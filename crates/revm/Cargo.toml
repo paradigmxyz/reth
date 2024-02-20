@@ -37,6 +37,5 @@ optimism = [
   "reth-primitives/optimism",
   "reth-consensus-common/optimism",
   "reth-interfaces/optimism",
-  "reth-node-api/optimism",
 ]
 js-tracer = ["revm-inspectors/js-tracer"]

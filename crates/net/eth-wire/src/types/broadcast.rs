@@ -12,10 +12,7 @@ use reth_primitives::{Block, Bytes, TransactionSigned, TxHash, B256, U128};
 use std::{collections::HashMap, mem, sync::Arc};
 
 #[cfg(feature = "arbitrary")]
-use proptest::prelude::*;
-
-#[cfg(feature = "arbitrary")]
-use proptest::{arbitrary::Arbitrary, collection::vec};
+use proptest::{collection::vec, prelude::*};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -664,7 +661,6 @@ impl FromIterator<(TxHash, Option<(u8, usize)>)> for RequestTxHashes {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
     use reth_primitives::hex;
     use std::str::FromStr;

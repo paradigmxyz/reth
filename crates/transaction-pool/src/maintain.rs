@@ -194,6 +194,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     pool.delete_blobs(blobs);
                 }
             }
+            // also do periodic cleanup of the blob store
+            let pool = pool.clone();
+            task_spawner.spawn_blocking(Box::pin(async move {
+                debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
+                pool.cleanup_blobs();
+            }));
         }
 
         // outcomes of the futures we are waiting on
@@ -665,9 +671,7 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
     };
-    use reth_primitives::{
-        fs, hex, FromRecoveredPooledTransaction, PooledTransactionsElement, MAINNET, U256,
-    };
+    use reth_primitives::{fs, hex, PooledTransactionsElement, MAINNET, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 

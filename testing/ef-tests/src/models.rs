@@ -11,7 +11,7 @@ use reth_primitives::{
     ChainSpecBuilder, Header as RethHeader, SealedHeader, StorageEntry, Withdrawals, B256, B64,
     U256,
 };
-use serde::{self, Deserialize};
+use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
 
 /// The definition of a blockchain test.
@@ -408,7 +408,6 @@ pub type AccessList = Vec<AccessListItem>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
 
     #[test]
     fn header_deserialize() {

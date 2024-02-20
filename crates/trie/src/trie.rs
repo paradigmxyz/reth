@@ -479,10 +479,9 @@ mod tests {
     };
     use reth_primitives::{
         hex_literal::hex,
-        keccak256,
         proofs::triehash::KeccakHasher,
         trie::{BranchNodeCompact, TrieMask},
-        Account, Address, StorageEntry, B256, U256,
+        Account, StorageEntry, U256,
     };
     use reth_provider::{test_utils::create_test_provider_factory, DatabaseProviderRW};
     use std::{

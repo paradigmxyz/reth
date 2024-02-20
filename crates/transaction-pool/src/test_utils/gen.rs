@@ -2,8 +2,8 @@ use crate::EthPooledTransaction;
 use rand::Rng;
 use reth_primitives::{
     constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Address, Bytes,
-    FromRecoveredTransaction, Transaction, TransactionKind, TransactionSigned, TxEip1559, TxLegacy,
-    TxValue, B256, MAINNET,
+    FromRecoveredTransaction, Transaction, TransactionKind, TransactionSigned, TxEip1559,
+    TxEip4844, TxLegacy, TxValue, B256, MAINNET,
 };
 
 /// A generator for transactions for testing purposes.
@@ -91,10 +91,21 @@ impl<R: Rng> TransactionGenerator<R> {
         self.transaction().into_eip1559()
     }
 
+    /// Creates a new transaction with a random signer
+    pub fn gen_eip4844(&mut self) -> TransactionSigned {
+        self.transaction().into_eip4844()
+    }
+
     /// Generates and returns a pooled EIP-1559 transaction with a random signer.
     pub fn gen_eip1559_pooled(&mut self) -> EthPooledTransaction {
         EthPooledTransaction::from_recovered_transaction(
             self.gen_eip1559().into_ecrecovered().unwrap(),
+        )
+    }
+    /// Generates and returns a pooled EIP-4844 transaction with a random signer.
+    pub fn gen_eip4844_pooled(&mut self) -> EthPooledTransaction {
+        EthPooledTransaction::from_recovered_transaction(
+            self.gen_eip4844().into_ecrecovered().unwrap(),
         )
     }
 }
@@ -157,6 +168,26 @@ impl TransactionBuilder {
                 value: self.value,
                 access_list: self.access_list,
                 input: self.input,
+            }
+            .into(),
+            self.signer,
+        )
+    }
+    /// Converts the transaction builder into a transaction format using EIP-4844.
+    pub fn into_eip4844(self) -> TransactionSigned {
+        TransactionBuilder::signed(
+            TxEip4844 {
+                chain_id: self.chain_id,
+                nonce: self.nonce,
+                gas_limit: self.gas_limit,
+                max_fee_per_gas: self.max_fee_per_gas,
+                max_priority_fee_per_gas: self.max_priority_fee_per_gas,
+                to: self.to,
+                value: self.value,
+                access_list: self.access_list,
+                input: self.input,
+                blob_versioned_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
             }
             .into(),
             self.signer,

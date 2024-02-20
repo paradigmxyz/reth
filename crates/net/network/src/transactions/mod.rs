@@ -69,18 +69,21 @@ use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
+mod config;
 mod constants;
 mod fetcher;
 mod validation;
+pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
 
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 pub use validation::*;
 
-use self::constants::{
-    tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
+pub use self::constants::{
+    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
+use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
 
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>> + Send + 'static>>;
@@ -237,11 +240,14 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         network: NetworkHandle,
         pool: Pool,
         from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent>,
+        transactions_manager_config: TransactionsManagerConfig,
     ) -> Self {
         let network_events = network.event_listener();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-        let transaction_fetcher = TransactionFetcher::default();
+        let transaction_fetcher = TransactionFetcher::default().with_transaction_fetcher_config(
+            &transactions_manager_config.transaction_fetcher_config,
+        );
 
         // install a listener for new pending transactions that are allowed to be propagated over
         // the network
@@ -326,7 +332,7 @@ where
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
-                    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+                    self.transaction_fetcher.info.soft_limit_byte_size_pooled_transactions_response,
                 ),
             );
 
@@ -913,11 +919,18 @@ where
 
             for tx in transactions {
                 // recover transaction
-                let tx = if let Ok(tx) = tx.try_into_ecrecovered() {
-                    tx
-                } else {
-                    has_bad_transactions = true;
-                    continue
+                let tx = match tx.try_into_ecrecovered() {
+                    Ok(tx) => tx,
+                    Err(badtx) => {
+                        trace!(target: "net::tx",
+                            peer_id=format!("{peer_id:#}"),
+                            hash=%badtx.hash(),
+                            client_version=%peer.client_version,
+                            "failed ecrecovery for transaction"
+                        );
+                        has_bad_transactions = true;
+                        continue
+                    }
                 };
 
                 // track that the peer knows this transaction, but only if this is a new broadcast.
@@ -994,7 +1007,12 @@ where
             }
         }
 
-        if has_bad_transactions || num_already_seen > 0 {
+        if has_bad_transactions {
+            // peer sent us invalid transactions
+            self.report_peer_bad_transactions(peer_id)
+        }
+
+        if num_already_seen > 0 {
             self.report_already_seen(peer_id);
         }
     }
@@ -1503,11 +1521,12 @@ mod tests {
 
         let pool = testing_pool();
 
+        let transactions_manager_config = config.transactions_manager_config.clone();
         let (_network_handle, _network, transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone())
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
         transactions
@@ -1553,11 +1572,12 @@ mod tests {
             .disable_discovery()
             .listener_port(0)
             .build(client);
+        let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone())
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
         tokio::task::spawn(network);
@@ -1635,11 +1655,12 @@ mod tests {
             .disable_discovery()
             .listener_port(0)
             .build(client);
+        let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone())
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
         tokio::task::spawn(network);
@@ -1723,11 +1744,12 @@ mod tests {
             .disable_discovery()
             .listener_port(0)
             .build(client);
+        let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone())
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
         tokio::task::spawn(network);
 
@@ -1812,11 +1834,12 @@ mod tests {
             .disable_discovery()
             .listener_port(0)
             .build(client);
+        let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone())
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
         tokio::task::spawn(network);
 

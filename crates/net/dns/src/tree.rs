@@ -364,7 +364,6 @@ fn ensure_strip_key(input: &mut &str, key: &str, err: &'static str) -> ParseEntr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secp256k1::SecretKey;
 
     #[test]
     fn parse_root_entry() {

@@ -415,7 +415,6 @@ mod tests {
     use reth_primitives::{Hardfork, MAINNET};
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
-    use tokio_stream::StreamExt;
 
     #[tokio::test]
     async fn test_start_root_sync() {
