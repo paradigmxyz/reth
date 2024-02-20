@@ -625,15 +625,7 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
 
     fn commit(&self) -> ProviderResult<()> {
         for mut writer in self.writers.iter_mut() {
-            let time = Instant::now();
             writer.commit()?;
-            debug!(
-                target: "provider::static_file",
-                segment = ?writer.segment(),
-                ?path,
-                duration = ?time.elapsed(),
-                "Commit"
-            );
         }
         Ok(())
     }

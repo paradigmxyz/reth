@@ -9,10 +9,11 @@ use reth_primitives::{
     BlockHash, BlockNumber, Header, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };
+use tracing::debug;
 use std::{
     ops::Deref,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::Arc, time::Instant,
 };
 
 /// Mutable reference to a dashmap element of [`SnapshotProviderRW`].
@@ -78,8 +79,18 @@ impl<'a> SnapshotProviderRW<'a> {
 
     /// Commits configuration changes to disk and updates the reader index with the new changes.
     pub fn commit(&mut self) -> ProviderResult<()> {
+        let time = Instant::now();
+
         // Commits offsets and new user_header to disk
         self.writer.commit()?;
+
+        debug!(
+            target: "provider::static_file",
+            segment = ?self.writer.user_header().segment(),
+            path = ?self.data_path,
+            duration = ?time.elapsed(),
+            "Commit"
+        );
 
         self.reader.update_index(self.writer.user_header().segment(), self.get_max_block())?;
 
