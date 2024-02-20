@@ -9,12 +9,13 @@ use reth_primitives::{
     BlockHash, BlockNumber, Header, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };
-use tracing::debug;
 use std::{
     ops::Deref,
     path::{Path, PathBuf},
-    sync::Arc, time::Instant,
+    sync::Arc,
+    time::Instant,
 };
+use tracing::debug;
 
 /// Mutable reference to a dashmap element of [`SnapshotProviderRW`].
 pub type SnapshotProviderRWRefMut<'a> = RefMut<'a, SnapshotSegment, SnapshotProviderRW<'static>>;
