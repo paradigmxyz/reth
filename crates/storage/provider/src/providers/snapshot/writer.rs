@@ -73,11 +73,6 @@ impl<'a> SnapshotProviderRW<'a> {
         }
     }
 
-    /// Returns respective [`SnapshotSegment`].
-    pub fn segment(&self) -> SnapshotSegment {
-        self.writer.user_header().segment()
-    }
-
     /// Commits configuration changes to disk and updates the reader index with the new changes.
     pub fn commit(&mut self) -> ProviderResult<()> {
         let time = Instant::now();
