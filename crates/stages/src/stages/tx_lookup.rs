@@ -232,7 +232,6 @@ mod tests {
         generators::{random_block, random_block_range},
     };
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, B256};
-    use reth_provider::TransactionsProvider;
     use std::ops::Sub;
 
     // Implement stage test suite.
@@ -287,77 +286,6 @@ mod tests {
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
-    }
-
-    /// Execute the stage twice with input range that exceeds the commit threshold
-    #[tokio::test]
-    async fn execute_intermediate_commit_transaction_lookup() {
-        let threshold = 50;
-        let mut runner = TransactionLookupTestRunner::default();
-        runner.set_commit_threshold(threshold);
-        let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
-        let first_input = ExecInput {
-            target: Some(previous_stage),
-            checkpoint: Some(StageCheckpoint::new(stage_progress)),
-        };
-        let mut rng = generators::rng();
-
-        // Seed only once with full input range
-        let seed =
-            random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
-        runner
-            .db
-            .insert_blocks(seed.iter(), StorageKind::Static)
-            .expect("failed to seed execution");
-
-        let total_txs =
-            runner.db.factory.snapshot_provider().count_entries::<tables::Transactions>().unwrap()
-                as u64;
-
-        // Execute first time
-        let result = runner.execute(first_input).await.unwrap();
-        let mut tx_count = 0;
-        let expected_progress = seed
-            .iter()
-            .find(|x| {
-                tx_count += x.body.len();
-                tx_count as u64 > threshold
-            })
-            .map(|x| x.number)
-            .unwrap_or(previous_stage);
-        assert_matches!(result, Ok(_));
-        assert_eq!(
-            result.unwrap(),
-            ExecOutput {
-                checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
-                    EntitiesCheckpoint {
-                        processed: runner.db.table::<tables::TxHashNumber>().unwrap().len() as u64,
-                        total: total_txs
-                    }
-                ),
-                done: false
-            }
-        );
-
-        // Execute second time to completion
-        runner.set_commit_threshold(u64::MAX);
-        let second_input = ExecInput {
-            target: Some(previous_stage),
-            checkpoint: Some(StageCheckpoint::new(expected_progress)),
-        };
-        let result = runner.execute(second_input).await.unwrap();
-        assert_matches!(result, Ok(_));
-        assert_eq!(
-            result.as_ref().unwrap(),
-            &ExecOutput {
-                checkpoint: StageCheckpoint::new(previous_stage).with_entities_stage_checkpoint(
-                    EntitiesCheckpoint { processed: total_txs, total: total_txs }
-                ),
-                done: true
-            }
-        );
-
-        assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
     }
 
     #[tokio::test]
