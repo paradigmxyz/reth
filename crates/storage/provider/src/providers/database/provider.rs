@@ -84,7 +84,14 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
 impl<DB: Database> DatabaseProviderRW<DB> {
     /// Commit database transaction
     pub fn commit(self) -> ProviderResult<bool> {
-        self.0.commit()
+        let time = Instant::now();
+        let result = self.0.commit();
+        debug!(
+            target: "provider::db::commit",
+            duration = ?time.elapsed(),
+            "Commit time"
+        );
+        return result
     }
 
     /// Consume `DbTx` or `DbTxMut`.
