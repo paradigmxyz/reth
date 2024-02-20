@@ -1,9 +1,10 @@
 //! Shared arguments related to stages
+use derive_more::Display;
 
 /// Represents a specific stage within the data pipeline.
 ///
 /// Different stages within the pipeline have dedicated functionalities and operations.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, clap::ValueEnum, Display)]
 pub enum StageEnum {
     /// The headers stage within the pipeline.
     ///

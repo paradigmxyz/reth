@@ -17,7 +17,6 @@ use reth_primitives::{
     SnapshotSegment, StorageKey, StorageValue, B256,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use std::sync::Arc;
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -39,7 +38,7 @@ pub struct HistoricalStateProviderRef<'b, TX: DbTx> {
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
     /// Snapshot provider
-    snapshot_provider: Arc<SnapshotProvider>,
+    snapshot_provider: SnapshotProvider,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -52,11 +51,7 @@ pub enum HistoryInfo {
 
 impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
     /// Create new StateProvider for historical block number
-    pub fn new(
-        tx: &'b TX,
-        block_number: BlockNumber,
-        snapshot_provider: Arc<SnapshotProvider>,
-    ) -> Self {
+    pub fn new(tx: &'b TX, block_number: BlockNumber, snapshot_provider: SnapshotProvider) -> Self {
         Self { tx, block_number, lowest_available_blocks: Default::default(), snapshot_provider }
     }
 
@@ -66,7 +61,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         tx: &'b TX,
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
-        snapshot_provider: Arc<SnapshotProvider>,
+        snapshot_provider: SnapshotProvider,
     ) -> Self {
         Self { tx, block_number, lowest_available_blocks, snapshot_provider }
     }
@@ -319,16 +314,12 @@ pub struct HistoricalStateProvider<TX: DbTx> {
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
     /// Snapshot provider
-    snapshot_provider: Arc<SnapshotProvider>,
+    snapshot_provider: SnapshotProvider,
 }
 
 impl<TX: DbTx> HistoricalStateProvider<TX> {
     /// Create new StateProvider for historical block number
-    pub fn new(
-        tx: TX,
-        block_number: BlockNumber,
-        snapshot_provider: Arc<SnapshotProvider>,
-    ) -> Self {
+    pub fn new(tx: TX, block_number: BlockNumber, snapshot_provider: SnapshotProvider) -> Self {
         Self { tx, block_number, lowest_available_blocks: Default::default(), snapshot_provider }
     }
 

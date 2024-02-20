@@ -44,7 +44,7 @@ pub struct ProviderFactory<DB> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot Provider
-    snapshot_provider: Arc<SnapshotProvider>,
+    snapshot_provider: SnapshotProvider,
 }
 
 impl<DB> ProviderFactory<DB> {
@@ -54,11 +54,7 @@ impl<DB> ProviderFactory<DB> {
         chain_spec: Arc<ChainSpec>,
         snapshots_path: PathBuf,
     ) -> RethResult<ProviderFactory<DB>> {
-        Ok(Self {
-            db,
-            chain_spec,
-            snapshot_provider: Arc::new(SnapshotProvider::new(snapshots_path)?),
-        })
+        Ok(Self { db, chain_spec, snapshot_provider: SnapshotProvider::new(snapshots_path)? })
     }
 
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
@@ -72,7 +68,7 @@ impl<DB> ProviderFactory<DB> {
         Ok(ProviderFactory::<DatabaseEnv> {
             db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
             chain_spec,
-            snapshot_provider: Arc::new(SnapshotProvider::new(snapshots_path)?),
+            snapshot_provider: SnapshotProvider::new(snapshots_path)?,
         })
     }
 
@@ -82,7 +78,7 @@ impl<DB> ProviderFactory<DB> {
     }
 
     /// Returns snapshot provider
-    pub fn snapshot_provider(&self) -> Arc<SnapshotProvider> {
+    pub fn snapshot_provider(&self) -> SnapshotProvider {
         self.snapshot_provider.clone()
     }
 

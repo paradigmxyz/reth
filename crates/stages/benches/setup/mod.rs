@@ -17,7 +17,7 @@ use reth_interfaces::test_utils::{
 use reth_primitives::{fs, Account, Address, SealedBlock, B256, U256};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
-    test_utils::TestStageDB,
+    test_utils::{StorageKind, TestStageDB},
     ExecInput, Stage, UnwindInput,
 };
 use reth_trie::StateRoot;
@@ -165,7 +165,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         updated_header.state_root = root;
         *last_block = SealedBlock { header: updated_header.seal_slow(), ..cloned_last };
 
-        db.insert_blocks(blocks.iter(), None).unwrap();
+        db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
 
         // initialize TD
         db.commit(|tx| {

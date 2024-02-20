@@ -6412,6 +6412,7 @@ dependencies = [
  "assert_matches",
  "clap",
  "const-str",
+ "derive_more",
  "dirs-next",
  "eyre",
  "futures",

@@ -21,6 +21,7 @@ use reth_db::{
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
+    keccak256,
     snapshot::{find_fixed_range, HighestSnapshots, SegmentHeader, SegmentRangeInclusive},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment, TransactionMeta,
@@ -29,9 +30,9 @@ use reth_primitives::{
 };
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
-    ops::{Range, RangeBounds, RangeInclusive},
+    ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{mpsc, Arc},
 };
 
 /// Alias type for a map that can be queried for block ranges from a transaction
@@ -39,8 +40,29 @@ use std::{
 type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<TxNumber, SegmentRangeInclusive>>;
 
 /// [`SnapshotProvider`] manages all existing [`SnapshotJarProvider`].
+#[derive(Debug, Default, Clone)]
+pub struct SnapshotProvider(Arc<SnapshotProviderInner>);
+
+impl SnapshotProvider {
+    /// Creates a new [`SnapshotProvider`].
+    pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        let provider = Self(Arc::new(SnapshotProviderInner::new(path)?));
+        provider.initialize_index()?;
+        Ok(provider)
+    }
+}
+
+impl Deref for SnapshotProvider {
+    type Target = SnapshotProviderInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// [`SnapshotProviderInner`] manages all existing [`SnapshotJarProvider`].
 #[derive(Debug, Default)]
-pub struct SnapshotProvider {
+pub struct SnapshotProviderInner {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
@@ -57,9 +79,9 @@ pub struct SnapshotProvider {
     writers: DashMap<SnapshotSegment, SnapshotProviderRW<'static>>,
 }
 
-impl SnapshotProvider {
-    /// Creates a new [`SnapshotProvider`].
-    pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
+impl SnapshotProviderInner {
+    /// Creates a new [`SnapshotProviderInner`].
+    fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
         let provider = Self {
             map: Default::default(),
             writers: Default::default(),
@@ -69,14 +91,16 @@ impl SnapshotProvider {
             load_filters: false,
         };
 
-        provider.initialize_index()?;
         Ok(provider)
     }
-
+}
+impl SnapshotProvider {
     /// Loads filters into memory when creating a [`SnapshotJarProvider`].
-    pub fn with_filters(mut self) -> Self {
-        self.load_filters = true;
-        self
+    pub fn with_filters(self) -> Self {
+        let mut provider =
+            Arc::try_unwrap(self.0).expect("should be called when initializing only.");
+        provider.load_filters = true;
+        Self(Arc::new(provider))
     }
 
     /// Gets the [`SnapshotJarProvider`] of the requested segment and block.
@@ -410,11 +434,11 @@ impl SnapshotProvider {
         &self,
         segment: SnapshotSegment,
         range: Range<u64>,
-        get_fn: F,
+        mut get_fn: F,
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
-        F: Fn(&mut SnapshotCursor<'_>, u64) -> ProviderResult<Option<T>>,
+        F: FnMut(&mut SnapshotCursor<'_>, u64) -> ProviderResult<Option<T>>,
         P: FnMut(&T) -> bool,
     {
         let get_provider = |start: u64| match segment {
@@ -599,7 +623,7 @@ pub trait SnapshotWriter {
     fn commit(&self) -> ProviderResult<()>;
 }
 
-impl SnapshotWriter for Arc<SnapshotProvider> {
+impl SnapshotWriter for SnapshotProvider {
     fn get_writer(
         &self,
         block: BlockNumber,
@@ -749,16 +773,68 @@ impl TransactionsProviderExt for SnapshotProvider {
         &self,
         tx_range: Range<TxNumber>,
     ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
-        self.fetch_range_with_predicate(
-            SnapshotSegment::Transactions,
-            tx_range,
-            |cursor, number| {
-                let tx =
-                    cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())?;
-                Ok(tx.map(|tx| (tx.hash(), cursor.number())))
-            },
-            |_| true,
-        )
+        let tx_range_size = (tx_range.end - tx_range.start) as usize;
+
+        // Transactions are different size, so chunks will not all take the same processing time. If
+        // chunks are too big, there will be idle threads waiting for work. Choosing an
+        // arbitrary smaller value to make sure it doesn't happen.
+        let chunk_size = 100;
+
+        let chunks = (tx_range.start..tx_range.end)
+            .step_by(chunk_size)
+            .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end))
+            .collect::<Vec<Range<u64>>>();
+        let mut channels = Vec::with_capacity(chunk_size);
+
+        #[inline]
+        fn calculate_hash(
+            entry: (TxNumber, TransactionSignedNoHash),
+            rlp_buf: &mut Vec<u8>,
+        ) -> Result<(B256, TxNumber), Box<ProviderError>> {
+            let (tx_id, tx) = entry;
+            tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+            Ok((keccak256(rlp_buf), tx_id))
+        }
+
+        for chunk_range in chunks {
+            let (channel_tx, channel_rx) = mpsc::channel();
+            channels.push(channel_rx);
+
+            let manager = self.clone();
+
+            // Spawn the task onto the global rayon pool
+            // This task will send the results through the channel after it has calculated
+            // the hash.
+            rayon::spawn(move || {
+                let mut rlp_buf = Vec::with_capacity(128);
+                let _ = manager.fetch_range_with_predicate(
+                    SnapshotSegment::Transactions,
+                    chunk_range,
+                    |cursor, number| {
+                        Ok(cursor
+                            .get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())?
+                            .map(|transaction| {
+                                rlp_buf.clear();
+                                let _ = channel_tx
+                                    .send(calculate_hash((number, transaction), &mut rlp_buf));
+                            }))
+                    },
+                    |_| true,
+                );
+            });
+        }
+
+        let mut tx_list = Vec::with_capacity(tx_range_size);
+
+        // Iterate over channels and append the tx hashes unsorted
+        for channel in channels {
+            while let Ok(tx) = channel.recv() {
+                let (tx_hash, tx_id) = tx.map_err(|boxed| *boxed)?;
+                tx_list.push((tx_hash, tx_id));
+            }
+        }
+
+        Ok(tx_list)
     }
 }
 

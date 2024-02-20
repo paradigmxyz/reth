@@ -13,7 +13,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
-    TransactionsProviderExt,
+    TransactionsProvider, TransactionsProviderExt,
 };
 use tracing::*;
 
@@ -144,7 +144,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         // Cursors to unwind tx hash to number
         let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
-        let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
+        let snapshot_provider = provider.snapshot_provider();
         let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
         while let Some((number, body)) = rev_walker.next().transpose()? {
             if number <= unwind_to {
@@ -154,7 +154,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             // Delete all transactions that belong to this block
             for tx_id in body.tx_num_range() {
                 // First delete the transaction and hash to id mapping
-                if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
+                if let Some(transaction) = snapshot_provider.transaction_by_id(tx_id)? {
                     if tx_hash_number_cursor.seek_exact(transaction.hash())?.is_some() {
                         tx_hash_number_cursor.delete_current()?;
                     }
@@ -191,8 +191,8 @@ fn stage_checkpoint<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestStageDB, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
+        TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{
@@ -231,7 +231,10 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        runner.db.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
+        runner
+            .db
+            .insert_blocks(blocks.iter(), StorageKind::Static)
+            .expect("failed to insert blocks");
 
         let rx = runner.execute(input);
 
@@ -247,7 +250,7 @@ mod tests {
                     total
                 }))
             }, done: true }) if block_number == previous_stage && processed == total &&
-                total == runner.db.table::<tables::Transactions>().unwrap().len() as u64
+                total == runner.db.factory.snapshot_provider().count_entries::<tables::Transactions>().unwrap() as u64
         );
 
         // Validate the stage execution
@@ -270,9 +273,14 @@ mod tests {
         // Seed only once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
-        runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+        runner
+            .db
+            .insert_blocks(seed.iter(), StorageKind::Static)
+            .expect("failed to seed execution");
 
-        let total_txs = runner.db.table::<tables::Transactions>().unwrap().len() as u64;
+        let total_txs =
+            runner.db.factory.snapshot_provider().count_entries::<tables::Transactions>().unwrap()
+                as u64;
 
         // Execute first time
         let result = runner.execute(first_input).await.unwrap();
@@ -335,7 +343,10 @@ mod tests {
         // Seed only once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..2);
-        runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+        runner
+            .db
+            .insert_blocks(seed.iter(), StorageKind::Static)
+            .expect("failed to seed execution");
 
         runner.set_prune_mode(PruneMode::Before(prune_target));
 
@@ -353,7 +364,7 @@ mod tests {
                     total
                 }))
             }, done: true }) if block_number == previous_stage && processed == total &&
-                total == runner.db.table::<tables::Transactions>().unwrap().len() as u64
+                total == runner.db.factory.snapshot_provider().count_entries::<tables::Transactions>().unwrap() as u64
         );
 
         // Validate the stage execution
@@ -366,7 +377,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
-        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let max_pruned_block = 30;
         let max_processed_block = 70;
@@ -488,7 +499,7 @@ mod tests {
             let mut rng = generators::rng();
 
             let blocks = random_block_range(&mut rng, stage_progress + 1..=end, B256::ZERO, 0..2);
-            self.db.insert_blocks(blocks.iter(), None)?;
+            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             Ok(blocks)
         }
 

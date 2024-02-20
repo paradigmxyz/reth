@@ -1,23 +1,22 @@
 use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use itertools::Itertools;
 use reth_db::{
     cursor::DbCursorRW,
     database::Database,
+    snapshot::TransactionMask,
     tables,
     transaction::{DbTx, DbTxMut},
-    RawValue,
 };
-use reth_interfaces::{consensus, RethError};
+use reth_interfaces::consensus;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Address, PruneSegment, TransactionSignedNoHash, TxNumber,
+    Address, PruneSegment, SnapshotSegment, TransactionSignedNoHash, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
-    StatsReader, TransactionsProvider,
+    StatsReader,
 };
-use std::{fmt::Debug, sync::mpsc};
+use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
 use tracing::*;
 
@@ -83,43 +82,49 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
 
-        // Query the transactions from both database and static files
-        let transactions = provider.raw_transactions_by_tx_range(tx_range.clone())?;
-
         // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
-
-        // channels used to return result of sender recovery.
-        let mut channels = Vec::new();
 
         // Spawn recovery jobs onto the default rayon threadpool and send the result through the
         // channel.
         //
-        // We try to evenly divide the transactions to recover across all threads in the threadpool.
-        // Chunks are submitted instead of individual transactions to reduce the overhead of work
-        // stealing in the threadpool workers.
-        let chunk_size = self.commit_threshold as usize / rayon::current_num_threads();
-        // prevents an edge case
-        // where the chunk size is either 0 or too small
-        // to gain anything from using more than 1 thread
-        let chunk_size = chunk_size.max(16);
+        // Transactions are different size, so chunks will not all take the same processing time. If
+        // chunks are too big, there will be idle threads waiting for work. Choosing an
+        // arbitrary smaller value to make sure it doesn't happen.
+        let chunk_size = 100;
 
-        for chunk in &tx_range.zip(transactions).chunks(chunk_size) {
+        let chunks = (tx_range.start..tx_range.end)
+            .step_by(chunk_size as usize)
+            .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end))
+            .collect::<Vec<Range<u64>>>();
+
+        let mut channels = Vec::with_capacity(chunks.len());
+        for chunk_range in chunks {
             // An _unordered_ channel to receive results from a rayon job
             let (recovered_senders_tx, recovered_senders_rx) = mpsc::channel();
             channels.push(recovered_senders_rx);
-            // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
-            let chunk: Vec<_> = chunk.collect();
 
-            // Spawn the sender recovery task onto the global rayon pool
-            // This task will send the results through the channel after it recovered the senders.
+            let snapshot_provider = provider.snapshot_provider().clone();
+
+            // Spawn the task onto the global rayon pool
+            // This task will send the results through the channel after it has read the transaction
+            // and calculated the sender.
             rayon::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
-                for entry in chunk {
-                    rlp_buf.clear();
-                    let recovery_result = recover_sender(entry, &mut rlp_buf);
-                    let _ = recovered_senders_tx.send(recovery_result);
-                }
+                let _ = snapshot_provider.fetch_range_with_predicate(
+                    SnapshotSegment::Transactions,
+                    chunk_range,
+                    |cursor, number| {
+                        Ok(cursor
+                            .get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())?
+                            .map(|tx| {
+                                rlp_buf.clear();
+                                let _ = recovered_senders_tx
+                                    .send(recover_sender((number, tx), &mut rlp_buf));
+                            }))
+                    },
+                    |_| true,
+                );
             });
         }
 
@@ -185,17 +190,11 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 }
 
+#[inline]
 fn recover_sender(
-    (tx_id, tx): (TxNumber, RawValue<TransactionSignedNoHash>),
+    (tx_id, tx): (TxNumber, TransactionSignedNoHash),
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
-    let tx = tx
-        .value()
-        .map_err(RethError::from)
-        .map_err(StageError::from)
-        .map_err(Into::into)
-        .map_err(Box::new)?;
-
     tx.transaction.encode_without_signature(rlp_buf);
 
     // We call [Signature::recover_signer_unchecked] because transactions run in the pipeline are
@@ -258,12 +257,12 @@ mod tests {
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
         TransactionSigned, B256,
     };
-    use reth_provider::PruneCheckpointWriter;
+    use reth_provider::{PruneCheckpointWriter, TransactionsProvider};
 
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestStageDB, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
+        TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
 
     stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);
@@ -294,7 +293,10 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        runner.db.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
+        runner
+            .db
+            .insert_blocks(blocks.iter(), StorageKind::Static)
+            .expect("failed to insert blocks");
 
         let rx = runner.execute(input);
 
@@ -328,9 +330,14 @@ mod tests {
         // Manually seed once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
-        runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+        runner
+            .db
+            .insert_blocks(seed.iter(), StorageKind::Static)
+            .expect("failed to seed execution");
 
-        let total_transactions = runner.db.table::<tables::Transactions>().unwrap().len() as u64;
+        let total_transactions =
+            runner.db.factory.snapshot_provider().count_entries::<tables::Transactions>().unwrap()
+                as u64;
 
         let first_input = ExecInput {
             target: Some(previous_stage),
@@ -389,7 +396,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
-        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let max_pruned_block = 30;
         let max_processed_block = 70;
@@ -501,7 +508,7 @@ mod tests {
             let end = input.target();
 
             let blocks = random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..2);
-            self.db.insert_blocks(blocks.iter(), None)?;
+            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             Ok(blocks)
         }
 

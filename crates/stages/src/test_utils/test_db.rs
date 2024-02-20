@@ -194,18 +194,27 @@ impl TestStageDB {
     /// Insert ordered collection of [SealedBlock] into corresponding tables.
     /// Superset functionality of [TestStageDB::insert_headers].
     ///
+    /// If tx_offset is set to `None`, then transactions will be stored on static files, otherwise
+    /// database.
+    ///
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
-    pub fn insert_blocks<'a, I>(&self, blocks: I, tx_offset: Option<u64>) -> ProviderResult<()>
+    pub fn insert_blocks<'a, I>(&self, blocks: I, storage_kind: StorageKind) -> ProviderResult<()>
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
         let provider = self.factory.snapshot_provider();
-        let mut writer = provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
+
+        let mut txs_writer = storage_kind.is_static().then(|| {
+            provider.latest_writer(reth_primitives::SnapshotSegment::Transactions).unwrap()
+        });
+
+        let mut headers_writer =
+            provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
         let tx = self.factory.provider_rw().unwrap().into_tx();
 
-        let mut next_tx_num = tx_offset.unwrap_or_default();
+        let mut next_tx_num = storage_kind.tx_offset();
         blocks.into_iter().try_for_each(|block| {
-            Self::insert_header(Some(&mut writer), &tx, &block.header, U256::ZERO)?;
+            Self::insert_header(Some(&mut headers_writer), &tx, &block.header, U256::ZERO)?;
 
             // Insert into body tables.
             let block_body_indices = StoredBlockBodyIndices {
@@ -218,15 +227,27 @@ impl TestStageDB {
             }
             tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
 
-            block.body.iter().try_for_each(|body_tx| {
-                tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?;
+            let res = block.body.iter().try_for_each(|body_tx| {
+                if let Some(txs_writer) = &mut txs_writer {
+                    txs_writer.append_transaction(next_tx_num, body_tx.clone().into())?;
+                } else {
+                    tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?
+                }
                 next_tx_num += 1;
                 Ok::<(), ProviderError>(())
-            })
+            });
+
+            if let Some(txs_writer) = &mut txs_writer {
+                txs_writer.increment_block(reth_primitives::SnapshotSegment::Transactions)?;
+            }
+            res
         })?;
 
         tx.commit()?;
-        writer.commit()
+        if let Some(txs_writer) = &mut txs_writer {
+            txs_writer.commit()?;
+        }
+        headers_writer.commit()
     }
 
     pub fn insert_tx_hash_numbers<I>(&self, tx_hash_numbers: I) -> ProviderResult<()>
@@ -363,5 +384,30 @@ impl TestStageDB {
         provider_rw.commit()?;
 
         Ok(())
+    }
+}
+
+/// Used to identify where to store data when setting up a test.
+#[derive(Debug)]
+pub enum StorageKind {
+    Database(Option<u64>),
+    Static,
+}
+
+impl StorageKind {
+    #[allow(dead_code)]
+    fn is_database(&self) -> bool {
+        matches!(self, Self::Database(_))
+    }
+
+    fn is_static(&self) -> bool {
+        matches!(self, Self::Static)
+    }
+
+    fn tx_offset(&self) -> u64 {
+        if let Self::Database(offset) = self {
+            return offset.unwrap_or_default()
+        }
+        0
     }
 }

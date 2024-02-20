@@ -94,7 +94,7 @@ mod tests {
     };
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
     use reth_provider::PruneCheckpointReader;
-    use reth_stages::test_utils::TestStageDB;
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::{collections::BTreeMap, ops::AddAssign};
 
     #[test]
@@ -103,7 +103,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 0..=5000, B256::ZERO, 0..1);
-        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let accounts =
             random_eoa_account_range(&mut rng, 0..2).into_iter().collect::<BTreeMap<_, _>>();
