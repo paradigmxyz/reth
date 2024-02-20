@@ -18,13 +18,13 @@ use tracing::debug;
 /// This is a wrapper around [`BestTransactions`] that also enforces a specific basefee.
 ///
 /// This iterator guarantees that all transaction it returns satisfy both the base fee and blob fee!
-pub(crate) struct BestTransactionsWithBasefee<T: TransactionOrdering> {
+pub(crate) struct BestTransactionsWithFees<T: TransactionOrdering> {
     pub(crate) best: BestTransactions<T>,
     pub(crate) base_fee: u64,
     pub(crate) base_fee_per_blob_gas: u64,
 }
 
-impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithBasefee<T> {
+impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithFees<T> {
     fn mark_invalid(&mut self, tx: &Self::Item) {
         BestTransactions::mark_invalid(&mut self.best, tx)
     }
@@ -42,7 +42,7 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
     }
 }
 
-impl<T: TransactionOrdering> Iterator for BestTransactionsWithBasefee<T> {
+impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
     type Item = Arc<ValidPoolTransaction<T::Transaction>>;
 
     fn next(&mut self) -> Option<Self::Item> {
