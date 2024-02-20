@@ -223,9 +223,9 @@ impl FilterAnnouncement for EthAnnouncementFilter {
         let NewPooledTransactionHashes68 { mut hashes, mut types, mut sizes } = msg;
 
         debug_assert!(
-            hashes.len() == types.len() && hashes.len() == sizes.len(), "`%hashes`, `%types` and `%sizes` should all be the same length, decoding of `NewPooledTransactionHashes68` should handle this, 
-`%hashes`: {hashes:?}, 
-`%types`: {types:?}, 
+            hashes.len() == types.len() && hashes.len() == sizes.len(), "`%hashes`, `%types` and `%sizes` should all be the same length, decoding of `NewPooledTransactionHashes68` should handle this,
+`%hashes`: {hashes:?},
+`%types`: {types:?},
 `%sizes: {sizes:?}`"
         );
 
@@ -332,7 +332,6 @@ impl FilterAnnouncement for EthAnnouncementFilter {
 #[cfg(test)]
 mod test {
     use super::*;
-    use reth_eth_wire::MAX_MESSAGE_SIZE;
     use reth_primitives::B256;
     use std::str::FromStr;
 

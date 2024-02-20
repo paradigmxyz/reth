@@ -314,7 +314,7 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
 mod tests {
     use super::*;
     use crate::Discv4Event;
-    use std::net::{IpAddr, Ipv4Addr};
+    use std::net::Ipv4Addr;
 
     /// This test creates two local UDP sockets. The mocked discovery service responds to specific
     /// messages and we check the actual service receives answers

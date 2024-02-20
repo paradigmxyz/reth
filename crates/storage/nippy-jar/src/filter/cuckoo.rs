@@ -1,6 +1,6 @@
 use super::InclusionFilter;
 use crate::NippyJarError;
-use cuckoofilter::{self, CuckooFilter, ExportedCuckooFilter};
+use cuckoofilter::{CuckooFilter, ExportedCuckooFilter};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::hash_map::DefaultHasher;
 

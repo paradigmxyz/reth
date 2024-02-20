@@ -413,11 +413,7 @@ pub enum OpenDiskFileBlobStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::{
-        prelude::*,
-        strategy::{Strategy, ValueTree},
-        test_runner::TestRunner,
-    };
+    use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
     use std::sync::atomic::Ordering;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {

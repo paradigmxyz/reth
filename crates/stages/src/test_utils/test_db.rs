@@ -198,20 +198,21 @@ impl TestStageDB {
     /// database.
     ///
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
-    pub fn insert_blocks<'a, I>(&self, blocks: I, tx_offset: Option<u64>) -> ProviderResult<()>
+    pub fn insert_blocks<'a, I>(&self, blocks: I, storage_kind: StorageKind) -> ProviderResult<()>
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
         let provider = self.factory.snapshot_provider();
-        let mut txs_writer = tx_offset.map_or_else(
-            || Some(provider.latest_writer(reth_primitives::SnapshotSegment::Transactions)?),
-            |_| None,
-        );
+
+        let mut txs_writer = storage_kind.is_static().then(|| {
+            provider.latest_writer(reth_primitives::SnapshotSegment::Transactions).unwrap()
+        });
+
         let mut headers_writer =
             provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
         let tx = self.factory.provider_rw().unwrap().into_tx();
 
-        let mut next_tx_num = tx_offset.unwrap_or_default();
+        let mut next_tx_num = storage_kind.tx_offset();
         blocks.into_iter().try_for_each(|block| {
             Self::insert_header(Some(&mut headers_writer), &tx, &block.header, U256::ZERO)?;
 
@@ -383,5 +384,30 @@ impl TestStageDB {
         provider_rw.commit()?;
 
         Ok(())
+    }
+}
+
+/// Used to identify where to store data when setting up a test.
+#[derive(Debug)]
+pub enum StorageKind {
+    Database(Option<u64>),
+    Static,
+}
+
+impl StorageKind {
+    #[allow(dead_code)]
+    fn is_database(&self) -> bool {
+        matches!(self, Self::Database(_))
+    }
+
+    fn is_static(&self) -> bool {
+        matches!(self, Self::Database(_))
+    }
+
+    fn tx_offset(&self) -> u64 {
+        if let Self::Database(offset) = self {
+            return offset.unwrap_or_default()
+        }
+        0
     }
 }
