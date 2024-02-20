@@ -79,7 +79,7 @@ pub mod tx_fetcher {
     /// assembling a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response.
     ///
     /// Default is 128 KiB.
-    pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST: usize = 128 * 1024;
+    pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ: usize = 128 * 1024;
 
     /* ==================== RETRIES ==================== */
 
@@ -177,10 +177,10 @@ pub mod tx_fetcher {
     /// is filled from hashes pending fetch.
     ///
     /// Default is half of
-    /// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST`],
+    /// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ`],
     /// which defaults to 128 KiB, so 64 KiB.
     pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES:
-        usize = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST / 2;
+        usize = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ / 2;
 
     /// Default max inflight request when fetching pending hashes.
     ///
