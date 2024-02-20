@@ -127,7 +127,12 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                 for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
                     let (hash, number) = hash_to_number?;
                     if index > 0 && index % interval == 0 {
-                        info!(target: "sync::stages::transaction_lookup", ?append_only, progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0), "Writing transaction hash index");
+                        info!(
+                            target: "sync::stages::transaction_lookup",
+                            ?append_only,
+                            progress = format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                            "Writing transaction hash index"
+                        );
                     }
 
                     if append_only {
