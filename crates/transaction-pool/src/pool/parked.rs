@@ -1,7 +1,7 @@
 use crate::{
     identifier::{SenderId, TransactionId},
     pool::size::SizeTracker,
-    PoolTransaction, SubPoolLimit, ValidPoolTransaction,
+    PoolTransaction, SubPoolLimit, ValidPoolTransaction, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
 };
 use std::{
     cmp::Ordering,
@@ -106,27 +106,34 @@ impl<T: ParkedOrd> ParkedPool<T> {
         let senders = self
             .by_id
             .iter()
-            .fold(Vec::new(), |mut set: Vec<SubmissionSenderId>, (_, tx)| {
-                if let Some(last) = set.last_mut() {
-                    // sort by last
-                    if last.sender_id == tx.transaction.sender_id() {
-                        if last.submission_id < tx.submission_id {
-                            // update last submission id
-                            last.submission_id = tx.submission_id;
+            .fold(
+                // pre-allocate some capacity for unique senders, targeting 4 slots per sender
+                Vec::with_capacity(self.by_id.len() / (TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER / 4)),
+                |mut set: Vec<SubmissionSenderId>, (_, tx)| {
+                    if let Some(last) = set.last_mut() {
+                        // sort by last
+                        if last.sender_id == tx.transaction.sender_id() {
+                            if last.submission_id < tx.submission_id {
+                                // update last submission id
+                                last.submission_id = tx.submission_id;
+                            }
+                        } else {
+                            // new entry
+                            set.push(SubmissionSenderId::new(
+                                tx.transaction.sender_id(),
+                                tx.submission_id,
+                            ));
                         }
                     } else {
-                        // new entry
+                        // first entry
                         set.push(SubmissionSenderId::new(
                             tx.transaction.sender_id(),
                             tx.submission_id,
                         ));
                     }
-                } else {
-                    // first entry
-                    set.push(SubmissionSenderId::new(tx.transaction.sender_id(), tx.submission_id));
-                }
-                set
-            })
+                    set
+                },
+            )
             .into_iter()
             // sort by submission id
             .collect::<BinaryHeap<_>>();
