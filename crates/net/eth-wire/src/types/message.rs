@@ -305,8 +305,7 @@ pub trait EncodableExt {
     /// * The encoded data as `Vec<u8>`.
     /// * The length of the data at the point just before reaching the limit, or 0 if the limit was
     ///   not exceeded.
-    /// * Actual payload length
-    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize, usize);
+    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize);
 }
 
 impl<T: Encodable> EncodableExt for Vec<T> {
@@ -315,72 +314,50 @@ impl<T: Encodable> EncodableExt for Vec<T> {
         approx: usize,
         limit: usize,
     ) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error> {
-        let (mut buf, current_len, actual_payload_length) = self.encode_until_limit(approx, limit);
+        let (mut buf, current_len) = self.encode_until_limit(approx, limit);
 
         if current_len != 0 {
             // Don't shrink if limit_exceeded since we return Error anyway
             return Err(alloy_rlp::Error::Custom("Size limit exceeded"));
         }
-        let mut header_buffer = Vec::new();
-        let header = Header { list: true, payload_length: actual_payload_length };
-        header.encode(&mut header_buffer);
-        // Ensure the encoded header does not exceed the placeholder size
-        assert!(header_buffer.len() <= 3); // header placeholder size is 3
-                                           // Replace the placeholder with the real header
-        buf[..header_buffer.len()].copy_from_slice(&header_buffer[..]);
-        // If the real header is smaller than the placeholder, remove the excess
-        if header_buffer.len() < 3 {
-            let excess = 3 - header_buffer.len();
-            buf.drain(header_buffer.len()..excess);
-        }
+
         buf.shrink_to_fit();
         Ok(buf)
     }
 
-    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize, usize) {
+    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize) {
         let mut buffer = Vec::with_capacity(approx);
         let mut header = Header { list: true, payload_length: 0 };
-        for item in self {
-            // initial payload length calculation if limit is not exceeded
-            header.payload_length += item.length();
-        }
-        // header.encode(&mut buffer);
-        let header_placeholder_size = 3;
-        buffer.extend(vec![0; header_placeholder_size]);
         let mut actual_payload_length = 0;
+        let mut current_len = 0;
         for item in self {
-            let current_len = buffer.len();
             item.encode(&mut buffer);
-            if buffer.len() > limit {
-                return (buffer, current_len, actual_payload_length);
-            }
             actual_payload_length += item.length();
+            // retroactively check if current buffer , and the list header would be > limit
+            if check_limit(&buffer, actual_payload_length) > limit {
+                let mut head: Vec<u8> = Vec::new();
+                header.payload_length = actual_payload_length - item.length();
+                header.encode(&mut head);
+                current_len = head.len() + current_len;
+                head.append(&mut buffer);
+                return (head.clone(), current_len);
+            }
+
+            current_len = buffer.len();
         }
+        let mut head: Vec<u8> = Vec::new();
+        header.payload_length = actual_payload_length;
+        header.encode(&mut head);
+        head.append(&mut buffer);
         // Return current_len as 0
-        (buffer, 0, header.payload_length)
+        (head, 0)
     }
 
     fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8> {
-        let (mut buf, current_len, actual_payload_length) = self.encode_until_limit(approx, limit);
-        // let header_buffer
-        let mut header_buffer = Vec::new();
-        let header = Header { list: true, payload_length: actual_payload_length };
-        header.encode(&mut header_buffer);
-        // Ensure the encoded header does not exceed the placeholder size
-        assert!(header_buffer.len() <= 3); // header placeholder size is 3
-                                           // Replace the placeholder with the real header
-        buf[..header_buffer.len()].copy_from_slice(&header_buffer[..]);
-        // If the real header is smaller than the placeholder, remove the excess
-        if header_buffer.len() < 3 {
-            let excess = 3 - header_buffer.len();
-            buf.drain(header_buffer.len()..excess);
-        }
+        let (mut buf, current_len) = self.encode_until_limit(approx, limit);
+
         if current_len != 0 {
-            // placeholder value case, nothing in the vec that is to be encoded
-
-            let difference_in_list_header_estimation = 3 - header_buffer.len();
-
-            buf.truncate(current_len - difference_in_list_header_estimation);
+            buf.truncate(current_len);
             buf.shrink_to_fit(); // shrink buffer to catch cases where approx > limit
             return buf;
         }
@@ -388,6 +365,13 @@ impl<T: Encodable> EncodableExt for Vec<T> {
         buf.shrink_to_fit();
         buf
     }
+}
+
+fn check_limit(buf: &Vec<u8>, payload_length: usize) -> usize {
+    let mut head: Vec<u8> = Vec::new();
+    let header = Header { list: true, payload_length };
+    header.encode(&mut head);
+    head.len() + buf.len()
 }
 
 impl Encodable for EthMessage {
@@ -751,7 +735,7 @@ mod tests {
         assert_eq!(s[0], header1);
     }
 
-    //Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481 and https://github.com/ethereum/tests/blob/970503935aeb76f59adfa3b3224aabf25e77b83d/BlockchainTests/ValidBlocks/bcExample/shanghaiExample.json#L15-L34
+    // Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481 and https://github.com/ethereum/tests/blob/970503935aeb76f59adfa3b3224aabf25e77b83d/BlockchainTests/ValidBlocks/bcExample/shanghaiExample.json#L15-L34
     #[test]
     fn encode_max_header_decode_round_trip_vec() {
         let mut headers = Vec::new();
