@@ -10,7 +10,7 @@ use reth_interfaces::p2p::{
 use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256,
 };
-use std::{self, collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;

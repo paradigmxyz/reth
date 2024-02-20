@@ -105,7 +105,6 @@ impl DatabaseInstance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_chains::Chain;
 
     #[test]
     fn test_database_db_dir() {

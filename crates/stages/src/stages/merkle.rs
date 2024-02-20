@@ -344,11 +344,7 @@ mod tests {
         TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_db::{
-        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-        tables,
-        transaction::{DbTx, DbTxMut},
-    };
+    use reth_db::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
     use reth_interfaces::test_utils::{
         generators,
         generators::{
@@ -356,8 +352,7 @@ mod tests {
         },
     };
     use reth_primitives::{
-        keccak256, stage::StageUnitCheckpoint, SealedBlock, SnapshotSegment, StorageEntry, B256,
-        U256,
+        keccak256, stage::StageUnitCheckpoint, SealedBlock, SnapshotSegment, StorageEntry, U256,
     };
     use reth_provider::providers::SnapshotWriter;
     use reth_trie::test_utils::{state_root, state_root_prehashed};
