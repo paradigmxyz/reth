@@ -813,6 +813,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             ]
         );
 
+        self.assert_invariants();
+
         removed
     }
 
@@ -833,7 +835,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// # Panics
     /// if any invariant is violated
-    #[cfg(any(test, feature = "test-utils"))]
+    // #[cfg(any(test, feature = "test-utils"))]
     pub fn assert_invariants(&self) {
         let size = self.size();
         let actual = size.basefee + size.pending + size.queued + size.blob;
