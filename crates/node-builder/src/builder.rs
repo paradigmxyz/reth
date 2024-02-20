@@ -40,7 +40,7 @@ use reth_node_core::{
 };
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    ChainSpec, DisplayHardforks,
+    ChainSpec,
 };
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
 use reth_prune::{PrunerBuilder, PrunerEvent};
@@ -416,7 +416,7 @@ where
 
         let genesis_hash = init_genesis(database.clone(), config.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", DisplayHardforks::new(config.chain.hardforks()));
+        info!(target: "reth::cli", "{}",config.chain.display_hardforks());
 
         let consensus = config.consensus();
 
@@ -1080,8 +1080,10 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     where
         Pool: TransactionPool + Unpin + 'static,
     {
-        let (handle, network, txpool, eth) =
-            builder.transactions(pool).request_handler(self.provider().clone()).split_with_handle();
+        let (handle, network, txpool, eth) = builder
+            .transactions(pool, Default::default())
+            .request_handler(self.provider().clone())
+            .split_with_handle();
 
         self.executor.spawn_critical("p2p txpool", txpool);
         self.executor.spawn_critical("p2p eth request handler", eth);

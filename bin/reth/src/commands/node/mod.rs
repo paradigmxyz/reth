@@ -163,15 +163,6 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             ext,
         } = self;
 
-        let data_dir = datadir.unwrap_or_chain_default(chain.chain);
-        let db_path = data_dir.db_path();
-
-        tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = Arc::new(
-            init_db(db_path.clone(), DatabaseArguments::default().log_level(db.log_level))?
-                .with_metrics(),
-        );
-
         // set up node config
         let mut node_config = NodeConfig {
             config,
@@ -188,6 +179,19 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             dev,
             pruning,
         };
+
+        // Register the prometheus recorder before creating the database,
+        // because database init needs it to register metrics.
+        let _ = node_config.install_prometheus_recorder()?;
+
+        let data_dir = datadir.unwrap_or_chain_default(node_config.chain.chain);
+        let db_path = data_dir.db_path();
+
+        tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
+        let database = Arc::new(
+            init_db(db_path.clone(), DatabaseArguments::default().log_level(db.log_level))?
+                .with_metrics(),
+        );
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();
