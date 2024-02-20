@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     fs::File,
-    marker::Sync,
     ops::Range,
     path::{Path, PathBuf},
 };

@@ -522,7 +522,6 @@ mod tests {
     use jsonrpsee::http_client::HttpClientBuilder;
     use reth_primitives::BlockNumberOrTag;
     use reth_rpc_types::trace::filter::TraceFilterMode;
-    use std::collections::HashSet;
 
     fn assert_is_stream<St: Stream>(_: &St) {}
 

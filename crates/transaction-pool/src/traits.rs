@@ -206,7 +206,9 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns converted [PooledTransactionsElement] for the given transaction hashes.
     ///
-    /// This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
+    /// This adheres to the expected behavior of
+    /// [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
+    ///
     /// The transactions must be in same order as in the request, but it is OK to skip transactions
     /// which are not available.
     ///
@@ -247,7 +249,11 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns all transactions that can be included in the next block.
     ///
-    /// This is primarily used for the `txpool_` RPC namespace: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes between `pending` and `queued` transactions, where `pending` are transactions ready for inclusion in the next block and `queued` are transactions that are ready for inclusion in future blocks.
+    /// This is primarily used for the `txpool_` RPC namespace:
+    /// <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes
+    /// between `pending` and `queued` transactions, where `pending` are transactions ready for
+    /// inclusion in the next block and `queued` are transactions that are ready for inclusion in
+    /// future blocks.
     ///
     /// Consumer: RPC
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
@@ -271,7 +277,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     ///
     /// Also removes all _dependent_ transactions.
     ///
-    /// Consumer: Block production
+    /// Consumer: Utility
     fn remove_transactions(
         &self,
         hashes: Vec<TxHash>,

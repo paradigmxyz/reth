@@ -186,6 +186,7 @@ pub struct ExecutionConfig {
     /// The maximum cumulative amount of gas to process before the execution stage commits.
     pub max_cumulative_gas: Option<u64>,
     /// The maximum time spent on blocks processing before the execution stage commits.
+    #[serde(with = "humantime_serde")]
     pub max_duration: Option<Duration>,
 }
 
@@ -282,6 +283,7 @@ impl Default for PruneConfig {
 #[cfg(test)]
 mod tests {
     use super::Config;
+    use std::time::Duration;
 
     const EXTENSION: &str = "toml";
 
@@ -306,6 +308,18 @@ mod tests {
     fn test_load_config() {
         with_tempdir("config-load-test", |config_path| {
             let config = Config::default();
+            confy::store_path(config_path, &config).unwrap();
+
+            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            assert_eq!(config, loaded_config);
+        })
+    }
+
+    #[test]
+    fn test_load_execution_stage() {
+        with_tempdir("config-load-test", |config_path| {
+            let mut config = Config::default();
+            config.stages.execution.max_duration = Some(Duration::from_secs(10 * 60));
             confy::store_path(config_path, &config).unwrap();
 
             let loaded_config: Config = confy::load_path(config_path).unwrap();

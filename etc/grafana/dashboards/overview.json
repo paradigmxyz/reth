@@ -4541,7 +4541,7 @@
               }
             ]
           },
-          "unit": "cps"
+          "unit": "reqps"
         },
         "overrides": [
           {
@@ -4596,7 +4596,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "increase(reth_network_pool_transactions_messages_sent{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_network_pool_transactions_messages_sent{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "instant": false,
           "legendFormat": "Tx",
@@ -4609,7 +4609,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "increase(reth_network_pool_transactions_messages_received{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_network_pool_transactions_messages_received{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Rx",
           "range": true,

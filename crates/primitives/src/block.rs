@@ -521,7 +521,7 @@ impl BlockBody {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockId, BlockNumberOrTag::*, *};
+    use super::{BlockNumberOrTag::*, *};
     use crate::hex_literal::hex;
     use alloy_rlp::{Decodable, Encodable};
     use reth_rpc_types::HexStringMissingPrefixError;

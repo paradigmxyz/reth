@@ -176,7 +176,7 @@ mod tests {
     use super::*;
     use tokio::{
         io::{duplex, AsyncReadExt, AsyncWriteExt, DuplexStream},
-        net::{TcpListener, TcpStream},
+        net::TcpListener,
     };
 
     async fn duplex_stream_ping_pong(

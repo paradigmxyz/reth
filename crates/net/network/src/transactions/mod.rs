@@ -80,7 +80,7 @@ pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 pub use validation::*;
 
 pub use self::constants::{
-    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST,
+    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
@@ -589,7 +589,7 @@ where
 
         // get handle to peer's session, if the session is still active
         let Some(peer) = self.peers.get_mut(&peer_id) else {
-            debug!(
+            trace!(
                 peer_id=format!("{peer_id:#}"),
                 msg=?msg,
                 "discarding announcement from inactive peer"
@@ -919,11 +919,18 @@ where
 
             for tx in transactions {
                 // recover transaction
-                let tx = if let Ok(tx) = tx.try_into_ecrecovered() {
-                    tx
-                } else {
-                    has_bad_transactions = true;
-                    continue
+                let tx = match tx.try_into_ecrecovered() {
+                    Ok(tx) => tx,
+                    Err(badtx) => {
+                        trace!(target: "net::tx",
+                            peer_id=format!("{peer_id:#}"),
+                            hash=%badtx.hash(),
+                            client_version=%peer.client_version,
+                            "failed ecrecovery for transaction"
+                        );
+                        has_bad_transactions = true;
+                        continue
+                    }
                 };
 
                 // track that the peer knows this transaction, but only if this is a new broadcast.
@@ -1000,7 +1007,12 @@ where
             }
         }
 
-        if has_bad_transactions || num_already_seen > 0 {
+        if has_bad_transactions {
+            // peer sent us invalid transactions
+            self.report_peer_bad_transactions(peer_id)
+        }
+
+        if num_already_seen > 0 {
             self.report_already_seen(peer_id);
         }
     }
