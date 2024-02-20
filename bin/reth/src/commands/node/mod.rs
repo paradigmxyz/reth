@@ -52,10 +52,6 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     )]
     pub chain: Arc<ChainSpec>,
 
-    /// Bitfinity Args
-    #[clap(flatten)]
-    pub bitfinity: BitfinityArgs,
-
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
@@ -88,6 +84,10 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     /// Overrides the KZG trusted setup by reading from the supplied file.
     #[arg(long, value_name = "PATH")]
     pub trusted_setup_file: Option<PathBuf>,
+
+    /// Bitfinity Args
+    #[clap(flatten)]
+    pub bitfinity: BitfinityArgs,
 
     /// All networking related arguments
     #[clap(flatten)]
