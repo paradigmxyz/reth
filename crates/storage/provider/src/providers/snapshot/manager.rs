@@ -628,7 +628,7 @@ impl SnapshotWriter for Arc<SnapshotProvider> {
             let time = Instant::now();
             writer.commit()?;
             debug!(
-                target: "provider::static::commit",
+                target: "provider::static_file",
                 segment = ?writer.segment(),
                 duration = ?time.elapsed(),
                 "Commit time"
