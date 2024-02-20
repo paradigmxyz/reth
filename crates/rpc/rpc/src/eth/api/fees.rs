@@ -198,12 +198,6 @@ where
             // newest block"
             //
             // The unwrap is safe since we checked earlier that we got at least 1 header.
-
-            // The spec states that `base_fee_per_gas` "[..] includes the next block after the
-            // newest of the returned range, because this value can be derived from the
-            // newest block"
-            //
-            // The unwrap is safe since we checked earlier that we got at least 1 header.
             let last_header = headers.last().expect("is present");
             base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
                 last_header.gas_used,
@@ -212,7 +206,8 @@ where
                 self.provider().chain_spec().base_fee_params(last_header.timestamp),
             )));
 
-            // Same goes for the `base_fee_per_blob_gas`
+            // Same goes for the `base_fee_per_blob_gas`:
+            // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
             base_fee_per_blob_gas
                 .push(U256::from(last_header.next_block_blob_fee().unwrap_or_default()));
         };

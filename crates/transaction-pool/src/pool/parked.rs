@@ -442,7 +442,7 @@ impl<T: PoolTransaction> Ord for BasefeeOrd<T> {
 /// The primary order function always compares the transaction costs first. In case these
 /// are equal, it compares the timestamps when the transactions were created.
 #[derive(Debug)]
-pub(crate) struct QueuedOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
+pub struct QueuedOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
 
 impl_ord_wrapper!(QueuedOrd);
 

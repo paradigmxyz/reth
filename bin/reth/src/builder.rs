@@ -36,7 +36,6 @@ use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]
 use reth_node_optimism::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives::DisplayHardforks;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_rpc_engine_api::EngineApi;
@@ -148,7 +147,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         let genesis_hash = init_genesis(Arc::clone(&self.db), self.config.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", DisplayHardforks::new(self.config.chain.hardforks()));
+        info!(target: "reth::cli", "{}", self.config.chain.display_hardforks());
 
         let consensus = self.config.consensus();
 
