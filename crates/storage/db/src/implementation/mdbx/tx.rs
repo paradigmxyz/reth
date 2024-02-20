@@ -110,13 +110,19 @@ impl<K: TransactionKind> Tx<K> {
         let run = |tx| {
             let start = Instant::now();
             let (result, commit_latency) = f(tx);
-            let duration = start.elapsed();
+            let total_duration = start.elapsed();
+
+            // fsync or msync
+            let sync = commit_latency.as_ref().and_then(|latency| Some(latency.sync()));
+
             debug!(
                 target: "provider::database",
-                ?duration,
+                ?total_duration,
+                ?sync,
                 "Commit"
             );
-            (result, commit_latency, duration)
+
+            (result, commit_latency, total_duration)
         };
 
         if let Some(mut metrics_handler) = self.metrics_handler.take() {
