@@ -4,7 +4,7 @@ use alloy_rlp::Encodable;
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge, Address, BlobTransactionSidecar, ChainSpec,
-    Header, SealedBlock, Withdrawals, B256, U256, Hardfork,
+    Hardfork, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
@@ -77,10 +77,10 @@ impl EthBuiltPayload {
     pub fn into_v3_payload(self, spec: &ChainSpec) -> ExecutionPayloadEnvelopeV3 {
         let EthBuiltPayload { block, fees, sidecars, .. } = self;
 
-        // After `Cancun` is enabled on optimism, an extra field `parent_beacon_block_root` is included in the enveloped
-        // V3 payload.
-        let parent_beacon_block_root = (spec.is_optimism()
-            && spec.is_fork_active_at_timestamp(Hardfork::Cancun, block.timestamp))
+        // After `Cancun` is enabled on optimism, an extra field `parent_beacon_block_root` is
+        // included in the enveloped V3 payload.
+        let parent_beacon_block_root = (spec.is_optimism() &&
+            spec.is_fork_active_at_timestamp(Hardfork::Cancun, block.timestamp))
         .then_some(block.parent_beacon_block_root)
         .flatten();
 
@@ -97,7 +97,8 @@ impl EthBuiltPayload {
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
-            // Optimism-specific: Post-cancun, the parent beacon block root is included in the enveloped payload.
+            // Optimism-specific: Post-cancun, the parent beacon block root is included in the
+            // enveloped payload.
             parent_beacon_block_root,
         }
     }
@@ -123,10 +124,10 @@ impl BuiltPayload for EthBuiltPayload {
     fn into_v3_payload(self, spec: &ChainSpec) -> ExecutionPayloadEnvelopeV3 {
         let EthBuiltPayload { block, fees, sidecars, .. } = self;
 
-        // After `Cancun` is enabled on optimism, an extra field `parent_beacon_block_root` is included in the enveloped
-        // V3 payload.
-        let parent_beacon_block_root = (spec.is_optimism()
-            && spec.is_fork_active_at_timestamp(Hardfork::Cancun, block.timestamp))
+        // After `Cancun` is enabled on optimism, an extra field `parent_beacon_block_root` is
+        // included in the enveloped V3 payload.
+        let parent_beacon_block_root = (spec.is_optimism() &&
+            spec.is_fork_active_at_timestamp(Hardfork::Cancun, block.timestamp))
         .then_some(block.parent_beacon_block_root)
         .flatten();
 
@@ -143,7 +144,8 @@ impl BuiltPayload for EthBuiltPayload {
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
-            // Optimism-specific: Post-cancun, the parent beacon block root is included in the enveloped payload.
+            // Optimism-specific: Post-cancun, the parent beacon block root is included in the
+            // enveloped payload.
             parent_beacon_block_root,
         }
     }
