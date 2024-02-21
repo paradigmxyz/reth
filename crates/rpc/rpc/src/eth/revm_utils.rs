@@ -457,19 +457,16 @@ impl CallFees {
         max_fee_per_blob_gas: Option<U256>,
         block_blob_fee: Option<U256>,
     ) -> EthResult<CallFees> {
-
         fn get_effective_gas_price(
             max_fee_per_gas: Option<U256>,
             max_priority_fee_per_gas: Option<U256>,
-            block_base_fee: U256
+            block_base_fee: U256,
         ) -> EthResult<U256> {
             match max_fee_per_gas {
                 Some(max_fee) => {
                     if max_fee < block_base_fee {
                         // `base_fee_per_gas` is greater than the `max_fee_per_gas`
-                        return Err(
-                            RpcInvalidTransactionError::FeeCapTooLow.into()
-                        )
+                        return Err(RpcInvalidTransactionError::FeeCapTooLow.into())
                     }
                     if max_fee < max_priority_fee_per_gas.unwrap_or(U256::ZERO) {
                         return Err(
@@ -477,11 +474,12 @@ impl CallFees {
                             RpcInvalidTransactionError::TipAboveFeeCap.into(),
                         )
                     }
-                    Ok(min(max_fee, block_base_fee + max_priority_fee_per_gas.unwrap_or(U256::ZERO)))
-                },
-                None => {
-                    Ok(block_base_fee + max_priority_fee_per_gas.unwrap_or(U256::ZERO))
+                    Ok(min(
+                        max_fee,
+                        block_base_fee + max_priority_fee_per_gas.unwrap_or(U256::ZERO),
+                    ))
                 }
+                None => Ok(block_base_fee + max_priority_fee_per_gas.unwrap_or(U256::ZERO)),
             }
         }
 
@@ -501,14 +499,26 @@ impl CallFees {
             }
             (None, max_fee_per_gas, max_priority_fee_per_gas, None) => {
                 // request for eip-1559 transaction
-                let effective_gas_price = get_effective_gas_price(max_fee_per_gas, max_priority_fee_per_gas, block_base_fee)?;
+                let effective_gas_price = get_effective_gas_price(
+                    max_fee_per_gas,
+                    max_priority_fee_per_gas,
+                    block_base_fee,
+                )?;
                 let max_fee_per_blob_gas = has_blob_hashes.then_some(block_blob_fee).flatten();
 
-                Ok(CallFees { gas_price: effective_gas_price, max_priority_fee_per_gas, max_fee_per_blob_gas })
+                Ok(CallFees {
+                    gas_price: effective_gas_price,
+                    max_priority_fee_per_gas,
+                    max_fee_per_blob_gas,
+                })
             }
             (None, max_fee_per_gas, max_priority_fee_per_gas, Some(max_fee_per_blob_gas)) => {
                 // request for eip-4844 transaction
-                let effective_gas_price = get_effective_gas_price(max_fee_per_gas, max_priority_fee_per_gas, block_base_fee)?;
+                let effective_gas_price = get_effective_gas_price(
+                    max_fee_per_gas,
+                    max_priority_fee_per_gas,
+                    block_base_fee,
+                )?;
                 // Ensure blob_hashes are present
                 if !has_blob_hashes {
                     // Blob transaction but no blob hashes
