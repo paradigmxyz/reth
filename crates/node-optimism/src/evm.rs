@@ -47,13 +47,11 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
 }
 
 impl ConfigureEvm for OptimismEvmConfig {
-    /// Returns new EVM with the given database
     fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, (), DB> {
         let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
         EvmBuilder::default().with_db(db).with_handler_cfg(handler_cfg).build()
     }
 
-    /// Returns a new EVM with the given inspector
     fn evm_with_inspector<'a, DB: Database + 'a, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB> {
         let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
         EvmBuilder::default()

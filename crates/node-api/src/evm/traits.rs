@@ -15,9 +15,14 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     }
 }
 
-/// This represents the set of methods used to configure the EVM's environment before block execution.
+/// This represents the set of methods used to configure the EVM's environment before block
+/// execution.
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
-    /// The type of the transaction metadata.
+    /// The type of the transaction metadata that should be used to fill fields in the transaction
+    /// environment.
+    ///
+    /// On ethereum mainnet, this is `()`, and on optimism these are the L1 fee fields and
+    /// additional L1 block info.
     type TxMeta;
 
     /// Fill transaction environment from a [Transaction] and the given sender address.
