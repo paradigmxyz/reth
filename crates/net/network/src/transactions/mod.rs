@@ -870,7 +870,7 @@ where
                 // Send a `NewPooledTransactionHashes` to the peer with up to
                 // `SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE`
                 // transactions in the pool.
-                if !self.network.is_initially_syncing() && !self.network.tx_gossip_disabled() {
+                if self.network.is_initially_syncing() || self.network.tx_gossip_disabled() {
                     return
                 }
 
