@@ -11,7 +11,6 @@ use crate::eth::{
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
-
 use async_trait::async_trait;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
@@ -21,7 +20,6 @@ use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, B256,
     U256, U64,
 };
-
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
@@ -35,7 +33,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-
 use tokio::sync::{oneshot, Mutex};
 
 mod block;

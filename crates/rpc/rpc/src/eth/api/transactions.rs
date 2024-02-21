@@ -16,7 +16,7 @@ use reth_network_api::NetworkInfo;
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
-    revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
+    revm::env::{fill_block_env_with_coinbase, FillableTransaction},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionKind::{Call, Create},
@@ -889,8 +889,7 @@ where
             // replay all transactions prior to the targeted transaction
             replay_transactions_until(&mut db, cfg.clone(), block_env.clone(), block_txs, tx.hash)?;
 
-            let env =
-                EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
+            let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx.tx_env());
 
             let mut inspector = TracingInspector::new(config);
             let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
@@ -973,8 +972,7 @@ where
                         block_number: Some(block_number),
                         base_fee: Some(base_fee),
                     };
-                    let tx_env = tx_env_with_recovered(&tx);
-                    (tx_info, tx_env)
+                    (tx_info, tx.tx_env())
                 })
                 .peekable();
 

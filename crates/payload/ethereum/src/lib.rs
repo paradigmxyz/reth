@@ -25,7 +25,7 @@ mod builder {
         },
         eip4844::calculate_excess_blob_gas,
         proofs,
-        revm::env::tx_env_with_recovered,
+        revm::env::FillableTransaction,
         Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
     };
     use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
@@ -267,7 +267,7 @@ mod builder {
                 .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
                     initialized_cfg.clone(),
                     initialized_block_env.clone(),
-                    tx_env_with_recovered(&tx),
+                    tx.tx_env(),
                 ))
                 .build();
 

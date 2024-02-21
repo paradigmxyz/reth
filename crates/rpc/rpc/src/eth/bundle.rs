@@ -3,7 +3,6 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult, RpcInvalidTransactionError},
-        revm_utils::FillableTransaction,
         utils::recover_raw_transaction,
         EthTransactions,
     },
@@ -12,6 +11,7 @@ use crate::{
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
     keccak256,
+    revm::env::TryFillableTransaction,
     revm_primitives::db::{DatabaseCommit, DatabaseRef},
     U256,
 };
@@ -104,7 +104,8 @@ where
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)?;
-                    tx.try_fill_tx_env(evm.tx_mut())?;
+                    tx.try_fill_tx_env(evm.tx_mut())
+                        .map_err(|_| EthApiError::InvalidTransactionSignature)?;
                     let ResultAndState { result, state } = evm.transact()?;
 
                     let gas_used = result.gas_used();
