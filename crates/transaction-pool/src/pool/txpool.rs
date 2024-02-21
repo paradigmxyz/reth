@@ -1550,7 +1550,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 // the new transaction is the next one
                 false
             } else {
-                // SAFETY: the transaction was added above so the _inclusive_ descendants iterator
+                // The transaction was added above so the _inclusive_ descendants iterator
                 // returns at least 1 tx.
                 let (id, tx) = descendants.peek().expect("Includes >= 1; qed.");
                 if id.nonce < inserted_tx_id.nonce {
