@@ -458,11 +458,9 @@ impl SnapshotProvider {
         let mut provider = get_provider(range.start)?;
         let mut cursor = provider.cursor()?;
 
-        // Used as a safety check to make sure we don't get stuck on a loop on an unexpected issue
-        // or corrupted file.
-        //
-        // Since we're looping through a range, we should retry at most once for a specific
-        // **number: if we're changing files (get_provider) aka checking the lower block range file.
+        // The `retrying` flag ensures a single retry attempt per `number`. If `get_fn` fails to
+        // access data in two different static files, it halts further attempts by returning
+        // an error, effectively preventing infinite retry loops.
         let mut retrying = false;
 
         // advances number in range
