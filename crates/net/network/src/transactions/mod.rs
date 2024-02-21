@@ -337,8 +337,7 @@ where
 
             // we sent a response at which point we assume that the peer is aware of the
             // transactions
-            peer.seen_transactions
-                .extend_seen_by_peer_and_in_pool(transactions.iter().map(|tx| *tx.hash()));
+            peer.seen_transactions.extend(transactions.iter().map(|tx| *tx.hash()));
 
             let resp = PooledTransactions(transactions);
             let _ = response.send(Ok(resp));
@@ -406,9 +405,7 @@ where
             // transaction lists, before deciding whether or not to send full transactions to the
             // peer.
             for tx in to_propagate.iter() {
-                if !peer.seen_transactions.has_seen_transaction(&tx.hash()) {
-                    peer.seen_transactions.seen_by_peer_and_in_pool(tx.hash());
-
+                if peer.seen_transactions.insert(tx.hash()) {
                     hashes.push(tx);
 
                     // Do not send full 4844 transaction hashes to peers.
@@ -494,9 +491,7 @@ where
 
         // Iterate through the transactions to propagate and fill the hashes and full transaction
         for tx in to_propagate {
-            if !peer.seen_transactions.has_seen_transaction(&tx.hash()) {
-                peer.seen_transactions.seen_by_peer_and_in_pool(tx.hash());
-
+            if peer.seen_transactions.insert(tx.hash()) {
                 full_transactions.push(&tx);
             }
         }
@@ -542,8 +537,7 @@ where
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
 
             for tx in to_propagate {
-                if peer.seen_transactions.has_seen_transaction(&tx.hash()) {
-                    peer.seen_transactions.seen_by_peer_and_in_pool(tx.hash());
+                if !peer.seen_transactions.insert(tx.hash()) {
                     hashes.push(&tx);
                 }
             }
@@ -596,7 +590,34 @@ where
 
             return
         };
-        let client_version = peer.client_version.clone();
+        let client = peer.client_version.clone();
+
+        // keep track of the transactions the peer knows
+        let mut count_txns_already_seen_by_peer = 0;
+        for tx in msg.iter_hashes().copied() {
+            if !peer.seen_transactions.insert(tx) {
+                count_txns_already_seen_by_peer += 1;
+            }
+        }
+        if count_txns_already_seen_by_peer > 0 {
+            // this may occur if transactions are sent or announced to a peer, at the same time as
+            // the peer sends/announces those hashes to us. this is because, marking
+            // txns as seen by a peer is done optimistically upon sending them to the
+            // peer.
+            self.metrics.messages_with_hashes_already_seen_by_peer.increment(1);
+            self.metrics
+                .occurrences_hash_already_seen_by_peer
+                .increment(count_txns_already_seen_by_peer);
+
+            trace!(target: "net::tx",
+                count_txns_already_seen_by_peer=%count_txns_already_seen_by_peer,
+                peer_id=format!("{peer_id:#}"),
+                client=?client,
+                "Peer sent hashes that have already been marked as seen by peer"
+            );
+
+            self.report_already_seen(peer_id);
+        }
 
         // 1. filter out known hashes
         //
@@ -605,24 +626,7 @@ where
         // most hashes will be filtered out here since this the mempool protocol is a gossip
         // protocol, healthy peers will send many of the same hashes.
         //
-        let already_known_by_pool = self.pool.retain_unknown(&mut msg);
-
-        // keep track of the transactions the peer knows
-        let mut num_already_seen = 0;
-        if let Some(pools_intersection) = already_known_by_pool {
-            for tx in pools_intersection.into_hashes() {
-                if peer.seen_transactions.has_seen_transaction(&tx) {
-                    num_already_seen += 1;
-                }
-                peer.seen_transactions.seen_by_peer_and_in_pool(tx);
-            }
-        }
-        for tx in msg.iter_hashes().copied() {
-            if peer.seen_transactions.has_seen_transaction(&tx) {
-                num_already_seen += 1;
-            }
-            peer.seen_transactions.seen_in_announcement(tx);
-        }
+        let _already_known_by_pool = self.pool.retain_unknown(&mut msg);
 
         if msg.is_empty() {
             // nothing to request
@@ -675,7 +679,7 @@ where
             |hash| bad_imports.contains(hash),
             &peer_id,
             |peer_id| self.peers.contains_key(&peer_id),
-            &client_version,
+            &client,
         );
 
         if valid_announcement_data.is_empty() {
@@ -688,7 +692,7 @@ where
             hashes_len=valid_announcement_data.iter().count(),
             hashes=?valid_announcement_data.keys().collect::<Vec<_>>(),
             msg_version=%valid_announcement_data.msg_version(),
-            client_version=%client_version,
+            client_version=%client,
             "received previously unseen and pending hashes in announcement from peer"
         );
 
@@ -703,7 +707,7 @@ where
                 peer_id=format!("{peer_id:#}"),
                 hashes=?*hashes,
                 msg_version=%msg_version,
-                client_version=%client_version,
+                client_version=%client,
                 "buffering hashes announced by busy peer"
             );
 
@@ -730,7 +734,7 @@ where
                 peer_id=format!("{peer_id:#}"),
                 surplus_hashes=?*surplus_hashes,
                 msg_version=%msg_version,
-                client_version=%client_version,
+                client_version=%client,
                 "some hashes in announcement from peer didn't fit in `GetPooledTransactions` request, buffering surplus hashes"
             );
 
@@ -741,7 +745,7 @@ where
             peer_id=format!("{peer_id:#}"),
             hashes=?*hashes_to_request,
             msg_version=%msg_version,
-            client_version=%client_version,
+            client_version=%client,
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
 
@@ -761,17 +765,10 @@ where
                 peer_id=format!("{peer_id:#}"),
                 failed_to_request_hashes=?*failed_to_request_hashes,
                 conn_eth_version=%conn_eth_version,
-                client_version=%client_version,
+                client_version=%client,
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
-            return
-        }
-
-        if num_already_seen > 0 {
-            self.metrics.messages_with_already_seen_hashes.increment(1);
-            trace!(target: "net::tx", num_hashes=%num_already_seen, ?peer_id, client=?client_version, "Peer sent already seen hashes");
-            self.report_already_seen(peer_id);
         }
     }
 
@@ -834,12 +831,7 @@ where
                     let hashes = self
                         .peers
                         .get(&peer_id)
-                        .map(|peer| {
-                            peer.seen_transactions
-                                .iter_transaction_hashes()
-                                .copied()
-                                .collect::<HashSet<_>>()
-                        })
+                        .map(|peer| peer.seen_transactions.iter().copied().collect::<HashSet<_>>())
                         .unwrap_or_default();
                     res.insert(peer_id, hashes);
                 }
@@ -885,7 +877,7 @@ where
                     }
 
                     for pooled_tx in pooled_txs.into_iter() {
-                        peer.seen_transactions.seen_by_peer_and_in_pool(*pooled_tx.hash());
+                        peer.seen_transactions.insert(*pooled_tx.hash());
                         msg_builder.push_pooled(pooled_tx);
                     }
 
@@ -914,7 +906,7 @@ where
 
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
-        let mut num_already_seen = 0;
+        let mut num_already_seen_by_peer = 0;
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             // pre-size to avoid reallocations
@@ -938,15 +930,10 @@ where
                 // track that the peer knows this transaction, but only if this is a new broadcast.
                 // If we received the transactions as the response to our GetPooledTransactions
                 // requests (based on received `NewPooledTransactionHashes`) then we already
-                // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`] as  `peer.
-                // seen_transactions.transactions_received_as_hash`. In that case, we don't move
-                // hashes from `peer.seen_transactions.transactions_received_as_hash` to
-                // `peer.seen_transactions.transactions_received_in_full_or_sent` here. The
-                // division of the `seen_transactions` list, just serves as a hint for tx fetcher
-                // of which hashes are missing. It's good enough without reallocating hashes.
+                // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`].
 
-                if source.is_broadcast() && peer.seen_transactions.has_seen_transaction(tx.hash()) {
-                    num_already_seen += 1;
+                if source.is_broadcast() && !peer.seen_transactions.insert(*tx.hash()) {
+                    num_already_seen_by_peer += 1;
                 }
 
                 match self.transactions_by_peers.entry(*tx.hash()) {
@@ -1004,9 +991,12 @@ where
                 self.pool_imports.push(import);
             }
 
-            if num_already_seen > 0 {
-                self.metrics.messages_with_already_seen_transactions.increment(1);
-                trace!(target: "net::tx", num_txs=%num_already_seen, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
+            if num_already_seen_by_peer > 0 {
+                self.metrics.messages_with_transactions_already_seen_by_peer.increment(1);
+                self.metrics
+                    .occurrences_of_transaction_already_seen_by_peer
+                    .increment(num_already_seen_by_peer);
+                trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
             }
         }
 
@@ -1015,7 +1005,7 @@ where
             self.report_peer_bad_transactions(peer_id)
         }
 
-        if num_already_seen > 0 {
+        if num_already_seen_by_peer > 0 {
             self.report_already_seen(peer_id);
         }
     }
@@ -1332,66 +1322,13 @@ impl TransactionSource {
     }
 }
 
-/// Tracks transactions a peer has seen.
-#[derive(Debug)]
-struct TransactionsSeenByPeer {
-    /// Keeps track of transactions that we know the peer has seen.
-    transactions: LruCache<B256>,
-}
-
-impl TransactionsSeenByPeer {
-    /// Returns `true` if peer has seen transaction.
-    fn has_seen_transaction(&self, hash: &TxHash) -> bool {
-        self.transactions.contains(hash)
-    }
-
-    /// Inserts a transaction hash that has been seen in an announcement.
-    fn seen_in_announcement(&mut self, hash: TxHash) {
-        // todo: add metrics
-        _ = self.transactions.insert(hash);
-    }
-
-    /// Inserts a hash of a transaction that has either been sent to the peer, or has been
-    /// received in full from the peer over broadcast.
-    fn seen_by_peer_and_in_pool(&mut self, hash: TxHash) {
-        // todo: add metrics
-        _ = self.transactions.insert(hash);
-    }
-
-    /// Inserts a list of transactions that have either been sent to the peer, or have been
-    /// received in full from the peer over broadcast.
-    fn extend_seen_by_peer_and_in_pool(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
-        // todo: add metrics
-        self.transactions.extend(hashes)
-    }
-
-    /// Returns an iterator over all transactions that the peer has seen.
-    fn iter_transaction_hashes(&self) -> impl Iterator<Item = &TxHash> {
-        // todo: add metrics
-        self.transactions.iter().chain(self.transactions.iter())
-    }
-
-    /// Returns an iterator over all transaction hashes that the peer has sent in an announcement.
-    fn maybe_pending_transaction_hashes(&self) -> &LruCache<TxHash> {
-        &self.transactions
-    }
-}
-
-impl Default for TransactionsSeenByPeer {
-    fn default() -> Self {
-        Self {
-            transactions: LruCache::new(
-                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER).unwrap(),
-            ),
-        }
-    }
-}
-
 /// Tracks a single peer
 #[derive(Debug)]
 struct Peer {
-    /// Keeps track of transactions that we know the peer has seen.
-    seen_transactions: TransactionsSeenByPeer,
+    /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
+    /// the sense that transactions are preemptively marked as seen by peer when they are sent to
+    /// the peer.
+    seen_transactions: LruCache<B256>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
@@ -1403,7 +1340,9 @@ struct Peer {
 impl Peer {
     fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
         Self {
-            seen_transactions: TransactionsSeenByPeer::default(),
+            seen_transactions: LruCache::new(
+                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER).expect("infallible"),
+            ),
             request_tx,
             version,
             client_version,
@@ -1914,8 +1853,8 @@ mod tests {
         let (mut peer_1, mut to_mock_session_rx) = new_mock_session(peer_id_1, eth_version);
         // mark hashes as seen by peer so it can fish them out from the cache for hashes pending
         // fetch
-        peer_1.seen_transactions.seen_in_announcement(seen_hashes[0]);
-        peer_1.seen_transactions.seen_in_announcement(seen_hashes[1]);
+        peer_1.seen_transactions.insert(seen_hashes[0]);
+        peer_1.seen_transactions.insert(seen_hashes[1]);
         tx_manager.peers.insert(peer_id_1, peer_1);
 
         // hashes are seen and currently not inflight, with one fallback peer, and are buffered
