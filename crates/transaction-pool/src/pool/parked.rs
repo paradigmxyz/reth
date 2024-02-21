@@ -193,7 +193,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
         while limit.is_exceeded(self.len(), self.size()) && !self.last_sender_submission.is_empty()
         {
-            // SAFETY: This will not panic due to `!last_sender_transaction.is_empty()`
+            // NOTE: This will not panic due to `!last_sender_transaction.is_empty()`
             let sender_id = self.last_sender_submission.last().expect("not empty").sender_id;
             let list = self.get_txs_by_sender(sender_id);
 
