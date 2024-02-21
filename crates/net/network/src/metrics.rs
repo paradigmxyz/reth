@@ -64,7 +64,7 @@ pub struct TransactionsManagerMetrics {
     /// Total number of messages from a peer, announcing transactions that have already been
     /// marked as seen by that peer.
     ///
-    /// This number is optimistic in the sense that transactions are marked as seen by a peer 
+    /// This number is optimistic in the sense that transactions are marked as seen by a peer
     /// preemptively when they are sent or announced to the peer.
     pub(crate) messages_with_hashes_already_seen_by_peer: Counter,
     /// Total number of messages from a peer, with transaction that have already been marked as
@@ -73,6 +73,18 @@ pub struct TransactionsManagerMetrics {
     /// This number is optimistic in the sense that transactions are marked as seen by a peer
     /// preemptively when they are sent or announced to the peer.
     pub(crate) messages_with_transactions_already_seen_by_peer: Counter,
+    /// Total number of occurrences, of a peer announcing a transaction that has already been
+    /// marked as seen by that peer.
+    ///
+    /// This number is optimistic in the sense that transactions are marked as seen by a peer
+    /// preemptively when they are sent or announced to the peer.
+    pub(crate) occurrences_hashes_already_seen_by_peer: Counter,
+    /// Total number of times a transaction is seen from a peer, that has already been marked as
+    /// seen by that peer.
+    ///
+    /// This number is optimistic in the sense that transactions are marked as seen by a peer
+    /// preemptively when they are sent or announced to the peer.
+    pub(crate) occurrences_of_transactions_already_seen_by_peer: Counter,
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
     /// Total number of bad imports.
