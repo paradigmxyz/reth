@@ -1194,9 +1194,9 @@ dependencies = [
 
 [[package]]
 name = "c-kzg"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9d8c306be83ec04bf5f73710badd8edf56dea23f2f0d8b7f9fe4644d371c758"
+checksum = "94a4bc5367b6284358d2a6a6a1dc2d92ec4b86034561c3b9d3341909752fd848"
 dependencies = [
  "blst",
  "cc",
@@ -3581,12 +3581,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "if_chain"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb56e1aa765b4b4f3aadfab769793b7087bb03a4ea4920644a6d238e2df5b9ed"
-
-[[package]]
 name = "igd-next"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5897,7 +5891,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "serde",
- "test-fuzz 4.0.5",
+ "test-fuzz",
 ]
 
 [[package]]
@@ -5964,7 +5958,7 @@ dependencies = [
  "serde_json",
  "strum 0.26.1",
  "tempfile",
- "test-fuzz 5.0.0",
+ "test-fuzz",
  "thiserror",
 ]
 
@@ -6102,7 +6096,7 @@ dependencies = [
  "secp256k1 0.27.0",
  "serde",
  "snap",
- "test-fuzz 4.0.5",
+ "test-fuzz",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -6599,7 +6593,7 @@ dependencies = [
  "strum 0.26.1",
  "sucds 0.6.0",
  "tempfile",
- "test-fuzz 4.0.5",
+ "test-fuzz",
  "thiserror",
  "toml",
  "tracing",
@@ -7719,17 +7713,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha-1"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5058ada175748e33390e40e872bd0fe59a19f265d0158daa551c5a88a76009c"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "digest 0.10.7",
-]
-
-[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7937,7 +7920,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.5",
- "sha-1 0.9.8",
+ "sha-1",
 ]
 
 [[package]]
@@ -8226,37 +8209,14 @@ checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
 
 [[package]]
 name = "test-fuzz"
-version = "4.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "470137c4c87413dd450bef3d516e6bf88a6dfc70e3f5e359dedbc7f9fc6992b3"
-dependencies = [
- "serde",
- "test-fuzz-internal 4.0.5",
- "test-fuzz-macro 4.0.5",
- "test-fuzz-runtime 4.0.5",
-]
-
-[[package]]
-name = "test-fuzz"
 version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b139530208017f9d5a113784ed09cf1b8b22dee95eb99d51d89af1a3c2d6594e"
 dependencies = [
  "serde",
- "test-fuzz-internal 5.0.0",
- "test-fuzz-macro 5.0.0",
- "test-fuzz-runtime 5.0.0",
-]
-
-[[package]]
-name = "test-fuzz-internal"
-version = "4.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9dc636f7d25fd41828408b08931216b93a4d18454a72e2d55d78bc3b78dc167e"
-dependencies = [
- "bincode",
- "cargo_metadata",
- "serde",
+ "test-fuzz-internal",
+ "test-fuzz-macro",
+ "test-fuzz-runtime",
 ]
 
 [[package]]
@@ -8268,22 +8228,6 @@ dependencies = [
  "bincode",
  "cargo_metadata",
  "serde",
-]
-
-[[package]]
-name = "test-fuzz-macro"
-version = "4.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4da89cfe93508da3676114d5a15aa26e29aa88d5230e22bc5ea5f3c1f08ef5f6"
-dependencies = [
- "darling 0.20.6",
- "if_chain",
- "itertools 0.12.1",
- "once_cell",
- "prettyplease",
- "proc-macro2",
- "quote",
- "syn 2.0.49",
 ]
 
 [[package]]
@@ -8303,19 +8247,6 @@ dependencies = [
 
 [[package]]
 name = "test-fuzz-runtime"
-version = "4.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09f701acb832f8c7911fa32863683cd9e02fe83976ed6bc9a9f56c2e4fbea936"
-dependencies = [
- "hex",
- "num-traits",
- "serde",
- "sha-1 0.10.1",
- "test-fuzz-internal 4.0.5",
-]
-
-[[package]]
-name = "test-fuzz-runtime"
 version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b657ccc932fde05dbac5c460bffa40809937adaa5558863fe8174526e1b3bc9"
@@ -8324,7 +8255,7 @@ dependencies = [
  "num-traits",
  "serde",
  "sha1",
- "test-fuzz-internal 5.0.0",
+ "test-fuzz-internal",
 ]
 
 [[package]]
