@@ -155,21 +155,19 @@ impl<T: ParkedOrd> ParkedPool<T> {
             .collect()
     }
 
-    /// Returns sender ids sorted by each sender's last submission id. Senders with older last
-    /// submission ids are first. Note that _last_ submission ids are the newest submission id for
-    /// that sender, so this sorts senders by the last time they submitted a transaction in
-    /// descending order. Senders that have least recently submitted a transaction are first.
-    ///
-    /// Similar to `Heartbeat` in Geth
-    pub fn get_senders_by_submission_id(&self) -> Vec<SubmissionSenderId> {
+    #[cfg(test)]
+    pub(crate) fn get_senders_by_submission_id(&self) -> Vec<SubmissionSenderId> {
         self.last_sender_transaction.iter().cloned().collect()
     }
 
     /// Truncates the pool by removing transactions, until the given [SubPoolLimit] has been met.
     ///
-    /// This is done by first ordering senders by the last time they have submitted a transaction,
-    /// using [get_senders_by_submission_id](ParkedPool::get_senders_by_submission_id) to determine
-    /// this ordering.
+    /// This is done by first ordering senders by the last time they have submitted a transaction
+    ///
+    /// Uses sender ids sorted by each sender's last submission id. Senders with older last
+    /// submission ids are first. Note that _last_ submission ids are the newest submission id for
+    /// that sender, so this sorts senders by the last time they submitted a transaction in
+    /// descending order. Senders that have least recently submitted a transaction are first.
     ///
     /// Then, for each sender, all transactions for that sender are removed, until the pool limits
     /// have been met.
@@ -185,11 +183,11 @@ impl<T: ParkedOrd> ParkedPool<T> {
         }
 
         let mut removed = Vec::new();
-        let mut sender_ids = self.get_senders_by_submission_id();
 
-        while limit.is_exceeded(self.len(), self.size()) && !sender_ids.is_empty() {
+        while limit.is_exceeded(self.len(), self.size()) && !self.last_sender_transaction.is_empty()
+        {
             // SAFETY: This will not panic due to `!addresses.is_empty()`
-            let sender_id = sender_ids.pop().unwrap().sender_id;
+            let sender_id = self.last_sender_transaction.first().expect("no empty").sender_id;
             let list = self.get_txs_by_sender(sender_id);
 
             // Drop transactions from this sender until the pool is under limits
@@ -366,7 +364,7 @@ impl<T: ParkedOrd> Ord for ParkedPoolTransaction<T> {
 /// Includes a [SenderId] and `submission_id`. This is used to sort senders by their last
 /// submission id.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub struct SubmissionSenderId {
+pub(crate) struct SubmissionSenderId {
     /// The sender id
     pub(crate) sender_id: SenderId,
     /// The submission id
