@@ -26,23 +26,26 @@ use tracing::*;
 /// This stage walks over the bodies table, and sets the transaction hash of each transaction in a
 /// block to the corresponding `BlockNumber` at each block. This is written to the
 /// [`tables::TxHashNumber`] This is used for looking up changesets via the transaction hash.
+///
+/// It uses [`reth_etl::Collector`] to collect all entries before finally writing them to disk.
 #[derive(Debug, Clone)]
 pub struct TransactionLookupStage {
-    /// The number of lookup entries to commit at once
-    commit_threshold: u64,
+    /// The maximum number of lookup entries to hold in memory before pushing them to
+    /// [`reth_etl::Collector`].
+    chunk_size: u64,
     prune_mode: Option<PruneMode>,
 }
 
 impl Default for TransactionLookupStage {
     fn default() -> Self {
-        Self { commit_threshold: 5_000_000, prune_mode: None }
+        Self { chunk_size: 5_000_000, prune_mode: None }
     }
 }
 
 impl TransactionLookupStage {
     /// Create new instance of [TransactionLookupStage].
-    pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>) -> Self {
-        Self { commit_threshold, prune_mode }
+    pub fn new(chunk_size: u64, prune_mode: Option<PruneMode>) -> Self {
+        Self { chunk_size, prune_mode }
     }
 }
 
@@ -107,8 +110,8 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         );
 
         loop {
-            let (tx_range, block_range, is_final_range) = input
-                .next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
+            let (tx_range, block_range, is_final_range) =
+                input.next_block_range_with_transaction_threshold(provider, self.chunk_size)?;
 
             let end_block = *block_range.end();
 
@@ -171,7 +174,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
-        let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.chunk_size);
 
         // Cursors to unwind tx hash to number
         let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
@@ -388,13 +391,13 @@ mod tests {
 
     struct TransactionLookupTestRunner {
         db: TestStageDB,
-        commit_threshold: u64,
+        chunk_size: u64,
         prune_mode: Option<PruneMode>,
     }
 
     impl Default for TransactionLookupTestRunner {
         fn default() -> Self {
-            Self { db: TestStageDB::default(), commit_threshold: 1000, prune_mode: None }
+            Self { db: TestStageDB::default(), chunk_size: 1000, prune_mode: None }
         }
     }
 
@@ -439,10 +442,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            TransactionLookupStage {
-                commit_threshold: self.commit_threshold,
-                prune_mode: self.prune_mode,
-            }
+            TransactionLookupStage { chunk_size: self.chunk_size, prune_mode: self.prune_mode }
         }
     }
 
