@@ -470,8 +470,6 @@ impl SnapshotProvider {
             'inner: loop {
                 match get_fn(&mut cursor, number)? {
                     Some(res) => {
-                        retrying = false;
-
                         if !predicate(&res) {
                             break 'outer
                         }
