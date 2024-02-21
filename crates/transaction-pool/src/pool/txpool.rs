@@ -31,8 +31,8 @@ use std::{
     fmt,
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
+    time::Instant,
 };
-use std::time::Instant;
 use tracing::trace;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -769,6 +769,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         .is_exceeded($this.$pool.len(), $this.$pool.size())
                     {
                         trace!(
+                            target: "pool-dbg",
                             "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             stringify!($pool),
                             $this.config.$limit,
@@ -827,7 +828,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             ]
         );
 
-         let elapsed = now.elapsed();
+        let elapsed = now.elapsed();
         if elapsed.as_millis() > 1 {
             println!("discard_worst took {:?}", elapsed);
         }
