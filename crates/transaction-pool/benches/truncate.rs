@@ -2,6 +2,7 @@
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
+use pprof::criterion::{Output, PProfProfiler};
 use proptest::{
     prelude::*,
     strategy::ValueTree,
@@ -233,5 +234,9 @@ fn truncate_basefee(
     });
 }
 
-criterion_group!(truncate, txpool_truncate);
+criterion_group! {
+    name = truncate;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = txpool_truncate
+}
 criterion_main!(truncate);
