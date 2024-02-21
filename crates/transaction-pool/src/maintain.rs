@@ -135,7 +135,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     // The update loop that waits for new blocks and reorgs and performs pool updated
     // Listen for new chain events and derive the update action for the pool
     loop {
-        trace!(target: "txpool", state=?maintained_state, "awaiting new block or reorg");
+        trace!(target: "pool-dbg", state=?maintained_state, "awaiting new block or reorg");
 
         metrics.set_dirty_accounts_len(dirty_addresses.len());
         let pool_info = pool.block_info();
@@ -197,7 +197,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             // also do periodic cleanup of the blob store
             let pool = pool.clone();
             task_spawner.spawn_blocking(Box::pin(async move {
-                debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
+                debug!(target: "pool-dbg", finalized_block = %finalized, "cleaning up blob store");
                 pool.cleanup_blobs();
             }));
         }
@@ -233,7 +233,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             Some(Ok(Err(res))) => {
                 // Failed to load accounts from state
                 let (accs, err) = *res;
-                debug!(target: "txpool", ?err, "failed to load accounts");
+                debug!(target: "pool-dbg", ?err, "failed to load accounts");
                 dirty_addresses.extend(accs);
             }
             Some(Err(_)) => {
@@ -291,7 +291,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                         Err(err) => {
                             let (addresses, err) = *err;
                             debug!(
-                                target: "txpool",
+                                target: "pool-dbg",
                                 ?err,
                                 "failed to load missing changed accounts at new tip: {:?}",
                                 new_tip.hash()
@@ -376,7 +376,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 let first_block = blocks.first();
                 trace!(
-                    target: "txpool",
+                    target: "pool-dbg",
                     first = first_block.number,
                     tip = tip.number,
                     pool_block = pool_info.last_seen_block_number,
@@ -388,7 +388,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let depth = tip.number.abs_diff(pool_info.last_seen_block_number);
                 if depth > max_update_depth {
                     maintained_state = MaintainedPoolState::Drifted;
-                    debug!(target: "txpool", ?depth, "skipping deep canonical update");
+                    debug!(target: "pool-dbg", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
                         last_seen_block_hash: tip.hash(),
                         last_seen_block_number: tip.number,
@@ -572,7 +572,7 @@ where
         return Ok(())
     }
 
-    debug!(target: "txpool", txs_file =?file_path, "Check local persistent storage for saved transactions");
+    debug!(target: "pool-dbg", txs_file =?file_path, "Check local persistent storage for saved transactions");
     let data = reth_primitives::fs::read(file_path)?;
 
     if data.is_empty() {
@@ -587,7 +587,7 @@ where
         .collect::<Vec<_>>();
     let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
 
-    info!(target: "txpool", txs_file =?file_path, num_txs=%outcome.len(), "Successfully reinserted local transactions from file");
+    info!(target: "pool-dbg", txs_file =?file_path, num_txs=%outcome.len(), "Successfully reinserted local transactions from file");
     reth_primitives::fs::remove_file(file_path)?;
     Ok(())
 }
@@ -598,7 +598,7 @@ where
 {
     let local_transactions = pool.get_local_transactions();
     if local_transactions.is_empty() {
-        trace!(target: "txpool", "no local transactions to save");
+        trace!(target: "pool-dbg", "no local transactions to save");
         return
     }
 
@@ -610,15 +610,15 @@ where
     let num_txs = local_transactions.len();
     let mut buf = alloy_rlp::BytesMut::new();
     alloy_rlp::encode_list(&local_transactions, &mut buf);
-    info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
+    info!(target: "pool-dbg", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
 
     match parent_dir.map(|_| reth_primitives::fs::write(file_path, buf)) {
         Ok(_) => {
-            info!(target: "txpool", txs_file=?file_path, "Wrote local transactions to file");
+            info!(target: "pool-dbg", txs_file=?file_path, "Wrote local transactions to file");
         }
         Err(err) => {
-            warn!(target: "txpool", %err, txs_file=?file_path, "Failed to write local transactions to file");
+            warn!(target: "pool-dbg", %err, txs_file=?file_path, "Failed to write local transactions to file");
         }
     }
 }
@@ -652,7 +652,7 @@ pub async fn backup_local_transactions_task<P>(
     };
 
     if let Err(err) = load_and_reinsert_transactions(pool.clone(), &transactions_path).await {
-        error!(target: "txpool", "{}", err)
+        error!(target: "pool-dbg", "{}", err)
     }
 
     let graceful_guard = shutdown.await;
