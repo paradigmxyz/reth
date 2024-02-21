@@ -1072,6 +1072,18 @@ where
     }
 }
 
+/// Measures the duration of executing the given code block. The duration is added to the given 
+/// accumulator value.
+macro_rules! duration_metered_exec {
+    ($code:block, $acc:ident) => {
+        let start = Instant::now();
+
+        $code
+
+        $acc += start.elapsed();
+    };
+}
+
 /// An endless future. Preemption ensure that future is non-blocking, nonetheless. See
 /// [`crate::NetworkManager`] for more context on the design pattern.
 ///
@@ -1092,16 +1104,6 @@ where
         let mut acc_pending_fetch = Duration::ZERO;
         let mut acc_cmds = Duration::ZERO;
 
-        macro_rules! metered_poll {
-            ($poll_nested:block, $acc:ident) => {
-                let start = Instant::now();
-
-                $poll_nested
-
-                $acc += start.elapsed();
-            };
-        }
-
         let this = self.get_mut();
 
         // If the budget is exhausted we manually yield back control to tokio. See
@@ -1111,7 +1113,7 @@ where
         loop {
             let mut some_ready = false;
 
-            metered_poll!(
+            duration_metered_exec!(
                 {
                     // drain network/peer related events
                     if let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
@@ -1122,7 +1124,7 @@ where
                 acc_network_events
             );
 
-            metered_poll!(
+            duration_metered_exec!(
                 {
                     if this.has_capacity_for_fetching_pending_hashes() {
                         // try drain buffered transactions.
@@ -1145,7 +1147,7 @@ where
                 acc_pending_fetch
             );
 
-            metered_poll!(
+            duration_metered_exec!(
                 {
                     // drain commands
                     if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
@@ -1156,7 +1158,7 @@ where
                 acc_cmds
             );
 
-            metered_poll!(
+            duration_metered_exec!(
                 {
                     // drain incoming transaction events
                     if let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
@@ -1167,7 +1169,7 @@ where
                 acc_tx_events
             );
 
-            metered_poll!(
+            duration_metered_exec!(
                 {
                     this.update_fetch_metrics();
 
@@ -1196,7 +1198,7 @@ where
                 acc_fetch_events
             );
 
-            metered_poll!(
+            duration_metered_exec!(
                 {
                     // Advance all imports
                     if let Poll::Ready(Some(batch_import_res)) =
@@ -1229,7 +1231,7 @@ where
                 acc_pending_imports
             );
 
-            metered_poll!(
+            duration_metered_exec!(
                 {
                     // handle and propagate new transactions.
                     //
