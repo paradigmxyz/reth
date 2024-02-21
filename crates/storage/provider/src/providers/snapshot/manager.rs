@@ -34,6 +34,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{mpsc, Arc},
 };
+use tracing::warn;
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a snapshot range.
@@ -225,7 +226,13 @@ impl SnapshotProvider {
                 },
             )??;
 
-            self.map.insert(key, LoadedJar::new(jar)?);
+            match self.map.entry(key) {
+                DashMapEntry::Occupied(_) => {}
+                DashMapEntry::Vacant(entry) => {
+                    entry.insert(LoadedJar::new(jar)?);
+                }
+            };
+
             Ok(self.map.get(&key).expect("qed").into())
         }
     }
@@ -454,6 +461,11 @@ impl SnapshotProvider {
 
         // advances number in range
         'outer: for number in range {
+            // The `retrying` flag ensures a single retry attempt per `number`. If `get_fn` fails to
+            // access data in two different static files, it halts further attempts by returning
+            // an error, effectively preventing infinite retry loops.
+            let mut retrying = false;
+
             // advances snapshot files if `get_fn` returns None
             'inner: loop {
                 match get_fn(&mut cursor, number)? {
@@ -465,8 +477,24 @@ impl SnapshotProvider {
                         break 'inner
                     }
                     None => {
+                        if retrying {
+                            warn!(
+                                target: "provider::static_file",
+                                ?segment,
+                                ?number,
+                                "Could not find block or tx number on a range request"
+                            );
+
+                            let err = if segment.is_headers() {
+                                ProviderError::MissingSnapshotBlock(segment, number)
+                            } else {
+                                ProviderError::MissingSnapshotTx(segment, number)
+                            };
+                            return Err(err)
+                        }
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
+                        retrying = true;
                     }
                 }
             }
