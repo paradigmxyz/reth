@@ -61,10 +61,18 @@ pub struct TransactionsManagerMetrics {
     pub(crate) propagated_transactions: Counter,
     /// Total number of reported bad transactions
     pub(crate) reported_bad_transactions: Counter,
-    /// Total number of messages with already seen hashes
-    pub(crate) messages_with_already_seen_hashes: Counter,
-    /// Total number of messages with already seen full transactions
-    pub(crate) messages_with_already_seen_transactions: Counter,
+    /// Total number of messages from a peer, announcing transactions that have already been
+    /// marked as seen by that peer.
+    ///
+    /// This number is optimistic in the sense that transactions are marked as seen by a peer 
+    /// preemptively when they are sent or announced to the peer.
+    pub(crate) messages_with_hashes_already_seen_by_peer: Counter,
+    /// Total number of messages from a peer, with transaction that have already been marked as
+    /// seen by that peer.
+    ///
+    /// This number is optimistic in the sense that transactions are marked as seen by a peer
+    /// preemptively when they are sent or announced to the peer.
+    pub(crate) messages_with_transactions_already_seen_by_peer: Counter,
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
     /// Total number of bad imports.
