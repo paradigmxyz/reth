@@ -761,10 +761,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         macro_rules! discard_worst {
             ($this:ident, $removed:ident, [$($limit:ident => $pool:ident),* $(,)*]) => {
                 $ (
-                while $this
-                        .config
-                        .$limit
-                        .is_exceeded($this.$pool.len(), $this.$pool.size())
+                while $this.$pool.exceeds(&$this.config.$limit)
                     {
                         trace!(
                             "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
