@@ -776,17 +776,22 @@ impl<T: TransactionOrdering> TxPool<T> {
                             $this.$pool.len(),
                         );
 
+                        let now = Instant::now();
                         // 1. first remove the worst transaction from the subpool
                         let removed_from_subpool = $this.$pool.truncate_pool($this.config.$limit.clone());
 
                         trace!(
-                            "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
+                            target: "pool-dbg",
+                            "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {} in {:?}",
                             removed_from_subpool.len(),
                             stringify!($pool),
                             $this.config.$limit,
                             $this.$pool.size(),
-                            $this.$pool.len()
+                            $this.$pool.len(),
+                            now.elapsed()
                         );
+
+                         let now = Instant::now();
 
                         // 2. remove all transactions from the total set
                         for tx in removed_from_subpool {
@@ -800,6 +805,13 @@ impl<T: TransactionOrdering> TxPool<T> {
                             // 3. remove all its descendants from the entire pool
                             $this.remove_descendants(&id, &mut $removed);
                         }
+
+                         trace!(
+                            target: "pool-dbg",
+                            "from {}, in {:?}",
+                            stringify!($pool),
+                            now.elapsed()
+                        );
                     }
 
                 )*
