@@ -473,7 +473,6 @@ impl SnapshotProvider {
                         if !predicate(&res) {
                             break 'outer
                         }
-
                         result.push(res);
                         break 'inner
                     }
