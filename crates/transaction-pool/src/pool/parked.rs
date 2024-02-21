@@ -32,10 +32,14 @@ pub struct ParkedPool<T: ParkedOrd> {
     ///
     /// The higher, the better.
     best: BTreeSet<ParkedPoolTransaction<T>>,
-    /// Keeps track of the number of transactions and the latest submission id for each sender.
-    last_sender_transaction: BTreeSet<SubmissionSenderId>,
-    /// Keeps track of the number of transactions by the sender and the last submission id.
-    sender_to_last_transaction: FnvHashMap<SenderId, SenderTransactionCount>,
+    /// Keeps track of last submission id for each sender.
+    ///
+    /// This are sorted in Reverse order, so the last (highest) submission id is first, and the
+    /// lowest(oldest) is the last.
+    last_sender_submission: BTreeSet<SubmissionSenderId>,
+    /// Keeps track of the number of transactions in the pool by the sender and the last submission
+    /// id.
+    sender_transaction_count: FnvHashMap<SenderId, SenderTransactionCount>,
     /// Keeps track of the size of this pool.
     ///
     /// See also [`PoolTransaction::size`].
@@ -73,11 +77,11 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// Increments the count of transactions for the given sender and updates the tracked submission
     /// id.
     fn add_sender_count(&mut self, sender: SenderId, submission_id: u64) {
-        match self.sender_to_last_transaction.entry(sender) {
+        match self.sender_transaction_count.entry(sender) {
             Entry::Occupied(mut entry) => {
                 let value = entry.get_mut();
                 // remove the __currently__ tracked submission id
-                self.last_sender_transaction
+                self.last_sender_submission
                     .remove(&SubmissionSenderId::new(sender, value.last_submission_id));
 
                 value.count += 1;
@@ -89,7 +93,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
             }
         }
         // insert a new entry
-        self.last_sender_transaction.insert(SubmissionSenderId::new(sender, submission_id));
+        self.last_sender_submission.insert(SubmissionSenderId::new(sender, submission_id));
     }
 
     /// Decrements the count of transactions for the given sender.
@@ -99,7 +103,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// Note: this does not update the tracked submission id for the sender, because we're only
     /// interested in the __last__ submission id when truncating the pool.
     fn remove_sender_count(&mut self, sender_id: SenderId) {
-        let removed_sender = match self.sender_to_last_transaction.entry(sender_id) {
+        let removed_sender = match self.sender_transaction_count.entry(sender_id) {
             Entry::Occupied(mut entry) => {
                 let value = entry.get_mut();
                 value.count -= 1;
@@ -110,13 +114,14 @@ impl<T: ParkedOrd> ParkedPool<T> {
                 }
             }
             Entry::Vacant(_) => {
+                // This should never happen because the bisection between the two maps
                 unreachable!("sender count not found {:?}", sender_id);
             }
         };
 
         // all transactions for this sender have been removed
         assert!(
-            self.last_sender_transaction
+            self.last_sender_submission
                 .remove(&SubmissionSenderId::new(sender_id, removed_sender.last_submission_id)),
             "last sender transaction not found {:?}",
             sender_id
@@ -159,7 +164,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     pub(crate) fn get_senders_by_submission_id(
         &self,
     ) -> impl Iterator<Item = SubmissionSenderId> + '_ {
-        self.last_sender_transaction.iter().cloned()
+        self.last_sender_submission.iter().cloned()
     }
 
     /// Truncates the pool by removing transactions, until the given [SubPoolLimit] has been met.
@@ -186,10 +191,10 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
         let mut removed = Vec::new();
 
-        while limit.is_exceeded(self.len(), self.size()) && !self.last_sender_transaction.is_empty()
+        while limit.is_exceeded(self.len(), self.size()) && !self.last_sender_submission.is_empty()
         {
-            // SAFETY: This will not panic due to `!addresses.is_empty()`
-            let sender_id = self.last_sender_transaction.last().expect("no empty").sender_id;
+            // SAFETY: This will not panic due to `!last_sender_transaction.is_empty()`
+            let sender_id = self.last_sender_submission.last().expect("not empty").sender_id;
             let list = self.get_txs_by_sender(sender_id);
 
             // Drop transactions from this sender until the pool is under limits
@@ -252,8 +257,8 @@ impl<T: ParkedOrd> ParkedPool<T> {
         assert_eq!(self.by_id.len(), self.best.len(), "by_id.len() != best.len()");
 
         assert_eq!(
-            self.last_sender_transaction.len(),
-            self.sender_to_last_transaction.len(),
+            self.last_sender_submission.len(),
+            self.sender_transaction_count.len(),
             "last_sender_transaction.len() != sender_to_last_transaction.len()"
         );
     }
@@ -321,8 +326,8 @@ impl<T: ParkedOrd> Default for ParkedPool<T> {
             submission_id: 0,
             by_id: Default::default(),
             best: Default::default(),
-            last_sender_transaction: Default::default(),
-            sender_to_last_transaction: Default::default(),
+            last_sender_submission: Default::default(),
+            sender_transaction_count: Default::default(),
             size_of: Default::default(),
         }
     }
