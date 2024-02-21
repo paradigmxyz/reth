@@ -1078,7 +1078,9 @@ macro_rules! duration_metered_exec {
     ($code:block, $acc:ident) => {
         let start = Instant::now();
 
-        $code * $acc += start.elapsed();
+        $code;
+        
+        *$acc += start.elapsed();
     };
 }
 
@@ -1116,6 +1118,7 @@ where
         loop {
             let mut some_ready = false;
 
+            let acc = &mut poll_durations.acc_network_events;
             duration_metered_exec!(
                 {
                     // drain network/peer related events
@@ -1124,9 +1127,10 @@ where
                         some_ready = true;
                     }
                 },
-                &mut poll_durations.acc_network_events
+                acc
             );
 
+            let acc = &mut poll_durations.acc_pending_fetch;
             duration_metered_exec!(
                 {
                     if this.has_capacity_for_fetching_pending_hashes() {
@@ -1147,9 +1151,10 @@ where
                         );
                     }
                 },
-                &mut poll_durations.acc_pending_fetch
+                acc
             );
 
+            let acc = &mut poll_durations.acc_cmds;
             duration_metered_exec!(
                 {
                     // drain commands
@@ -1158,9 +1163,10 @@ where
                         some_ready = true;
                     }
                 },
-                &mut poll_durations.acc_cmds
+                acc
             );
 
+            let acc = &mut poll_durations.acc_tx_events;
             duration_metered_exec!(
                 {
                     // drain incoming transaction events
@@ -1169,9 +1175,10 @@ where
                         some_ready = true;
                     }
                 },
-                &mut poll_durations.acc_tx_events
+                acc
             );
 
+            let acc = &mut poll_durations.acc_fetch_events;
             duration_metered_exec!(
                 {
                     this.update_fetch_metrics();
@@ -1198,9 +1205,10 @@ where
 
                     this.update_fetch_metrics();
                 },
-                &mut poll_durations.acc_fetch_events
+                acc
             );
 
+            let acc = &mut poll_durations.acc_pending_imports;
             duration_metered_exec!(
                 {
                     // Advance all imports
@@ -1231,9 +1239,10 @@ where
                         some_ready = true;
                     }
                 },
-                &mut poll_durations.acc_pending_imports
+                acc
             );
 
+            let acc = &mut poll_durations.acc_imported_txns;
             duration_metered_exec!(
                 {
                     // handle and propagate new transactions.
@@ -1250,7 +1259,7 @@ where
                         this.on_new_transactions(new_txs);
                     }
                 },
-                &mut poll_durations.acc_imported_txns
+                acc
             );
 
             // all channels are fully drained and import futures pending
