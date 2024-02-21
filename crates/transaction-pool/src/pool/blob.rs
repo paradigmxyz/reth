@@ -87,23 +87,31 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
         let mut transactions = Vec::new();
         {
-            let mut iter = self.by_id.iter().peekable();
+            // short path if blob_fee is None in provided best transactions attributes
+            if best_transactions_attributes.blob_fee.is_some() {
+                let blob_fee_to_satisfy = best_transactions_attributes
+                    .blob_fee
+                    .expect("blob fee is some and already checked")
+                    as u128;
 
-            while let Some((id, tx)) = iter.next() {
-                if tx.transaction.max_fee_per_blob_gas().unwrap_or_default() <
-                    best_transactions_attributes.blob_fee.unwrap_or_default() as u128 ||
-                    tx.transaction.max_fee_per_gas() <
-                        best_transactions_attributes.basefee as u128
-                {
-                    // still parked in blob pool -> skip descendant transactions
-                    'this: while let Some((peek, _)) = iter.peek() {
-                        if peek.sender != id.sender {
-                            break 'this
+                let mut iter = self.by_id.iter().peekable();
+
+                while let Some((id, tx)) = iter.next() {
+                    if tx.transaction.max_fee_per_blob_gas().unwrap_or_default() <
+                        blob_fee_to_satisfy ||
+                        tx.transaction.max_fee_per_gas() <
+                            best_transactions_attributes.basefee as u128
+                    {
+                        // still parked in blob pool -> skip descendant transactions
+                        'this: while let Some((peek, _)) = iter.peek() {
+                            if peek.sender != id.sender {
+                                break 'this
+                            }
+                            iter.next();
                         }
-                        iter.next();
+                    } else {
+                        transactions.push(tx.transaction.clone());
                     }
-                } else {
-                    transactions.push(tx.transaction.clone());
                 }
             }
         }
