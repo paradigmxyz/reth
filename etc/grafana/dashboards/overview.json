@@ -3922,7 +3922,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_response_response_size_bytes / reth_downloaders_bodies_response_response_length",
+          "expr": "reth_downloaders_bodies_response_response_size_bytes / reth_downloaders_bodies_response_response_length{instance=~\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Mean body size in response",
