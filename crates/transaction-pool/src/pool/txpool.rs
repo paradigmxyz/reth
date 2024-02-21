@@ -414,6 +414,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         mined_transactions: Vec<TxHash>,
         changed_senders: HashMap<SenderId, SenderInfo>,
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
+        let now = Instant::now();
         // update block info
         let block_hash = block_info.last_seen_block_hash;
         self.all_transactions.set_block_info(block_info);
@@ -427,6 +428,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
 
         let UpdateOutcome { promoted, discarded } = self.update_accounts(changed_senders);
+
+        trace!(target: "pool-dbg",
+            "on_canonical_state_change in {:?}",
+            now.elapsed()
+        );
 
         self.metrics.performed_state_updates.increment(1);
 

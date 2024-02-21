@@ -370,8 +370,14 @@ where
     /// This will either promote or discard transactions based on the new account state.
     pub(crate) fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
         let changed_senders = self.changed_senders(accounts.into_iter());
+        let now = Instant::now();
         let UpdateOutcome { promoted, discarded } =
+
             self.pool.write().update_accounts(changed_senders);
+        trace!(target: "pool-dbg",
+            "update_accounts dirty accounts in {:?}",
+            now.elapsed()
+        );
         let mut listener = self.event_listener.write();
 
         promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
