@@ -434,7 +434,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
             // return if either the pool is under limits or there are no more _eligible_
             // transactions to remove
-            if !limit.is_exceeded(self.len(), self.size()) || non_local_senders == 0 {
+            if !self.exceeds(limit) || non_local_senders == 0 {
                 return
             }
         }
@@ -455,16 +455,28 @@ impl<T: TransactionOrdering> PendingPool<T> {
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
-        self.remove_to_limit(&limit, false, &mut removed);
-
-        if !limit.is_exceeded(self.len(), self.size()) {
+        // return early if the pool is already under the limits
+        if !self.exceeds(&limit) {
             return removed
         }
 
-        // now repeat for local transactions
+        // first truncate only non-local transactions, returning if the pool end up under the limit
+        self.remove_to_limit(&limit, false, &mut removed);
+        if !self.exceeds(&limit) {
+            return removed
+        }
+
+        // now repeat for local transactions, since local transactions must be removed now for the
+        // pool to be under the limit
         self.remove_to_limit(&limit, true, &mut removed);
 
         removed
+    }
+
+    /// Returns true if the pool exceeds the given limit
+    #[inline]
+    pub(crate) fn exceeds(&self, limit: &SubPoolLimit) -> bool {
+        limit.is_exceeded(self.len(), self.size())
     }
 
     /// The reported size of all transactions in this pool.
