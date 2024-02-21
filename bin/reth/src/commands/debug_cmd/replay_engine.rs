@@ -5,8 +5,8 @@ use crate::{
         DatabaseArgs, NetworkArgs,
     },
     commands::debug_cmd::engine_api_store::{EngineApiStore, StoredEngineApiMessage},
+    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
-    runner::CliContext,
 };
 use clap::Parser;
 use eyre::Context;

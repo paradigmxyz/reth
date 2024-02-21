@@ -313,27 +313,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.by_id.insert(tx_id, tx);
     }
 
-    /// Removes a _mined_ transaction from the pool.
+    /// Removes the transaction from the pool.
     ///
-    /// If the transaction has a descendant transaction it will advance it to the best queue.
-    pub(crate) fn prune_transaction(
+    /// Note: If the transaction has a descendant transaction
+    /// it will advance it to the best queue.
+    pub(crate) fn remove_transaction(
         &mut self,
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         // mark the next as independent if it exists
         if let Some(unlocked) = self.get(&id.descendant()) {
             self.independent_transactions.insert(unlocked.clone());
-        };
-        self.remove_transaction(id)
-    }
-
-    /// Removes the transaction from the pool.
-    ///
-    /// Note: this only removes the given transaction.
-    pub(crate) fn remove_transaction(
-        &mut self,
-        id: &TransactionId,
-    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        }
         let tx = self.by_id.remove(id)?;
         self.size_of -= tx.transaction.size();
         self.all.remove(&tx);
@@ -464,13 +455,19 @@ impl<T: TransactionOrdering> PendingPool<T> {
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
-        self.remove_to_limit(&limit, false, &mut removed);
-
+        // return early if the pool is already under the limits
         if !limit.is_exceeded(self.len(), self.size()) {
             return removed
         }
 
-        // now repeat for local transactions
+        // first truncate only non-local transactions, returning if the pool end up under the limit
+        self.remove_to_limit(&limit, false, &mut removed);
+        if !limit.is_exceeded(self.len(), self.size()) {
+            return removed
+        }
+
+        // now repeat for local transactions, since local transactions must be removed now for the
+        // pool to be under the limit
         self.remove_to_limit(&limit, true, &mut removed);
 
         removed
