@@ -1072,16 +1072,25 @@ where
     }
 }
 
-/// Measures the duration of executing the given code block. The duration is added to the given 
-/// accumulator value.
+/// Measures the duration of executing the given code block. The duration is added to the given
+/// accumulator value passed as a mutable reference.
 macro_rules! duration_metered_exec {
     ($code:block, $acc:ident) => {
         let start = Instant::now();
 
-        $code
-
-        $acc += start.elapsed();
+        $code * $acc += start.elapsed();
     };
+}
+
+#[derive(Debug, Default)]
+struct TxManagerPollDurations {
+    acc_network_events: Duration,
+    acc_pending_imports: Duration,
+    acc_tx_events: Duration,
+    acc_imported_txns: Duration,
+    acc_fetch_events: Duration,
+    acc_pending_fetch: Duration,
+    acc_cmds: Duration,
 }
 
 /// An endless future. Preemption ensure that future is non-blocking, nonetheless. See
@@ -1096,13 +1105,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let start = Instant::now();
-        let mut acc_network_events = Duration::ZERO;
-        let mut acc_pending_imports = Duration::ZERO;
-        let mut acc_tx_events = Duration::ZERO;
-        let mut acc_imported_txns = Duration::ZERO;
-        let mut acc_fetch_events = Duration::ZERO;
-        let mut acc_pending_fetch = Duration::ZERO;
-        let mut acc_cmds = Duration::ZERO;
+        let mut poll_durations = TxManagerPollDurations::default();
 
         let this = self.get_mut();
 
@@ -1121,7 +1124,7 @@ where
                         some_ready = true;
                     }
                 },
-                acc_network_events
+                &mut poll_durations.acc_network_events
             );
 
             duration_metered_exec!(
@@ -1144,7 +1147,7 @@ where
                         );
                     }
                 },
-                acc_pending_fetch
+                &mut poll_durations.acc_pending_fetch
             );
 
             duration_metered_exec!(
@@ -1155,7 +1158,7 @@ where
                         some_ready = true;
                     }
                 },
-                acc_cmds
+                &mut poll_durations.acc_cmds
             );
 
             duration_metered_exec!(
@@ -1166,7 +1169,7 @@ where
                         some_ready = true;
                     }
                 },
-                acc_tx_events
+                &mut poll_durations.acc_tx_events
             );
 
             duration_metered_exec!(
@@ -1195,7 +1198,7 @@ where
 
                     this.update_fetch_metrics();
                 },
-                acc_fetch_events
+                &mut poll_durations.acc_fetch_events
             );
 
             duration_metered_exec!(
@@ -1228,7 +1231,7 @@ where
                         some_ready = true;
                     }
                 },
-                acc_pending_imports
+                &mut poll_durations.acc_pending_imports
             );
 
             duration_metered_exec!(
@@ -1247,7 +1250,7 @@ where
                         this.on_new_transactions(new_txs);
                     }
                 },
-                acc_imported_txns
+                &mut poll_durations.acc_imported_txns
             );
 
             // all channels are fully drained and import futures pending
@@ -1262,6 +1265,16 @@ where
                 break
             }
         }
+
+        let TxManagerPollDurations {
+            acc_network_events,
+            acc_pending_imports,
+            acc_tx_events,
+            acc_imported_txns,
+            acc_fetch_events,
+            acc_pending_fetch,
+            acc_cmds,
+        } = poll_durations;
 
         // update metrics for whole poll function
         this.metrics.duration_poll_tx_manager.set(start.elapsed());
