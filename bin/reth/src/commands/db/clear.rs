@@ -42,7 +42,9 @@ impl Command {
 
 #[derive(Subcommand, Debug)]
 enum Subcommands {
+    /// Deletes all database table entries
     Mdbx { table: Tables },
+    /// Deletes all snapshot segment entries
     Snapshot { segment: SnapshotSegment },
 }
 

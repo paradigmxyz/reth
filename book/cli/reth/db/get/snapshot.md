@@ -1,10 +1,20 @@
-# reth db stats
+# reth db get snapshot
 
-Lists all the tables, their entry count and their size
+Gets the content of a snapshot segment for the given key
 
 ```bash
-$ reth db stats --help
-Usage: reth db stats [OPTIONS]
+$ reth db get snapshot --help
+Usage: reth db get snapshot [OPTIONS] <SEGMENT> <KEY>
+
+Arguments:
+  <SEGMENT>
+          Possible values:
+          - headers:      Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
+          - transactions: Snapshot segment responsible for the `Transactions` table
+          - receipts:     Snapshot segment responsible for the `Receipts` table
+
+  <KEY>
+          The key to get content for
 
 Options:
       --datadir <DATA_DIR>
@@ -18,8 +28,8 @@ Options:
           
           [default: default]
 
-      --only-total-size
-          Show only the total size for snapshot files
+      --raw
+          Output bytes instead of human-readable decoded value
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
@@ -29,9 +39,6 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
           
           [default: mainnet]
-
-      --summary
-          Show only the summary per snapshot segment
 
       --instance <INSTANCE>
           Add a new instance of a node.
