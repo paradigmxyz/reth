@@ -67,7 +67,7 @@ impl ConfigureEvm for OptimismEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::revm_primitives::{BlockEnv, CfgEnv, SpecId};
+    use reth_primitives::revm_primitives::{BlockEnv, CfgEnv};
 
     #[test]
     #[ignore]
