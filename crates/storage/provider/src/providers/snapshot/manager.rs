@@ -339,12 +339,7 @@ impl SnapshotProvider {
                 }
 
                 // Update the cached provider.
-                match self.map.entry((fixed_range.end(), segment)) {
-                    DashMapEntry::Occupied(_) => {}
-                    DashMapEntry::Vacant(entry) => {
-                        entry.insert(LoadedJar::new(jar)?);
-                    }
-                };
+                self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
 
                 // Delete any cached provider that no longer has an associated jar.
                 self.map.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
@@ -463,21 +458,40 @@ impl SnapshotProvider {
         let mut provider = get_provider(range.start)?;
         let mut cursor = provider.cursor()?;
 
+        // Used as a safety check to make sure we don't get stuck on a loop on an unexpected issue
+        // or corrupted file.
+        //
+        // Since we're looping through a range, we should retry at most once for a specific
+        // **number: if we're changing files (get_provider) aka checking the lower block range file.
+        let mut retrying = false;
+
         // advances number in range
         'outer: for number in range {
             // advances snapshot files if `get_fn` returns None
             'inner: loop {
                 match get_fn(&mut cursor, number)? {
                     Some(res) => {
+                        retrying = false;
+
                         if !predicate(&res) {
                             break 'outer
                         }
+
                         result.push(res);
                         break 'inner
                     }
                     None => {
+                        if retrying {
+                            let err = if segment.is_headers() {
+                                ProviderError::MissingSnapshotBlock(segment, number)
+                            } else {
+                                ProviderError::MissingSnapshotTx(segment, number)
+                            };
+                            return Err(err)
+                        }
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
+                        retrying = true;
                     }
                 }
             }
