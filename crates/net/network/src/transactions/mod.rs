@@ -1279,17 +1279,13 @@ where
         // update metrics for whole poll function
         this.metrics.duration_poll_tx_manager.set(start.elapsed());
         // update poll metrics for nested streams
-        this.metrics.acc_duration_poll_network_events.set(acc_network_events.as_micros() as f64);
-        this.metrics
-            .acc_duration_poll_pending_pool_imports
-            .set(acc_pending_imports.as_micros() as f64);
-        this.metrics.acc_duration_poll_transaction_events.set(acc_tx_events.as_micros() as f64);
-        this.metrics
-            .acc_duration_poll_imported_transactions
-            .set(acc_imported_txns.as_micros() as f64);
-        this.metrics.acc_duration_poll_fetch_events.set(acc_fetch_events.as_micros() as f64);
-        this.metrics.acc_duration_fetch_pending_hashes.set(acc_pending_fetch.as_micros() as f64);
-        this.metrics.acc_duration_poll_commands.set(acc_cmds.as_micros() as f64);
+        this.metrics.acc_duration_poll_network_events.set(acc_network_events.as_secs_f64());
+        this.metrics.acc_duration_poll_pending_pool_imports.set(acc_pending_imports.as_secs_f64());
+        this.metrics.acc_duration_poll_transaction_events.set(acc_tx_events.as_secs_f64());
+        this.metrics.acc_duration_poll_imported_transactions.set(acc_imported_txns.as_secs_f64());
+        this.metrics.acc_duration_poll_fetch_events.set(acc_fetch_events.as_secs_f64());
+        this.metrics.acc_duration_fetch_pending_hashes.set(acc_pending_fetch.as_secs_f64());
+        this.metrics.acc_duration_poll_commands.set(acc_cmds.as_secs_f64());
 
         Poll::Pending
     }
