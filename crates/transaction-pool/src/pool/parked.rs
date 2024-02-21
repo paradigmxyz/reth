@@ -156,8 +156,10 @@ impl<T: ParkedOrd> ParkedPool<T> {
     }
 
     #[cfg(test)]
-    pub(crate) fn get_senders_by_submission_id(&self) -> Vec<SubmissionSenderId> {
-        self.last_sender_transaction.iter().cloned().collect()
+    pub(crate) fn get_senders_by_submission_id(
+        &self,
+    ) -> impl Iterator<Item = SubmissionSenderId> + '_ {
+        self.last_sender_transaction.iter().cloned()
     }
 
     /// Truncates the pool by removing transactions, until the given [SubPoolLimit] has been met.
@@ -242,6 +244,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {
         assert_eq!(self.by_id.len(), self.best.len(), "by_id.len() != best.len()");
+
+        assert_eq!(
+            self.last_sender_transaction.len(),
+            self.sender_to_last_transaction.len(),
+            "last_sender_transaction.len() != sender_to_last_transaction.len()"
+        );
     }
 }
 
@@ -696,11 +704,7 @@ mod tests {
         }
 
         // get senders by submission id - a4, b3, c3, d1, reversed
-        let senders = pool
-            .get_senders_by_submission_id()
-            .into_iter()
-            .map(|s| s.sender_id)
-            .collect::<Vec<_>>();
+        let senders = pool.get_senders_by_submission_id().map(|s| s.sender_id).collect::<Vec<_>>();
         assert_eq!(senders.len(), 4);
         let expected_senders = vec![d_sender, c_sender, b_sender, a_sender]
             .into_iter()
@@ -717,11 +721,7 @@ mod tests {
             pool.add_transaction(f.validated_arc(tx));
         }
 
-        let senders = pool
-            .get_senders_by_submission_id()
-            .into_iter()
-            .map(|s| s.sender_id)
-            .collect::<Vec<_>>();
+        let senders = pool.get_senders_by_submission_id().map(|s| s.sender_id).collect::<Vec<_>>();
         assert_eq!(senders.len(), 4);
         let expected_senders = vec![a_sender, c_sender, b_sender, d_sender]
             .into_iter()
