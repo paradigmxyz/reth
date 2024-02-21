@@ -931,7 +931,7 @@ where
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
 
-        // 2. filter out transactions that aren't pending import
+        // 2. filter out transactions that are invalid or already pending import
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             // pre-size to avoid reallocations
