@@ -46,7 +46,10 @@ pub mod tx_manager {
 }
 
 pub mod tx_fetcher {
-    use crate::peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND};
+    use crate::{
+        peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND},
+        transactions::fetcher::TransactionFetcherInfo,
+    };
 
     use super::{
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
@@ -194,8 +197,36 @@ pub mod tx_fetcher {
     /// Median observed size in bytes of a small encoded legacy transaction. Default is 120 bytes.
     pub const MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED: usize = 120;
 
-    /// Marginal number of hashes to allocate capacity for in a
-    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request packed according
-    /// to `eth` protocol version [`Eth68`](reth_eth_wire::EthVersion::Eth68).
-    pub const MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST: usize = 8;
+    /// Marginal on the number of hashes to preallocate memory for in a
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request, when packed
+    /// according to the [`Eth68`](reth_eth_wire::EthVersion::Eth68) protocol version. To make
+    /// sure enough memory is preallocated in most cases, it's sensible to use a margin. This,
+    /// since the capacity is calculated based on median value
+    /// [`MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED`]. There may otherwise be a noteworthy number of
+    /// cases where just 1 or 2 bytes too little memory is preallocated.
+    ///
+    /// Default is 8 hashes.
+    pub const DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST: usize = 8;
+
+    /// Returns the approx number of transaction hashes that a
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request will have capacity
+    /// for w.r.t. the [`Eth68`](reth_eth_wire::EthVersion::Eth68) protocol version. This is useful
+    /// for preallocating memory.
+    pub const fn approx_capacity_get_pooled_transactions_req_eth68(
+        info: &TransactionFetcherInfo,
+    ) -> usize {
+        let max_size_expected_response =
+            info.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
+
+        max_size_expected_response / MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED +
+            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST
+    }
+
+    /// Returns the approx number of transactions that a
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request will
+    /// have capacity for w.r.t. the [`Eth66`](reth_eth_wire::EthVersion::Eth66) protocol version.
+    /// This is useful for preallocating memory.
+    pub const fn approx_capacity_get_pooled_transactions_req_eth66() -> usize {
+        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST
+    }
 }

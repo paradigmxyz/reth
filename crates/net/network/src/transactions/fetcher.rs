@@ -272,6 +272,7 @@ impl TransactionFetcher {
             let surplus_hashes =
                 hashes.split_off(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST - 1);
             *hashes_to_request = hashes;
+            hashes_to_request.shrink_to_fit();
 
             RequestTxHashes::new(surplus_hashes)
         }
@@ -353,7 +354,7 @@ impl TransactionFetcher {
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) {
-        let init_capacity_req = self.approx_capacity_get_pooled_transactions_req_eth68();
+        let init_capacity_req = approx_capacity_get_pooled_transactions_req_eth68(&self.info);
         let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
 
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
@@ -809,24 +810,10 @@ impl TransactionFetcher {
         announcement_version: EthVersion,
     ) -> usize {
         if announcement_version.is_eth68() {
-            self.approx_capacity_get_pooled_transactions_req_eth68()
+            approx_capacity_get_pooled_transactions_req_eth68(&self.info)
         } else {
-            self.approx_capacity_get_pooled_transactions_req_eth66()
+            approx_capacity_get_pooled_transactions_req_eth66()
         }
-    }
-
-    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
-    /// have capacity for w.r.t. the [`Eth68`](EthVersion::Eth68) protocol.
-    pub fn approx_capacity_get_pooled_transactions_req_eth68(&self) -> usize {
-        self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request /
-            MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED +
-            MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST
-    }
-
-    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
-    /// have capacity for w.r.t. the [`Eth66`](EthVersion::Eth66) protocol.
-    pub fn approx_capacity_get_pooled_transactions_req_eth66(&self) -> usize {
-        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST
     }
 }
 
@@ -1016,7 +1003,7 @@ pub struct TransactionFetcherInfo {
     /// Soft limit for the byte size of the expected
     /// [`PooledTransactions`] response on packing a
     /// [`GetPooledTransactions`] request with hashes.
-    soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+    pub(super) soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
     /// Soft limit for the byte size of a [`PooledTransactions`]
     /// response on assembling a [`GetPooledTransactions`]
     /// request. Spec'd at 2 MiB.
