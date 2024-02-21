@@ -32,6 +32,7 @@ use std::{
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
 };
+use std::time::Instant;
 use tracing::trace;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -755,6 +756,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This returns all transactions that were removed from the entire pool.
     pub(crate) fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let now = Instant::now();
         let mut removed = Vec::new();
 
         // Helper macro that discards the worst transactions for the pools
@@ -812,6 +814,11 @@ impl<T: TransactionOrdering> TxPool<T> {
                 queued_limit  => queued_pool,
             ]
         );
+
+         let elapsed = now.elapsed();
+        if elapsed.as_millis() > 1 {
+            println!("discard_worst took {:?}", elapsed);
+        }
 
         removed
     }
