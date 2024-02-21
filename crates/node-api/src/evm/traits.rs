@@ -15,7 +15,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     }
 }
 
-/// This represents the set of methods used to configure the EVM before execution.
+/// This represents the set of methods used to configure the EVM's environment before block execution.
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     /// The type of the transaction metadata.
     type TxMeta;
