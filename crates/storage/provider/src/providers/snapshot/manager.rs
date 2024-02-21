@@ -225,7 +225,13 @@ impl SnapshotProvider {
                 },
             )??;
 
-            self.map.insert(key, LoadedJar::new(jar)?);
+            match self.map.entry(key) {
+                DashMapEntry::Occupied(_) => {}
+                DashMapEntry::Vacant(entry) => {
+                    entry.insert(LoadedJar::new(jar)?);
+                }
+            };
+
             Ok(self.map.get(&key).expect("qed").into())
         }
     }
@@ -333,7 +339,12 @@ impl SnapshotProvider {
                 }
 
                 // Update the cached provider.
-                self.map.insert((fixed_range.end(), segment), LoadedJar::new(jar)?);
+                match self.map.entry((fixed_range.end(), segment)) {
+                    DashMapEntry::Occupied(_) => {}
+                    DashMapEntry::Vacant(entry) => {
+                        entry.insert(LoadedJar::new(jar)?);
+                    }
+                };
 
                 // Delete any cached provider that no longer has an associated jar.
                 self.map.retain(|(end, seg), _| !(*seg == segment && *end > fixed_range.end()));
