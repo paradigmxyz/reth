@@ -158,7 +158,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         let mut sender_ids = self.get_senders_by_submission_id();
 
         while limit.is_exceeded(self.len(), self.size()) && !sender_ids.is_empty() {
-            // SAFETY: This will not panic due to `!addresses.is_empty()`
+            // NOTE: This will not panic due to `!addresses.is_empty()`
             let sender_id = sender_ids.pop().unwrap().sender_id;
             let list = self.get_txs_by_sender(sender_id);
 

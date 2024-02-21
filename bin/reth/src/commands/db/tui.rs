@@ -321,7 +321,7 @@ where
             MouseEventKind::ScrollUp => app.previous(),
             // TODO: This click event can be triggered outside of the list widget.
             MouseEventKind::Down(_) => {
-                // SAFETY: The pointer to the app's state will always be valid for
+                // NOTE: The pointer to the app's state will always be valid for
                 // reads here, and the source is larger than the destination.
                 //
                 // This is technically unsafe, but because the alignment requirements
