@@ -382,6 +382,7 @@ mod tests {
         // Check that we only synced around `batch_size` blocks even though the number of blocks
         // synced by the previous stage is higher
         let output = rx.await.unwrap();
+        runner.db().factory.snapshot_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -418,6 +419,7 @@ mod tests {
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
         let output = rx.await.unwrap();
+        runner.db().factory.snapshot_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput {
@@ -455,6 +457,7 @@ mod tests {
 
         // Check that we synced at least 10 blocks
         let first_run = rx.await.unwrap();
+        runner.db().factory.snapshot_provider().commit().unwrap();
         assert_matches!(
             first_run,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -475,6 +478,7 @@ mod tests {
 
         // Check that we synced more blocks
         let output = rx.await.unwrap();
+        runner.db().factory.snapshot_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -515,6 +519,7 @@ mod tests {
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
         let output = rx.await.unwrap();
+        runner.db().factory.snapshot_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
