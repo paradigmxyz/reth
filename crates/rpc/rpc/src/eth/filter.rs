@@ -81,7 +81,7 @@ where
         let eth_filter = Self { inner: Arc::new(inner) };
 
         let this = eth_filter.clone();
-        eth_filter.inner.task_spawner.clone().spawn_critical(
+        eth_filter.inner.task_spawner.spawn_critical(
             "eth-filters_stale-filters-clean",
             Box::pin(async move {
                 this.watch_and_clear_stale_filters().await;
