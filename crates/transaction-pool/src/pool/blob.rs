@@ -83,7 +83,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     /// Returns all transactions that satisfy the given basefee and blob_fee.
     pub(crate) fn satisfy_attributes(
         &self,
-        _best_transactions_attributes: BestTransactionsAttributes,
+        best_transactions_attributes: BestTransactionsAttributes,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
         let mut transactions = Vec::new();
         {
@@ -91,9 +91,9 @@ impl<T: PoolTransaction> BlobTransactions<T> {
 
             while let Some((id, tx)) = iter.next() {
                 if tx.transaction.max_fee_per_blob_gas().unwrap_or_default() <
-                    _best_transactions_attributes.blob_fee.unwrap_or_default() as u128 ||
+                    best_transactions_attributes.blob_fee.unwrap_or_default() as u128 ||
                     tx.transaction.max_fee_per_gas() <
-                        _best_transactions_attributes.basefee as u128
+                        best_transactions_attributes.basefee as u128
                 {
                     // still parked in blob pool -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {
