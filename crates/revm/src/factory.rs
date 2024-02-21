@@ -5,7 +5,7 @@ use crate::{
 };
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::ChainSpec;
-use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
+use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider, ExecutorFactoryLifetime, ExecutorFactoryGat};
 use std::sync::Arc;
 
 /// Factory for creating [EVMProcessor].
@@ -33,6 +33,46 @@ impl<EvmConfig> EvmProcessorFactory<EvmConfig> {
     pub fn with_stack_config(mut self, config: InspectorStackConfig) -> Self {
         self.stack = Some(InspectorStack::new(config));
         self
+    }
+}
+
+impl<'a, EvmConfig> ExecutorFactoryLifetime<'a> for EvmProcessorFactory<EvmConfig>
+where
+    EvmConfig: ConfigureEvmEnv + Send + Sync + Clone + 'static,
+{
+    type Executor = EVMProcessor<'a, EvmConfig>;
+
+    fn with_state<SP: StateProvider + 'a>(&self, sp: SP) -> Self::Executor {
+        let database_state = StateProviderDatabase::new(sp);
+        let mut evm = EVMProcessor::new_with_db(
+            self.chain_spec.clone(),
+            database_state,
+            self.evm_config.clone(),
+        );
+        if let Some(ref stack) = self.stack {
+            evm.set_stack(stack.clone());
+        }
+        evm
+    }
+}
+
+impl<EvmConfig> ExecutorFactoryGat for EvmProcessorFactory<EvmConfig>
+where
+    EvmConfig: ConfigureEvmEnv + Send + Sync + Clone + 'static,
+{
+    type Executor<'a> = EVMProcessor<'a, EvmConfig>;
+
+    fn with_state<'a, SP: StateProvider + 'a>(&self, sp: SP) -> Self::Executor<'a> {
+        let database_state = StateProviderDatabase::new(sp);
+        let mut evm = EVMProcessor::new_with_db(
+            self.chain_spec.clone(),
+            database_state,
+            self.evm_config.clone(),
+        );
+        if let Some(ref stack) = self.stack {
+            evm.set_stack(stack.clone());
+        }
+        evm
     }
 }
 

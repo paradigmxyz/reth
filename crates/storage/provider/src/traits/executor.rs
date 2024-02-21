@@ -17,6 +17,22 @@ pub trait ExecutorFactory: Send + Sync + 'static {
     ) -> Box<dyn PrunableBlockExecutor + 'a>;
 }
 
+/// ExecutorFactory that is generic over a lifetime.
+pub trait ExecutorFactoryLifetime<'a>: Send + Sync + 'static {
+    type Executor: PrunableBlockExecutor;
+
+    /// Executor with [`StateProvider`]
+    fn with_state<SP: StateProvider + 'a>(&self, sp: SP) -> Self::Executor;
+}
+
+/// ExecutorFactoryGat uses a GAT
+pub trait ExecutorFactoryGat: Send + Sync + 'static {
+    type Executor<'a>: PrunableBlockExecutor;
+
+    /// Executor with [`StateProvider`]
+    fn with_state<'a, SP: StateProvider + 'a>(&self, sp: SP) -> Self::Executor<'a>;
+}
+
 /// An executor capable of executing a block.
 pub trait BlockExecutor {
     /// Execute a block.
