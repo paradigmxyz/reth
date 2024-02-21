@@ -28,7 +28,7 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
     fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2;
 
     /// Converts the type into the response expected by `engine_getPayloadV3`
-    fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3;
+    fn into_v3_payload(self, spec: &ChainSpec) -> ExecutionPayloadEnvelopeV3;
 }
 
 /// This can be implemented by types that describe a currently running payload job.

@@ -271,7 +271,7 @@ where
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| payload.into_v3_payload())?)
+            .map(|payload| payload.into_v3_payload(self.inner.chain_spec.as_ref()))?)
     }
 
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`

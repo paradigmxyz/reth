@@ -4,7 +4,7 @@ use alloy_rlp::Encodable;
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge, Address, BlobTransactionSidecar, ChainSpec,
-    Header, SealedBlock, Withdrawals, B256, U256,
+    Header, SealedBlock, Withdrawals, B256, U256, Hardfork,
 };
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
@@ -73,9 +73,33 @@ impl EthBuiltPayload {
         self.into()
     }
 
-    /// Converts the type into the response expected by `engine_getPayloadV2`
-    pub fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
-        self.into()
+    /// Converts the type into the response expected by `engine_getPayloadV3`
+    pub fn into_v3_payload(self, spec: &ChainSpec) -> ExecutionPayloadEnvelopeV3 {
+        let EthBuiltPayload { block, fees, sidecars, .. } = self;
+
+        // After `Cancun` is enabled on optimism, an extra field `parent_beacon_block_root` is included in the enveloped
+        // V3 payload.
+        let parent_beacon_block_root = (spec.is_optimism()
+            && spec.is_fork_active_at_timestamp(Hardfork::Cancun, block.timestamp))
+        .then_some(block.parent_beacon_block_root)
+        .flatten();
+
+        ExecutionPayloadEnvelopeV3 {
+            execution_payload: block_to_payload_v3(block),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            // Optimism-specific: Post-cancun, the parent beacon block root is included in the enveloped payload.
+            parent_beacon_block_root,
+        }
     }
 }
 
@@ -96,8 +120,32 @@ impl BuiltPayload for EthBuiltPayload {
         self.into()
     }
 
-    fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
-        self.into()
+    fn into_v3_payload(self, spec: &ChainSpec) -> ExecutionPayloadEnvelopeV3 {
+        let EthBuiltPayload { block, fees, sidecars, .. } = self;
+
+        // After `Cancun` is enabled on optimism, an extra field `parent_beacon_block_root` is included in the enveloped
+        // V3 payload.
+        let parent_beacon_block_root = (spec.is_optimism()
+            && spec.is_fork_active_at_timestamp(Hardfork::Cancun, block.timestamp))
+        .then_some(block.parent_beacon_block_root)
+        .flatten();
+
+        ExecutionPayloadEnvelopeV3 {
+            execution_payload: block_to_payload_v3(block),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            // Optimism-specific: Post-cancun, the parent beacon block root is included in the enveloped payload.
+            parent_beacon_block_root,
+        }
     }
 }
 
@@ -116,27 +164,6 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
         ExecutionPayloadEnvelopeV2 {
             block_value: fees,
             execution_payload: convert_block_to_payload_field_v2(block),
-        }
-    }
-}
-
-impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
-    fn from(value: EthBuiltPayload) -> Self {
-        let EthBuiltPayload { block, fees, sidecars, .. } = value;
-
-        ExecutionPayloadEnvelopeV3 {
-            execution_payload: block_to_payload_v3(block),
-            block_value: fees,
-            // From the engine API spec:
-            //
-            // > Client software **MAY** use any heuristics to decide whether to set
-            // `shouldOverrideBuilder` flag or not. If client software does not implement any
-            // heuristic this flag **SHOULD** be set to `false`.
-            //
-            // Spec:
-            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
-            should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
         }
     }
 }
