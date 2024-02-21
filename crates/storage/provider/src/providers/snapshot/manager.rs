@@ -458,13 +458,14 @@ impl SnapshotProvider {
         let mut provider = get_provider(range.start)?;
         let mut cursor = provider.cursor()?;
 
-        // The `retrying` flag ensures a single retry attempt per `number`. If `get_fn` fails to
-        // access data in two different static files, it halts further attempts by returning
-        // an error, effectively preventing infinite retry loops.
-        let mut retrying = false;
-
         // advances number in range
         'outer: for number in range {
+
+            // The `retrying` flag ensures a single retry attempt per `number`. If `get_fn` fails to
+            // access data in two different static files, it halts further attempts by returning
+            // an error, effectively preventing infinite retry loops.
+            let mut retrying = false;
+            
             // advances snapshot files if `get_fn` returns None
             'inner: loop {
                 match get_fn(&mut cursor, number)? {
