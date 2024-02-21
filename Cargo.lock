@@ -7009,8 +7009,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8154cec6f8c4f543a379cf00a839cf47c67f405e8a92361a7791c55196c9b7e2"
+source = "git+https://github.com/clabby/revm?branch=cl/l1-block-caching#b3c59dc18c94af1497fda838aea61c6dd543c352"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -7041,8 +7040,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dff72cc825a9c44b28749a6181e21fa85ba45ac8d4b5732a7ded165a770ecbd9"
+source = "git+https://github.com/clabby/revm?branch=cl/l1-block-caching#b3c59dc18c94af1497fda838aea61c6dd543c352"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -7051,8 +7049,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "4.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "186373108c0a46e47368752372cc721d4b0ab4886d6786d180ef9dbf4dd71865"
+source = "git+https://github.com/clabby/revm?branch=cl/l1-block-caching#b3c59dc18c94af1497fda838aea61c6dd543c352"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -7069,8 +7066,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "093dc5df253eececaf03ffe0c12d3fd7ce5dea3342bc9de109d1aac2647ffa81"
+source = "git+https://github.com/clabby/revm?branch=cl/l1-block-caching#b3c59dc18c94af1497fda838aea61c6dd543c352"
 dependencies = [
  "alloy-primitives",
  "auto_impl",

@@ -156,7 +156,7 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
             source_hash: None,
             mint: None,
             is_system_transaction: Some(false),
-            enveloped_tx: None,
+            enveloped_tx: Some(Bytes::default()),
         },
     };
 

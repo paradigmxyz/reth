@@ -276,3 +276,7 @@ test-fuzz = "5"
 [workspace.metadata.cargo-udeps.ignore]
 # ignored because this is mutually exclusive with the optimism payload builder via feature flags
 normal = ["reth-ethereum-payload-builder", "reth-node-ethereum"]
+
+[patch.crates-io]
+revm = { git = "https://github.com/clabby/revm", branch = "cl/l1-block-caching" }
+revm-primitives = { git = "https://github.com/clabby/revm", branch = "cl/l1-block-caching" }
