@@ -219,7 +219,7 @@ strum = "0.26"
 rayon = "1.7"
 itertools = "0.12"
 parking_lot = "0.12"
-metrics = "0.21.1"                                    # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
@@ -252,8 +252,9 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
     "recovery",
 ] }
 enr = { version = "0.9", default-features = false, features = ["k256"] }
+
 # for eip-4844
-c-kzg = "0.4.0"
+c-kzg = "0.4.2"
 
 # config
 confy = "0.6"
@@ -269,6 +270,7 @@ proptest = "1.4"
 proptest-derive = "0.4"
 serial_test = "3"
 similar-asserts = "1.5.0"
+test-fuzz = "5"
 
 [workspace.metadata.cargo-udeps.ignore]
 # ignored because this is mutually exclusive with the optimism payload builder via feature flags
