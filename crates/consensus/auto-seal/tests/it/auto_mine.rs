@@ -8,7 +8,7 @@ use reth::{
         ext::{NoArgs, NoArgsCliExt, RethNodeCommandConfig},
     },
     commands::node::NodeCommand,
-    runner::CliRunner,
+    core::cli::runner::CliRunner,
     tasks::TaskSpawner,
 };
 use reth_primitives::{hex, revm_primitives::FixedBytes, ChainSpec, Genesis};

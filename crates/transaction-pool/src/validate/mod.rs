@@ -134,12 +134,6 @@ impl<T: PoolTransaction> ValidTransaction<T> {
         self.transaction().hash()
     }
 
-    /// Returns the length of the rlp encoded object
-    #[inline]
-    pub(crate) fn encoded_length(&self) -> usize {
-        self.transaction().encoded_length()
-    }
-
     /// Returns the nonce of the transaction.
     #[inline]
     pub(crate) fn nonce(&self) -> u64 {

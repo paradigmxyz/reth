@@ -678,7 +678,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         tx: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         match pool {
-            SubPool::Pending => self.pending_pool.prune_transaction(tx),
+            SubPool::Pending => self.pending_pool.remove_transaction(tx),
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
             SubPool::Blob => self.blob_pool.remove_transaction(tx),
@@ -2873,5 +2873,93 @@ mod tests {
         // 'pending' now).
         assert!(pool.queued_transactions().is_empty());
         assert_eq!(2, pool.pending_transactions().len());
+    }
+    #[test]
+    fn test_transaction_removal() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_1 = tx_0.next();
+
+        // Create 2 transactions
+        let v0 = f.validated(tx_0.clone());
+        let v1 = f.validated(tx_1);
+
+        // Add them to the pool
+        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(2, pool.pending_transactions().len());
+
+        // Remove first (nonce 0) - simulating that it was taken to be a part of the block.
+        pool.remove_transaction(v0.id());
+        // assert the second transaction is really at the top of the queue
+        let pool_txs = pool.best_transactions().map(|x| x.id().nonce).collect::<Vec<_>>();
+        assert_eq!(vec![v1.nonce()], pool_txs);
+    }
+    #[test]
+    fn wrong_best_order_of_transactions() {
+        let on_chain_balance = U256::from(10_000);
+        let mut on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_1 = tx_0.next();
+        let tx_2 = tx_1.next();
+        let tx_3 = tx_2.next();
+
+        // Create 4 transactions
+        let v0 = f.validated(tx_0.clone());
+        let v1 = f.validated(tx_1);
+        let v2 = f.validated(tx_2);
+        let v3 = f.validated(tx_3);
+
+        // Add first 2 to the pool
+        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(2, pool.pending_transactions().len());
+
+        // Remove first (nonce 0) - simulating that it was taken to be a part of the block.
+        pool.remove_transaction(v0.id());
+
+        // Now add transaction with nonce 2
+        let _res = pool.add_transaction(v2.clone(), on_chain_balance, on_chain_nonce).unwrap();
+
+        // v2 is in the queue now. v1 is still in 'pending'.
+        assert_eq!(1, pool.queued_transactions().len());
+        assert_eq!(1, pool.pending_transactions().len());
+
+        // Simulate new block arrival - and chain nonce increasing.
+        let mut updated_accounts = HashMap::new();
+        on_chain_nonce += 1;
+        updated_accounts.insert(
+            v0.sender_id(),
+            SenderInfo { state_nonce: on_chain_nonce, balance: on_chain_balance },
+        );
+        pool.update_accounts(updated_accounts);
+
+        // Transactions are not changed (IMHO - this is a bug, as transaction v2 should be in the
+        // 'pending' now).
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(2, pool.pending_transactions().len());
+
+        // Add transaction v3 - it 'unclogs' everything.
+        let _res = pool.add_transaction(v3.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(3, pool.pending_transactions().len());
+
+        // It should have returned transactions in order (v1, v2, v3 - as there is nothing blocking
+        // them).
+        assert_eq!(
+            pool.best_transactions().map(|x| x.id().nonce).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
     }
 }
