@@ -991,10 +991,9 @@ where
                 results.push(f(tx_info, inspector, result, &state, &db)?);
 
                 // need to apply the state changes of this transaction before executing the
-                // next transaction
+                // next transaction, but only if there's a next transaction
                 if transactions.peek().is_some() {
-                    // need to apply the state changes of this transaction before executing
-                    // the next transaction
+                    // commit the state changes to the DB
                     db.commit(state)
                 }
             }
