@@ -156,7 +156,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        if !limit.is_exceeded(self.len(), self.size()) {
+        if !self.exceeds(&limit) {
             // if we are below the limits, we don't need to drop anything
             return Vec::new()
         }
@@ -175,7 +175,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
                     removed.push(tx);
                 }
 
-                if !limit.is_exceeded(self.len(), self.size()) {
+                if !self.exceeds(&limit) {
                     break
                 }
             }
@@ -198,6 +198,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// Number of transactions in the entire pool
     pub(crate) fn len(&self) -> usize {
         self.by_id.len()
+    }
+
+    /// Returns true if the pool exceeds the given limit
+    #[inline]
+    pub(crate) fn exceeds(&self, limit: &SubPoolLimit) -> bool {
+        limit.is_exceeded(self.len(), self.size())
     }
 
     /// Returns whether the pool is empty
