@@ -8,7 +8,9 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber, B256,
 };
-use reth_provider::{providers::SnapshotWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
+use reth_provider::{
+    providers::SnapshotWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+};
 use reth_tokio_util::EventListeners;
 use std::pin::Pin;
 use tokio::sync::watch;
@@ -431,7 +433,7 @@ fn on_stage_error<DB: Database>(
                     StageId::MerkleExecute,
                     prev_checkpoint.unwrap_or_default(),
                 )?;
-                self.provider_factory.snapshot_provider().commit()?;
+                factory.snapshot_provider().commit()?;
                 provider_rw.commit()?;
 
                 // We unwind because of a validation error. If the unwind itself
