@@ -386,7 +386,7 @@ impl TransactionFetcher {
 
         self.fill_request_from_hashes_pending_fetch(
             &mut hashes_to_request,
-            peer.seen_transactions.maybe_pending_transaction_hashes(),
+            &peer.seen_transactions,
             budget_fill_request,
         );
 
@@ -1160,11 +1160,11 @@ mod test {
         let (mut peer_1_data, mut peer_1_mock_session_rx) =
             new_mock_session(peer_1, EthVersion::Eth66);
         for hash in &seen_hashes {
-            peer_1_data.seen_transactions.seen_in_announcement(*hash);
+            peer_1_data.seen_transactions.insert(*hash);
         }
         let (mut peer_2_data, _) = new_mock_session(peer_2, EthVersion::Eth66);
         for hash in &seen_hashes {
-            peer_2_data.seen_transactions.seen_in_announcement(*hash);
+            peer_2_data.seen_transactions.insert(*hash);
         }
         let mut peers = HashMap::new();
         peers.insert(peer_1, peer_1_data);
