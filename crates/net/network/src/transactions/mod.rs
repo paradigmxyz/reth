@@ -31,7 +31,9 @@ use crate::{
     cache::LruCache,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
-    metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
+    metrics::{
+        TransactionsManagerMetrics, TxManagerObjectMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE,
+    },
     NetworkEvents, NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
@@ -44,7 +46,9 @@ use reth_interfaces::{
     p2p::error::{RequestError, RequestResult},
     sync::SyncStateProvider,
 };
-use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
+use reth_metrics::common::mpsc::{
+    metered_unbounded_channel, MeteredReceiver, UnboundedMeteredReceiver, UnboundedMeteredSender,
+};
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
     FromRecoveredPooledTransaction, PeerId, PooledTransactionsElement, TransactionSigned, TxHash,
@@ -91,7 +95,7 @@ pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>>
 #[derive(Debug, Clone)]
 pub struct TransactionsHandle {
     /// Command channel to the [`TransactionsManager`]
-    manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
+    manager_tx: UnboundedMeteredSender<TransactionsCommand>,
 }
 
 /// Implementation of the `TransactionsHandle` API.
@@ -203,7 +207,7 @@ pub struct TransactionsManager<Pool> {
     /// Subscriptions to all network related events.
     ///
     /// From which we get all new incoming transaction related messages.
-    network_events: UnboundedReceiverStream<NetworkEvent>,
+    network_events: UnboundedMeteredReceiver<NetworkEvent>,
     /// Transaction fetcher to handle inflight and missing transaction requests.
     transaction_fetcher: TransactionFetcher,
     /// All currently pending transactions grouped by peers.
@@ -220,15 +224,17 @@ pub struct TransactionsManager<Pool> {
     /// All the connected peers.
     peers: HashMap<PeerId, Peer>,
     /// Send half for the command channel.
-    command_tx: mpsc::UnboundedSender<TransactionsCommand>,
+    command_tx: UnboundedMeteredSender<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
-    command_rx: UnboundedReceiverStream<TransactionsCommand>,
+    command_rx: UnboundedMeteredReceiver<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
-    pending_transactions: ReceiverStream<TxHash>,
+    pending_transactions: MeteredReceiver<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
     metrics: TransactionsManagerMetrics,
+    /// Transaction manager object metrics
+    object_metrics: TxManagerObjectMetrics,
 }
 
 impl<Pool: TransactionPool> TransactionsManager<Pool> {
@@ -242,7 +248,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         transactions_manager_config: TransactionsManagerConfig,
     ) -> Self {
         let network_events = network.event_listener();
-        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let (command_tx, command_rx) = metered_unbounded_channel("network.txmanager.command");
 
         let transaction_fetcher = TransactionFetcher::default().with_transaction_fetcher_config(
             &transactions_manager_config.transaction_fetcher_config,
@@ -276,13 +282,14 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             ),
             peers: Default::default(),
             command_tx,
-            command_rx: UnboundedReceiverStream::new(command_rx),
-            pending_transactions: ReceiverStream::new(pending),
+            command_rx,
+            pending_transactions: MeteredReceiver::new(pending, "network.pendingtxs"),
             transaction_events: UnboundedMeteredReceiver::new(
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
             metrics,
+            object_metrics: TxManagerObjectMetrics::default(),
         }
     }
 }
@@ -1055,12 +1062,20 @@ where
         self.bad_imports.insert(hash);
     }
 
-    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns  
+    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns
     /// `false` if [`TransactionsManager`] is operating close to full capacity.
     fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         self.pending_pool_imports_info
             .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports) &&
             self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
+    }
+
+    /// Update the [TxManagerObjectMetrics] with the current state of the [TransactionsManager]
+    fn update_object_metrics(&self) {
+        self.object_metrics.transactions_by_peers.set(self.transactions_by_peers.len() as f64);
+        self.object_metrics.pool_imports_futures.set(self.pool_imports.len() as f64);
+        self.object_metrics.bad_imports_cache.set(self.bad_imports.len() as f64);
+        self.object_metrics.connected_peers.set(self.peers.len() as f64);
     }
 }
 
@@ -1076,6 +1091,8 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+
+        this.update_object_metrics();
 
         // If the budget is exhausted we manually yield back control to tokio. See
         // `NetworkManager` for more context on the design pattern.

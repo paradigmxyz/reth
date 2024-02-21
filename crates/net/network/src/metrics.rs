@@ -105,6 +105,23 @@ pub struct TransactionsManagerMetrics {
     pub(crate) hashes_pending_fetch: Gauge,
 }
 
+/// Channel metrics
+#[derive(Metrics)]
+#[metrics(scope = "network")]
+pub struct TxManagerObjectMetrics {
+    /// Transactions by peers hashmap
+    pub(crate) transactions_by_peers: Gauge,
+
+    /// pool imports futures
+    pub(crate) pool_imports_futures: Gauge,
+
+    /// bad imports cache
+    pub(crate) bad_imports_cache: Gauge,
+
+    /// All connected peers hashmap
+    pub(crate) connected_peers: Gauge,
+}
+
 /// Metrics for Disconnection types
 ///
 /// These are just counters, and ideally we would implement these metrics on a peer-by-peer basis,

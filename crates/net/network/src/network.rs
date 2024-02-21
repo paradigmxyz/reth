@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
+use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
     NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
@@ -185,10 +186,10 @@ impl NetworkHandle {
 // === API Implementations ===
 
 impl NetworkEvents for NetworkHandle {
-    fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
+    fn event_listener(&self) -> UnboundedMeteredReceiver<NetworkEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
         let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
-        UnboundedReceiverStream::new(rx)
+        UnboundedMeteredReceiver::new(rx, "network.handle")
     }
 
     fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
@@ -381,7 +382,7 @@ struct NetworkInner {
 /// Provides event subscription for the network.
 pub trait NetworkEvents: Send + Sync {
     /// Creates a new [`NetworkEvent`] listener channel.
-    fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent>;
+    fn event_listener(&self) -> UnboundedMeteredReceiver<NetworkEvent>;
     /// Returns a new [`DiscoveryEvent`] stream.
     ///
     /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
