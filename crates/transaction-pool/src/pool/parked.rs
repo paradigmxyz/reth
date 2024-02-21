@@ -187,7 +187,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         while limit.is_exceeded(self.len(), self.size()) && !self.last_sender_transaction.is_empty()
         {
             // SAFETY: This will not panic due to `!addresses.is_empty()`
-            let sender_id = self.last_sender_transaction.first().expect("no empty").sender_id;
+            let sender_id = self.last_sender_transaction.last().expect("no empty").sender_id;
             let list = self.get_txs_by_sender(sender_id);
 
             // Drop transactions from this sender until the pool is under limits
