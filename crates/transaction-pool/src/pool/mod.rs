@@ -400,7 +400,6 @@ where
             } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
-                let _encoded_length = transaction.encoded_length();
 
                 // split the valid transaction and the blob sidecar if it has any
                 let (transaction, maybe_sidecar) = match transaction {
