@@ -8,7 +8,7 @@ use crate::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_tracing::tracing::{debug, trace, warn};
@@ -30,36 +30,43 @@ const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 pub struct Tx<K: TransactionKind> {
     /// Libmdbx-sys transaction.
     pub inner: Transaction<K>,
-    /// Database table handle cache.
-    pub(crate) db_handles: Arc<RwLock<[Option<DBI>; Tables::COUNT]>>,
+
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
     /// closed by [Tx::commit] or [Tx::abort], but we still need to report it in the metrics.
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
+
+    /// Database table handle cache.
+    db_handles: Mutex<[Option<DBI>; Tables::COUNT]>,
 }
 
 impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction.
+    #[inline]
     pub fn new(inner: Transaction<K>) -> Self {
-        Self { inner, db_handles: Default::default(), metrics_handler: None }
+        Self::new_inner(inner, None)
     }
 
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
+    #[inline]
     #[track_caller]
     pub fn new_with_metrics(
         inner: Transaction<K>,
-        metrics: Option<Arc<DatabaseEnvMetrics>>,
+        env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> Self {
-        let metrics_handler = if let Some(metrics) = metrics {
-            let handler = MetricsHandler::<K>::new(inner.id(), metrics);
+        let metrics_handler = env_metrics.map(|env_metrics| {
+            let handler = MetricsHandler::<K>::new(inner.id(), env_metrics);
             handler.env_metrics.record_opened_transaction(handler.transaction_mode());
             handler.log_transaction_opened();
-            Some(handler)
-        } else {
-            None
-        };
-        Self { inner, db_handles: Default::default(), metrics_handler }
+            handler
+        });
+        Self::new_inner(inner, metrics_handler)
+    }
+
+    #[inline]
+    fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
+        Self { inner, db_handles: Mutex::new([None; Tables::COUNT]), metrics_handler }
     }
 
     /// Gets this transaction ID.
@@ -69,18 +76,14 @@ impl<K: TransactionKind> Tx<K> {
 
     /// Gets a table database handle if it exists, otherwise creates it.
     pub fn get_dbi<T: Table>(&self) -> Result<DBI, DatabaseError> {
-        let mut handles = self.db_handles.write();
-
-        let table = T::TABLE;
-
-        let dbi_handle = handles.get_mut(table as usize).expect("should exist");
-        if dbi_handle.is_none() {
-            *dbi_handle = Some(
-                self.inner.open_db(Some(T::NAME)).map_err(|e| DatabaseError::Open(e.into()))?.dbi(),
-            );
+        match self.db_handles.lock()[T::TABLE as usize] {
+            Some(handle) => Ok(handle),
+            ref mut handle @ None => {
+                let db =
+                    self.inner.open_db(Some(T::NAME)).map_err(|e| DatabaseError::Open(e.into()))?;
+                Ok(*handle.insert(db.dbi()))
+            }
         }
-
-        Ok(dbi_handle.expect("is some; qed"))
     }
 
     /// Create db Cursor

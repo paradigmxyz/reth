@@ -159,16 +159,14 @@ impl SnapshotProvider {
         if let Some(jar) = self.map.get(&key) {
             Ok(jar.into())
         } else {
-            let jar = NippyJar::load(&self.path.join(segment.filename(block_range, tx_range)))
-                .map(|jar| {
-                if self.load_filters {
-                    return jar.load_filters()
-                }
-                Ok(jar)
-            })??;
-
-            self.map.insert(key, LoadedJar::new(jar)?);
-            Ok(self.map.get(&key).expect("qed").into())
+            let path = self.path.join(segment.filename(block_range, tx_range));
+            let mut jar = NippyJar::load(&path)?;
+            if self.load_filters {
+                jar.load_filters()?;
+            }
+            let loaded_jar = LoadedJar::new(jar)?;
+            self.map.insert(key, loaded_jar);
+            Ok(self.map.get(&key).unwrap().into())
         }
     }
 

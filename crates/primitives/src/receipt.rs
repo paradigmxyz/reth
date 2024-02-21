@@ -500,6 +500,8 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         }
 
         match self.receipt.tx_type {
+            TxType::Legacy => unreachable!("legacy already handled"),
+
             TxType::EIP2930 => {
                 out.put_u8(0x01);
             }
@@ -513,7 +515,6 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
             TxType::DEPOSIT => {
                 out.put_u8(0x7E);
             }
-            _ => unreachable!("legacy handled; qed."),
         }
         out.put_slice(payload.as_ref());
     }
