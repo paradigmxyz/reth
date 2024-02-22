@@ -5,7 +5,7 @@ use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
 
-use derive_more::{Constructor, Deref, DerefMut, IntoIterator, From};
+use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{
     Block, Bytes, PooledTransactionsElement, TransactionSigned, TxHash, B256, U128,
@@ -656,7 +656,7 @@ impl<V> PartiallyValidData<V> {
 }
 
 /// Partially validated data from an announcement or a
-[`PooledTransactions`](crate::PooledTransactions) response.
+/// [`PooledTransactions`](crate::PooledTransactions) response.
 #[derive(Debug, Deref, DerefMut, IntoIterator, From)]
 #[from(PartiallyValidData<Eth68TxMetadata>)]
 pub struct ValidAnnouncementData {

@@ -573,7 +573,7 @@ where
     fn on_new_pooled_transaction_hashes(
         &mut self,
         peer_id: PeerId,
-        mut msg: NewPooledTransactionHashes,
+        msg: NewPooledTransactionHashes,
         cx: &mut Context<'_>,
     ) {
         // If the node is initially syncing, ignore transactions
@@ -641,7 +641,7 @@ where
         // most hashes will be filtered out here since this the mempool protocol is a gossip
         // protocol, healthy peers will send many of the same hashes.
         //
-        let already_known_by_pool = self.pool.retain_unknown(&mut msg);
+        let already_known_by_pool = self.pool.retain_unknown(&mut partially_valid_msg);
         if let Some(intersection) = already_known_by_pool {
             self.metrics.occurrences_hashes_already_in_pool.increment(intersection.len() as u64);
         }

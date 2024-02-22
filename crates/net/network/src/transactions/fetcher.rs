@@ -931,7 +931,7 @@ impl TransactionFetcher {
 
                 self.remove_hashes_from_transaction_fetcher(fetched);
                 // buffer left over hashes
-                self.buffer_hashes_for_retry(requested_hashes, &peer_id);
+                self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
 
                 let transactions =
                     valid_payload.into_data().into_values().collect::<PooledTransactions>();
@@ -1096,11 +1096,13 @@ impl Future for GetPooledTxRequestFut {
     }
 }
 
+/// Wrapper of unverified [`PooledTransactions`].
 #[derive(Debug, Constructor, Deref)]
 pub struct UnverifiedPooledTransactions {
     txns: PooledTransactions,
 }
 
+/// [`PooledTransactions`] that have been successfully verified.
 #[derive(Debug, Constructor)]
 pub struct VerifiedPooledTransactions {
     txns: PooledTransactions,
