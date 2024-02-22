@@ -177,10 +177,11 @@ where
                 // receipt hashes should be computed when set. The state transition process ensures
                 // this is only set for post-Canyon deposit transactions.
                 #[cfg(feature = "optimism")]
-                deposit_receipt_version: self
-                    .chain_spec()
-                    .is_fork_active_at_timestamp(Hardfork::Canyon, block.timestamp)
-                    .then_some(1),
+                deposit_receipt_version: (transaction.is_deposit()
+                    && self
+                        .chain_spec()
+                        .is_fork_active_at_timestamp(Hardfork::Canyon, block.timestamp))
+                .then_some(1),
             });
         }
 
