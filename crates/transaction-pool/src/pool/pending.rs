@@ -33,19 +33,19 @@ pub struct PendingPool<T: TransactionOrdering> {
     /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
-    by_id: BTreeMap<TransactionId, PendingTransaction<T>>,
+    pub(crate)by_id: BTreeMap<TransactionId, PendingTransaction<T>>,
     /// _All_ transactions sorted by priority
-    all: BTreeSet<PendingTransaction<T>>,
+    pub(crate) all: BTreeSet<PendingTransaction<T>>,
     /// The highest nonce transactions for each sender - like the `independent` set, but the
     /// highest instead of lowest nonce.
     ///
     /// Sorted by their scoring value.
-    highest_nonces: BTreeSet<PendingTransaction<T>>,
+    pub(crate) highest_nonces: BTreeSet<PendingTransaction<T>>,
     /// Independent transactions that can be included directly and don't require other
     /// transactions.
     ///
     /// Sorted by their scoring value.
-    independent_transactions: BTreeSet<PendingTransaction<T>>,
+   pub(crate) independent_transactions: BTreeSet<PendingTransaction<T>>,
     /// Keeps track of the size of this pool.
     ///
     /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).

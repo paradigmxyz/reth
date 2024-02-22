@@ -839,6 +839,12 @@ impl<T: TransactionOrdering> TxPool<T> {
             ]
         );
 
+        if self.pending_pool.independent_transactions.len() != self.pending_pool.highest_nonces.len() {
+           println!("independent_transactions: {}, highest_nonces: {}, all: {}, by_id: {}", self.pending_pool.independent_transactions.len(), self.pending_pool.highest_nonces.len(),
+            self.pending_pool.all.len(),  self.pending_pool.by_id.len()
+           );
+        }
+
         removed
     }
 
