@@ -519,8 +519,23 @@ mod builder {
 
         // initialize empty blob sidecars. There are no blob transactions on L2.
         let blob_sidecars = Vec::new();
-        let excess_blob_gas = None;
-        let blob_gas_used = None;
+        let mut excess_blob_gas = None;
+        let mut blob_gas_used = None;
+
+        // only determine cancun fields when active
+        if chain_spec.is_cancun_active_at_timestamp(attributes.payload_attributes.timestamp) {
+            excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
+                let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
+                let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
+                Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+            } else {
+                // for the first post-fork block, both parent.blob_gas_used and
+                // parent.excess_blob_gas are evaluated as 0
+                Some(calculate_excess_blob_gas(0, 0))
+            };
+
+            blob_gas_used = Some(0);
+        }
 
         let header = Header {
             parent_hash: parent_block.hash(),
