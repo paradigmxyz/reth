@@ -119,6 +119,7 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
         // changes if necessary.
         if !is_created {
             writer.check_consistency_and_heal()?;
+            writer.commit()?;
         }
 
         Ok(writer)
