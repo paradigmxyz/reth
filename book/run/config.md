@@ -207,7 +207,7 @@ The transaction lookup stage builds an index of transaction hashes to their sequ
 #
 # Lower thresholds correspond to more frequent disk I/O (writes),
 # but lowers memory usage
-commit_threshold = 5000000
+chunk_size = 5000000
 ```
 
 ### `index_account_history`

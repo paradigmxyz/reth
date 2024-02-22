@@ -239,13 +239,13 @@ impl Default for MerkleConfig {
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct TransactionLookupConfig {
-    /// The maximum number of transactions to process before committing progress to the database.
-    pub commit_threshold: u64,
+    /// The maximum number of transactions to process before writing to disk.
+    pub chunk_size: u64,
 }
 
 impl Default for TransactionLookupConfig {
     fn default() -> Self {
-        Self { commit_threshold: 5_000_000 }
+        Self { chunk_size: 5_000_000 }
     }
 }
 
