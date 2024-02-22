@@ -739,7 +739,7 @@ mod tests {
         let call_fees = CallFees::ensure_fees(
             None,
             Some(U256::from(5 * GWEI_TO_WEI)),
-            Some(U256::from(1 * GWEI_TO_WEI)),
+            Some(U256::from(GWEI_TO_WEI)),
             U256::from(15 * GWEI_TO_WEI),
             None,
             None,
