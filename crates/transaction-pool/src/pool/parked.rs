@@ -1,7 +1,7 @@
 use crate::{
     identifier::{SenderId, TransactionId},
     pool::size::SizeTracker,
-    PoolTransaction, SubPoolLimit, ValidPoolTransaction,
+    PoolTransaction, SubPoolLimit, ValidPoolTransaction, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
 };
 use fnv::FnvHashMap;
 use smallvec::SmallVec;
@@ -198,7 +198,8 @@ impl<T: ParkedOrd> ParkedPool<T> {
             let sender_id = self.last_sender_submission.last().expect("not empty").sender_id;
             // Utilize SmallVec to efficiently handle up to 16 transactions
             // per sender, adhering to the TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER limit.
-            let list: SmallVec<[TransactionId; 16]> = self.get_txs_by_sender(sender_id).into();
+            let list: SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]> =
+                self.get_txs_by_sender(sender_id).into();
 
             // Drop transactions from this sender until the pool is under limits
             for txid in list.into_iter().rev() {
