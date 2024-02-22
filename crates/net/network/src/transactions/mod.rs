@@ -317,6 +317,32 @@ where
         self.metrics.hashes_inflight_transaction_requests.set(total_hashes - hashes_pending_fetch);
     }
 
+    #[inline]
+    fn update_poll_metrics(&self, start: Instant, poll_durations: TxManagerPollDurations) {
+        let metrics = &self.metrics;
+
+        let TxManagerPollDurations {
+            acc_network_events,
+            acc_pending_imports,
+            acc_tx_events,
+            acc_imported_txns,
+            acc_fetch_events,
+            acc_pending_fetch,
+            acc_cmds,
+        } = poll_durations;
+
+        // update metrics for whole poll function
+        metrics.duration_poll_tx_manager.set(start.elapsed());
+        // update poll metrics for nested streams
+        metrics.acc_duration_poll_network_events.set(acc_network_events.as_secs_f64());
+        metrics.acc_duration_poll_pending_pool_imports.set(acc_pending_imports.as_secs_f64());
+        metrics.acc_duration_poll_transaction_events.set(acc_tx_events.as_secs_f64());
+        metrics.acc_duration_poll_imported_transactions.set(acc_imported_txns.as_secs_f64());
+        metrics.acc_duration_poll_fetch_events.set(acc_fetch_events.as_secs_f64());
+        metrics.acc_duration_fetch_pending_hashes.set(acc_pending_fetch.as_secs_f64());
+        metrics.acc_duration_poll_commands.set(acc_cmds.as_secs_f64());
+    }
+
     /// Request handler for an incoming request for transactions
     fn on_get_pooled_transactions(
         &mut self,
@@ -1287,26 +1313,7 @@ where
             }
         }
 
-        let TxManagerPollDurations {
-            acc_network_events,
-            acc_pending_imports,
-            acc_tx_events,
-            acc_imported_txns,
-            acc_fetch_events,
-            acc_pending_fetch,
-            acc_cmds,
-        } = poll_durations;
-
-        // update metrics for whole poll function
-        this.metrics.duration_poll_tx_manager.set(start.elapsed());
-        // update poll metrics for nested streams
-        this.metrics.acc_duration_poll_network_events.set(acc_network_events.as_secs_f64());
-        this.metrics.acc_duration_poll_pending_pool_imports.set(acc_pending_imports.as_secs_f64());
-        this.metrics.acc_duration_poll_transaction_events.set(acc_tx_events.as_secs_f64());
-        this.metrics.acc_duration_poll_imported_transactions.set(acc_imported_txns.as_secs_f64());
-        this.metrics.acc_duration_poll_fetch_events.set(acc_fetch_events.as_secs_f64());
-        this.metrics.acc_duration_fetch_pending_hashes.set(acc_pending_fetch.as_secs_f64());
-        this.metrics.acc_duration_poll_commands.set(acc_cmds.as_secs_f64());
+        this.update_poll_metrics(start, poll_durations);
 
         Poll::Pending
     }
