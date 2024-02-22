@@ -63,6 +63,8 @@ pub struct DatabaseArguments {
     log_level: Option<LogLevel>,
     /// Maximum duration of a read transaction. If [None], the default value is used.
     max_read_transaction_duration: Option<MaxReadTransactionDuration>,
+    /// Mdbx exclusive flag. If [None], the default value is used.
+    exclusive: Option<bool>,
 }
 
 impl DatabaseArguments {
@@ -78,6 +80,12 @@ impl DatabaseArguments {
         max_read_transaction_duration: Option<MaxReadTransactionDuration>,
     ) -> Self {
         self.max_read_transaction_duration = max_read_transaction_duration;
+        self
+    }
+
+    /// Set the mdbx exclusive flag.
+    pub fn exclusive(mut self, exclusive: Option<bool>) -> Self {
+        self.exclusive = exclusive;
         self
     }
 }
@@ -247,6 +255,7 @@ impl DatabaseEnv {
             // worsens it for random access (which is our access pattern outside of sync)
             no_rdahead: true,
             coalesce: true,
+            exclusive: inner_env.is_exclusive(),
             ..Default::default()
         });
         // Configure more readers
@@ -306,6 +315,10 @@ impl DatabaseEnv {
 
         if let Some(max_read_transaction_duration) = args.max_read_transaction_duration {
             inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
+        }
+
+        if let Some(exclusive) = args.exclusive {
+            inner_env.set_exclusive(exclusive);
         }
 
         let env = DatabaseEnv {

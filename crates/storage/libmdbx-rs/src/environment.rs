@@ -54,6 +54,7 @@ impl Environment {
             handle_slow_readers: None,
             #[cfg(feature = "read-tx-timeouts")]
             max_read_transaction_duration: None,
+            exclusive: false,
         }
     }
 
@@ -579,6 +580,8 @@ pub struct EnvironmentBuilder {
     /// The maximum duration of a read transaction. If [None], but the `read-tx-timeout` feature is
     /// enabled, the default value of [DEFAULT_MAX_READ_TRANSACTION_DURATION] is used.
     max_read_transaction_duration: Option<read_transactions::MaxReadTransactionDuration>,
+    /// MDBX exclusive flag.
+    exclusive: bool,
 }
 
 impl EnvironmentBuilder {
@@ -722,6 +725,9 @@ impl EnvironmentBuilder {
         Ok(Environment { inner: Arc::new(env) })
     }
 
+    pub fn is_exclusive(&self) -> bool {
+        self.exclusive
+    }
     /// Configures how this environment will be opened.
     pub fn set_kind(&mut self, kind: EnvironmentKind) -> &mut Self {
         self.kind = kind;
@@ -858,6 +864,11 @@ pub(crate) mod read_transactions {
             max_read_transaction_duration: MaxReadTransactionDuration,
         ) -> &mut Self {
             self.max_read_transaction_duration = Some(max_read_transaction_duration);
+            self
+        }
+        /// Set the mdbx exclusive mode see https://libmdbx.dqdkfa.ru/group__c__opening.html#gga9138119a904355d245777c4119534061aa516c74e6fed22c9812bb909c8c459ed
+        pub fn set_exclusive(&mut self, exclusive: bool) -> &mut Self {
+            self.exclusive = exclusive;
             self
         }
     }
