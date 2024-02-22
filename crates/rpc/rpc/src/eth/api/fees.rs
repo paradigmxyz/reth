@@ -38,7 +38,7 @@ where
     pub(crate) async fn blob_base_fee(&self) -> EthResult<U256> {
         self.block(BlockNumberOrTag::Latest)
             .await?
-            .and_then(|h: reth_primitives::SealedBlock| h.next_block_blob_fee())
+            .and_then(|h| h.next_block_blob_fee())
             .ok_or(EthApiError::ExcessBlobGasNotSet)
             .map(U256::from)
     }
