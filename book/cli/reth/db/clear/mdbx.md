@@ -1,10 +1,14 @@
-# reth db stats
+# reth db clear mdbx
 
-Lists all the tables, their entry count and their size
+Deletes all database table entries
 
 ```bash
-$ reth db stats --help
-Usage: reth db stats [OPTIONS]
+$ reth db clear mdbx --help
+Usage: reth db clear mdbx [OPTIONS] <TABLE>
+
+Arguments:
+  <TABLE>
+          
 
 Options:
       --datadir <DATA_DIR>
@@ -18,9 +22,6 @@ Options:
           
           [default: default]
 
-      --only-total-size
-          Show only the total size for snapshot files
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -29,9 +30,6 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
           
           [default: mainnet]
-
-      --summary
-          Show only the summary per snapshot segment
 
       --instance <INSTANCE>
           Add a new instance of a node.

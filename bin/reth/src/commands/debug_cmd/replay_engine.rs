@@ -5,8 +5,8 @@ use crate::{
         DatabaseArgs, NetworkArgs,
     },
     commands::debug_cmd::engine_api_store::{EngineApiStore, StoredEngineApiMessage},
+    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
-    runner::CliContext,
 };
 use clap::Parser;
 use eyre::Context;
@@ -189,7 +189,7 @@ impl Command {
         let (payload_service, payload_builder): (_, PayloadBuilderHandle<EthEngineTypes>) =
             PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
 
-        ctx.task_executor.spawn_critical("payload builder service", Box::pin(payload_service));
+        ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
         // Configure the consensus engine
         let network_client = network.fetch_client().await?;

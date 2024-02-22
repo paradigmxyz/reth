@@ -1,10 +1,20 @@
-# reth db stats
+# reth db get mdbx
 
-Lists all the tables, their entry count and their size
+Gets the content of a database table for the given key
 
 ```bash
-$ reth db stats --help
-Usage: reth db stats [OPTIONS]
+$ reth db get mdbx --help
+Usage: reth db get mdbx [OPTIONS] <TABLE> <KEY> [SUBKEY]
+
+Arguments:
+  <TABLE>
+          
+
+  <KEY>
+          The key to get content for
+
+  [SUBKEY]
+          The subkey to get content for
 
 Options:
       --datadir <DATA_DIR>
@@ -18,8 +28,8 @@ Options:
           
           [default: default]
 
-      --only-total-size
-          Show only the total size for snapshot files
+      --raw
+          Output bytes instead of human-readable decoded value
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
@@ -29,9 +39,6 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
           
           [default: mainnet]
-
-      --summary
-          Show only the summary per snapshot segment
 
       --instance <INSTANCE>
           Add a new instance of a node.

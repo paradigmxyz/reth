@@ -18,6 +18,7 @@ pub struct Command {
 
 #[derive(clap::Subcommand, Debug)]
 enum Subcommand {
+    /// Gets the content of a database table for the given key
     Mdbx {
         table: tables::Tables,
 
@@ -33,6 +34,7 @@ enum Subcommand {
         #[clap(long)]
         raw: bool,
     },
+    /// Gets the content of a snapshot segment for the given key
     Snapshot {
         segment: SnapshotSegment,
 

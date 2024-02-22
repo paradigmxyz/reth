@@ -761,10 +761,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         macro_rules! discard_worst {
             ($this:ident, $removed:ident, [$($limit:ident => $pool:ident),* $(,)*]) => {
                 $ (
-                while $this
-                        .config
-                        .$limit
-                        .is_exceeded($this.$pool.len(), $this.$pool.size())
+                while $this.$pool.exceeds(&$this.config.$limit)
                     {
                         trace!(
                             "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
@@ -1553,7 +1550,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 // the new transaction is the next one
                 false
             } else {
-                // SAFETY: the transaction was added above so the _inclusive_ descendants iterator
+                // The transaction was added above so the _inclusive_ descendants iterator
                 // returns at least 1 tx.
                 let (id, tx) = descendants.peek().expect("Includes >= 1; qed.");
                 if id.nonce < inserted_tx_id.nonce {
