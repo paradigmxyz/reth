@@ -99,7 +99,7 @@ pub struct TransactionsManagerMetrics {
     pub(crate) duration_poll_tx_manager: Gauge,
     //
     // Nested streams
-    /// Streaming session updates and updating peers accordingly. Duration in us.
+    /// Streaming session updates and updating peers accordingly. Duration in microseconds.
     pub(crate) acc_duration_poll_network_events: Gauge,
     /// Flushing queue of batched pending pool imports into pool. Duration in us.
     pub(crate) acc_duration_poll_pending_pool_imports: Gauge,
