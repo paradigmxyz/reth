@@ -48,14 +48,17 @@ pub fn iter_snapshots(path: impl AsRef<Path>) -> Result<SortedSnapshots, NippyJa
             {
                 let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
 
-                let ranges = (jar.user_header().block_range(), jar.user_header().tx_range());
+                let (block_range, tx_range) =
+                    (jar.user_header().block_range(), jar.user_header().tx_range());
 
-                match static_files.entry(segment) {
-                    Entry::Occupied(mut entry) => {
-                        entry.get_mut().push(ranges);
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(vec![ranges]);
+                if let Some(block_range) = block_range {
+                    match static_files.entry(segment) {
+                        Entry::Occupied(mut entry) => {
+                            entry.get_mut().push((block_range, tx_range));
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(vec![(block_range, tx_range)]);
+                        }
                     }
                 }
             }

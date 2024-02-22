@@ -314,27 +314,29 @@ impl SnapshotProvider {
 
                     // Current block range has the same block start as `fixed_range``, but block end
                     // might be different if we are still filling this static file.
-                    let current_block_range = jar.user_header().block_range();
-
-                    // Considering that `update_index` is called when we either append/truncate, we
-                    // are sure that we are handling the latest data points.
-                    //
-                    // Here we remove every entry of the index that has a block start higher or
-                    // equal than our current one. This is important in the case
-                    // that we prune a lot of rows resulting in a file (and thus
-                    // a higher block range) deletion.
-                    tx_index
-                        .entry(segment)
-                        .and_modify(|index| {
-                            index
-                                .retain(|_, block_range| block_range.start() < fixed_range.start());
-                            index.insert(tx_end, current_block_range);
-                        })
-                        .or_insert_with(|| BTreeMap::from([(tx_end, current_block_range)]));
+                    if let Some(current_block_range) = jar.user_header().block_range() {
+                        // Considering that `update_index` is called when we either append/truncate,
+                        // we are sure that we are handling the latest data
+                        // points.
+                        //
+                        // Here we remove every entry of the index that has a block start higher or
+                        // equal than our current one. This is important in the case
+                        // that we prune a lot of rows resulting in a file (and thus
+                        // a higher block range) deletion.
+                        tx_index
+                            .entry(segment)
+                            .and_modify(|index| {
+                                index.retain(|_, block_range| {
+                                    block_range.start() < fixed_range.start()
+                                });
+                                index.insert(tx_end, current_block_range);
+                            })
+                            .or_insert_with(|| BTreeMap::from([(tx_end, current_block_range)]));
+                    }
                 } else if let Some(1) = tx_index.get(&segment).map(|index| index.len()) {
                     // Only happens if we unwind all the txs/receipts from the first static file.
                     // Should only happen in test scenarios.
-                    if jar.user_header().block_start() == 0 &&
+                    if jar.user_header().expected_block_start() == 0 &&
                         matches!(
                             segment,
                             SnapshotSegment::Receipts | SnapshotSegment::Transactions
