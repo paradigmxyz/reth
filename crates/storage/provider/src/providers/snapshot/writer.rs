@@ -117,10 +117,8 @@ impl<'a> SnapshotProviderRW<'a> {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<BlockNumber> {
         if let Some(last_block) = self.writer.user_header().block_end() {
-            let writer_range_end = find_fixed_range(last_block).end();
-
             // We have finished the previous snapshot and must freeze it
-            if last_block + 1 > writer_range_end {
+            if last_block == self.writer.user_header().expected_block_end() {
                 // Commits offsets and new user_header to disk
                 self.commit()?;
 

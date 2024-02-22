@@ -177,6 +177,11 @@ impl SegmentHeader {
         self.expected_block_range.start()
     }
 
+    /// The expected block end of the segment.
+    pub fn expected_block_end(&self) -> BlockNumber {
+        self.expected_block_range.end()
+    }
+
     /// Returns the first block number of the segment.
     pub fn block_start(&self) -> Option<BlockNumber> {
         self.block_range.as_ref().map(|b| b.start())
