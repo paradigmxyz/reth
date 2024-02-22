@@ -34,11 +34,8 @@ impl<DB: Database> Segment<DB> for Transactions {
             snapshot_provider.get_writer(*block_range.start(), SnapshotSegment::Transactions)?;
 
         for block in block_range {
-            if block > 0 {
-                let _snapshot_block =
-                    snapshot_writer.increment_block(SnapshotSegment::Transactions)?;
-                debug_assert_eq!(_snapshot_block, block);
-            }
+            let _snapshot_block = snapshot_writer.increment_block(SnapshotSegment::Transactions)?;
+            debug_assert_eq!(_snapshot_block, block);
 
             let block_body_indices = provider
                 .block_body_indices(block)?

@@ -73,11 +73,6 @@ impl SnapshotSegment {
         }
     }
 
-    /// Returns the default file name for the provided [`SegmentHeader`]
-    pub fn filename_from_header(&self, header: SegmentHeader) -> String {
-        self.filename(&header.block_range)
-    }
-
     /// Returns the default file name for the provided segment and range.
     pub fn filename(&self, block_range: &SegmentRangeInclusive) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
@@ -147,9 +142,14 @@ impl SnapshotSegment {
 /// A segment header that contains information common to all segments. Used for storage.
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
 pub struct SegmentHeader {
-    /// Block range of the snapshot segment
-    block_range: SegmentRangeInclusive,
-    /// Transaction range of the snapshot segment
+    /// Defines the expected block range for a snapshot segment. This attribute is crucial for
+    /// scenarios where the file contains no data, allowing for a representation beyond a
+    /// simple `start..=start` range. It ensures clarity in differentiating between an empty file
+    /// and a file with a single block numbered 0.
+    expected_block_range: SegmentRangeInclusive,
+    /// Block range of data on the snapshot segment
+    block_range: Option<SegmentRangeInclusive>,
+    /// Transaction range of data of the snapshot segment
     tx_range: Option<SegmentRangeInclusive>,
     /// Segment type
     segment: SnapshotSegment,
@@ -158,11 +158,12 @@ pub struct SegmentHeader {
 impl SegmentHeader {
     /// Returns [`SegmentHeader`].
     pub fn new(
-        block_range: SegmentRangeInclusive,
+        expected_block_range: SegmentRangeInclusive,
+        block_range: Option<SegmentRangeInclusive>,
         tx_range: Option<SegmentRangeInclusive>,
         segment: SnapshotSegment,
     ) -> Self {
-        Self { block_range, tx_range, segment }
+        Self { expected_block_range, block_range, tx_range, segment }
     }
 
     /// Returns the snapshot segment kind.
@@ -171,63 +172,67 @@ impl SegmentHeader {
     }
 
     /// Returns the block range.
-    pub fn block_range(&self) -> SegmentRangeInclusive {
-        self.block_range
+    pub fn block_range(&self) -> Option<&SegmentRangeInclusive> {
+        self.block_range.as_ref()
     }
 
     /// Returns the transaction range.
-    pub fn tx_range(&self) -> Option<SegmentRangeInclusive> {
-        self.tx_range
+    pub fn tx_range(&self) -> Option<&SegmentRangeInclusive> {
+        self.tx_range.as_ref()
+    }
+
+    /// The expected block start of the segment.
+    pub fn expected_block_start(&self) -> BlockNumber {
+        self.expected_block_range.start()
+    }
+
+    /// The expected block end of the segment.
+    pub fn expected_block_end(&self) -> BlockNumber {
+        self.expected_block_range.end()
     }
 
     /// Returns the first block number of the segment.
-    pub fn block_start(&self) -> BlockNumber {
-        self.block_range.start()
+    pub fn block_start(&self) -> Option<BlockNumber> {
+        self.block_range.as_ref().map(|b| b.start())
     }
 
     /// Returns the last block number of the segment.
-    pub fn block_end(&self) -> BlockNumber {
-        self.block_range.end()
+    pub fn block_end(&self) -> Option<BlockNumber> {
+        self.block_range.as_ref().map(|b| b.end())
     }
 
     /// Returns the first transaction number of the segment.  
-    ///  
-    /// ### Panics
-    ///
-    /// This method panics if `self.tx_range` is `None`.
-    pub fn tx_start(&self) -> TxNumber {
-        self.tx_range.as_ref().expect("should exist").start()
+    pub fn tx_start(&self) -> Option<TxNumber> {
+        self.tx_range.as_ref().map(|t| t.start())
     }
 
     /// Returns the last transaction number of the segment.   
-    ///
-    /// ### Panics
-    ///
-    /// This method panics if `self.tx_range` is `None`.
-    #[track_caller]
-    pub fn tx_end(&self) -> TxNumber {
-        self.tx_range.as_ref().expect("should exist").end()
+    pub fn tx_end(&self) -> Option<TxNumber> {
+        self.tx_range.as_ref().map(|t| t.end())
     }
 
     /// Number of transactions.  
-    ///
-    /// ### Panics
-    ///
-    /// This method panics if `self.tx_range` is `None`.
-    #[track_caller]
-    pub fn tx_len(&self) -> u64 {
-        self.tx_range.as_ref().expect("should exist").end() + 1 -
-            self.tx_range.as_ref().expect("should exist").start()
+    pub fn tx_len(&self) -> Option<u64> {
+        self.tx_range.as_ref().map(|r| (r.end() + 1) - r.start())
     }
 
     /// Number of blocks.
-    pub fn block_len(&self) -> u64 {
-        self.block_range.end() + 1 - self.block_range.start()
+    pub fn block_len(&self) -> Option<u64> {
+        self.block_range.as_ref().map(|r| (r.end() + 1) - r.start())
     }
 
     /// Increments block end range depending on segment
-    pub fn increment_block(&mut self) {
-        self.block_range.end += 1;
+    pub fn increment_block(&mut self) -> BlockNumber {
+        if let Some(block_range) = &mut self.block_range {
+            block_range.end += 1;
+            block_range.end
+        } else {
+            self.block_range = Some(SegmentRangeInclusive::new(
+                self.expected_block_start(),
+                self.expected_block_start(),
+            ));
+            self.expected_block_start()
+        }
     }
 
     /// Increments tx end range depending on segment
@@ -248,7 +253,13 @@ impl SegmentHeader {
     pub fn prune(&mut self, num: u64) {
         match self.segment {
             SnapshotSegment::Headers => {
-                self.block_range.end = self.block_range.end.saturating_sub(num);
+                if let Some(range) = &mut self.block_range {
+                    if num > range.end {
+                        self.block_range = None;
+                    } else {
+                        range.end = range.end.saturating_sub(num);
+                    }
+                };
             }
             SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
                 if let Some(range) = &mut self.tx_range {
@@ -264,8 +275,12 @@ impl SegmentHeader {
 
     /// Sets a new block_range.
     pub fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
-        self.block_range.start = block_start;
-        self.block_range.end = block_end;
+        if let Some(block_range) = &mut self.block_range {
+            block_range.start = block_start;
+            block_range.end = block_end;
+        } else {
+            self.block_range = Some(SegmentRangeInclusive::new(block_start, block_end))
+        }
     }
 
     /// Sets a new tx_range.
@@ -279,7 +294,7 @@ impl SegmentHeader {
     }
 
     /// Returns the row offset which depends on whether the segment is block or transaction based.
-    pub fn start(&self) -> u64 {
+    pub fn start(&self) -> Option<u64> {
         match self.segment {
             SnapshotSegment::Headers => self.block_start(),
             SnapshotSegment::Transactions | SnapshotSegment::Receipts => self.tx_start(),

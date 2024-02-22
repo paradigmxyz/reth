@@ -71,6 +71,7 @@ mod tests {
         let segment_header = SegmentHeader::new(
             range.clone().into(),
             Some(range.clone().into()),
+            Some(range.clone().into()),
             SnapshotSegment::Headers,
         );
 

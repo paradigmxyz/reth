@@ -59,13 +59,8 @@ impl<'a> SnapshotProviderRW<'a> {
                     (NippyJar::load(provider.data_path())?, provider.data_path().into())
                 }
                 Err(ProviderError::MissingSnapshotBlock(_, _)) => {
-                    // TODO(joshie): if its a receipt segment, we can find out the actual range.
-                    let tx_range = reader
-                        .get_highest_snapshot_tx(segment)
-                        .map(|tx| SegmentRangeInclusive::new(tx, tx));
                     let path = reader.directory().join(segment.filename(&block_range));
-
-                    (create_jar(segment, &path, block_range, tx_range), path)
+                    (create_jar(segment, &path, block_range), path)
                 }
                 Err(err) => return Err(err),
             };
@@ -97,7 +92,13 @@ impl<'a> SnapshotProviderRW<'a> {
         // Commits offsets and new user_header to disk
         self.writer.commit()?;
 
-        self.reader.update_index(self.writer.user_header().segment(), self.get_max_block())?;
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                self.writer.user_header().segment(),
+                SnapshotProviderOperation::CommitWriter,
+                Some(start.elapsed()),
+            );
+        }
 
         debug!(
             target: "provider::static_file",
@@ -107,31 +108,33 @@ impl<'a> SnapshotProviderRW<'a> {
             "Commit"
         );
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operation(
-                self.writer.user_header().segment(),
-                SnapshotProviderOperation::CommitWriter,
-                Some(start.elapsed()),
-            );
-        }
+        self.update_index()?;
 
         Ok(())
     }
 
-    /// Get the maximum block of the current writer if it exists.
-    fn get_max_block(&self) -> Option<BlockNumber> {
-        let user_header = self.writer.user_header();
-        let mut max_block = Some(user_header.block_end());
-
-        if self.writer.user_header().segment().is_headers() {
-            // This can be a scenario where we pruned all blocks from the static file, including the
-            // genesis block.
-            if user_header.block_end() == 0 && self.writer.rows() == 0 {
-                max_block = None
+    /// Updates the `self.reader` internal index.
+    fn update_index(&self) -> ProviderResult<()> {
+        // We find the maximum block of the segment by checking this writer's last block.
+        //
+        // However if there's no block range (because there's no data), we try to calculate it by
+        // substracting 1 from the expected block start, resulting on the last block of the
+        // previous file.
+        //
+        // If that expected block start is 0, then it means that there's no actual block data, and
+        // there's no snapshotted block data.
+        let segment_max_block = match self.writer.user_header().block_range() {
+            Some(block_range) => Some(block_range.end()),
+            None => {
+                if self.writer.user_header().expected_block_start() > 0 {
+                    Some(self.writer.user_header().expected_block_start() - 1)
+                } else {
+                    None
+                }
             }
         };
 
-        max_block
+        self.reader.update_index(self.writer.user_header().segment(), segment_max_block)
     }
 
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current snapshot,
@@ -140,36 +143,24 @@ impl<'a> SnapshotProviderRW<'a> {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<BlockNumber> {
         let start = Instant::now();
+        if let Some(last_block) = self.writer.user_header().block_end() {
+            // We have finished the previous snapshot and must freeze it
+            if last_block == self.writer.user_header().expected_block_end() {
+                // Commits offsets and new user_header to disk
+                self.commit()?;
 
-        debug_assert!(
-            (self.writer.rows() as u64 + self.writer.user_header().block_end()) != 0
-            || !segment.is_headers(),
-            "This function should only be called by append_header when dealing with SnapshotSegment::Headers.");
+                // Opens the new snapshot
+                let (writer, data_path) =
+                    Self::open(segment, last_block + 1, self.reader.clone(), self.metrics.clone())?;
+                self.writer = writer;
+                self.data_path = data_path;
 
-        let last_block = self.writer.user_header().block_end();
-        let writer_range_end = find_fixed_range(last_block).end();
-
-        // We have finished the previous snapshot and must freeze it
-        if last_block + 1 > writer_range_end {
-            // Commits offsets and new user_header to disk
-            self.commit()?;
-
-            // Opens the new snapshot
-            let (writer, data_path) =
-                Self::open(segment, last_block + 1, self.reader.clone(), self.metrics.clone())?;
-            self.writer = writer;
-            self.data_path = data_path;
-
-            let block_start = find_fixed_range(last_block + 1).start();
-            *self.writer.user_header_mut() = SegmentHeader::new(
-                SegmentRangeInclusive::new(block_start, block_start),
-                None,
-                segment,
-            )
-        } else {
-            self.writer.user_header_mut().increment_block()
+                *self.writer.user_header_mut() =
+                    SegmentHeader::new(find_fixed_range(last_block + 1), None, None, segment);
+            }
         }
 
+        let block = self.writer.user_header_mut().increment_block();
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 segment,
@@ -178,7 +169,7 @@ impl<'a> SnapshotProviderRW<'a> {
             );
         }
 
-        Ok(self.writer.user_header().block_end())
+        Ok(block)
     }
 
     /// Truncates a number of rows from disk. It deletes and loads an older snapshot file if block
@@ -196,9 +187,11 @@ impl<'a> SnapshotProviderRW<'a> {
     ) -> ProviderResult<()> {
         while num_rows > 0 {
             let len = match segment {
-                SnapshotSegment::Headers => self.writer.user_header().block_len(),
+                SnapshotSegment::Headers => {
+                    self.writer.user_header().block_len().unwrap_or_default()
+                }
                 SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
-                    self.writer.user_header().tx_len()
+                    self.writer.user_header().tx_len().unwrap_or_default()
                 }
             };
 
@@ -206,12 +199,12 @@ impl<'a> SnapshotProviderRW<'a> {
                 // If there's more rows to delete than this snapshot contains, then just
                 // delete the whole file and go to the next snapshot
                 let previous_snap = self.data_path.clone();
-                let block_start = self.writer.user_header().block_start();
+                let block_start = self.writer.user_header().expected_block_start();
 
                 if block_start != 0 {
                     let (writer, data_path) = Self::open(
                         segment,
-                        self.writer.user_header().block_start() - 1,
+                        self.writer.user_header().expected_block_start() - 1,
                         self.reader.clone(),
                         self.metrics.clone(),
                     )?;
@@ -240,7 +233,7 @@ impl<'a> SnapshotProviderRW<'a> {
         // Only Transactions and Receipts
         if let Some(last_block) = last_block {
             let header = self.writer.user_header_mut();
-            header.set_block_range(header.block_start(), last_block);
+            header.set_block_range(header.expected_block_start(), last_block);
         }
 
         // Commits new changes to disk.
@@ -277,7 +270,7 @@ impl<'a> SnapshotProviderRW<'a> {
 
         self.append_column(value)?;
 
-        Ok(self.writer.user_header().tx_end())
+        Ok(self.writer.user_header().tx_end().expect("qed"))
     }
 
     /// Appends header to snapshot file.
@@ -296,10 +289,7 @@ impl<'a> SnapshotProviderRW<'a> {
 
         debug_assert!(self.writer.user_header().segment() == SnapshotSegment::Headers);
 
-        // Only increment the block number if this is NOT the genesis header
-        if !(self.writer.rows() == 0 && self.writer.user_header().block_end() == 0) {
-            self.increment_block(SnapshotSegment::Headers)?;
-        }
+        let block_number = self.increment_block(SnapshotSegment::Headers)?;
 
         self.append_column(header)?;
         self.append_column(CompactU256::from(terminal_difficulty))?;
@@ -313,7 +303,7 @@ impl<'a> SnapshotProviderRW<'a> {
             );
         }
 
-        Ok(self.writer.user_header().block_end())
+        Ok(block_number)
     }
 
     /// Appends transaction to snapshot file.
@@ -462,17 +452,12 @@ impl<'a> Deref for SnapshotProviderRW<'a> {
 fn create_jar(
     segment: SnapshotSegment,
     path: &Path,
-    block_range: SegmentRangeInclusive,
-    tx_range: Option<SegmentRangeInclusive>,
+    expected_block_range: SegmentRangeInclusive,
 ) -> NippyJar<SegmentHeader> {
     let mut jar = NippyJar::new(
         segment.columns(),
         path,
-        SegmentHeader::new(
-            SegmentRangeInclusive::new(block_range.start(), block_range.start()),
-            tx_range,
-            segment,
-        ),
+        SegmentHeader::new(expected_block_range, None, None, segment),
     );
 
     // Transaction and Receipt already have the compression scheme used natively in its encoding.

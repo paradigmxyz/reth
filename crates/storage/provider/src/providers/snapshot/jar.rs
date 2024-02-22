@@ -191,7 +191,7 @@ impl<'a> BlockNumReader for SnapshotJarProvider<'a> {
 
         Ok(cursor
             .get_one::<HeaderMask<BlockHash>>((&hash).into())?
-            .and_then(|res| (res == hash).then(|| cursor.number())))
+            .and_then(|res| (res == hash).then(|| cursor.number()).flatten()))
     }
 }
 
@@ -201,7 +201,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
 
         Ok(cursor
             .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
-            .and_then(|res| (res.hash() == hash).then(|| cursor.number())))
+            .and_then(|res| (res.hash() == hash).then(|| cursor.number()).flatten()))
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
