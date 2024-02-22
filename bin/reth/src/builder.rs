@@ -131,7 +131,8 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             Arc::clone(&self.db),
             Arc::clone(&self.config.chain),
             self.data_dir.snapshots_path(),
-        )?;
+        )?
+        .with_snapshot_metrics();
 
         self.config.start_metrics_endpoint(prometheus_handle, Arc::clone(&self.db)).await?;
 
