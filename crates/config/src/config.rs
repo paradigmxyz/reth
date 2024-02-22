@@ -52,8 +52,6 @@ impl Config {
 pub struct StageConfig {
     /// Header stage configuration.
     pub headers: HeadersConfig,
-    /// Total Difficulty stage configuration
-    pub total_difficulty: TotalDifficultyConfig,
     /// Body stage configuration.
     pub bodies: BodiesConfig,
     /// Sender Recovery stage configuration.
@@ -104,21 +102,6 @@ impl Default for HeadersConfig {
             downloader_min_concurrent_requests: 5,
             downloader_max_buffered_responses: 100,
         }
-    }
-}
-
-/// Total difficulty stage configuration
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
-#[serde(default)]
-pub struct TotalDifficultyConfig {
-    /// The maximum number of total difficulty entries to sum up before committing progress to the
-    /// database.
-    pub commit_threshold: u64,
-}
-
-impl Default for TotalDifficultyConfig {
-    fn default() -> Self {
-        Self { commit_threshold: 100_000 }
     }
 }
 
@@ -337,9 +320,6 @@ downloader_min_concurrent_requests = 5
 downloader_max_buffered_responses = 100
 downloader_request_limit = 1000
 commit_threshold = 10000
-
-[stages.total_difficulty]
-commit_threshold = 100000
 
 [stages.bodies]
 downloader_request_limit = 200
