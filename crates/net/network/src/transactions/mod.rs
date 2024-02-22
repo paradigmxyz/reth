@@ -1079,7 +1079,7 @@ macro_rules! duration_metered_exec {
         let start = Instant::now();
 
         $code;
-        
+
         *$acc += start.elapsed();
     };
 }

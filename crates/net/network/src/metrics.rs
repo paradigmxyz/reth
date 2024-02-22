@@ -90,9 +90,9 @@ pub struct TransactionsManagerMetrics {
     /// Total number of hashes pending fetch.
     pub(crate) hashes_pending_fetch: Gauge,
 
-    // Poll duration of `TransactionsManager` future
-    /// Duration of call to [`TransactionsManager`](crate::transactions::TransactionsManager)s
-    /// poll function.
+    /* -- Poll duration of `TransactionsManager` future -- */
+    /// Duration in seconds of call to
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager)'s poll function.
     ///
     /// Updating metrics could take time, so the true duration of this call could
     /// be longer than the sum of the accumulated durations of polling nested streams.
@@ -101,7 +101,8 @@ pub struct TransactionsManagerMetrics {
     // Nested streams
     /// Streaming session updates and updating peers accordingly. Duration in microseconds.
     pub(crate) acc_duration_poll_network_events: Gauge,
-    /// Time spent flushing the queue of batched pending pool imports into pool. Duration in microseconds.
+    /// Time spent flushing the queue of batched pending pool imports into pool. Duration in
+    /// microseconds.
     pub(crate) acc_duration_poll_pending_pool_imports: Gauge,
     /// Streaming transaction and announcement broadcast, queueing for pool import
     /// or requesting respectively. Duration in us.
