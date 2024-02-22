@@ -103,7 +103,7 @@ where
         //
         // Treat a request for 1 block as a request for `newest_block..=newest_block`,
         // otherwise `newest_block - 2
-        // SAFETY: We ensured that block count is capped
+        // NOTE: We ensured that block count is capped
         let start_block = end_block_plus - block_count;
 
         // Collect base fees, gas usage ratios and (optionally) reward percentile data

@@ -486,7 +486,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
     ) -> Vec<PoolResult<TxHash>> {
-        let added =
+        let mut added =
             transactions.into_iter().map(|tx| self.add_transaction(origin, tx)).collect::<Vec<_>>();
 
         // If at least one transaction was added successfully, then we enforce the pool size limits.
@@ -504,15 +504,15 @@ where
 
         // It may happen that a newly added transaction is immediately discarded, so we need to
         // adjust the result here
-        added
-            .into_iter()
-            .map(|res| match res {
-                Ok(ref hash) if discarded.contains(hash) => {
-                    Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
+        for res in added.iter_mut() {
+            if let Ok(hash) = res {
+                if discarded.contains(hash) {
+                    *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
                 }
-                other => other,
-            })
-            .collect()
+            }
+        }
+
+        added
     }
 
     /// Notify all listeners about a new pending transaction.

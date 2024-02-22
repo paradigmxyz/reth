@@ -6969,6 +6969,7 @@ dependencies = [
  "metrics",
  "parking_lot 0.12.1",
  "paste",
+ "pprof",
  "proptest",
  "rand 0.8.5",
  "reth-eth-wire",
