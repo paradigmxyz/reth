@@ -720,11 +720,16 @@ where
             return
         }
 
-        // load message version before announcement data is destructed in packing
+        // load message version before announcement data type is destructed in packing
         let msg_version = valid_announcement_data.msg_version();
+        //
         // demand recommended soft limit on response, however the peer may enforce an arbitrary
         // limit on the response (2MB)
-        let mut hashes_to_request = RequestTxHashes::with_capacity(valid_announcement_data.len());
+        //
+        // request buffer is shrunk via call to pack request!
+        let init_capacity_req =
+            self.transaction_fetcher.approx_capacity_get_pooled_transactions_req(msg_version);
+        let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
         let surplus_hashes =
             self.transaction_fetcher.pack_request(&mut hashes_to_request, valid_announcement_data);
         hashes_to_request.shrink_to_fit();

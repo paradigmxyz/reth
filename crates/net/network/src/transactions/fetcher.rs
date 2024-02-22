@@ -395,7 +395,8 @@ impl TransactionFetcher {
         // try free active peers
         self.try_drain_inflight_requests(cx);
 
-        let mut hashes_to_request = RequestTxHashes::with_capacity(32);
+        let init_capacity_req = approx_capacity_get_pooled_transactions_req_eth68(&self.info);
+        let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
         // budget to look for an idle peer before giving up
@@ -839,6 +840,19 @@ impl TransactionFetcher {
             );
 
             Some(limit)
+        }
+    }
+
+    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
+    /// have capacity for w.r.t. the given version of the protocol.
+    pub fn approx_capacity_get_pooled_transactions_req(
+        &self,
+        announcement_version: EthVersion,
+    ) -> usize {
+        if announcement_version.is_eth68() {
+            approx_capacity_get_pooled_transactions_req_eth68(&self.info)
+        } else {
+            approx_capacity_get_pooled_transactions_req_eth66()
         }
     }
 
