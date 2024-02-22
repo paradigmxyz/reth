@@ -58,7 +58,6 @@ impl SnapshotProviderMetrics {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub(crate) enum SnapshotProviderOperation {
     InitCursor,
-    CursorGet,
     OpenWriter,
     Append,
     Prune,
@@ -70,7 +69,6 @@ impl SnapshotProviderOperation {
     const fn as_str(&self) -> &'static str {
         match self {
             Self::InitCursor => "init-cursor",
-            Self::CursorGet => "cursor-get",
             Self::OpenWriter => "open-writer",
             Self::Append => "append",
             Self::Prune => "prune",
