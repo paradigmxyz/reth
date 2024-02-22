@@ -90,32 +90,58 @@ pub struct TransactionsManagerMetrics {
     /// Total number of hashes pending fetch.
     pub(crate) hashes_pending_fetch: Gauge,
 
-    /* -- Poll duration of `TransactionsManager` future -- */
+    /* ================ POLL DURATION ================ */
+
+    /* -- Total poll duration of `TransactionsManager` future -- */
     /// Duration in seconds of call to
     /// [`TransactionsManager`](crate::transactions::TransactionsManager)'s poll function.
     ///
     /// Updating metrics could take time, so the true duration of this call could
     /// be longer than the sum of the accumulated durations of polling nested streams.
     pub(crate) duration_poll_tx_manager: Gauge,
-    //
-    // Nested streams
-    /// Streaming session updates and updating peers accordingly. Duration in microseconds.
+
+    /* -- Poll duration of items nested in `TransactionsManager` future -- */
+    /// Accumulated time spent streaming session updates and updating peers accordingly, in
+    /// one call to poll the [`TransactionsManager`](crate::transactions::TransactionsManager)
+    /// future.
+    ///
+    /// Duration in seconds.
     pub(crate) acc_duration_poll_network_events: Gauge,
-    /// Time spent flushing the queue of batched pending pool imports into pool. Duration in
-    /// microseconds.
+    /// Accumulated time spent flushing the queue of batched pending pool imports into pool, in
+    /// one call to poll the [`TransactionsManager`](crate::transactions::TransactionsManager)
+    /// future.
+    ///
+    /// Duration in seconds.
     pub(crate) acc_duration_poll_pending_pool_imports: Gauge,
-    /// Streaming transaction and announcement broadcast, queueing for pool import
-    /// or requesting respectively. Duration in us.
+    /// Accumulated time spent streaming transaction and announcement broadcast, queueing for
+    /// pool import or requesting respectively, in one call to poll the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager) future.
+    ///
+    /// Duration in seconds.
     pub(crate) acc_duration_poll_transaction_events: Gauge,
-    /// Streaming fetch events, queueing for pool import on successful fetch, Duration in us.
+    /// Accumulated time spent streaming fetch events, queueing for pool import on successful
+    /// fetch, in one call to poll the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager) future.
+    ///
+    /// Duration in seconds.
     pub(crate) acc_duration_poll_fetch_events: Gauge,
-    /// Streaming and propagating transactions that were successfully imported into
-    /// the pool. Duration in us.
+    /// Accumulated time spent streaming and propagating transactions that were successfully
+    /// imported into the pool, in one call to poll the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager) future.
+    ///
+    /// Duration in seconds.
     pub(crate) acc_duration_poll_imported_transactions: Gauge,
-    /// Assembling and sending requests for hashes fetching pending. Duration in us.
+    /// Accumulated time spent assembling and sending requests for hashes fetching pending, in
+    /// one call to poll the [`TransactionsManager`](crate::transactions::TransactionsManager)
+    /// future.
+    ///
+    /// Duration in seconds.
     pub(crate) acc_duration_fetch_pending_hashes: Gauge,
-    /// Streaming commands and propagating, fetching and serving transactions
-    /// accordingly. Duration in us.
+    /// Accumulated time spent streaming commands and propagating, fetching and serving
+    /// transactions accordingly, in one call to poll the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager) future.
+    ///
+    /// Duration in seconds.
     pub(crate) acc_duration_poll_commands: Gauge,
 }
 
