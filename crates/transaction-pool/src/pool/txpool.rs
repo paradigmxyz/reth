@@ -287,38 +287,67 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Returns an iterator that yields transactions that are ready to be included in the block.
+    /// Returns an iterator that yields transactions that are ready to be included in the block with
+    /// the tracked fees.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pending_pool.best()
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
     /// the given base fee and optional blob fee.
+    ///
+    /// If the provided attributes differ from the currently tracked fees, this will also include
+    /// transactions that are unlocked by the new fees, or exclude transactions that are no longer
+    /// valid with the new fees.
     pub(crate) fn best_transactions_with_attributes(
         &self,
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
     {
+        // First we need to check if the given base fee is different than what's currently being
+        // tracked
         match best_transactions_attributes.basefee.cmp(&self.all_transactions.pending_fees.base_fee)
         {
             Ordering::Equal => {
-                // fee unchanged, nothing to shift
-                Box::new(self.best_transactions())
+                // for EIP-4844 transactions we also need to check if the blob fee is now lower than
+                // what's currently being tracked, if so we need to include transactions from the
+                // blob pool that are valid with the lower blob fee
+                if best_transactions_attributes
+                    .blob_fee
+                    .map_or(false, |fee| fee < self.all_transactions.pending_fees.blob_fee as u64)
+                {
+                    let unlocked_by_blob_fee =
+                        self.blob_pool.satisfy_attributes(best_transactions_attributes);
+
+                    Box::new(self.pending_pool.best_with_unlocked(
+                        unlocked_by_blob_fee,
+                        self.all_transactions.pending_fees.base_fee,
+                    ))
+                } else {
+                    Box::new(self.pending_pool.best())
+                }
             }
             Ordering::Greater => {
                 // base fee increased, we only need to enforce this on the pending pool
-                Box::new(self.pending_pool.best_with_basefee(best_transactions_attributes.basefee))
+                Box::new(self.pending_pool.best_with_basefee_and_blobfee(
+                    best_transactions_attributes.basefee,
+                    best_transactions_attributes.blob_fee.unwrap_or_default(),
+                ))
             }
             Ordering::Less => {
-                // base fee decreased, we need to move transactions from the basefee pool to the
-                // pending pool and satisfy blob fee transactions as well
-                let unlocked_with_blob =
-                    self.blob_pool.satisfy_attributes(best_transactions_attributes);
+                // base fee decreased, we need to move transactions from the basefee + blob pool to
+                // the pending pool that might be unlocked by the lower base fee
+                let mut unlocked = self
+                    .basefee_pool
+                    .satisfy_base_fee_transactions(best_transactions_attributes.basefee);
 
-                Box::new(self.pending_pool.best_with_unlocked(
-                    unlocked_with_blob,
-                    self.all_transactions.pending_fees.base_fee,
-                ))
+                // also include blob pool transactions that are now unlocked
+                unlocked.extend(self.blob_pool.satisfy_attributes(best_transactions_attributes));
+
+                Box::new(
+                    self.pending_pool
+                        .best_with_unlocked(unlocked, self.all_transactions.pending_fees.base_fee),
+                )
             }
         }
     }
