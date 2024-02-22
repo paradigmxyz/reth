@@ -457,6 +457,8 @@ impl CallFees {
         max_fee_per_blob_gas: Option<U256>,
         block_blob_fee: Option<U256>,
     ) -> EthResult<CallFees> {
+        /// Get the effective gas price of a transaction as specfified in EIP-1559 with relevant
+        /// checks.
         fn get_effective_gas_price(
             max_fee_per_gas: Option<U256>,
             max_priority_fee_per_gas: Option<U256>,
@@ -476,10 +478,16 @@ impl CallFees {
                     }
                     Ok(min(
                         max_fee,
-                        block_base_fee + max_priority_fee_per_gas.unwrap_or(U256::ZERO),
+                        block_base_fee
+                            .checked_add(max_priority_fee_per_gas.unwrap_or(U256::ZERO))
+                            .ok_or_else(|| {
+                                EthApiError::from(RpcInvalidTransactionError::TipVeryHigh)
+                            })?,
                     ))
                 }
-                None => Ok(block_base_fee + max_priority_fee_per_gas.unwrap_or(U256::ZERO)),
+                None => Ok(block_base_fee
+                    .checked_add(max_priority_fee_per_gas.unwrap_or(U256::ZERO))
+                    .ok_or_else(|| EthApiError::from(RpcInvalidTransactionError::TipVeryHigh))?),
             }
         }
 
@@ -645,6 +653,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use reth_primitives::constants::GWEI_TO_WEI;
+
     use super::*;
 
     #[test]
@@ -675,5 +685,77 @@ mod tests {
         .unwrap();
         assert!(gas_price.is_zero());
         assert_eq!(max_fee_per_blob_gas, Some(U256::from(99)));
+    }
+
+    #[test]
+    fn test_eip_1559_fees() {
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            Some(U256::from(25 * GWEI_TO_WEI)),
+            Some(U256::from(15 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
+        assert_eq!(gas_price, U256::from(25 * GWEI_TO_WEI));
+
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            Some(U256::from(25 * GWEI_TO_WEI)),
+            Some(U256::from(5 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
+        assert_eq!(gas_price, U256::from(20 * GWEI_TO_WEI));
+
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            Some(U256::from(30 * GWEI_TO_WEI)),
+            Some(U256::from(30 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
+        assert_eq!(gas_price, U256::from(30 * GWEI_TO_WEI));
+
+        let call_fees = CallFees::ensure_fees(
+            None,
+            Some(U256::from(30 * GWEI_TO_WEI)),
+            Some(U256::from(31 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        );
+        assert!(call_fees.is_err());
+
+        let call_fees = CallFees::ensure_fees(
+            None,
+            Some(U256::from(5 * GWEI_TO_WEI)),
+            Some(U256::from(1 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        );
+        assert!(call_fees.is_err());
+
+        let call_fees = CallFees::ensure_fees(
+            None,
+            Some(U256::MAX),
+            Some(U256::MAX),
+            U256::from(5 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        );
+        assert!(call_fees.is_err());
     }
 }
