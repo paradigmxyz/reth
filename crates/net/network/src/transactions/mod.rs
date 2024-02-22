@@ -626,7 +626,15 @@ where
             self.report_already_seen(peer_id);
         }
 
-        // 1. filter out known hashes
+        // 1. filter out spam
+        let (validation_outcome, mut partially_valid_msg) =
+            self.transaction_fetcher.filter_valid_message.partially_filter_valid_entries(msg);
+
+        if let FilterOutcome::ReportPeer = validation_outcome {
+            self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
+        }
+
+        // 2. filter out known hashes
         //
         // known txns have already been successfully fetched.
         //
@@ -638,46 +646,41 @@ where
             self.metrics.occurrences_hashes_already_in_pool.increment(intersection.len() as u64);
         }
 
-        if msg.is_empty() {
+        if partially_valid_msg.is_empty() {
             // nothing to request
             return
         }
 
-        // 2. filter out invalid entries
+        // 3. filter out invalid entries (spam)
         //
         // validates messages with respect to the given network, e.g. allowed tx types
         //
-        let mut valid_announcement_data = match msg {
-            NewPooledTransactionHashes::Eth68(eth68_msg) => {
-                // validate eth68 announcement data
-                let (outcome, valid_data) =
-                    self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_68(eth68_msg);
-
-                if let FilterOutcome::ReportPeer = outcome {
-                    self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
-                }
-
-                valid_data
-            }
-            NewPooledTransactionHashes::Eth66(eth66_msg) => {
-                // validate eth66 announcement data
-                let (outcome, valid_data) =
-                    self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_66(eth66_msg);
-
-                if let FilterOutcome::ReportPeer = outcome {
-                    self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
-                }
-
-                valid_data
-            }
+        let (validation_outcome, mut valid_announcement_data) = if partially_valid_msg
+            .msg_version()
+            .expect("partially valid announcement should have version")
+            .is_eth68()
+        {
+            // validate eth68 announcement data
+            self.transaction_fetcher
+                .filter_valid_message
+                .filter_valid_entries_68(partially_valid_msg)
+        } else {
+            // validate eth66 announcement data
+            self.transaction_fetcher
+                .filter_valid_message
+                .filter_valid_entries_66(partially_valid_msg)
         };
+
+        if let FilterOutcome::ReportPeer = validation_outcome {
+            self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
+        }
 
         if valid_announcement_data.is_empty() {
             // no valid announcement data
             return
         }
 
-        // 3. filter out already seen unknown hashes
+        // 4. filter out already seen unknown hashes
         //
         // seen hashes are already in the tx fetcher, pending fetch.
         //
@@ -796,7 +799,7 @@ where
                     .into_iter()
                     .map(PooledTransactionsElement::try_from_broadcast)
                     .filter_map(Result::ok)
-                    .collect::<Vec<_>>();
+                    .collect::<PooledTransactions>();
 
                 // mark the transactions as received
                 self.transaction_fetcher.remove_hashes_from_transaction_fetcher(
@@ -906,7 +909,7 @@ where
     fn import_transactions(
         &mut self,
         peer_id: PeerId,
-        mut transactions: Vec<PooledTransactionsElement>,
+        transactions: PooledTransactions,
         source: TransactionSource,
     ) {
         // If the node is pipeline syncing, ignore transactions
@@ -916,6 +919,8 @@ where
         if self.network.tx_gossip_disabled() {
             return
         }
+
+        let mut transactions = transactions.0;
 
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
 
