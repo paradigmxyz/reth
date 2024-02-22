@@ -4,6 +4,7 @@ use crate::{
     PoolTransaction, SubPoolLimit, ValidPoolTransaction,
 };
 use fnv::FnvHashMap;
+use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry, BTreeMap, BTreeSet},
@@ -195,7 +196,9 @@ impl<T: ParkedOrd> ParkedPool<T> {
         {
             // NOTE: This will not panic due to `!last_sender_transaction.is_empty()`
             let sender_id = self.last_sender_submission.last().expect("not empty").sender_id;
-            let list = self.get_txs_by_sender(sender_id);
+            // Utilize SmallVec to efficiently handle up to 16 transactions
+            // per sender, adhering to the TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER limit.
+            let list: SmallVec<[TransactionId; 16]> = self.get_txs_by_sender(sender_id).into();
 
             // Drop transactions from this sender until the pool is under limits
             for txid in list.into_iter().rev() {
