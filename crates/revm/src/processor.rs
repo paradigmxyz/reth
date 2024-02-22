@@ -4,9 +4,7 @@ use crate::{
     stack::{InspectorStack, InspectorStackConfig},
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
-use reth_interfaces::executor::{
-    BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
-};
+use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     Address, Block, BlockNumber, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
@@ -21,7 +19,7 @@ use revm::{
     inspector_handle_register,
     interpreter::Host,
     primitives::{CfgEnvWithHandlerCfg, ResultAndState},
-    Database, Evm, Handler, State, StateBuilder,
+    Evm, Handler, State, StateBuilder,
 };
 use std::{sync::Arc, time::Instant};
 
@@ -200,18 +198,6 @@ where
         &mut self,
         block: &Block,
     ) -> Result<(), BlockExecutionError> {
-        // On Optimism, we must load storage from the `L1Block` contract during execution. Because
-        // the 4788 call happens prior to the execution of the block, we must load the
-        // contract into the cache here prior to accessing its storage.
-        #[cfg(feature = "optimism")]
-        let _ = self.db_mut().basic(revm::optimism::L1_BLOCK_CONTRACT).map_err(|_| {
-            BlockExecutionError::OptimismBlockExecution(
-                OptimismBlockExecutionError::L1BlockInfoError {
-                    message: "Failed to load L1Block contract into cache".to_string(),
-                },
-            )
-        })?;
-
         apply_beacon_root_contract_call(
             &self.chain_spec,
             block.timestamp,
