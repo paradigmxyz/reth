@@ -314,7 +314,7 @@ impl SnapshotProvider {
 
                     // Current block range has the same block start as `fixed_range``, but block end
                     // might be different if we are still filling this static file.
-                    if let Some(current_block_range) = jar.user_header().block_range() {
+                    if let Some(current_block_range) = jar.user_header().block_range().copied() {
                         // Considering that `update_index` is called when we either append/truncate,
                         // we are sure that we are handling the latest data
                         // points.
@@ -882,7 +882,7 @@ impl TransactionsProvider for SnapshotProvider {
                 .and_then(|tx| (tx.hash() == tx_hash).then_some(tx))
                 .is_some()
             {
-                Ok(Some(cursor.number()))
+                Ok(cursor.number())
             } else {
                 Ok(None)
             }

@@ -127,12 +127,8 @@ impl<'a> SnapshotProviderRW<'a> {
                 self.writer = writer;
                 self.data_path = data_path;
 
-                *self.writer.user_header_mut() = SegmentHeader::new(
-                    find_fixed_range(last_block + 1).into(),
-                    None,
-                    None,
-                    segment,
-                );
+                *self.writer.user_header_mut() =
+                    SegmentHeader::new(find_fixed_range(last_block + 1), None, None, segment);
             }
         }
 
@@ -236,7 +232,7 @@ impl<'a> SnapshotProviderRW<'a> {
 
         self.append_column(value)?;
 
-        Ok(self.writer.user_header().tx_end())
+        Ok(self.writer.user_header().tx_end().expect("qed"))
     }
 
     /// Appends header to snapshot file.

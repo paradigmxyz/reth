@@ -48,8 +48,10 @@ pub fn iter_snapshots(path: impl AsRef<Path>) -> Result<SortedSnapshots, NippyJa
             {
                 let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
 
-                let (block_range, tx_range) =
-                    (jar.user_header().block_range(), jar.user_header().tx_range());
+                let (block_range, tx_range) = (
+                    jar.user_header().block_range().copied(),
+                    jar.user_header().tx_range().copied(),
+                );
 
                 if let Some(block_range) = block_range {
                     match static_files.entry(segment) {
