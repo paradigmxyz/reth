@@ -312,9 +312,7 @@ impl FilterAnnouncement for EthMessageFilter {
 mod test {
     use super::*;
 
-    use reth_eth_wire::{
-        NewPooledTransactionHashes66, NewPooledTransactionHashes68,
-    };
+    use reth_eth_wire::{NewPooledTransactionHashes66, NewPooledTransactionHashes68};
     use reth_primitives::B256;
     use std::{collections::HashMap, str::FromStr};
 
