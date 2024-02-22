@@ -48,8 +48,7 @@ reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
 ethers-core = { workspace = true, default-features = false }
 
-
-test-fuzz = "4"
+test-fuzz.workspace = true
 tokio-util = { workspace = true, features = ["io", "codec"] }
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }

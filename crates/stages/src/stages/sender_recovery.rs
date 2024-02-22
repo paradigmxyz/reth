@@ -257,7 +257,7 @@ mod tests {
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
         TransactionSigned, B256,
     };
-    use reth_provider::{PruneCheckpointWriter, TransactionsProvider};
+    use reth_provider::{providers::SnapshotWriter, PruneCheckpointWriter, TransactionsProvider};
 
     use super::*;
     use crate::test_utils::{

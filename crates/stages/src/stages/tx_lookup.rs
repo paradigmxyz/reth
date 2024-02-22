@@ -200,6 +200,7 @@ mod tests {
         generators::{random_block, random_block_range},
     };
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, B256};
+    use reth_provider::providers::SnapshotWriter;
     use std::ops::Sub;
 
     // Implement stage test suite.

@@ -306,10 +306,12 @@ fn stage_checkpoint_progress<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
+    use reth_provider::providers::SnapshotWriter;
     use test_utils::*;
 
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
@@ -441,7 +443,7 @@ mod tests {
 
     mod test_utils {
         use super::*;
-        use crate::test_utils::{StageTestRunner, TestStageDB};
+        use crate::test_utils::TestStageDB;
         use reth_primitives::Address;
 
         pub(crate) struct AccountHashingTestRunner {

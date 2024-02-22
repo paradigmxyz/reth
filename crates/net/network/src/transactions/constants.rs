@@ -36,17 +36,10 @@ pub const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 2 * 1024 * 
 pub mod tx_manager {
     use super::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
-    /// Default limit for number of transactions to keep track of for a single peer, for
-    /// transactions that the peer's pool and local pool have in common.
+    /// Default limit for number of transactions to keep track of for a single peer.
     ///
     /// Default is 10 KiB.
-    pub const DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER_AND_IN_POOL: usize = 10 * 1024;
-
-    /// Default limit for the number of transactions to keep track of for a single peer, for
-    /// transactions that are in the peer's pool but maybe not in the local pool yet.
-    ///
-    /// Default is 10 KiB.
-    pub const DEFAULT_CAPACITY_CACHE_SENT_BY_PEER_AND_MAYBE_IN_POOL: usize = 10 * 1024;
+    pub const DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER: usize = 10 * 1024;
 
     /// Default maximum pending pool imports to tolerate.
     ///
@@ -62,7 +55,10 @@ pub mod tx_manager {
 }
 
 pub mod tx_fetcher {
-    use crate::peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND};
+    use crate::{
+        peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND},
+        transactions::fetcher::TransactionFetcherInfo,
+    };
 
     use super::{
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
@@ -193,16 +189,14 @@ pub mod tx_fetcher {
 
     /// Default divisor of the max inflight request when calculating search breadth of the search
     /// for any idle peer to which to send a request filled with hashes pending fetch. The max
-    /// inflight requests is configured in
-    /// [`TransactionFetcherInfo`](crate::transactions::fetcher::TransactionFetcherInfo).
+    /// inflight requests is configured in [`TransactionFetcherInfo`].
     ///
     /// Default is 3 requests.
     pub const DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER: usize = 3;
 
     /// Default divisor of the max inflight request when calculating search breadth of the search
     /// for the intersection of hashes announced by a peer and hashes pending fetch. The max
-    /// inflight requests is configured in
-    /// [`TransactionFetcherInfo`](crate::transactions::fetcher::TransactionFetcherInfo).
+    /// inflight requests is configured in [`TransactionFetcherInfo`].
     ///
     /// Default is 2 requests.
     pub const DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION: usize = 2;
@@ -238,4 +232,37 @@ pub mod tx_fetcher {
     ///
     /// Default is 120 bytes.
     pub const MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED: usize = 120;
+
+    /// Marginal on the number of hashes to preallocate memory for in a
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request, when packed
+    /// according to the [`Eth68`](reth_eth_wire::EthVersion::Eth68) protocol version. To make
+    /// sure enough memory is preallocated in most cases, it's sensible to use a margin. This,
+    /// since the capacity is calculated based on median value
+    /// [`MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED`]. There may otherwise be a noteworthy number of
+    /// cases where just 1 or 2 bytes too little memory is preallocated.
+    ///
+    /// Default is 8 hashes.
+    pub const DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST: usize = 8;
+
+    /// Returns the approx number of transaction hashes that a
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request will have capacity
+    /// for w.r.t. the [`Eth68`](reth_eth_wire::EthVersion::Eth68) protocol version. This is useful
+    /// for preallocating memory.
+    pub const fn approx_capacity_get_pooled_transactions_req_eth68(
+        info: &TransactionFetcherInfo,
+    ) -> usize {
+        let max_size_expected_response =
+            info.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
+
+        max_size_expected_response / MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED +
+            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST
+    }
+
+    /// Returns the approx number of transactions that a
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request will
+    /// have capacity for w.r.t. the [`Eth66`](reth_eth_wire::EthVersion::Eth66) protocol version.
+    /// This is useful for preallocating memory.
+    pub const fn approx_capacity_get_pooled_transactions_req_eth66() -> usize {
+        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST
+    }
 }

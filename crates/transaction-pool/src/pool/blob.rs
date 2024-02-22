@@ -88,6 +88,12 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         Vec::new()
     }
 
+    /// Returns true if the pool exceeds the given limit
+    #[inline]
+    pub(crate) fn exceeds(&self, limit: &SubPoolLimit) -> bool {
+        limit.is_exceeded(self.len(), self.size())
+    }
+
     /// The reported size of all transactions in this pool.
     pub(crate) fn size(&self) -> usize {
         self.size_of.into()
@@ -188,7 +194,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
         let mut removed = Vec::new();
 
-        while limit.is_exceeded(self.len(), self.size()) {
+        while self.exceeds(&limit) {
             let tx = self.all.last().expect("pool is not empty");
             let id = *tx.transaction.id();
             removed.push(self.remove_transaction(&id).expect("transaction exists"));

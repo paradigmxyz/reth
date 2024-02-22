@@ -1,10 +1,17 @@
-# reth db stats
+# reth db clear snapshot
 
-Lists all the tables, their entry count and their size
+Deletes all snapshot segment entries
 
 ```bash
-$ reth db stats --help
-Usage: reth db stats [OPTIONS]
+$ reth db clear snapshot --help
+Usage: reth db clear snapshot [OPTIONS] <SEGMENT>
+
+Arguments:
+  <SEGMENT>
+          Possible values:
+          - headers:      Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
+          - transactions: Snapshot segment responsible for the `Transactions` table
+          - receipts:     Snapshot segment responsible for the `Receipts` table
 
 Options:
       --datadir <DATA_DIR>
@@ -18,9 +25,6 @@ Options:
           
           [default: default]
 
-      --only-total-size
-          Show only the total size for snapshot files
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -29,9 +33,6 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
           
           [default: mainnet]
-
-      --summary
-          Show only the summary per snapshot segment
 
       --instance <INSTANCE>
           Add a new instance of a node.
