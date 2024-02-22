@@ -148,7 +148,6 @@ where
             // Append to Headers segment
             writer.append_header(header, td, header_hash)?;
         }
-        writer.commit()?;
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing header hash index");
 
@@ -566,6 +565,7 @@ mod tests {
         runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
+        runner.db().factory.snapshot_provider().commit().unwrap();
         assert_matches!( result, Ok(ExecOutput { checkpoint: StageCheckpoint {
             block_number,
             stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {

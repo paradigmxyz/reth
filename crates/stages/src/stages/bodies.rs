@@ -242,9 +242,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             highest_block = block_number;
         }
 
-        // Committing static file can be done, since we unwind it if the db tx is not committed.
-        snapshotter.commit()?;
-
         // The stage is "done" if:
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
@@ -385,6 +382,7 @@ mod tests {
         // Check that we only synced around `batch_size` blocks even though the number of blocks
         // synced by the previous stage is higher
         let output = rx.await.unwrap();
+        runner.db().factory.snapshot_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -421,6 +419,7 @@ mod tests {
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
         let output = rx.await.unwrap();
+        runner.db().factory.snapshot_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput {
@@ -458,6 +457,7 @@ mod tests {
 
         // Check that we synced at least 10 blocks
         let first_run = rx.await.unwrap();
+        runner.db().factory.snapshot_provider().commit().unwrap();
         assert_matches!(
             first_run,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -478,6 +478,7 @@ mod tests {
 
         // Check that we synced more blocks
         let output = rx.await.unwrap();
+        runner.db().factory.snapshot_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -518,6 +519,7 @@ mod tests {
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
         let output = rx.await.unwrap();
+        runner.db().factory.snapshot_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput { checkpoint: StageCheckpoint {

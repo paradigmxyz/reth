@@ -8,7 +8,9 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber, B256,
 };
-use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
+use reth_provider::{
+    providers::SnapshotWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+};
 use reth_tokio_util::EventListeners;
 use std::pin::Pin;
 use tokio::sync::watch;
@@ -279,7 +281,9 @@ where
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
+                        self.provider_factory.snapshot_provider().commit()?;
                         provider_rw.commit()?;
+
                         provider_rw = self.provider_factory.provider_rw()?;
                     }
                     Err(err) => {
@@ -371,6 +375,7 @@ where
                         result: out.clone(),
                     });
 
+                    self.provider_factory.snapshot_provider().commit()?;
                     provider_rw.commit()?;
 
                     if done {
@@ -428,6 +433,7 @@ fn on_stage_error<DB: Database>(
                     StageId::MerkleExecute,
                     prev_checkpoint.unwrap_or_default(),
                 )?;
+                factory.snapshot_provider().commit()?;
                 provider_rw.commit()?;
 
                 // We unwind because of a validation error. If the unwind itself
