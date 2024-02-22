@@ -72,6 +72,12 @@ impl<DB> ProviderFactory<DB> {
         })
     }
 
+    /// Enables metrics on the snapshot provider.
+    pub fn with_snapshots_metrics(mut self) -> Self {
+        self.snapshot_provider = self.snapshot_provider.with_metrics();
+        self
+    }
+
     /// Returns reference to the underlying database.
     pub fn db_ref(&self) -> &DB {
         &self.db

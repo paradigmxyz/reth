@@ -545,8 +545,7 @@ impl Discv4Service {
             for (key, val) in config.additional_eip868_rlp_pairs.iter() {
                 builder.add_value_rlp(key, val.clone());
             }
-
-            builder.build(&secret_key).expect("v4 is set; qed")
+            builder.build(&secret_key).expect("v4 is set")
         };
 
         let (to_service, commands_rx) = mpsc::unbounded_channel();

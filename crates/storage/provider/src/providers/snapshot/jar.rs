@@ -1,4 +1,7 @@
-use super::LoadedJarRef;
+use super::{
+    metrics::{SnapshotProviderMetrics, SnapshotProviderOperation},
+    LoadedJarRef,
+};
 use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
@@ -13,7 +16,10 @@ use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
-use std::ops::{Deref, RangeBounds};
+use std::{
+    ops::{Deref, RangeBounds},
+    sync::Arc,
+};
 
 /// Provider over a specific `NippyJar` and range.
 #[derive(Debug)]
@@ -22,6 +28,7 @@ pub struct SnapshotJarProvider<'a> {
     jar: LoadedJarRef<'a>,
     /// Another kind of snapshot segment to help query data from the main one.
     auxiliar_jar: Option<Box<Self>>,
+    metrics: Option<Arc<SnapshotProviderMetrics>>,
 }
 
 impl<'a> Deref for SnapshotJarProvider<'a> {
@@ -33,7 +40,7 @@ impl<'a> Deref for SnapshotJarProvider<'a> {
 
 impl<'a> From<LoadedJarRef<'a>> for SnapshotJarProvider<'a> {
     fn from(value: LoadedJarRef<'a>) -> Self {
-        SnapshotJarProvider { jar: value, auxiliar_jar: None }
+        SnapshotJarProvider { jar: value, auxiliar_jar: None, metrics: None }
     }
 }
 
@@ -43,12 +50,28 @@ impl<'a> SnapshotJarProvider<'a> {
     where
         'b: 'a,
     {
-        SnapshotCursor::new(self.value(), self.mmap_handle())
+        let result = SnapshotCursor::new(self.value(), self.mmap_handle())?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                self.segment(),
+                SnapshotProviderOperation::InitCursor,
+                None,
+            );
+        }
+
+        Ok(result)
     }
 
     /// Adds a new auxiliar snapshot to help query data from the main one
     pub fn with_auxiliar(mut self, auxiliar_jar: SnapshotJarProvider<'a>) -> Self {
         self.auxiliar_jar = Some(Box::new(auxiliar_jar));
+        self
+    }
+
+    /// Enables metrics on the provider.
+    pub fn with_metrics(mut self, metrics: Arc<SnapshotProviderMetrics>) -> Self {
+        self.metrics = Some(metrics);
         self
     }
 }
