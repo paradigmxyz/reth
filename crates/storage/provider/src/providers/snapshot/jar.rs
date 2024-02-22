@@ -69,6 +69,7 @@ impl<'a> SnapshotJarProvider<'a> {
         self
     }
 
+    /// Enables metrics on the provider.
     pub fn with_metrics(mut self, metrics: Arc<SnapshotProviderMetrics>) -> Self {
         self.metrics = Some(metrics);
         self

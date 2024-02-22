@@ -2409,7 +2409,7 @@ mod tests {
     mod new_payload {
         use super::*;
         use reth_db::test_utils::create_test_snapshots_dir;
-        use reth_interfaces::test_utils::{generators, generators::random_block};
+        use reth_interfaces::test_utils::generators::random_block;
         use reth_primitives::{
             genesis::{Genesis, GenesisAllocator},
             Hardfork, U256,

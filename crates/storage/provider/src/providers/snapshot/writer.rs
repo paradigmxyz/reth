@@ -382,7 +382,7 @@ impl<'a> SnapshotProviderRW<'a> {
         let segment = SnapshotSegment::Transactions;
         debug_assert!(self.writer.user_header().segment() == segment);
 
-        let result = self.truncate(segment, number, Some(last_block))?;
+        self.truncate(segment, number, Some(last_block))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -392,7 +392,7 @@ impl<'a> SnapshotProviderRW<'a> {
             );
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Prunes `to_delete` number of receipts from snapshots.
@@ -409,7 +409,7 @@ impl<'a> SnapshotProviderRW<'a> {
         let segment = SnapshotSegment::Receipts;
         debug_assert!(self.writer.user_header().segment() == segment);
 
-        let result = self.truncate(segment, to_delete, Some(last_block))?;
+        self.truncate(segment, to_delete, Some(last_block))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -419,7 +419,7 @@ impl<'a> SnapshotProviderRW<'a> {
             );
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Prunes `to_delete` number of headers from snapshots.
@@ -432,7 +432,7 @@ impl<'a> SnapshotProviderRW<'a> {
         let segment = SnapshotSegment::Headers;
         debug_assert!(self.writer.user_header().segment() == segment);
 
-        let result = self.truncate(segment, to_delete, None)?;
+        self.truncate(segment, to_delete, None)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -442,7 +442,7 @@ impl<'a> SnapshotProviderRW<'a> {
             );
         }
 
-        Ok(result)
+        Ok(())
     }
 
     #[cfg(any(test, feature = "test-utils"))]

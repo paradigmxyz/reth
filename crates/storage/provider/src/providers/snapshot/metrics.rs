@@ -4,11 +4,11 @@ use itertools::Itertools;
 use metrics::{Counter, Histogram};
 use reth_metrics::Metrics;
 use reth_primitives::SnapshotSegment;
-use std::convert::AsRef;
-use strum::{AsRefStr, EnumIter, IntoEnumIterator};
+use strum::{EnumIter, IntoEnumIterator};
 
+/// Metrics for the snapshot provider.
 #[derive(Debug)]
-pub(crate) struct SnapshotProviderMetrics {
+pub struct SnapshotProviderMetrics {
     segment_operations:
         HashMap<(SnapshotSegment, SnapshotProviderOperation), SnapshotProviderOperationMetrics>,
 }
