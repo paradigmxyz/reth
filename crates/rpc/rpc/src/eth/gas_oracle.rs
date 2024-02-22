@@ -191,7 +191,7 @@ where
             results.sort_unstable();
             price = *results
                 .get((results.len() - 1) * self.oracle_config.percentile as usize / 100)
-                .expect("gas price index is a percent of nonzero array length, so a value always exists; qed");
+                .expect("gas price index is a percent of nonzero array length, so a value always exists");
         }
 
         // constrain to the max price

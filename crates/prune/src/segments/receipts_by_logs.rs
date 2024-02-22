@@ -158,11 +158,12 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             // For accurate checkpoints we need to know that we have checked every transaction.
             // Example: we reached the end of the range, and the last receipt is supposed to skip
             // its deletion.
-            last_pruned_transaction =
-                Some(last_pruned_transaction.unwrap_or_default().max(last_skipped_transaction));
+            let last_pruned_transaction = *last_pruned_transaction
+                .insert(last_pruned_transaction.unwrap_or_default().max(last_skipped_transaction));
+
             last_pruned_block = Some(
                 provider
-                    .transaction_block(last_pruned_transaction.expect("qed"))?
+                    .transaction_block(last_pruned_transaction)?
                     .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
                     // If there's more receipts to prune, set the checkpoint block number to
                     // previous, so we could finish pruning its receipts on the
@@ -175,7 +176,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                 break
             }
 
-            from_tx_number = last_pruned_transaction.expect("qed") + 1;
+            from_tx_number = last_pruned_transaction + 1;
         }
 
         // If there are contracts using `PruneMode::Distance(_)` there will be receipts before

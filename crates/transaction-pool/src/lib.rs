@@ -350,7 +350,8 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
-        self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
+        let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
+        results.pop().expect("result length is the same as the input")
     }
 
     async fn add_transactions(

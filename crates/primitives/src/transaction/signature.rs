@@ -42,18 +42,16 @@ impl Compact for Signature {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        buf.put_slice(self.r.as_le_bytes().as_ref());
-        buf.put_slice(self.s.as_le_bytes().as_ref());
+        buf.put_slice(&self.r.as_le_bytes());
+        buf.put_slice(&self.s.as_le_bytes());
         self.odd_y_parity as usize
     }
 
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
-        let r = U256::try_from_le_slice(&buf[..32]).expect("qed");
-        buf.advance(32);
-
-        let s = U256::try_from_le_slice(&buf[..32]).expect("qed");
-        buf.advance(32);
-
+        assert!(buf.len() >= 64);
+        let r = U256::from_le_slice(&buf[0..32]);
+        let s = U256::from_le_slice(&buf[32..64]);
+        buf.advance(64);
         (Signature { r, s, odd_y_parity: identifier != 0 }, buf)
     }
 }
