@@ -868,8 +868,8 @@ impl TransactionFetcher {
                 peer_id, self
             );
 
-            self.decrement_inflight_request_count_for(&peer_id);
-      
+        self.decrement_inflight_request_count_for(&peer_id);
+
         let event = match result {
             Ok(Ok(transactions)) => {
                 // clear received hashes
@@ -1091,9 +1091,9 @@ impl Default for TransactionFetcherInfo {
 mod test {
     use std::collections::HashSet;
 
+    use derive_more::IntoIterator;
     use futures_test::task::noop_context;
     use reth_eth_wire::EthVersion;
-    use derive_more::IntoIterator;
     use reth_primitives::B256;
 
     use crate::transactions::tests::{default_cache, new_mock_session};
