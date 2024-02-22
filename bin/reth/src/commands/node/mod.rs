@@ -10,8 +10,8 @@ use crate::{
     },
     builder::{launch_from_config, NodeConfig},
     cli::{db_type::DatabaseBuilder, ext::RethCliExt},
+    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
-    runner::CliContext,
 };
 use clap::{value_parser, Parser};
 use reth_auto_seal_consensus::AutoSealConsensus;

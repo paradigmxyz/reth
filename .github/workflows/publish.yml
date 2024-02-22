@@ -44,6 +44,6 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: .
+          file: ./Dockerfile
           push: true
           tags: ${{ steps.gh-meta.outputs.tags }}
