@@ -82,7 +82,7 @@ use crate::{
 };
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
-use reth_eth_wire::HandleAnnouncement;
+use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{
     Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
     PooledTransactionsElement, TransactionSigned, TxHash, B256,
@@ -476,7 +476,8 @@ where
             let mut listener = self.event_listener.write();
             listener.subscribe(tx.tx_hash())
         };
-        self.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")?;
+        let mut results = self.add_transactions(origin, std::iter::once(tx));
+        results.pop().expect("result length is the same as the input")?;
         Ok(listener)
     }
 
@@ -669,9 +670,9 @@ where
     }
 
     /// Removes and returns all transactions that are present in the pool.
-    pub(crate) fn retain_unknown<A: HandleAnnouncement>(&self, announcement: &mut A) -> Option<A>
+    pub(crate) fn retain_unknown<A: HandleMempoolData>(&self, announcement: &mut A) -> Option<A>
     where
-        A: HandleAnnouncement,
+        A: HandleMempoolData,
     {
         if announcement.is_empty() {
             return None

@@ -201,13 +201,13 @@ impl SnapshotProvider {
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
         } else {
-            NippyJar::<SegmentHeader>::load(&self.path.join(segment.filename(&fixed_block_range)))
-                .map(|jar| {
-                    if self.load_filters {
-                        return jar.load_filters()
-                    }
-                    Ok(jar)
-                })??
+            let mut jar = NippyJar::<SegmentHeader>::load(
+                &self.path.join(segment.filename(&fixed_block_range)),
+            )?;
+            if self.load_filters {
+                jar.load_filters()?;
+            }
+            jar
         };
 
         jar.delete()?;
@@ -225,29 +225,20 @@ impl SnapshotProvider {
         fixed_block_range: &SegmentRangeInclusive,
     ) -> ProviderResult<SnapshotJarProvider<'_>> {
         let key = (fixed_block_range.end(), segment);
-        let result: ProviderResult<SnapshotJarProvider<'_>> =
-            if let Some(jar) = self.map.get(&key) {
-                Ok(jar.into())
-            } else {
-                let jar = NippyJar::load(&self.path.join(segment.filename(fixed_block_range)))
-                    .map(|jar| {
-                    if self.load_filters {
-                        return jar.load_filters()
-                    }
-                    Ok(jar)
-                })??;
 
-                match self.map.entry(key) {
-                    DashMapEntry::Occupied(_) => {}
-                    DashMapEntry::Vacant(entry) => {
-                        entry.insert(LoadedJar::new(jar)?);
-                    }
-                };
+        // Avoid using `entry` directly to avoid a write lock in the common case.
+        let mut provider: SnapshotJarProvider<'_> = if let Some(jar) = self.map.get(&key) {
+            jar.into()
+        } else {
+            let path = self.path.join(segment.filename(fixed_block_range));
+            let mut jar = NippyJar::load(&path)?;
+            if self.load_filters {
+                jar.load_filters()?;
+            }
 
-                Ok(self.map.get(&key).expect("qed").into())
-            };
+            self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
+        };
 
-        let mut provider = result?;
         if let Some(metrics) = &self.metrics {
             provider = provider.with_metrics(metrics.clone());
         }

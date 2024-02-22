@@ -1,7 +1,7 @@
 use crate::{
     identifier::{SenderId, TransactionId},
     pool::{
-        best::{BestTransactions, BestTransactionsWithBasefee},
+        best::{BestTransactions, BestTransactionsWithFees},
         size::SizeTracker,
     },
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
@@ -115,9 +115,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
     }
 
-    /// Same as `best` but only returns transactions that satisfy the given basefee.
-    pub(crate) fn best_with_basefee(&self, base_fee: u64) -> BestTransactionsWithBasefee<T> {
-        BestTransactionsWithBasefee { best: self.best(), base_fee }
+    /// Same as `best` but only returns transactions that satisfy the given basefee and blobfee.
+    pub(crate) fn best_with_basefee_and_blobfee(
+        &self,
+        base_fee: u64,
+        base_fee_per_blob_gas: u64,
+    ) -> BestTransactionsWithFees<T> {
+        BestTransactionsWithFees { best: self.best(), base_fee, base_fee_per_blob_gas }
     }
 
     /// Same as `best` but also includes the given unlocked transactions.

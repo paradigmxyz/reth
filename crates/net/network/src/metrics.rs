@@ -77,6 +77,12 @@ pub struct TransactionsManagerMetrics {
     /// seen by that peer.
     pub(crate) occurrences_of_transaction_already_seen_by_peer: Counter,
 
+    /* -- Freq txns already in pool -- */
+    /// Total number of times a hash is announced that is already in the local pool.
+    pub(crate) occurrences_hashes_already_in_pool: Counter,
+    /// Total number of times a transaction is sent that is already in the local pool.
+    pub(crate) occurrences_transactions_already_in_pool: Counter,
+
     /* ================ POOL IMPORTS ================ */
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
