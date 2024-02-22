@@ -23,7 +23,7 @@ pub struct DatabaseEnvMetrics {
     operations: FxHashMap<(Tables, Operation), OperationMetrics>,
     /// Caches TransactionMetrics handles for counters grouped by only transaction mode.
     /// Updated both at tx open and close.
-    open_transactions: FxHashMap<TransactionMode, TransactionMetrics>,
+    transactions: FxHashMap<TransactionMode, TransactionMetrics>,
     /// Caches TransactionOutcomeMetrics handles for counters grouped by transaction mode and
     /// outcome. Can only be updated at tx close, as outcome is only known at that point.
     transaction_outcomes:
@@ -36,7 +36,7 @@ impl DatabaseEnvMetrics {
         // to avoid runtime locks on the map when recording metrics.
         Self {
             operations: Self::generate_operation_handles(),
-            open_transactions: Self::generate_transaction_handles(),
+            transactions: Self::generate_transaction_handles(),
             transaction_outcomes: Self::generate_transaction_outcome_handles(),
         }
     }
@@ -117,7 +117,7 @@ impl DatabaseEnvMetrics {
 
     /// Record metrics for opening a database transaction.
     pub(crate) fn record_opened_transaction(&self, mode: TransactionMode) {
-        self.open_transactions
+        self.transactions
             .get(&mode)
             .expect("transaction mode metric handle not found")
             .record_open();
@@ -132,7 +132,7 @@ impl DatabaseEnvMetrics {
         close_duration: Option<Duration>,
         commit_latency: Option<CommitLatency>,
     ) {
-        self.open_transactions
+        self.transactions
             .get(&mode)
             .expect("transaction mode metric handle not found")
             .record_close();
