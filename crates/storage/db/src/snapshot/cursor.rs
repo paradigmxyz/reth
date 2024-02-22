@@ -18,8 +18,8 @@ impl<'a> SnapshotCursor<'a> {
 
     /// Returns the current `BlockNumber` or `TxNumber` of the cursor depending on the kind of
     /// snapshot segment.
-    pub fn number(&self) -> u64 {
-        self.row_index() + self.jar().user_header().start()
+    pub fn number(&self) -> Option<u64> {
+        self.jar().user_header().start().map(|start| self.row_index() + start)
     }
 
     /// Gets a row of values.
@@ -34,13 +34,15 @@ impl<'a> SnapshotCursor<'a> {
 
         let row = match key_or_num {
             KeyOrNumber::Key(k) => self.row_by_key_with_cols(k, mask),
-            KeyOrNumber::Number(n) => {
-                let offset = self.jar().user_header().start();
-                if offset > n {
-                    return Ok(None)
+            KeyOrNumber::Number(n) => match self.jar().user_header().start() {
+                Some(offset) => {
+                    if offset > n {
+                        return Ok(None)
+                    }
+                    self.row_by_number_with_cols((n - offset) as usize, mask)
                 }
-                self.row_by_number_with_cols((n - offset) as usize, mask)
-            }
+                None => Ok(None),
+            },
         }?;
 
         Ok(row)

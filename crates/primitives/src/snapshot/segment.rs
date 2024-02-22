@@ -163,13 +163,13 @@ impl SegmentHeader {
     }
 
     /// Returns the block range.
-    pub fn block_range(&self) -> Option<SegmentRangeInclusive> {
-        self.block_range
+    pub fn block_range(&self) -> Option<&SegmentRangeInclusive> {
+        self.block_range.as_ref()
     }
 
     /// Returns the transaction range.
-    pub fn tx_range(&self) -> Option<SegmentRangeInclusive> {
-        self.tx_range
+    pub fn tx_range(&self) -> Option<&SegmentRangeInclusive> {
+        self.tx_range.as_ref()
     }
 
     /// The expected block start of the segment.
@@ -193,39 +193,21 @@ impl SegmentHeader {
     }
 
     /// Returns the first transaction number of the segment.  
-    ///  
-    /// ### Panics
-    ///
-    /// This method panics if `self.tx_range` is `None`.
-    #[track_caller]
-    pub fn tx_start(&self) -> TxNumber {
-        self.tx_range.as_ref().expect("should exist").start()
+    pub fn tx_start(&self) -> Option<TxNumber> {
+        self.tx_range.as_ref().map(|t| t.start())
     }
 
     /// Returns the last transaction number of the segment.   
-    ///
-    /// ### Panics
-    ///
-    /// This method panics if `self.tx_range` is `None`.
-    #[track_caller]
-    pub fn tx_end(&self) -> TxNumber {
-        self.tx_range.as_ref().expect("should exist").end()
+    pub fn tx_end(&self) -> Option<TxNumber> {
+        self.tx_range.as_ref().map(|t| t.end())
     }
 
     /// Number of transactions.  
-    ///
-    /// ### Panics
-    ///
-    /// This method panics if `self.tx_range` is `None`.
     pub fn tx_len(&self) -> Option<u64> {
         self.tx_range.as_ref().map(|r| (r.end() + 1) - r.start())
     }
 
     /// Number of blocks.
-    ///
-    /// ### Panics
-    ///
-    /// This method panics if `self.tx_range` is `None`.
     pub fn block_len(&self) -> Option<u64> {
         self.block_range.as_ref().map(|r| (r.end() + 1) - r.start())
     }
@@ -303,9 +285,9 @@ impl SegmentHeader {
     }
 
     /// Returns the row offset which depends on whether the segment is block or transaction based.
-    pub fn start(&self) -> u64 {
+    pub fn start(&self) -> Option<u64> {
         match self.segment {
-            SnapshotSegment::Headers => self.expected_block_start(),
+            SnapshotSegment::Headers => self.block_start(),
             SnapshotSegment::Transactions | SnapshotSegment::Receipts => self.tx_start(),
         }
     }
