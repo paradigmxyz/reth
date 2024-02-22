@@ -80,7 +80,9 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         Some(tx.transaction)
     }
 
-    /// Returns all transactions that satisfy the given basefee and blob_fee.
+    /// Returns all transactions that satisfy the given basefee and blobfee.
+    ///
+    /// Note: This does not remove any the transactions from the pool.
     pub(crate) fn satisfy_attributes(
         &self,
         best_transactions_attributes: BestTransactionsAttributes,
@@ -88,12 +90,9 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         let mut transactions = Vec::new();
         {
             // short path if blob_fee is None in provided best transactions attributes
-            if best_transactions_attributes.blob_fee.is_some() {
-                let blob_fee_to_satisfy = best_transactions_attributes
-                    .blob_fee
-                    .expect("blob fee is some and already checked")
-                    as u128;
-
+            if let Some(blob_fee_to_satisfy) =
+                best_transactions_attributes.blob_fee.map(|fee| fee as u128)
+            {
                 let mut iter = self.by_id.iter().peekable();
 
                 while let Some((id, tx)) = iter.next() {
@@ -102,6 +101,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
                         tx.transaction.max_fee_per_gas() <
                             best_transactions_attributes.basefee as u128
                     {
+                        // does not satisfy the blob fee or base fee
                         // still parked in blob pool -> skip descendant transactions
                         'this: while let Some((peek, _)) = iter.peek() {
                             if peek.sender != id.sender {
