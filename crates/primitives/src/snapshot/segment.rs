@@ -38,6 +38,15 @@ pub enum SnapshotSegment {
 }
 
 impl SnapshotSegment {
+    /// Returns the segment as a string.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            SnapshotSegment::Headers => "headers",
+            SnapshotSegment::Transactions => "transactions",
+            SnapshotSegment::Receipts => "receipts",
+        }
+    }
+
     /// Returns the default configuration of the segment.
     pub const fn config(&self) -> SegmentConfig {
         let default_config = SegmentConfig {
