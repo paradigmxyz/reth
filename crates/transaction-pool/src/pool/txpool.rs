@@ -1583,7 +1583,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             } else {
                 // The transaction was added above so the _inclusive_ descendants iterator
                 // returns at least 1 tx.
-                let (id, tx) = descendants.peek().expect("Includes >= 1; qed.");
+                let (id, tx) = descendants.peek().expect("includes >= 1");
                 if id.nonce < inserted_tx_id.nonce {
                     !tx.state.is_pending()
                 } else {

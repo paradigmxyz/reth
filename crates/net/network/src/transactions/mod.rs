@@ -857,36 +857,39 @@ where
             NetworkEvent::SessionEstablished {
                 peer_id, client_version, messages, version, ..
             } => {
-                // insert a new peer into the peerset
-                self.peers.insert(peer_id, Peer::new(messages, version, client_version));
+                // Insert a new peer into the peerset.
+                let peer = Peer::new(messages, version, client_version);
+                let peer = match self.peers.entry(peer_id) {
+                    Entry::Occupied(mut entry) => {
+                        entry.insert(peer);
+                        entry.into_mut()
+                    }
+                    Entry::Vacant(entry) => entry.insert(peer),
+                };
 
                 // Send a `NewPooledTransactionHashes` to the peer with up to
-                // `NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT` transactions in the
-                // pool
-                if !self.network.is_initially_syncing() {
-                    if self.network.tx_gossip_disabled() {
-                        return
-                    }
-                    let peer = self.peers.get_mut(&peer_id).expect("is present; qed");
-
-                    let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
-
-                    let pooled_txs = self.pool.pooled_transactions_max(
-                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
-                    );
-                    if pooled_txs.is_empty() {
-                        // do not send a message if there are no transactions in the pool
-                        return
-                    }
-
-                    for pooled_tx in pooled_txs.into_iter() {
-                        peer.seen_transactions.insert(*pooled_tx.hash());
-                        msg_builder.push_pooled(pooled_tx);
-                    }
-
-                    let msg = msg_builder.build();
-                    self.network.send_transactions_hashes(peer_id, msg);
+                // `SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE`
+                // transactions in the pool.
+                if self.network.is_initially_syncing() || self.network.tx_gossip_disabled() {
+                    return
                 }
+
+                let pooled_txs = self.pool.pooled_transactions_max(
+                    SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
+                );
+                if pooled_txs.is_empty() {
+                    // do not send a message if there are no transactions in the pool
+                    return
+                }
+
+                let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
+                for pooled_tx in pooled_txs {
+                    peer.seen_transactions.insert(*pooled_tx.hash());
+                    msg_builder.push_pooled(pooled_tx);
+                }
+
+                let msg = msg_builder.build();
+                self.network.send_transactions_hashes(peer_id, msg);
             }
             _ => {}
         }
