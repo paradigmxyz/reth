@@ -793,7 +793,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 while $this.$pool.exceeds(&$this.config.$limit)
                     {
                         trace!(
-                             target: "txpool",
+                            target: "txpool",
                             "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             stringify!($pool),
                             $this.config.$limit,
