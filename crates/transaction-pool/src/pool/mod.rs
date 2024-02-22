@@ -476,7 +476,8 @@ where
             let mut listener = self.event_listener.write();
             listener.subscribe(tx.tx_hash())
         };
-        self.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")?;
+        let mut results = self.add_transactions(origin, std::iter::once(tx));
+        results.pop().expect("result length is the same as the input")?;
         Ok(listener)
     }
 
