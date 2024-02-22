@@ -805,7 +805,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         let removed_from_subpool = $this.$pool.truncate_pool($this.config.$limit.clone());
 
                         trace!(
-                             target: "txpool",
+                            target: "txpool",
                             "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             removed_from_subpool.len(),
                             stringify!($pool),
