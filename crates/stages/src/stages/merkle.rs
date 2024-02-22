@@ -572,14 +572,14 @@ mod tests {
 
                     let mut rev_changeset_walker =
                         storage_changesets_cursor.walk_back(None).unwrap();
-                    while let Some((tid_address, entry)) =
+                    while let Some((bn_address, entry)) =
                         rev_changeset_walker.next().transpose().unwrap()
                     {
-                        if tid_address.block_number() < target_block {
+                        if bn_address.block_number() < target_block {
                             break
                         }
 
-                        tree.entry(keccak256(tid_address.address()))
+                        tree.entry(keccak256(bn_address.address()))
                             .or_default()
                             .insert(keccak256(entry.key), entry.value);
                     }
