@@ -34,3 +34,7 @@ pub mod eth_dao_fork;
 /// Optimism-specific implementation and utilities for the executor
 #[cfg(feature = "optimism")]
 pub mod optimism;
+
+/// Common test helpers
+#[cfg(test)]
+pub mod test_utils;

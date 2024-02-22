@@ -310,7 +310,7 @@ where
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
-            .into())
+            .into());
         }
         let time = Instant::now();
         self.apply_post_execution_state_change(block, total_difficulty)?;
@@ -321,8 +321,8 @@ where
             !self
                 .prune_modes
                 .account_history
-                .map_or(false, |mode| mode.should_prune(block.number, tip)) &&
-                !self
+                .map_or(false, |mode| mode.should_prune(block.number, tip))
+                && !self
                     .prune_modes
                     .storage_history
                     .map_or(false, |mode| mode.should_prune(block.number, tip))
@@ -369,7 +369,7 @@ where
             self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
         {
             receipts.clear();
-            return Ok(())
+            return Ok(());
         }
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
@@ -377,7 +377,7 @@ where
         let prunable_receipts =
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
         if !prunable_receipts {
-            return Ok(())
+            return Ok(());
         }
 
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
@@ -438,7 +438,7 @@ where
                 verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
             {
                 debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
-                return Err(error)
+                return Err(error);
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -455,7 +455,7 @@ where
 
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok((Vec::new(), 0))
+            return Ok((Vec::new(), 0));
         }
 
         let mut cumulative_gas_used = 0;
@@ -470,7 +470,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, *sender)?;
@@ -571,14 +571,14 @@ pub fn compare_receipts_root_and_logs_bloom(
         return Err(BlockValidationError::ReceiptRootDiff(
             GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
         )
-        .into())
+        .into());
     }
 
     if calculated_logs_bloom != expected_logs_bloom {
         return Err(BlockValidationError::BloomLogDiff(
             GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
         )
-        .into())
+        .into());
     }
 
     Ok(())
@@ -587,114 +587,20 @@ pub fn compare_receipts_root_and_logs_bloom(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_interfaces::provider::ProviderResult;
+    use crate::test_utils::StateProviderTest;
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS},
-        keccak256,
-        trie::AccountProof,
-        Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, Signature, StorageKey,
-        Transaction, TransactionKind, TxEip1559, MAINNET,
+        keccak256, Account, Bytes, ChainSpecBuilder, ForkCondition, Signature, Transaction,
+        TransactionKind, TxEip1559, MAINNET,
     };
-    #[cfg(feature = "optimism")]
-    use reth_provider::BundleStateWithReceipts;
-    use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
-    use reth_trie::updates::TrieUpdates;
     use revm::{Database, TransitionState};
     use std::collections::HashMap;
 
     static BEACON_ROOT_CONTRACT_CODE: Bytes = bytes!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
 
-    #[derive(Debug, Default, Clone, Eq, PartialEq)]
-    struct StateProviderTest {
-        accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
-        contracts: HashMap<B256, Bytecode>,
-        block_hash: HashMap<u64, B256>,
-    }
-
-    impl StateProviderTest {
-        /// Insert account.
-        fn insert_account(
-            &mut self,
-            address: Address,
-            mut account: Account,
-            bytecode: Option<Bytes>,
-            storage: HashMap<StorageKey, U256>,
-        ) {
-            if let Some(bytecode) = bytecode {
-                let hash = keccak256(&bytecode);
-                account.bytecode_hash = Some(hash);
-                self.contracts.insert(hash, Bytecode::new_raw(bytecode));
-            }
-            self.accounts.insert(address, (storage, account));
-        }
-    }
-
-    impl AccountReader for StateProviderTest {
-        fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-            Ok(self.accounts.get(&address).map(|(_, acc)| *acc))
-        }
-    }
-
-    impl BlockHashReader for StateProviderTest {
-        fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-            Ok(self.block_hash.get(&number).cloned())
-        }
-
-        fn canonical_hashes_range(
-            &self,
-            start: BlockNumber,
-            end: BlockNumber,
-        ) -> ProviderResult<Vec<B256>> {
-            let range = start..end;
-            Ok(self
-                .block_hash
-                .iter()
-                .filter_map(|(block, hash)| range.contains(block).then_some(*hash))
-                .collect())
-        }
-    }
-
-    impl StateRootProvider for StateProviderTest {
-        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
-            unimplemented!("state root computation is not supported")
-        }
-
-        fn state_root_with_updates(
-            &self,
-            _bundle_state: &BundleStateWithReceipts,
-        ) -> ProviderResult<(B256, TrieUpdates)> {
-            unimplemented!("state root computation is not supported")
-        }
-    }
-
-    impl StateProvider for StateProviderTest {
-        fn storage(
-            &self,
-            account: Address,
-            storage_key: StorageKey,
-        ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
-            Ok(self
-                .accounts
-                .get(&account)
-                .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
-        }
-
-        fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
-            Ok(self.contracts.get(&code_hash).cloned())
-        }
-
-        fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-            unimplemented!("proof generation is not supported")
-        }
-    }
-
-    #[test]
-    fn eip_4788_non_genesis_call() {
-        let mut header =
-            Header { timestamp: 1, number: 1, excess_blob_gas: Some(0), ..Header::default() };
-
+    fn create_state_provider_with_beacon_root_contract() -> StateProviderTest {
         let mut db = StateProviderTest::default();
 
         let beacon_root_contract_account = Account {
@@ -709,6 +615,16 @@ mod tests {
             Some(BEACON_ROOT_CONTRACT_CODE.clone()),
             HashMap::new(),
         );
+
+        db
+    }
+
+    #[test]
+    fn eip_4788_non_genesis_call() {
+        let mut header =
+            Header { timestamp: 1, number: 1, excess_blob_gas: Some(0), ..Header::default() };
+
+        let db = create_state_provider_with_beacon_root_contract();
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
@@ -846,20 +762,8 @@ mod tests {
     fn eip_4788_empty_account_call() {
         // This test ensures that we do not increment the nonce of an empty SYSTEM_ADDRESS account
         // during the pre-block call
-        let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_account = Account {
-            balance: U256::ZERO,
-            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
-            nonce: 1,
-        };
-
-        db.insert_account(
-            BEACON_ROOTS_ADDRESS,
-            beacon_root_contract_account,
-            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
-            HashMap::new(),
-        );
+        let mut db = create_state_provider_with_beacon_root_contract();
 
         // insert an empty SYSTEM_ADDRESS
         db.insert_account(SYSTEM_ADDRESS, Account::default(), None, HashMap::new());
@@ -913,20 +817,7 @@ mod tests {
 
     #[test]
     fn eip_4788_genesis_call() {
-        let mut db = StateProviderTest::default();
-
-        let beacon_root_contract_account = Account {
-            balance: U256::ZERO,
-            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
-            nonce: 1,
-        };
-
-        db.insert_account(
-            BEACON_ROOTS_ADDRESS,
-            beacon_root_contract_account,
-            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
-            HashMap::new(),
-        );
+        let db = create_state_provider_with_beacon_root_contract();
 
         // activate cancun at genesis
         let chain_spec = Arc::new(
@@ -1009,20 +900,7 @@ mod tests {
             ..Header::default()
         };
 
-        let mut db = StateProviderTest::default();
-
-        let beacon_root_contract_account = Account {
-            balance: U256::ZERO,
-            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
-            nonce: 1,
-        };
-
-        db.insert_account(
-            BEACON_ROOTS_ADDRESS,
-            beacon_root_contract_account,
-            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
-            HashMap::new(),
-        );
+        let db = create_state_provider_with_beacon_root_contract();
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
