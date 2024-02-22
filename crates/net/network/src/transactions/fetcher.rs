@@ -929,7 +929,7 @@ impl TransactionFetcher {
                 });
                 fetched.shrink_to_fit();
                 self.remove_hashes_from_transaction_fetcher(fetched);
-              
+
                 // buffer left over hashes
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
 

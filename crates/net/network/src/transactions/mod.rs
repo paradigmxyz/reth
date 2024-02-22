@@ -573,7 +573,7 @@ where
     fn on_new_pooled_transaction_hashes(
         &mut self,
         peer_id: PeerId,
-        mut msg: NewPooledTransactionHashes,
+        msg: NewPooledTransactionHashes,
         cx: &mut Context<'_>,
     ) {
         // If the node is initially syncing, ignore transactions
