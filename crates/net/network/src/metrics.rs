@@ -91,7 +91,7 @@ pub struct TransactionsManagerMetrics {
     pub(crate) hashes_pending_fetch: Gauge,
 
     // Poll duration of `TransactionsManager` future
-    /// Duration of call to [`TransactionsManager`](crate::transactions::TransactionsManager) s
+    /// Duration of call to [`TransactionsManager`](crate::transactions::TransactionsManager)s
     /// poll function.
     ///
     /// Updating metrics could take time, so the true duration of this call could
