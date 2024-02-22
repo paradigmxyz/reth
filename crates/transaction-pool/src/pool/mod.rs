@@ -82,7 +82,7 @@ use crate::{
 };
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
-use reth_eth_wire::HandlePayload;
+use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{
     Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
     PooledTransactionsElement, TransactionSigned, TxHash, B256,
@@ -670,9 +670,9 @@ where
     }
 
     /// Removes and returns all transactions that are present in the pool.
-    pub(crate) fn retain_unknown<A: HandlePayload>(&self, announcement: &mut A) -> Option<A>
+    pub(crate) fn retain_unknown<A: HandleMempoolData>(&self, announcement: &mut A) -> Option<A>
     where
-        A: HandlePayload,
+        A: HandleMempoolData,
     {
         if announcement.is_empty() {
             return None

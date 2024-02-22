@@ -7,7 +7,7 @@ use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
-    DedupPayload, GetPooledTransactions, HandlePayload, PartiallyValidData, RequestTxHashes,
+    DedupPayload, GetPooledTransactions, HandleMempoolData, PartiallyValidData, RequestTxHashes,
     ValidAnnouncementData,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};

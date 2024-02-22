@@ -534,7 +534,7 @@ impl DedupPayload for NewPooledTransactionHashes66 {
 /// Interface for handling announcement data in filters in the transaction manager and transaction
 /// pool. Note: this trait may disappear when distinction between eth66 and eth68 hashes is more
 /// clearly defined, see <https://github.com/paradigmxyz/reth/issues/6148>.
-pub trait HandlePayload {
+pub trait HandleMempoolData {
     /// The announcement contains no entries.
     fn is_empty(&self) -> bool;
 
@@ -548,7 +548,7 @@ pub trait HandlePayload {
 
 macro_rules! hash_map_handle_payload_impl {
     ($data_ty:ty, $(<$generic:ident>)?) => {
-        impl$(<$generic>)? HandlePayload for $data_ty {
+        impl$(<$generic>)? HandleMempoolData for $data_ty {
             fn is_empty(&self) -> bool {
                 self.data.is_empty()
             }

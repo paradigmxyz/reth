@@ -36,7 +36,7 @@ use crate::{
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    EthVersion, GetPooledTransactions, HandlePayload, NewPooledTransactionHashes,
+    EthVersion, GetPooledTransactions, HandleMempoolData, NewPooledTransactionHashes,
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions,
     RequestTxHashes, Transactions,
 };

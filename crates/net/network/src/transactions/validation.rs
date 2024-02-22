@@ -6,7 +6,7 @@ use std::{fmt, mem};
 
 use derive_more::{Deref, DerefMut, Display};
 use reth_eth_wire::{
-    DedupPayload, Eth68TxMetadata, HandlePayload, PartiallyValidData, ValidAnnouncementData,
+    DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
 };
 use reth_primitives::{Signature, TxHash, TxType};
