@@ -50,8 +50,4 @@ pub enum StageEnum {
     ///
     /// Manages historical data related to storage.
     StorageHistory,
-    /// The total difficulty stage within the pipeline.
-    ///
-    /// Handles computations and data related to total difficulty.
-    TotalDifficulty,
 }

@@ -180,14 +180,6 @@ impl Command {
                         Default::default(),
                     )?;
                 }
-                StageEnum::TotalDifficulty => {
-                    tx.clear::<tables::HeaderTD>()?;
-                    tx.put::<tables::SyncStage>(
-                        StageId::TotalDifficulty.to_string(),
-                        Default::default(),
-                    )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
-                }
                 StageEnum::TxLookup => {
                     tx.clear::<tables::TxHashNumber>()?;
                     tx.put::<tables::SyncStage>(
