@@ -151,7 +151,7 @@
 
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
-use reth_eth_wire::HandleAnnouncement;
+use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
@@ -350,7 +350,8 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
-        self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
+        let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
+        results.pop().expect("result length is the same as the input")
     }
 
     async fn add_transactions(
@@ -457,7 +458,7 @@ where
 
     fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
     where
-        A: HandleAnnouncement,
+        A: HandleMempoolData,
     {
         self.pool.retain_unknown(announcement)
     }

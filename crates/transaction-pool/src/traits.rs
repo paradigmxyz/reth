@@ -8,7 +8,7 @@ use crate::{
     AllTransactionsEvents,
 };
 use futures_util::{ready, Stream};
-use reth_eth_wire::HandleAnnouncement;
+use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{
     kzg::KzgSettings, AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
@@ -290,7 +290,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: P2P
     fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
     where
-        A: HandleAnnouncement;
+        A: HandleMempoolData;
 
     /// Returns if the transaction for the given hash is already included in this pool.
     fn contains(&self, tx_hash: &TxHash) -> bool {

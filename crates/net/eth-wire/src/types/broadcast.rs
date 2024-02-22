@@ -7,7 +7,9 @@ use alloy_rlp::{
 
 use derive_more::{Constructor, Deref, DerefMut, IntoIterator};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Block, Bytes, TransactionSigned, TxHash, B256, U128};
+use reth_primitives::{
+    Block, Bytes, PooledTransactionsElement, TransactionSigned, TxHash, B256, U128,
+};
 
 use std::{collections::HashMap, mem, sync::Arc};
 
@@ -439,10 +441,9 @@ impl Decodable for NewPooledTransactionHashes68 {
     }
 }
 
-/// Interface for handling announcement data in filters in the transaction manager and transaction
-/// pool. Note: this trait may disappear when distinction between eth66 and eth68 hashes is more
-/// clearly defined, see <https://github.com/paradigmxyz/reth/issues/6148>.
-pub trait HandleAnnouncement {
+/// Interface for handling mempool message data. Used in various filters in pipelines in
+/// `TransactionsManager` and in queries to `TransactionPool`.
+pub trait HandleMempoolData {
     /// The announcement contains no entries.
     fn is_empty(&self) -> bool;
 
@@ -452,13 +453,16 @@ pub trait HandleAnnouncement {
     /// Retain only entries for which the hash in the entry satisfies a given predicate, return
     /// the rest.
     fn retain_by_hash(&mut self, f: impl FnMut(&TxHash) -> bool) -> Self;
+}
 
+/// Extension of [`HandleMempoolData`] interface, for mempool messages that are versioned.
+pub trait HandleVersionedMempoolData {
     /// Returns the announcement version, either [`Eth66`](EthVersion::Eth66) or
     /// [`Eth68`](EthVersion::Eth68).
     fn msg_version(&self) -> EthVersion;
 }
 
-impl HandleAnnouncement for NewPooledTransactionHashes {
+impl HandleMempoolData for NewPooledTransactionHashes {
     fn is_empty(&self) -> bool {
         self.is_empty()
     }
@@ -473,13 +477,15 @@ impl HandleAnnouncement for NewPooledTransactionHashes {
             NewPooledTransactionHashes::Eth68(msg) => Self::Eth68(msg.retain_by_hash(f)),
         }
     }
+}
 
+impl HandleVersionedMempoolData for NewPooledTransactionHashes {
     fn msg_version(&self) -> EthVersion {
         self.version()
     }
 }
 
-impl HandleAnnouncement for NewPooledTransactionHashes68 {
+impl HandleMempoolData for NewPooledTransactionHashes68 {
     fn is_empty(&self) -> bool {
         self.hashes.is_empty()
     }
@@ -511,13 +517,15 @@ impl HandleAnnouncement for NewPooledTransactionHashes68 {
 
         Self { hashes: removed_hashes, types: removed_types, sizes: removed_sizes }
     }
+}
 
+impl HandleVersionedMempoolData for NewPooledTransactionHashes68 {
     fn msg_version(&self) -> EthVersion {
         EthVersion::Eth68
     }
 }
 
-impl HandleAnnouncement for NewPooledTransactionHashes66 {
+impl HandleMempoolData for NewPooledTransactionHashes66 {
     fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -543,7 +551,9 @@ impl HandleAnnouncement for NewPooledTransactionHashes66 {
 
         Self(removed_hashes)
     }
+}
 
+impl HandleVersionedMempoolData for NewPooledTransactionHashes66 {
     fn msg_version(&self) -> EthVersion {
         EthVersion::Eth66
     }
@@ -601,7 +611,7 @@ impl ValidAnnouncementData {
     }
 }
 
-impl HandleAnnouncement for ValidAnnouncementData {
+impl HandleMempoolData for ValidAnnouncementData {
     fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
@@ -619,7 +629,9 @@ impl HandleAnnouncement for ValidAnnouncementData {
 
         ValidAnnouncementData::new(rest, self.version)
     }
+}
 
+impl HandleVersionedMempoolData for ValidAnnouncementData {
     fn msg_version(&self) -> EthVersion {
         self.version
     }
@@ -655,6 +667,34 @@ impl FromIterator<(TxHash, Option<(u8, usize)>)> for RequestTxHashes {
         hashes.shrink_to_fit();
 
         RequestTxHashes::new(hashes)
+    }
+}
+
+impl HandleMempoolData for Vec<PooledTransactionsElement> {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
+        let mut indices_to_remove = vec![];
+        for (i, tx) in self.iter().enumerate() {
+            if !f(tx.hash()) {
+                indices_to_remove.push(i);
+            }
+        }
+
+        let mut removed_txns = Vec::with_capacity(indices_to_remove.len());
+
+        for index in indices_to_remove.into_iter().rev() {
+            let hash = self.remove(index);
+            removed_txns.push(hash);
+        }
+
+        removed_txns
     }
 }
 
