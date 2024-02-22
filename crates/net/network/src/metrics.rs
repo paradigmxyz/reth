@@ -53,6 +53,22 @@ pub struct SessionManagerMetrics {
     pub(crate) total_dial_successes: Counter,
 }
 
+/// Metrics for TransactionsManager
+#[derive(Metrics)]
+#[metrics(scope = "network.fetcher")]
+pub struct TransactionFetcherMetrics {
+    /// Number of active peers
+    pub(crate) active_peers: Gauge,
+    /// Number of inflight requests
+    pub(crate) inflight_requests: Gauge,
+    /// Number of hashes pending fetch
+    pub(crate) hashes_pending_fetch: Gauge,
+    /// Number of entries in the hashes fetch inflight and pending fetch
+    pub(crate) inflight_and_pending_fetch: Gauge,
+    /// Total sum of hashes fetch metadata
+    pub(crate) total_hashes_fetch_metadata: Gauge,
+}
+
 /// Metrics for the [`TransactionsManager`](crate::transactions::TransactionsManager).
 #[derive(Metrics)]
 #[metrics(scope = "network")]

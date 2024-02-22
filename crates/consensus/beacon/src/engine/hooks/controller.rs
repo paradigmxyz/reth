@@ -6,6 +6,8 @@ use std::{
     collections::VecDeque,
     task::{Context, Poll},
 };
+use metrics::Gauge;
+use reth_metrics::Metrics;
 use tracing::debug;
 
 #[derive(Debug)]
@@ -14,6 +16,14 @@ pub(crate) struct PolledHook {
     pub(crate) name: &'static str,
     pub(crate) event: EngineHookEvent,
     pub(crate) db_access_level: EngineHookDBAccessLevel,
+}
+
+/// Metrics for the engine hook controller
+#[derive(Metrics)]
+#[metrics(scope = "consensus.engine_hook_controller")]
+pub struct EngineHookControllerMetrics {
+    /// Current hooks
+    pub hooks: Gauge,
 }
 
 /// Manages hooks under the control of the engine.
@@ -29,12 +39,14 @@ pub(crate) struct EngineHooksController {
     hooks: VecDeque<Box<dyn EngineHook>>,
     /// Currently running hook with DB write access, if any.
     active_db_write_hook: Option<Box<dyn EngineHook>>,
+    /// Hook metrics
+    metrics: EngineHookControllerMetrics,
 }
 
 impl EngineHooksController {
     /// Creates a new [`EngineHooksController`].
     pub(crate) fn new(hooks: EngineHooks) -> Self {
-        Self { hooks: hooks.inner.into(), active_db_write_hook: None }
+        Self { hooks: hooks.inner.into(), active_db_write_hook: None, metrics: Default::default() }
     }
 
     /// Polls currently running hook with DB write access, if any.
@@ -75,6 +87,7 @@ impl EngineHooksController {
                     self.hooks.push_back(hook);
                 }
 
+                self.update_metrics();
                 return Poll::Ready(Ok(result))
             }
             Poll::Pending => {
@@ -82,7 +95,13 @@ impl EngineHooksController {
             }
         }
 
+        self.update_metrics();
         Poll::Pending
+    }
+
+    /// Update metrics
+    fn update_metrics(&self) {
+        self.metrics.hooks.set(self.hooks.len() as f64);
     }
 
     /// Polls next engine from the collection.
@@ -121,6 +140,7 @@ impl EngineHooksController {
             self.hooks.push_back(hook);
         }
 
+        self.update_metrics();
         result
     }
 

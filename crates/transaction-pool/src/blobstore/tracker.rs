@@ -65,6 +65,16 @@ impl BlobStoreCanonTracker {
             BlobStoreUpdates::Finalized(finalized)
         }
     }
+
+    /// Return the length of the inner map
+    pub fn len(&self) -> usize {
+        self.blob_txs_in_blocks.len()
+    }
+
+    /// Return whether or not the blob store canon tracker is empty
+    pub fn is_empty(&self) -> bool {
+        self.blob_txs_in_blocks.is_empty()
+    }
 }
 
 /// Updates that should be applied to the blob store.

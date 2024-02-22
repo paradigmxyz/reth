@@ -16,6 +16,12 @@ impl CanonicalChain {
         Self { chain }
     }
 
+    /// Returns the length of the canonical chain data structure
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        self.chain.len()
+    }
+
     /// Replaces the current chain with the given one.
     #[inline]
     pub(crate) fn replace(&mut self, chain: BTreeMap<BlockNumber, BlockHash>) {

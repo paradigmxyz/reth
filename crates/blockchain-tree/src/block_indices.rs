@@ -1,7 +1,7 @@
 //! Implementation of [`BlockIndices`] related to [`super::BlockchainTree`]
 
 use super::state::BlockChainId;
-use crate::canonical_chain::CanonicalChain;
+use crate::{canonical_chain::CanonicalChain, metrics::BlockIndicesMetrics};
 use linked_hash_set::LinkedHashSet;
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
 use reth_provider::Chain;
@@ -40,6 +40,8 @@ pub struct BlockIndices {
     block_number_to_block_hashes: BTreeMap<BlockNumber, HashSet<BlockHash>>,
     /// Block hashes and side chain they belong
     blocks_to_chain: HashMap<BlockHash, BlockChainId>,
+    /// Block indices metrics
+    metrics: BlockIndicesMetrics,
 }
 
 impl BlockIndices {
@@ -54,7 +56,23 @@ impl BlockIndices {
             fork_to_child: Default::default(),
             blocks_to_chain: Default::default(),
             block_number_to_block_hashes: Default::default(),
+            metrics: Default::default(),
         }
+    }
+
+    /// Update metrics
+    fn update_metrics(&self) {
+        self.metrics.blocks_to_chain.set(self.blocks_to_chain.len() as f64);
+        self.metrics.canonical_chain.set(self.canonical_chain.len() as f64);
+        self.metrics.fork_to_child.set(self.fork_to_child.len() as f64);
+        self.metrics
+            .fork_to_child_hashes
+            .set(self.fork_to_child.values().map(|v| v.len()).sum::<usize>() as f64);
+        self.metrics.block_number_to_hash.set(self.block_number_to_block_hashes.len() as f64);
+        self.metrics
+            .block_number_to_hash_hashes
+            .set(self.block_number_to_block_hashes.values().map(|v| v.len()).sum::<usize>() as f64);
+        self.metrics.blocks_to_chain.set(self.blocks_to_chain.len() as f64);
     }
 
     /// Return internal index that maps all pending block number to their hashes.
@@ -128,6 +146,7 @@ impl BlockIndices {
     ) {
         self.block_number_to_block_hashes.entry(block_number).or_default().insert(block_hash);
         self.blocks_to_chain.insert(block_hash, chain_id);
+        self.update_metrics();
     }
 
     /// Insert block to chain and fork child indices of the new chain
@@ -141,6 +160,7 @@ impl BlockIndices {
         let first = chain.first();
         // add parent block -> block index
         self.fork_to_child.entry(first.parent_hash).or_default().insert_if_absent(first.hash());
+        self.update_metrics();
     }
 
     /// Get the chain ID the block belongs to
@@ -212,26 +232,30 @@ impl BlockIndices {
         }
 
         // remove childs of removed blocks
-        (
+        let res = (
             removed.into_iter().fold(BTreeSet::new(), |mut fold, (number, hash)| {
                 fold.extend(self.remove_block(number, hash));
                 fold
             }),
             added,
-        )
+        );
+        self.update_metrics();
+        res
     }
 
     /// Remove chain from indices and return dependent chains that need to be removed.
     /// Does the cleaning of the tree and removing blocks from the chain.
     pub fn remove_chain(&mut self, chain: &Chain) -> BTreeSet<BlockChainId> {
-        chain
+        let chain = chain
             .blocks()
             .iter()
             .flat_map(|(block_number, block)| {
                 let block_hash = block.hash();
                 self.remove_block(*block_number, block_hash)
             })
-            .collect()
+            .collect();
+        self.update_metrics();
+        chain
     }
 
     /// Remove Blocks from indices.
@@ -257,14 +281,16 @@ impl BlockIndices {
 
         // rm fork -> child
         let removed_fork = self.fork_to_child.remove(&block_hash);
-        removed_fork
+        let removed = removed_fork
             .map(|fork_blocks| {
                 fork_blocks
                     .into_iter()
                     .filter_map(|fork_child| self.blocks_to_chain.remove(&fork_child))
                     .collect()
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        self.update_metrics();
+        removed
     }
 
     /// Remove all blocks from canonical list and insert new blocks to it.
@@ -312,7 +338,8 @@ impl BlockIndices {
         );
 
         // insert new canonical
-        self.canonical_chain.extend(blocks.iter().map(|(number, block)| (*number, block.hash())))
+        self.canonical_chain.extend(blocks.iter().map(|(number, block)| (*number, block.hash())));
+        self.update_metrics();
     }
 
     /// this is function that is going to remove N number of last canonical hashes.
@@ -323,6 +350,7 @@ impl BlockIndices {
     pub(crate) fn unwind_canonical_chain(&mut self, unwind_to: BlockNumber) {
         // this will remove all blocks numbers that are going to be replaced.
         self.canonical_chain.retain(|num, _| *num <= unwind_to);
+        self.update_metrics();
     }
 
     /// Used for finalization of block.
@@ -364,6 +392,7 @@ impl BlockIndices {
         // set last finalized block.
         self.last_finalized_block = finalized_block;
 
+        self.update_metrics();
         lose_chains
     }
 

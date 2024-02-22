@@ -434,6 +434,8 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 blob_store_tracker.add_new_chain_blocks(&blocks);
             }
         }
+
+        metrics.blob_store_canon_tracker.set(blob_store_tracker.len() as f64);
     }
 }
 

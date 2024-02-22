@@ -1,6 +1,6 @@
 use crate::{
     cache::{LruCache, LruMap},
-    message::PeerRequest,
+    message::PeerRequest, metrics::TransactionFetcherMetrics,
 };
 
 use derive_more::Constructor;
@@ -55,6 +55,8 @@ pub(crate) struct TransactionFetcher {
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
     pub(super) info: TransactionFetcherInfo,
+    /// Transaction fetcher metrics
+    pub(super) metrics: TransactionFetcherMetrics,
 }
 
 // === impl TransactionFetcher ===
@@ -67,6 +69,15 @@ impl TransactionFetcher {
         self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request =
             config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
         self
+    }
+
+    /// Updates metrics for the tx fetcher.
+    pub fn update_metrics(&self) {
+        self.metrics.active_peers.set(self.active_peers.len() as f64);
+        self.metrics.inflight_requests.set(self.inflight_requests.len() as f64);
+        self.metrics.hashes_pending_fetch.set(self.hashes_pending_fetch.len() as f64);
+        self.metrics.inflight_and_pending_fetch.set(self.hashes_fetch_inflight_and_pending_fetch.len() as f64);
+        self.metrics.total_hashes_fetch_metadata.set(self.hashes_fetch_inflight_and_pending_fetch.iter().map(|(_, v)| v).map(|v| v.fallback_peers_len()).sum::<usize>() as f64);
     }
 
     /// Removes the specified hashes from inflight tracking.
@@ -859,6 +870,7 @@ impl Stream for TransactionFetcher {
                     // buffer left over hashes
                     self.buffer_hashes_for_retry(requested_hashes, &peer_id);
 
+                    self.update_metrics();
                     Poll::Ready(Some(FetchEvent::TransactionsFetched {
                         peer_id,
                         transactions: transactions.0,
@@ -866,10 +878,12 @@ impl Stream for TransactionFetcher {
                 }
                 Ok(Err(req_err)) => {
                     self.buffer_hashes_for_retry(requested_hashes, &peer_id);
+                    self.update_metrics();
                     Poll::Ready(Some(FetchEvent::FetchError { peer_id, error: req_err }))
                 }
                 Err(_) => {
                     self.buffer_hashes_for_retry(requested_hashes, &peer_id);
+                    self.update_metrics();
                     // request channel closed/dropped
                     Poll::Ready(Some(FetchEvent::FetchError {
                         peer_id,
@@ -878,6 +892,8 @@ impl Stream for TransactionFetcher {
                 }
             }
         }
+
+        self.update_metrics();
 
         Poll::Pending
     }
@@ -895,6 +911,7 @@ impl Default for TransactionFetcher {
             hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
             info: TransactionFetcherInfo::default(),
+            metrics: Default::default(),
         }
     }
 }
@@ -916,6 +933,10 @@ pub(super) struct TxFetchMetadata {
 impl TxFetchMetadata {
     pub fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
         &mut self.fallback_peers
+    }
+
+    pub fn fallback_peers_len(&self) -> usize {
+        self.fallback_peers.len()
     }
 
     pub fn tx_encoded_len(&self) -> Option<usize> {

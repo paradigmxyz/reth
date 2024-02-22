@@ -83,7 +83,15 @@ impl BlockBuffer {
                 self.remove_from_parent(evicted_block.parent_hash, &evicted_hash);
             }
         }
+        self.update_metrics();
+    }
+
+    /// Update metrics
+    pub fn update_metrics(&mut self) {
         self.metrics.blocks.set(self.blocks.len() as f64);
+        self.metrics.parent_to_child.set(self.parent_to_child.len() as f64);
+        self.metrics.earliest_blocks.set(self.earliest_blocks.len() as f64);
+        self.metrics.oldest_inserted_blocks.set(self.lru.len() as f64);
     }
 
     /// Removes the given block from the buffer and also all the children of the block.
@@ -100,7 +108,7 @@ impl BlockBuffer {
         let mut removed = self.remove_block(parent_hash).into_iter().collect::<Vec<_>>();
 
         removed.extend(self.remove_children(vec![*parent_hash]));
-        self.metrics.blocks.set(self.blocks.len() as f64);
+        self.update_metrics();
         removed
     }
 
@@ -124,7 +132,7 @@ impl BlockBuffer {
         }
 
         self.remove_children(block_hashes_to_remove);
-        self.metrics.blocks.set(self.blocks.len() as f64);
+        self.update_metrics();
     }
 
     /// Remove block entry

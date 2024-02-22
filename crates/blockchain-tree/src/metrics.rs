@@ -31,6 +31,38 @@ pub struct TreeMetrics {
 pub struct BlockBufferMetrics {
     /// Total blocks in the block buffer
     pub blocks: Gauge,
+    /// Size of the parent to child map
+    pub parent_to_child: Gauge,
+    /// Size of the earliest blocks map
+    pub earliest_blocks: Gauge,
+    /// Size of the oldest inserted block cache
+    pub oldest_inserted_blocks: Gauge,
+}
+
+/// Metrics for the blockchain tree blockindices
+#[derive(Metrics, Clone)]
+#[metrics(scope = "blockchain_tree.block_indices")]
+pub struct BlockIndicesMetrics {
+    /// Amount of blocks in the in-memory canonical chain
+    pub canonical_chain: Gauge,
+    ///Amount of entries in the fork-to-child map
+    pub fork_to_child: Gauge,
+    /// Amount of total block hashes in the fork-to-child map
+    pub fork_to_child_hashes: Gauge,
+    /// Amount of entries in the `block_number_to_block_hashes` map
+    pub block_number_to_hash: Gauge,
+    /// Amount of total block hashes in the `block_number_to_block_hashes` map
+    pub block_number_to_hash_hashes: Gauge,
+    /// Amount of entries in the `blocks_to_chain` map
+    pub blocks_to_chain: Gauge,
+}
+
+/// Metrics for the MakeCanonicalDurationsRecorder
+#[derive(Metrics)]
+#[metrics(scope = "blockchain_tree.make_canonical_durations")]
+pub struct MakeCanonicalDurationsMetrics {
+    /// The number of elements in the make_canonical_durations vec
+    pub actions: Gauge,
 }
 
 #[derive(Debug)]
@@ -38,11 +70,12 @@ pub(crate) struct MakeCanonicalDurationsRecorder {
     start: Instant,
     pub(crate) actions: Vec<(MakeCanonicalAction, Duration)>,
     latest: Option<Duration>,
+    metrics: MakeCanonicalDurationsMetrics,
 }
 
 impl Default for MakeCanonicalDurationsRecorder {
     fn default() -> Self {
-        Self { start: Instant::now(), actions: Vec::new(), latest: None }
+        Self { start: Instant::now(), actions: Vec::new(), latest: None, metrics: MakeCanonicalDurationsMetrics::default() }
     }
 }
 
@@ -58,6 +91,7 @@ impl MakeCanonicalDurationsRecorder {
             .duration
             .record(duration);
 
+        self.metrics.actions.set(self.actions.len() as f64);
         self.latest = Some(elapsed);
     }
 }

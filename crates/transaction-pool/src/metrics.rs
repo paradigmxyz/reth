@@ -70,6 +70,8 @@ pub struct MaintainPoolMetrics {
     pub(crate) reinserted_transactions: Counter,
     /// Number of transactions finalized blob transactions we were tracking.
     pub(crate) deleted_tracked_finalized_blobs: Counter,
+    /// Number of entries in the blob store canon tracker
+    pub(crate) blob_store_canon_tracker: Gauge,
 }
 
 impl MaintainPoolMetrics {
