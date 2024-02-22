@@ -1355,7 +1355,7 @@ pub struct PeerMetadata {
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.
-    seen_transactions: TransactionsSeenByPeer,
+    seen_transactions: LruCache<TxHash>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
