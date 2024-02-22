@@ -225,8 +225,8 @@ pub struct TransactionsManager<Pool> {
     command_tx: mpsc::UnboundedSender<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
     command_rx: UnboundedReceiverStream<TransactionsCommand>,
-    /// Stream from [`TransactionPool`] of successfully imported transactions.
-    imported_transactions: ReceiverStream<TxHash>,
+    /// Incoming commands from [`TransactionsHandle`].
+    pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// TransactionsManager metrics
@@ -279,7 +279,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
-            imported_transactions: ReceiverStream::new(pending),
+            pending_transactions: ReceiverStream::new(pending),
             transaction_events: UnboundedMeteredReceiver::new(
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
@@ -1251,7 +1251,7 @@ where
                     //
                     let mut new_txs = Vec::new();
                     while let Poll::Ready(Some(hash)) =
-                        this.imported_transactions.poll_next_unpin(cx)
+                        this.pending_transactions.poll_next_unpin(cx)
                     {
                         new_txs.push(hash);
                     }
