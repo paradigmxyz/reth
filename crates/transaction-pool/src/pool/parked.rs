@@ -152,8 +152,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
         Some(tx.transaction.into())
     }
 
-    /// Get transactions by sender
-    pub(crate) fn get_txs_by_sender(&self, sender: SenderId) -> Vec<TransactionId> {
+    /// Retrieves transactions by sender, using `SmallVec` to efficiently handle up to
+    /// `TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER` transactions.
+    pub(crate) fn get_txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]> {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
@@ -196,10 +200,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         {
             // NOTE: This will not panic due to `!last_sender_transaction.is_empty()`
             let sender_id = self.last_sender_submission.last().expect("not empty").sender_id;
-            // Utilize SmallVec to efficiently handle up to 16 transactions
-            // per sender, adhering to the TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER limit.
-            let list: SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]> =
-                self.get_txs_by_sender(sender_id).into();
+            let list = self.get_txs_by_sender(sender_id);
 
             // Drop transactions from this sender until the pool is under limits
             for txid in list.into_iter().rev() {

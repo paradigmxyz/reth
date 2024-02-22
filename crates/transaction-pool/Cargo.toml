@@ -48,7 +48,7 @@ serde = { workspace = true, features = ["derive", "rc"], optional = true }
 fnv = "1.0.7"
 bitflags.workspace = true
 auto_impl = "1.0"
-smallvec = "1.13.1"
+smallvec.workspace = true
 
 # testing
 rand = { workspace = true, optional = true }
