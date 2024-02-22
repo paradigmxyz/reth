@@ -1106,7 +1106,6 @@ mod test {
 
     use derive_more::IntoIterator;
     use futures_test::task::noop_context;
-    use reth_eth_wire::EthVersion;
     use reth_primitives::B256;
 
     use crate::transactions::tests::{default_cache, new_mock_session};
