@@ -404,7 +404,6 @@ impl TransactionFetcher {
 
         let init_capacity_req = approx_capacity_get_pooled_transactions_req_eth68(&self.info);
         let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
-
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
         // budget to look for an idle peer before giving up
@@ -928,8 +927,9 @@ impl TransactionFetcher {
                     }
                     true
                 });
-
+                fetched.shrink_to_fit();
                 self.remove_hashes_from_transaction_fetcher(fetched);
+              
                 // buffer left over hashes
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
 
