@@ -357,12 +357,12 @@ where
     }
 
     /// Handler for: `eth_sendTransaction`
-    async fn send_transaction(&self, request: TransactionRequest) -> Result<B256> {
+    async fn send_transaction(&self, _request: TransactionRequest) -> Result<B256> {
         Err(internal_rpc_err("read-only node"))
     }
 
     /// Handler for: `eth_sendRawTransaction`
-    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256> {
+    async fn send_raw_transaction(&self, _tx: Bytes) -> Result<B256> {
         Err(internal_rpc_err("read-only node"))
     }
 
