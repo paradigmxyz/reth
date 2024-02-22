@@ -367,7 +367,7 @@ commit_threshold = 100000
 clean_threshold = 50000
 
 [stages.transaction_lookup]
-commit_threshold = 5000000
+chunk_size = 5000000
 
 [stages.index_account_history]
 commit_threshold = 100000
