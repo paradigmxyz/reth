@@ -101,7 +101,7 @@ pub struct TransactionsManagerMetrics {
     // Nested streams
     /// Streaming session updates and updating peers accordingly. Duration in microseconds.
     pub(crate) acc_duration_poll_network_events: Gauge,
-    /// Flushing queue of batched pending pool imports into pool. Duration in us.
+    /// Time spent flushing the queue of batched pending pool imports into pool. Duration in microseconds.
     pub(crate) acc_duration_poll_pending_pool_imports: Gauge,
     /// Streaming transaction and announcement broadcast, queueing for pool import
     /// or requesting respectively. Duration in us.
