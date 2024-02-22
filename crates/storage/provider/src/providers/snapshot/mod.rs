@@ -64,7 +64,7 @@ mod tests {
         let row_count = 100u64;
         let range = 0..=(row_count - 1);
         let segment_header = SegmentHeader::new(
-            *range.start(),
+            range.clone().into(),
             Some(range.clone().into()),
             Some(range.clone().into()),
             SnapshotSegment::Headers,

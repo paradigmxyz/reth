@@ -133,8 +133,11 @@ impl SnapshotSegment {
 /// A segment header that contains information common to all segments. Used for storage.
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
 pub struct SegmentHeader {
-    /// Expected block start of the snapshot segment
-    expected_block_start: BlockNumber,
+    /// Defines the expected block range for a snapshot segment. This attribute is crucial for
+    /// scenarios where the file contains no data, allowing for a representation beyond a
+    /// simple `start..=start` range. It ensures clarity in differentiating between an empty file
+    /// and a file with a single block numbered 0.
+    expected_block_range: SegmentRangeInclusive,
     /// Block range of data on the snapshot segment
     block_range: Option<SegmentRangeInclusive>,
     /// Transaction range of data of the snapshot segment
@@ -146,12 +149,12 @@ pub struct SegmentHeader {
 impl SegmentHeader {
     /// Returns [`SegmentHeader`].
     pub fn new(
-        expected_block_start: BlockNumber,
+        expected_block_range: SegmentRangeInclusive,
         block_range: Option<SegmentRangeInclusive>,
         tx_range: Option<SegmentRangeInclusive>,
         segment: SnapshotSegment,
     ) -> Self {
-        Self { expected_block_start, block_range, tx_range, segment }
+        Self { expected_block_range, block_range, tx_range, segment }
     }
 
     /// Returns the snapshot segment kind.
@@ -171,7 +174,7 @@ impl SegmentHeader {
 
     /// The expected block start of the segment.
     pub fn expected_block_start(&self) -> BlockNumber {
-        self.expected_block_start
+        self.expected_block_range.start()
     }
 
     /// Returns the first block number of the segment.
@@ -229,10 +232,10 @@ impl SegmentHeader {
             block_range.end
         } else {
             self.block_range = Some(SegmentRangeInclusive::new(
-                self.expected_block_start,
-                self.expected_block_start,
+                self.expected_block_start(),
+                self.expected_block_start(),
             ));
-            self.expected_block_start
+            self.expected_block_start()
         }
     }
 

@@ -5,7 +5,7 @@ use reth_db::codecs::CompactU256;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
-    snapshot::{find_fixed_range, SegmentHeader},
+    snapshot::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
     BlockHash, BlockNumber, Header, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };
@@ -52,7 +52,7 @@ impl<'a> SnapshotProviderRW<'a> {
                 }
                 Err(ProviderError::MissingSnapshotBlock(_, _)) => {
                     let path = reader.directory().join(segment.filename(&block_range));
-                    (create_jar(segment, &path, block_range.start()), path)
+                    (create_jar(segment, &path, block_range), path)
                 }
                 Err(err) => return Err(err),
             };
@@ -129,9 +129,12 @@ impl<'a> SnapshotProviderRW<'a> {
                 self.writer = writer;
                 self.data_path = data_path;
 
-                let block_start = find_fixed_range(last_block + 1).start();
-                *self.writer.user_header_mut() =
-                    SegmentHeader::new(block_start, None, None, segment);
+                *self.writer.user_header_mut() = SegmentHeader::new(
+                    find_fixed_range(last_block + 1).into(),
+                    None,
+                    None,
+                    segment,
+                );
             }
         }
 
@@ -347,12 +350,12 @@ impl<'a> Deref for SnapshotProviderRW<'a> {
 fn create_jar(
     segment: SnapshotSegment,
     path: &Path,
-    expected_block_start: BlockNumber,
+    expected_block_range: SegmentRangeInclusive,
 ) -> NippyJar<SegmentHeader> {
     let mut jar = NippyJar::new(
         segment.columns(),
         path,
-        SegmentHeader::new(expected_block_start, None, None, segment),
+        SegmentHeader::new(expected_block_range, None, None, segment),
     );
 
     // Transaction and Receipt already have the compression scheme used natively in its encoding.
