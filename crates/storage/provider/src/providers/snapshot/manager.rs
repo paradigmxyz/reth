@@ -200,7 +200,12 @@ impl SnapshotProvider {
         };
 
         jar.delete()?;
-        self.update_index(segment, None)?;
+
+        let mut segment_max_block = None;
+        if !fixed_block_range.start() != 0 {
+            segment_max_block = Some(fixed_block_range.start() - 1)
+        };
+        self.update_index(segment, segment_max_block)?;
 
         Ok(())
     }
