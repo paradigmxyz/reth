@@ -36,9 +36,9 @@ use crate::{
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    EthVersion, GetPooledTransactions, HandleAnnouncement, NewPooledTransactionHashes,
-    NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions,
-    RequestTxHashes, Transactions,
+    EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
+    NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
+    PooledTransactions, RequestTxHashes, Transactions,
 };
 use reth_interfaces::{
     p2p::error::{RequestError, RequestResult},
@@ -626,7 +626,10 @@ where
         // most hashes will be filtered out here since this the mempool protocol is a gossip
         // protocol, healthy peers will send many of the same hashes.
         //
-        let _already_known_by_pool = self.pool.retain_unknown(&mut msg);
+        let already_known_by_pool = self.pool.retain_unknown(&mut msg);
+        if let Some(intersection) = already_known_by_pool {
+            self.metrics.occurrences_hashes_already_in_pool.increment(intersection.len() as u64);
+        }
 
         if msg.is_empty() {
             // nothing to request
@@ -893,7 +896,7 @@ where
     fn import_transactions(
         &mut self,
         peer_id: PeerId,
-        transactions: Vec<PooledTransactionsElement>,
+        mut transactions: Vec<PooledTransactionsElement>,
         source: TransactionSource,
     ) {
         // If the node is pipeline syncing, ignore transactions
@@ -904,10 +907,31 @@ where
             return
         }
 
+        let Some(peer) = self.peers.get_mut(&peer_id) else { return };
+
+        // track that the peer knows these transaction, but only if this is a new broadcast.
+        // If we received the transactions as the response to our `GetPooledTransactions``
+        // requests (based on received `NewPooledTransactionHashes`) then we already
+        // recorded the hashes as seen by this peer in `Self::on_new_pooled_transaction_hashes`.
+        let mut num_already_seen_by_peer = 0;
+        for tx in transactions.iter() {
+            if source.is_broadcast() && !peer.seen_transactions.insert(*tx.hash()) {
+                num_already_seen_by_peer += 1;
+            }
+        }
+
+        // 1. filter out already imported txns
+        let already_known_by_pool = self.pool.retain_unknown(&mut transactions);
+        if let Some(intersection) = already_known_by_pool {
+            self.metrics
+                .occurrences_transactions_already_in_pool
+                .increment(intersection.len() as u64);
+        }
+
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
-        let mut num_already_seen_by_peer = 0;
 
+        // 2. filter out transactions that are invalid or already pending import
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             // pre-size to avoid reallocations
             let mut new_txs = Vec::with_capacity(transactions.len());
@@ -926,15 +950,6 @@ where
                         continue
                     }
                 };
-
-                // track that the peer knows this transaction, but only if this is a new broadcast.
-                // If we received the transactions as the response to our GetPooledTransactions
-                // requests (based on received `NewPooledTransactionHashes`) then we already
-                // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`].
-
-                if source.is_broadcast() && !peer.seen_transactions.insert(*tx.hash()) {
-                    num_already_seen_by_peer += 1;
-                }
 
                 match self.transactions_by_peers.entry(*tx.hash()) {
                     Entry::Occupied(mut entry) => {
@@ -962,7 +977,8 @@ where
             }
             new_txs.shrink_to_fit();
 
-            // import new transactions as a batch to minimize lock contention on the underlying pool
+            // 3. import new transactions as a batch to minimize lock contention on the underlying
+            // pool
             if !new_txs.is_empty() {
                 let pool = self.pool.clone();
                 // update metrics

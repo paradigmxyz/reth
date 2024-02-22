@@ -151,7 +151,7 @@
 
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
-use reth_eth_wire::HandleAnnouncement;
+use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
@@ -457,7 +457,7 @@ where
 
     fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
     where
-        A: HandleAnnouncement,
+        A: HandleMempoolData,
     {
         self.pool.retain_unknown(announcement)
     }
