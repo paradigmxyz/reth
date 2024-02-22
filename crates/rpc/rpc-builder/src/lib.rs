@@ -198,7 +198,7 @@ use reth_rpc::{
     EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi,
     OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
 };
-use reth_rpc_api::{servers::*, EngineApiServer};
+use reth_rpc_api::servers::*;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 // re-export for convenience

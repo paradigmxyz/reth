@@ -2,9 +2,7 @@
 
 use super::cursor::Cursor;
 use crate::{
-    metrics::{
-        DatabaseEnvMetrics, Operation, TransactionMetrics, TransactionMode, TransactionOutcome,
-    },
+    metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     table::{Compress, DupSort, Encode, Table, TableImporter},
     tables::{utils::decode_one, Tables},
     transaction::{DbTx, DbTxMut},
@@ -13,7 +11,7 @@ use crate::{
 use parking_lot::RwLock;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
-use reth_tracing::tracing::{trace, warn};
+use reth_tracing::tracing::{debug, trace, warn};
 use std::{
     backtrace::Backtrace,
     marker::PhantomData,
@@ -55,7 +53,7 @@ impl<K: TransactionKind> Tx<K> {
     ) -> Self {
         let metrics_handler = if let Some(metrics) = metrics {
             let handler = MetricsHandler::<K>::new(inner.id(), metrics);
-            TransactionMetrics::record_open(handler.transaction_mode());
+            handler.env_metrics.record_opened_transaction(handler.transaction_mode());
             handler.log_transaction_opened();
             Some(handler)
         } else {
@@ -107,16 +105,28 @@ impl<K: TransactionKind> Tx<K> {
         outcome: TransactionOutcome,
         f: impl FnOnce(Self) -> (R, Option<CommitLatency>),
     ) -> R {
+        let run = |tx| {
+            let start = Instant::now();
+            let (result, commit_latency) = f(tx);
+            let total_duration = start.elapsed();
+
+            debug!(
+                target: "storage::db::mdbx",
+                ?total_duration,
+                ?commit_latency,
+                "Commit"
+            );
+
+            (result, commit_latency, total_duration)
+        };
+
         if let Some(mut metrics_handler) = self.metrics_handler.take() {
             metrics_handler.close_recorded = true;
             metrics_handler.log_backtrace_on_long_read_transaction();
 
-            let start = Instant::now();
-            let (result, commit_latency) = f(self);
+            let (result, commit_latency, close_duration) = run(self);
             let open_duration = metrics_handler.start.elapsed();
-            let close_duration = start.elapsed();
-
-            TransactionMetrics::record_close(
+            metrics_handler.env_metrics.record_closed_transaction(
                 metrics_handler.transaction_mode(),
                 outcome,
                 open_duration,
@@ -126,7 +136,7 @@ impl<K: TransactionKind> Tx<K> {
 
             result
         } else {
-            f(self).0
+            run(self).0
         }
     }
 
@@ -232,8 +242,7 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
     fn drop(&mut self) {
         if !self.close_recorded {
             self.log_backtrace_on_long_read_transaction();
-
-            TransactionMetrics::record_close(
+            self.env_metrics.record_closed_transaction(
                 self.transaction_mode(),
                 TransactionOutcome::Drop,
                 self.start.elapsed(),

@@ -42,7 +42,7 @@ impl Deref for LoadedJar {
 mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
-    use rand::{self, seq::SliceRandom};
+    use rand::seq::SliceRandom;
     use reth_db::{
         cursor::DbCursorRO,
         snapshot::create_snapshot_T1_T2_T3,
@@ -50,7 +50,6 @@ mod tests {
         CanonicalHeaders, HeaderNumbers, HeaderTD, Headers, RawTable,
     };
     use reth_interfaces::test_utils::generators::{self, random_header_range};
-    use reth_nippy_jar::NippyJar;
     use reth_primitives::{BlockNumber, B256, U256};
 
     #[test]

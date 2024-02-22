@@ -1894,7 +1894,8 @@ impl LookupTargetRotator {
 
 /// Tracks lookups across multiple `FindNode` requests.
 ///
-/// If this type is dropped by all
+/// If this type is dropped by all Clones, it will send all the discovered nodes to the listener, if
+/// one is present.
 #[derive(Clone, Debug)]
 struct LookupContext {
     inner: Rc<LookupContextInner>,
@@ -2193,7 +2194,7 @@ mod tests {
     use alloy_rlp::{Decodable, Encodable};
     use rand::{thread_rng, Rng};
     use reth_primitives::{hex, mainnet_nodes, ForkHash};
-    use std::{future::poll_fn, net::Ipv4Addr};
+    use std::future::poll_fn;
 
     #[tokio::test]
     async fn test_configured_enr_forkid_entry() {

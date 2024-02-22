@@ -82,7 +82,7 @@ use crate::{
 };
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
-use reth_eth_wire::HandleAnnouncement;
+use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{
     Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
     PooledTransactionsElement, TransactionSigned, TxHash, B256,
@@ -108,7 +108,7 @@ pub use best::BestTransactionFilter;
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
 pub use listener::{AllTransactionsEvents, TransactionEvents};
-pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool};
+pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool, QueuedOrd};
 pub use pending::PendingPool;
 
 mod best;
@@ -400,7 +400,6 @@ where
             } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
-                let _encoded_length = transaction.encoded_length();
 
                 // split the valid transaction and the blob sidecar if it has any
                 let (transaction, maybe_sidecar) = match transaction {
@@ -487,7 +486,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
     ) -> Vec<PoolResult<TxHash>> {
-        let added =
+        let mut added =
             transactions.into_iter().map(|tx| self.add_transaction(origin, tx)).collect::<Vec<_>>();
 
         // If at least one transaction was added successfully, then we enforce the pool size limits.
@@ -505,15 +504,15 @@ where
 
         // It may happen that a newly added transaction is immediately discarded, so we need to
         // adjust the result here
-        added
-            .into_iter()
-            .map(|res| match res {
-                Ok(ref hash) if discarded.contains(hash) => {
-                    Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
+        for res in added.iter_mut() {
+            if let Ok(hash) = res {
+                if discarded.contains(hash) {
+                    *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
                 }
-                other => other,
-            })
-            .collect()
+            }
+        }
+
+        added
     }
 
     /// Notify all listeners about a new pending transaction.
@@ -670,9 +669,9 @@ where
     }
 
     /// Removes and returns all transactions that are present in the pool.
-    pub(crate) fn retain_unknown<A: HandleAnnouncement>(&self, announcement: &mut A) -> Option<A>
+    pub(crate) fn retain_unknown<A: HandleMempoolData>(&self, announcement: &mut A) -> Option<A>
     where
-        A: HandleAnnouncement,
+        A: HandleMempoolData,
     {
         if announcement.is_empty() {
             return None

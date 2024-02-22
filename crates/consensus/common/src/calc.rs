@@ -102,7 +102,7 @@ pub fn ommer_reward(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{MAINNET, U256};
+    use reth_primitives::MAINNET;
 
     #[test]
     fn calc_base_block_reward() {

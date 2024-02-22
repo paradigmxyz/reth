@@ -25,7 +25,7 @@ use reth_rpc::{
     AuthLayer, BlockingTaskPool, Claims, EngineEthApi, EthApi, EthFilter,
     EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret,
 };
-use reth_rpc_api::{servers::*, EngineApiServer};
+use reth_rpc_api::servers::*;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{

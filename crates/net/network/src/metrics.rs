@@ -57,14 +57,33 @@ pub struct SessionManagerMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct TransactionsManagerMetrics {
+    /* ================ BROADCAST ================ */
     /// Total number of propagated transactions
     pub(crate) propagated_transactions: Counter,
     /// Total number of reported bad transactions
     pub(crate) reported_bad_transactions: Counter,
-    /// Total number of messages with already seen hashes
-    pub(crate) messages_with_already_seen_hashes: Counter,
-    /// Total number of messages with already seen full transactions
-    pub(crate) messages_with_already_seen_transactions: Counter,
+
+    /* -- Freq txns already marked as seen by peer -- */
+    /// Total number of messages from a peer, announcing transactions that have already been
+    /// marked as seen by that peer.
+    pub(crate) messages_with_hashes_already_seen_by_peer: Counter,
+    /// Total number of messages from a peer, with transaction that have already been marked as
+    /// seen by that peer.
+    pub(crate) messages_with_transactions_already_seen_by_peer: Counter,
+    /// Total number of occurrences, of a peer announcing a transaction that has already been
+    /// marked as seen by that peer.
+    pub(crate) occurrences_hash_already_seen_by_peer: Counter,
+    /// Total number of times a transaction is seen from a peer, that has already been marked as
+    /// seen by that peer.
+    pub(crate) occurrences_of_transaction_already_seen_by_peer: Counter,
+
+    /* -- Freq txns already in pool -- */
+    /// Total number of times a hash is announced that is already in the local pool.
+    pub(crate) occurrences_hashes_already_in_pool: Counter,
+    /// Total number of times a transaction is sent that is already in the local pool.
+    pub(crate) occurrences_transactions_already_in_pool: Counter,
+
+    /* ================ POOL IMPORTS ================ */
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
     /// Total number of bad imports.
@@ -76,6 +95,7 @@ pub struct TransactionsManagerMetrics {
     pub(crate) capacity_pending_pool_imports: Counter,
     /// Currently active outgoing [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
     /// requests.
+    /* ================ TX FETCHER ================ */
     pub(crate) inflight_transaction_requests: Gauge,
     /// Number of inflight requests at which the
     /// [`TransactionFetcher`](crate::transactions::TransactionFetcher) is considered to be at

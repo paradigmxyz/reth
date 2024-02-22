@@ -39,7 +39,7 @@ use reth_node_core::{
 };
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    ChainSpec, DisplayHardforks,
+    ChainSpec,
 };
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
 use reth_prune::{PrunerBuilder, PrunerEvent};
@@ -367,7 +367,7 @@ where
 
         let genesis_hash = init_genesis(database.clone(), config.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", DisplayHardforks::new(config.chain.hardforks()));
+        info!(target: "reth::cli", "{}", config.chain.display_hardforks());
 
         let consensus = config.consensus();
 

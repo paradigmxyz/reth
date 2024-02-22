@@ -140,13 +140,13 @@ async fn test_sending_invalid_transactions() {
                 assert_eq!(peer_id, *peer0.peer_id());
             }
             NetworkEvent::SessionEstablished { .. } => {
-                panic!("unexpected event")
+                panic!("unexpected SessionEstablished event")
             }
             NetworkEvent::PeerAdded(_) => {
-                panic!("unexpected event")
+                panic!("unexpected PeerAdded event")
             }
             NetworkEvent::PeerRemoved(_) => {
-                panic!("unexpected event")
+                panic!("unexpected PeerRemoved event")
             }
         }
     }
