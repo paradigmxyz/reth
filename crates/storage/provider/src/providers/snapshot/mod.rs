@@ -7,6 +7,8 @@ pub use jar::SnapshotJarProvider;
 mod writer;
 pub use writer::{SnapshotProviderRW, SnapshotProviderRWRefMut};
 
+mod metrics;
+
 use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{snapshot::SegmentHeader, SnapshotSegment};
@@ -34,6 +36,10 @@ impl LoadedJar {
     fn mmap_handle(&self) -> Arc<reth_nippy_jar::DataReader> {
         self.mmap_handle.clone()
     }
+
+    fn segment(&self) -> SnapshotSegment {
+        self.jar.user_header().segment()
+    }
 }
 
 impl Deref for LoadedJar {
@@ -55,7 +61,6 @@ mod tests {
         CanonicalHeaders, HeaderNumbers, HeaderTD, Headers, RawTable,
     };
     use reth_interfaces::test_utils::generators::{self, random_header_range};
-    use reth_nippy_jar::NippyJar;
     use reth_primitives::{snapshot::find_fixed_range, BlockNumber, B256, U256};
 
     #[test]

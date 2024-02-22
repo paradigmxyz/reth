@@ -1,6 +1,6 @@
 use super::{
-    LoadedJar, SnapshotJarProvider, SnapshotProviderRW, SnapshotProviderRWRefMut,
-    BLOCKS_PER_SNAPSHOT,
+    metrics::SnapshotProviderMetrics, LoadedJar, SnapshotJarProvider, SnapshotProviderRW,
+    SnapshotProviderRWRefMut, BLOCKS_PER_SNAPSHOT,
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
@@ -78,6 +78,7 @@ pub struct SnapshotProviderInner {
     load_filters: bool,
     /// Maintains a map of Snapshot writers for each [`SnapshotSegment`]
     writers: DashMap<SnapshotSegment, SnapshotProviderRW<'static>>,
+    metrics: Option<Arc<SnapshotProviderMetrics>>,
 }
 
 impl SnapshotProviderInner {
@@ -90,17 +91,27 @@ impl SnapshotProviderInner {
             snapshots_tx_index: Default::default(),
             path: path.as_ref().to_path_buf(),
             load_filters: false,
+            metrics: None,
         };
 
         Ok(provider)
     }
 }
+
 impl SnapshotProvider {
     /// Loads filters into memory when creating a [`SnapshotJarProvider`].
     pub fn with_filters(self) -> Self {
         let mut provider =
-            Arc::try_unwrap(self.0).expect("should be called when initializing only.");
+            Arc::try_unwrap(self.0).expect("should be called when initializing only");
         provider.load_filters = true;
+        Self(Arc::new(provider))
+    }
+
+    /// Enables metrics on the [`SnapshotProvider`].
+    pub fn with_metrics(self) -> Self {
+        let mut provider =
+            Arc::try_unwrap(self.0).expect("should be called when initializing only");
+        provider.metrics = Some(Arc::new(SnapshotProviderMetrics::default()));
         Self(Arc::new(provider))
     }
 
@@ -214,27 +225,33 @@ impl SnapshotProvider {
         fixed_block_range: &SegmentRangeInclusive,
     ) -> ProviderResult<SnapshotJarProvider<'_>> {
         let key = (fixed_block_range.end(), segment);
-        if let Some(jar) = self.map.get(&key) {
-            Ok(jar.into())
-        } else {
-            let jar = NippyJar::load(&self.path.join(segment.filename(fixed_block_range))).map(
-                |jar| {
+        let result: ProviderResult<SnapshotJarProvider<'_>> =
+            if let Some(jar) = self.map.get(&key) {
+                Ok(jar.into())
+            } else {
+                let jar = NippyJar::load(&self.path.join(segment.filename(fixed_block_range)))
+                    .map(|jar| {
                     if self.load_filters {
                         return jar.load_filters()
                     }
                     Ok(jar)
-                },
-            )??;
+                })??;
 
-            match self.map.entry(key) {
-                DashMapEntry::Occupied(_) => {}
-                DashMapEntry::Vacant(entry) => {
-                    entry.insert(LoadedJar::new(jar)?);
-                }
+                match self.map.entry(key) {
+                    DashMapEntry::Occupied(_) => {}
+                    DashMapEntry::Vacant(entry) => {
+                        entry.insert(LoadedJar::new(jar)?);
+                    }
+                };
+
+                Ok(self.map.get(&key).expect("qed").into())
             };
 
-            Ok(self.map.get(&key).expect("qed").into())
+        let mut provider = result?;
+        if let Some(metrics) = &self.metrics {
+            provider = provider.with_metrics(metrics.clone());
         }
+        Ok(provider)
     }
 
     /// Gets a snapshot segment's block range from the provider inner block
@@ -661,7 +678,9 @@ impl SnapshotWriter for SnapshotProvider {
         Ok(match self.writers.entry(segment) {
             DashMapEntry::Occupied(entry) => entry.into_ref(),
             DashMapEntry::Vacant(entry) => {
-                entry.insert(SnapshotProviderRW::new(segment, block, self.clone())?)
+                let writer =
+                    SnapshotProviderRW::new(segment, block, self.clone(), self.metrics.clone())?;
+                entry.insert(writer)
             }
         })
     }

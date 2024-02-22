@@ -443,7 +443,7 @@ mod tests {
 
     mod test_utils {
         use super::*;
-        use crate::test_utils::{StageTestRunner, TestStageDB};
+        use crate::test_utils::TestStageDB;
         use reth_primitives::Address;
 
         pub(crate) struct AccountHashingTestRunner {
