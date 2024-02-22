@@ -1121,7 +1121,7 @@ where
             let acc = &mut poll_durations.acc_network_events;
             duration_metered_exec!(
                 {
-                    // drain network/peer related events
+                    // advance network/peer related events
                     if let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
                         this.on_network_event(event);
                         some_ready = true;
@@ -1134,7 +1134,7 @@ where
             duration_metered_exec!(
                 {
                     if this.has_capacity_for_fetching_pending_hashes() {
-                        // try drain buffered transactions.
+                        // try drain transaction hashes pending fetch
                         let info = &this.pending_pool_imports_info;
                         let max_pending_pool_imports = info.max_pending_pool_imports;
                         let has_capacity_wrt_pending_pool_imports =
@@ -1157,7 +1157,7 @@ where
             let acc = &mut poll_durations.acc_cmds;
             duration_metered_exec!(
                 {
-                    // drain commands
+                    // advance commands
                     if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                         this.on_command(cmd);
                         some_ready = true;
@@ -1169,7 +1169,7 @@ where
             let acc = &mut poll_durations.acc_tx_events;
             duration_metered_exec!(
                 {
-                    // drain incoming transaction events
+                    // advance incoming transaction events
                     if let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
                         this.on_network_tx_event(event);
                         some_ready = true;
@@ -1183,7 +1183,7 @@ where
                 {
                     this.update_fetch_metrics();
 
-                    // drain fetching transaction events
+                    // advance fetching transaction events
                     if let Poll::Ready(Some(fetch_event)) =
                         this.transaction_fetcher.poll_next_unpin(cx)
                     {
@@ -1245,7 +1245,7 @@ where
             let acc = &mut poll_durations.acc_imported_txns;
             duration_metered_exec!(
                 {
-                    // handle and propagate new transactions.
+                    // drain successful pool insertions, handle and propagate transactions.
                     //
                     // higher priority! stream is drained
                     //
