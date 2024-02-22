@@ -102,7 +102,7 @@ pub mod tx_fetcher {
     /// once from each individual peer.
     ///
     /// Default is 1 peer.
-    const DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS: u8 = 1;
+    pub const DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS: u8 = 1;
 
     /* ==================== CONCURRENCY ==================== */
 
