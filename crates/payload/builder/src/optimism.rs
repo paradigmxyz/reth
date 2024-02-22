@@ -110,7 +110,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
         let blob_excess_gas_and_price = parent
             .next_block_excess_blob_gas()
             .or_else(|| {
-                if spec_id == SpecId::CANCUN {
+                if spec_id.is_enabled_in(SpecId::CANCUN) {
                     // default excess blob gas is zero
                     Some(0)
                 } else {
