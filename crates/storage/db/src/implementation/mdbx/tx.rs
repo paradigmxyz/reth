@@ -2,9 +2,7 @@
 
 use super::cursor::Cursor;
 use crate::{
-    metrics::{
-        DatabaseEnvMetrics, Operation, TransactionMetrics, TransactionMode, TransactionOutcome,
-    },
+    metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     table::{Compress, DupSort, Encode, Table, TableImporter},
     tables::{utils::decode_one, Tables},
     transaction::{DbTx, DbTxMut},
@@ -55,7 +53,7 @@ impl<K: TransactionKind> Tx<K> {
     ) -> Self {
         let metrics_handler = if let Some(metrics) = metrics {
             let handler = MetricsHandler::<K>::new(inner.id(), metrics);
-            TransactionMetrics::record_open(handler.transaction_mode());
+            handler.env_metrics.record_opened_transaction(handler.transaction_mode());
             handler.log_transaction_opened();
             Some(handler)
         } else {
@@ -128,7 +126,7 @@ impl<K: TransactionKind> Tx<K> {
 
             let (result, commit_latency, close_duration) = run(self);
             let open_duration = metrics_handler.start.elapsed();
-            TransactionMetrics::record_close(
+            metrics_handler.env_metrics.record_closed_transaction(
                 metrics_handler.transaction_mode(),
                 outcome,
                 open_duration,
@@ -244,8 +242,7 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
     fn drop(&mut self) {
         if !self.close_recorded {
             self.log_backtrace_on_long_read_transaction();
-
-            TransactionMetrics::record_close(
+            self.env_metrics.record_closed_transaction(
                 self.transaction_mode(),
                 TransactionOutcome::Drop,
                 self.start.elapsed(),
