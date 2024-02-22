@@ -16,10 +16,9 @@ use reth_config::Config;
 use reth_db::database_metrics::DatabaseMetadata;
 
 use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
-use reth_downloaders::remote_client::RemoteClient;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder, remote_client::RemoteClient,
 };
 use reth_interfaces::consensus::Consensus;
 use reth_node_core::{args::BitfinityArgs, events::node::NodeEvent, init::init_genesis};
