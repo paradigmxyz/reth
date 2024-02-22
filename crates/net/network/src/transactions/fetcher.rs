@@ -7,7 +7,8 @@ use derive_more::Constructor;
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
-    EthVersion, GetPooledTransactions, HandleAnnouncement, RequestTxHashes, ValidAnnouncementData,
+    EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
+    RequestTxHashes, ValidAnnouncementData,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
@@ -192,7 +193,7 @@ impl TransactionFetcher {
     pub(super) fn pack_request_eth68(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        hashes_from_announcement: impl HandleAnnouncement
+        hashes_from_announcement: impl HandleMempoolData
             + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
     ) -> RequestTxHashes {
         let mut acc_size_response = 0;
@@ -1048,17 +1049,13 @@ mod test {
     #[derive(IntoIterator)]
     struct TestValidAnnouncementData(Vec<(TxHash, Option<(u8, usize)>)>);
 
-    impl HandleAnnouncement for TestValidAnnouncementData {
+    impl HandleMempoolData for TestValidAnnouncementData {
         fn is_empty(&self) -> bool {
             self.0.is_empty()
         }
 
         fn len(&self) -> usize {
             self.0.len()
-        }
-
-        fn msg_version(&self) -> EthVersion {
-            EthVersion::Eth68
         }
 
         fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
@@ -1077,6 +1074,12 @@ mod test {
             }
 
             TestValidAnnouncementData(removed_hashes)
+        }
+    }
+
+    impl HandleVersionedMempoolData for TestValidAnnouncementData {
+        fn msg_version(&self) -> EthVersion {
+            EthVersion::Eth68
         }
     }
 

@@ -16,7 +16,7 @@ use crate::{
     PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
     TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use reth_eth_wire::HandleAnnouncement;
+use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{Address, BlobTransactionSidecar, TxHash, U256};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
@@ -176,7 +176,7 @@ impl TransactionPool for NoopTransactionPool {
 
     fn retain_unknown<A>(&self, _announcement: &mut A) -> Option<A>
     where
-        A: HandleAnnouncement,
+        A: HandleMempoolData,
     {
         None
     }
