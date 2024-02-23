@@ -3912,7 +3912,7 @@
           "editorMode": "builder",
           "expr": "reth_downloaders_bodies_response_response_length{instance=~\"$instance\"}",
           "hide": false,
-          "legendFormat": "Individual response length",
+          "legendFormat": "Individual response length (number of bodies in response)",
           "range": true,
           "refId": "B"
         },
