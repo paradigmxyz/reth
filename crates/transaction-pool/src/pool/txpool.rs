@@ -25,6 +25,7 @@ use reth_primitives::{
     },
     Address, TxHash, B256,
 };
+use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
@@ -366,7 +367,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn queued_and_pending_txs_by_sender(
         &self,
         sender: SenderId,
-    ) -> (Vec<TransactionId>, Vec<TransactionId>) {
+    ) -> (SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]>, Vec<TransactionId>) {
         (self.queued_pool.get_txs_by_sender(sender), self.pending_pool.get_txs_by_sender(sender))
     }
 
@@ -793,6 +794,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 while $this.$pool.exceeds(&$this.config.$limit)
                     {
                         trace!(
+                            target: "txpool",
                             "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             stringify!($pool),
                             $this.config.$limit,
@@ -804,6 +806,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         let removed_from_subpool = $this.$pool.truncate_pool($this.config.$limit.clone());
 
                         trace!(
+                            target: "txpool",
                             "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             removed_from_subpool.len(),
                             stringify!($pool),
@@ -1581,7 +1584,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             } else {
                 // The transaction was added above so the _inclusive_ descendants iterator
                 // returns at least 1 tx.
-                let (id, tx) = descendants.peek().expect("Includes >= 1; qed.");
+                let (id, tx) = descendants.peek().expect("includes >= 1");
                 if id.nonce < inserted_tx_id.nonce {
                     !tx.state.is_pending()
                 } else {

@@ -440,7 +440,7 @@ fn poll_action(&mut self) -> PollAction {
         return PollAction::NoPeersAvailable
     };
 
-    let request = self.queued_requests.pop_front().expect("not empty; qed");
+    let request = self.queued_requests.pop_front().expect("not empty");
     let request = self.prepare_block_request(peer_id, request);
 
     PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
