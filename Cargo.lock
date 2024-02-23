@@ -6066,7 +6066,6 @@ dependencies = [
  "alloy-rlp",
  "arbitrary",
  "async-stream",
- "async-trait",
  "bytes",
  "derive_more",
  "ethers-core",
