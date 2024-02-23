@@ -9,7 +9,7 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_provider::{
-    providers::SnapshotWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_tokio_util::EventListeners;
 use std::pin::Pin;
@@ -281,7 +281,7 @@ where
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
-                        self.provider_factory.snapshot_provider().commit()?;
+                        self.provider_factory.static_file_provider().commit()?;
                         provider_rw.commit()?;
 
                         provider_rw = self.provider_factory.provider_rw()?;
@@ -375,7 +375,7 @@ where
                         result: out.clone(),
                     });
 
-                    self.provider_factory.snapshot_provider().commit()?;
+                    self.provider_factory.static_file_provider().commit()?;
                     provider_rw.commit()?;
 
                     if done {
@@ -433,7 +433,7 @@ fn on_stage_error<DB: Database>(
                     StageId::MerkleExecute,
                     prev_checkpoint.unwrap_or_default(),
                 )?;
-                factory.snapshot_provider().commit()?;
+                factory.static_file_provider().commit()?;
                 provider_rw.commit()?;
 
                 // We unwind because of a validation error. If the unwind itself
@@ -463,13 +463,13 @@ fn on_stage_error<DB: Database>(
                 }))
             }
         }
-    } else if let StageError::MissingSnapshotData { block, segment } = err {
+    } else if let StageError::MissingStaticFileData { block, segment } = err {
         error!(
             target: "sync::pipeline",
             stage = %stage_id,
             bad_block = %block.number,
             segment = %segment,
-            "Stage is missing snapshot data."
+            "Stage is missing static file data."
         );
 
         Ok(Some(ControlFlow::Unwind { target: block.number - 1, bad_block: block }))

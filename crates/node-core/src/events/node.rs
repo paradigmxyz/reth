@@ -13,8 +13,8 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_prune::PrunerEvent;
-use reth_snapshot::SnapshotterEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
+use reth_static_file::StaticFileProducerEvent;
 use std::{
     fmt::{Display, Formatter},
     future::Future,
@@ -240,10 +240,10 @@ impl<DB> NodeState<DB> {
         }
     }
 
-    fn handle_snapshotter_event(&self, event: SnapshotterEvent) {
+    fn handle_static_file_producer_event(&self, event: StaticFileProducerEvent) {
         match event {
-            SnapshotterEvent::Finished { targets, elapsed } => {
-                info!(?targets, ?elapsed, "Snapshotter finished");
+            StaticFileProducerEvent::Finished { targets, elapsed } => {
+                info!(?targets, ?elapsed, "StaticFileProducer finished");
             }
         }
     }
@@ -291,8 +291,8 @@ pub enum NodeEvent {
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
     /// A pruner event
     Pruner(PrunerEvent),
-    /// A snapshotter event
-    Snapshotter(SnapshotterEvent),
+    /// A static_file_producer event
+    StaticFileProducer(StaticFileProducerEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -325,9 +325,9 @@ impl From<PrunerEvent> for NodeEvent {
     }
 }
 
-impl From<SnapshotterEvent> for NodeEvent {
-    fn from(event: SnapshotterEvent) -> Self {
-        NodeEvent::Snapshotter(event)
+impl From<StaticFileProducerEvent> for NodeEvent {
+    fn from(event: StaticFileProducerEvent) -> Self {
+        NodeEvent::StaticFileProducer(event)
     }
 }
 
@@ -447,8 +447,8 @@ where
                 NodeEvent::Pruner(event) => {
                     this.state.handle_pruner_event(event);
                 }
-                NodeEvent::Snapshotter(event) => {
-                    this.state.handle_snapshotter_event(event);
+                NodeEvent::StaticFileProducer(event) => {
+                    this.state.handle_static_file_producer_event(event);
                 }
             }
         }
@@ -522,7 +522,7 @@ impl Display for Eta {
                     f,
                     "{}",
                     humantime::format_duration(Duration::from_secs(remaining.as_secs()))
-                )
+                );
             }
         }
 

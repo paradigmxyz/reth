@@ -23,11 +23,11 @@ use reth_node_core::{events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
-use reth_snapshot::Snapshotter;
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
 };
+use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
@@ -91,7 +91,7 @@ impl ImportCommand {
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         info!(target: "reth::cli", "Database opened");
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.snapshots_path())?;
+            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
@@ -108,9 +108,9 @@ impl ImportCommand {
         let tip = file_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
 
-        let snapshotter = Snapshotter::new(
+        let static_file_producer = StaticFileProducer::new(
             provider_factory.clone(),
-            provider_factory.snapshot_provider(),
+            provider_factory.static_file_provider(),
             PruneModes::default(),
         );
 
@@ -120,7 +120,7 @@ impl ImportCommand {
                 provider_factory.clone(),
                 &consensus,
                 file_client,
-                snapshotter,
+                static_file_producer,
             )
             .await?;
 
@@ -156,7 +156,7 @@ impl ImportCommand {
         provider_factory: ProviderFactory<DB>,
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
-        snapshotter: Snapshotter<DB>,
+        static_file_producer: StaticFileProducer<DB>,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,
@@ -191,7 +191,7 @@ impl ImportCommand {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                    snapshotter,
+                    static_file_producer,
                 )?
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,

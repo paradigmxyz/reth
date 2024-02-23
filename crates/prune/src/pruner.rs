@@ -7,7 +7,7 @@ use crate::{
 };
 use reth_db::database::Database;
 use reth_primitives::{
-    BlockNumber, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SnapshotSegment,
+    BlockNumber, PruneMode, PruneProgress, PrunePurpose, PruneSegment, StaticFileSegment,
 };
 use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
 use reth_tokio_util::EventListeners;
@@ -76,7 +76,7 @@ impl<DB: Database> Pruner<DB> {
             self.previous_tip_block_number = Some(tip_block_number);
 
             debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PruneProgress::Finished)
+            return Ok(PruneProgress::Finished);
         }
 
         debug!(target: "pruner", %tip_block_number, "Pruner started");
@@ -125,7 +125,7 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Prunes the segments that the [Pruner] was initialized with, and the segments that needs to
-    /// be pruned according to the highest snapshots.
+    /// be pruned according to the highest static_files.
     ///
     /// Returns [PrunerStats], `delete_limit` that remained after pruning all segments, and
     /// [PruneProgress].
@@ -135,10 +135,10 @@ impl<DB: Database> Pruner<DB> {
         tip_block_number: BlockNumber,
         mut delete_limit: usize,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
-        let snapshot_segments = self.snapshot_segments();
-        let segments = snapshot_segments
+        let static_file_segments = self.static_file_segments();
+        let segments = static_file_segments
             .iter()
-            .map(|segment| (segment, PrunePurpose::Snapshot))
+            .map(|segment| (segment, PrunePurpose::StaticFile))
             .chain(self.segments.iter().map(|segment| (segment, PrunePurpose::User)));
 
         let mut done = true;
@@ -146,7 +146,7 @@ impl<DB: Database> Pruner<DB> {
 
         for (segment, purpose) in segments {
             if delete_limit == 0 {
-                break
+                break;
             }
 
             if let Some((to_block, prune_mode)) = segment
@@ -196,28 +196,29 @@ impl<DB: Database> Pruner<DB> {
         Ok((stats, delete_limit, PruneProgress::from_done(done)))
     }
 
-    /// Returns pre-configured segments that needs to be pruned according to the highest snapshots
-    /// for [PruneSegment::Transactions], [PruneSegment::Headers] and [PruneSegment::Receipts].
-    fn snapshot_segments(&self) -> Vec<Box<dyn Segment<DB>>> {
+    /// Returns pre-configured segments that needs to be pruned according to the highest
+    /// static_files for [PruneSegment::Transactions], [PruneSegment::Headers] and
+    /// [PruneSegment::Receipts].
+    fn static_file_segments(&self) -> Vec<Box<dyn Segment<DB>>> {
         let mut segments = Vec::<Box<dyn Segment<DB>>>::new();
 
-        let snapshot_provider = self.provider_factory.snapshot_provider();
+        let static_file_provider = self.provider_factory.static_file_provider();
 
         if let Some(to_block) =
-            snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Transactions)
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Transactions)
         {
             segments
                 .push(Box::new(segments::Transactions::new(PruneMode::before_inclusive(to_block))))
         }
 
         if let Some(to_block) =
-            snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers)
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers)
         {
             segments.push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
         }
 
         if let Some(to_block) =
-            snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Receipts)
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts)
         {
             segments.push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
         }
@@ -251,7 +252,7 @@ impl<DB: Database> Pruner<DB> {
 #[cfg(test)]
 mod tests {
     use crate::Pruner;
-    use reth_db::test_utils::{create_test_rw_db, create_test_snapshots_dir};
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_primitives::MAINNET;
     use reth_provider::ProviderFactory;
 
@@ -259,8 +260,8 @@ mod tests {
     fn is_pruning_needed() {
         let db = create_test_rw_db();
         let provider_factory =
-            ProviderFactory::new(db, MAINNET.clone(), create_test_snapshots_dir())
-                .expect("create provide factory with snapshots");
+            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir())
+                .expect("create provide factory with static_files");
         let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5);
 
         // No last pruned block number was set before

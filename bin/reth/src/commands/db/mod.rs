@@ -25,7 +25,7 @@ mod clear;
 mod diff;
 mod get;
 mod list;
-mod snapshots;
+mod static_files;
 mod stats;
 /// DB List TUI
 mod tui;
@@ -82,8 +82,8 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
-    /// Snapshots tables from database
-    Snapshot(snapshots::Command),
+    /// Creates static files from database tables
+    CreateStaticFiles(static_files::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -105,7 +105,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(data_dir, &tool)?;
@@ -116,7 +116,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
@@ -127,7 +127,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
@@ -138,7 +138,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
@@ -162,7 +162,7 @@ impl Command {
                 let db =
                     open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 let mut tool = DbTool::new(provider_factory, self.chain.clone())?;
                 tool.drop(db_path)?;
@@ -171,11 +171,11 @@ impl Command {
                 let db =
                     open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 command.execute(provider_factory)?;
             }
-            Subcommands::Snapshot(command) => {
+            Subcommands::CreateStaticFiles(command) => {
                 command.execute(data_dir, self.db.log_level, self.chain.clone())?;
             }
             Subcommands::Version => {

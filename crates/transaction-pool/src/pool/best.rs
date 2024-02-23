@@ -85,7 +85,7 @@ pub(crate) struct BestTransactions<T: TransactionOrdering> {
     /// There might be the case where a yielded transactions is invalid, this will track it.
     pub(crate) invalid: HashSet<TxHash>,
     /// Used to receive any new pending transactions that have been added to the pool after this
-    /// iterator was snapshotted
+    /// iterator was static fileted
     ///
     /// These new pending transactions are inserted into this iterator's pool before yielding the
     /// next value

@@ -2096,7 +2096,7 @@ mod tests {
 
     mod fork_choice_updated {
         use super::*;
-        use reth_db::{tables, test_utils::create_test_snapshots_dir, transaction::DbTxMut};
+        use reth_db::{tables, test_utils::create_test_static_files_dir, transaction::DbTxMut};
         use reth_interfaces::test_utils::generators::random_block;
         use reth_primitives::U256;
         use reth_rpc_types::engine::ForkchoiceUpdateError;
@@ -2155,9 +2155,9 @@ mod tests {
                 ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
-                    create_test_snapshots_dir(),
+                    create_test_static_files_dir(),
                 )
-                .expect("create provider factory with snapshots"),
+                .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
             env.db
@@ -2213,9 +2213,9 @@ mod tests {
                 ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
-                    create_test_snapshots_dir(),
+                    create_test_static_files_dir(),
                 )
-                .expect("create provider factory with snapshots"),
+                .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2237,9 +2237,9 @@ mod tests {
                 ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
-                    create_test_snapshots_dir(),
+                    create_test_static_files_dir(),
                 )
-                .expect("create provider factory with snapshots"),
+                .expect("create provider factory with static_files"),
                 [&next_head].into_iter(),
             );
 
@@ -2279,9 +2279,9 @@ mod tests {
                 ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
-                    create_test_snapshots_dir(),
+                    create_test_static_files_dir(),
                 )
-                .expect("create provider factory with snapshots"),
+                .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2334,9 +2334,9 @@ mod tests {
                 ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
-                    create_test_snapshots_dir(),
+                    create_test_static_files_dir(),
                 )
-                .expect("create provider factory with snapshots"),
+                .expect("create provider factory with static_files"),
                 [&genesis, &block1, &block2, &block3].into_iter(),
             );
 
@@ -2382,9 +2382,9 @@ mod tests {
                 ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
-                    create_test_snapshots_dir(),
+                    create_test_static_files_dir(),
                 )
-                .expect("create provider factory with snapshots"),
+                .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2408,7 +2408,7 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use reth_db::test_utils::create_test_snapshots_dir;
+        use reth_db::test_utils::create_test_static_files_dir;
         use reth_interfaces::test_utils::generators::random_block;
         use reth_primitives::{
             genesis::{Genesis, GenesisAllocator},
@@ -2486,9 +2486,9 @@ mod tests {
                 ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
-                    create_test_snapshots_dir(),
+                    create_test_static_files_dir(),
                 )
-                .expect("create provider factory with snapshots"),
+                .expect("create provider factory with static_files"),
                 [&genesis, &block1, &block2].into_iter(),
             );
 
@@ -2557,9 +2557,9 @@ mod tests {
                 ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
-                    create_test_snapshots_dir(),
+                    create_test_static_files_dir(),
                 )
-                .expect("create provider factory with snapshots"),
+                .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2603,9 +2603,9 @@ mod tests {
                 ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
-                    create_test_snapshots_dir(),
+                    create_test_static_files_dir(),
                 )
-                .expect("create provider factory with snapshots"),
+                .expect("create provider factory with static_files"),
                 [&genesis].into_iter(),
             );
 
@@ -2669,9 +2669,9 @@ mod tests {
                 ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
-                    create_test_snapshots_dir(),
+                    create_test_static_files_dir(),
                 )
-                .expect("create provider factory with snapshots"),
+                .expect("create provider factory with static_files"),
                 [&data.genesis, &block1].into_iter(),
             );
 

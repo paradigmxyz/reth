@@ -25,7 +25,7 @@ fn main() -> eyre::Result<()> {
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
     let spec = ChainSpecBuilder::mainnet().build();
-    let factory = ProviderFactory::new(db, spec.into(), db_path.join("snapshots"))?;
+    let factory = ProviderFactory::new(db, spec.into(), db_path.join("static_files"))?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.

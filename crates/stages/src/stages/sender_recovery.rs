@@ -2,7 +2,7 @@ use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInpu
 use reth_db::{
     cursor::DbCursorRW,
     database::Database,
-    snapshot::TransactionMask,
+    static_file::TransactionMask,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -10,7 +10,7 @@ use reth_interfaces::consensus;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Address, PruneSegment, SnapshotSegment, TransactionSignedNoHash, TxNumber,
+    Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
@@ -104,15 +104,15 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             let (recovered_senders_tx, recovered_senders_rx) = mpsc::channel();
             channels.push(recovered_senders_rx);
 
-            let snapshot_provider = provider.snapshot_provider().clone();
+            let static_file_provider = provider.static_file_provider().clone();
 
             // Spawn the task onto the global rayon pool
             // This task will send the results through the channel after it has read the transaction
             // and calculated the sender.
             rayon::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
-                let _ = snapshot_provider.fetch_range_with_predicate(
-                    SnapshotSegment::Transactions,
+                let _ = static_file_provider.fetch_range_with_predicate(
+                    StaticFileSegment::Transactions,
                     chunk_range,
                     |cursor, number| {
                         Ok(cursor
@@ -257,7 +257,7 @@ mod tests {
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
         TransactionSigned, B256,
     };
-    use reth_provider::{providers::SnapshotWriter, PruneCheckpointWriter, TransactionsProvider};
+    use reth_provider::{providers::StaticFileWriter, PruneCheckpointWriter, TransactionsProvider};
 
     use super::*;
     use crate::test_utils::{
@@ -335,9 +335,12 @@ mod tests {
             .insert_blocks(seed.iter(), StorageKind::Static)
             .expect("failed to seed execution");
 
-        let total_transactions =
-            runner.db.factory.snapshot_provider().count_entries::<tables::Transactions>().unwrap()
-                as u64;
+        let total_transactions = runner
+            .db
+            .factory
+            .static_file_provider()
+            .count_entries::<tables::Transactions>()
+            .unwrap() as u64;
 
         let first_input = ExecInput {
             target: Some(previous_stage),

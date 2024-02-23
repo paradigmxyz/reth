@@ -5,10 +5,10 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_rlp::Decodable;
-use reth_db::test_utils::{create_test_rw_db, create_test_snapshots_dir};
+use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
 use reth_node_ethereum::EthEvmConfig;
-use reth_primitives::{BlockBody, SealedBlock, SnapshotSegment};
-use reth_provider::{providers::SnapshotWriter, HashingWriter, ProviderFactory};
+use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
+use reth_provider::{providers::StaticFileWriter, HashingWriter, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
@@ -81,7 +81,7 @@ impl Case for BlockchainTestCase {
             let provider = ProviderFactory::new(
                 db.as_ref(),
                 Arc::new(case.network.clone().into()),
-                create_test_snapshots_dir(),
+                create_test_static_files_dir(),
             )?
             .provider_rw()
             .unwrap();
@@ -109,8 +109,8 @@ impl Case for BlockchainTestCase {
                 Ok::<Option<SealedBlock>, Error>(Some(decoded))
             })?;
             provider
-                .snapshot_provider()
-                .latest_writer(SnapshotSegment::Headers)
+                .static_file_provider()
+                .latest_writer(StaticFileSegment::Headers)
                 .unwrap()
                 .commit()
                 .unwrap();

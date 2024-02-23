@@ -134,7 +134,7 @@ impl Command {
             .build(Arc::new(ProviderFactory::new(
                 noop_db,
                 self.chain.clone(),
-                data_dir.snapshots_path(),
+                data_dir.static_files_path(),
             )?))
             .start_network()
             .await?;

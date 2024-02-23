@@ -18,8 +18,8 @@ mod index_storage_history;
 mod merkle;
 /// The sender recovery stage.
 mod sender_recovery;
-/// The snapshot stage.
-mod snapshot;
+/// The static file stage.
+mod static_file;
 /// The transaction lookup stage
 mod tx_lookup;
 
@@ -33,7 +33,7 @@ pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
 pub use sender_recovery::*;
-pub use snapshot::*;
+pub use static_file::*;
 pub use tx_lookup::*;
 
 #[cfg(test)]
@@ -53,10 +53,10 @@ mod tests {
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
-        PruneModes, SealedBlock, SnapshotSegment, U256,
+        PruneModes, SealedBlock, StaticFileSegment, U256,
     };
     use reth_provider::{
-        providers::SnapshotWriter, AccountExtReader, ProviderFactory, ReceiptProvider,
+        providers::StaticFileWriter, AccountExtReader, ProviderFactory, ReceiptProvider,
         StorageReader,
     };
     use reth_revm::EvmProcessorFactory;
@@ -92,8 +92,8 @@ mod tests {
                 .unwrap();
         }
         provider_rw
-            .snapshot_provider()
-            .latest_writer(SnapshotSegment::Headers)
+            .static_file_provider()
+            .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();

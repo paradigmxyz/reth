@@ -7,12 +7,12 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
-    stage::StageId, Account, Bytecode, ChainSpec, Receipts, SnapshotSegment, StorageEntry, B256,
+    stage::StageId, Account, Bytecode, ChainSpec, Receipts, StaticFileSegment, StorageEntry, B256,
     U256,
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
-    providers::{SnapshotProvider, SnapshotWriter},
+    providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BundleStateWithReceipts, ChainSpecProvider, DatabaseProviderRW, HashingWriter,
     HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
 };
@@ -55,7 +55,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 
     // Check if we already have the genesis header or if we have the wrong one.
     match factory.block_hash(0) {
-        Ok(None) | Err(ProviderError::MissingSnapshotBlock(SnapshotSegment::Headers, 0)) => {}
+        Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {}
         Ok(Some(block_hash)) => {
             if block_hash == hash {
                 debug!("Genesis already written, skipping.");
@@ -79,7 +79,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 
     // Insert header
     let tx = provider_rw.into_tx();
-    insert_genesis_header::<DB>(&tx, factory.snapshot_provider(), chain.clone())?;
+    insert_genesis_header::<DB>(&tx, factory.static_file_provider(), chain.clone())?;
 
     insert_genesis_state::<DB>(&tx, genesis)?;
 
@@ -209,15 +209,15 @@ pub fn insert_genesis_history<DB: Database>(
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<DB: Database>(
     tx: &<DB as Database>::TXMut,
-    snapshot_provider: SnapshotProvider,
+    static_file_provider: StaticFileProvider,
     chain: Arc<ChainSpec>,
 ) -> ProviderResult<()> {
     let (header, block_hash) = chain.sealed_genesis_header().split();
 
-    match snapshot_provider.block_hash(0) {
-        Ok(None) | Err(ProviderError::MissingSnapshotBlock(SnapshotSegment::Headers, 0)) => {
+    match static_file_provider.block_hash(0) {
+        Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
             let (difficulty, hash) = (header.difficulty, block_hash);
-            let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+            let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
             writer.append_header(header, difficulty, hash)?;
             writer.commit()?;
         }
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn fail_init_inconsistent_db() {
         let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
-        let snapshot_provider = factory.snapshot_provider();
+        let static_file_provider = factory.static_file_provider();
         init_genesis(factory.clone()).unwrap();
 
         // Try to init db with a different genesis block
@@ -295,7 +295,7 @@ mod tests {
             ProviderFactory::new(
                 factory.into_db(),
                 MAINNET.clone(),
-                snapshot_provider.path().into(),
+                static_file_provider.path().into(),
             )
             .unwrap(),
         );

@@ -35,8 +35,8 @@ mod receipt;
 /// Helpers for working with revm
 pub mod revm;
 pub mod serde_helper;
-pub mod snapshot;
 pub mod stage;
+pub mod static_file;
 mod storage;
 /// Helpers for working with transactions
 pub mod transaction;
@@ -73,7 +73,7 @@ pub use prune::{
     PruneSegmentError, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
-pub use snapshot::SnapshotSegment;
+pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
 #[cfg(feature = "c-kzg")]
