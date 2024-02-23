@@ -1,20 +1,17 @@
-# reth db get snapshot
+# reth db clear static-file
 
-Gets the content of a snapshot segment for the given key
+Deletes all static_file segment entries
 
 ```bash
-$ reth db get snapshot --help
-Usage: reth db get snapshot [OPTIONS] <SEGMENT> <KEY>
+$ reth db clear static-file --help
+Usage: reth db clear static-file [OPTIONS] <SEGMENT>
 
 Arguments:
   <SEGMENT>
           Possible values:
-          - headers:      Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
-          - transactions: Snapshot segment responsible for the `Transactions` table
-          - receipts:     Snapshot segment responsible for the `Receipts` table
-
-  <KEY>
-          The key to get content for
+          - headers:      StaticFile segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
+          - transactions: StaticFile segment responsible for the `Transactions` table
+          - receipts:     StaticFile segment responsible for the `Receipts` table
 
 Options:
       --datadir <DATA_DIR>
@@ -27,9 +24,6 @@ Options:
           - macOS: `$HOME/Library/Application Support/reth/`
           
           [default: default]
-
-      --raw
-          Output bytes instead of human-readable decoded value
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.

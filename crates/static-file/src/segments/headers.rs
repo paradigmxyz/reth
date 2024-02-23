@@ -11,7 +11,7 @@ use reth_provider::{
 };
 use std::{ops::RangeInclusive, path::Path};
 
-/// Snapshot segment responsible for [SnapshotSegment::Headers] part of data.
+/// StaticFile segment responsible for [StaticFileSegment::Headers] part of data.
 #[derive(Debug, Default)]
 pub struct Headers;
 
@@ -20,7 +20,7 @@ impl<DB: Database> Segment<DB> for Headers {
         StaticFileSegment::Headers
     }
 
-    fn snapshot(
+    fn copy_to_static_files(
         &self,
         provider: DatabaseProviderRO<DB>,
         static_file_provider: StaticFileProvider,

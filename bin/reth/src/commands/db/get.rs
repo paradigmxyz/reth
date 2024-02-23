@@ -34,7 +34,7 @@ enum Subcommand {
         #[clap(long)]
         raw: bool,
     },
-    /// Gets the content of a snapshot segment for the given key
+    /// Gets the content of a static file segment for the given key
     StaticFile {
         segment: StaticFileSegment,
 

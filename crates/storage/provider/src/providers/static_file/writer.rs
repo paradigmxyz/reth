@@ -19,12 +19,12 @@ use std::{
 };
 use tracing::debug;
 
-/// Mutable reference to a dashmap element of [`SnapshotProviderRW`].
+/// Mutable reference to a dashmap element of [`StaticFileProviderRW`].
 pub type StaticFileProviderRWRefMut<'a> =
     RefMut<'a, StaticFileSegment, StaticFileProviderRW<'static>>;
 
 #[derive(Debug)]
-/// Extends `SnapshotProvider` with writing capabilities
+/// Extends `StaticFileProvider` with writing capabilities
 pub struct StaticFileProviderRW<'a> {
     reader: StaticFileProvider,
     writer: NippyJarWriter<'a, SegmentHeader>,
@@ -34,7 +34,7 @@ pub struct StaticFileProviderRW<'a> {
 }
 
 impl<'a> StaticFileProviderRW<'a> {
-    /// Creates a new [`SnapshotProviderRW`] for a [`SnapshotSegment`].
+    /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
     pub fn new(
         segment: StaticFileSegment,
         block: BlockNumber,
@@ -69,7 +69,7 @@ impl<'a> StaticFileProviderRW<'a> {
         let result = match NippyJarWriter::from_owned(jar) {
             Ok(writer) => Ok((writer, path)),
             Err(NippyJarError::FrozenJar) => {
-                // This snapshot has been frozen, so we should
+                // This static file has been frozen, so we should
                 Err(ProviderError::FinalizedStaticFile(segment, block))
             }
             Err(e) => Err(e.into()),
@@ -123,7 +123,7 @@ impl<'a> StaticFileProviderRW<'a> {
         // previous file.
         //
         // If that expected block start is 0, then it means that there's no actual block data, and
-        // there's no snapshotted block data.
+        // there's no block data in static files.
         let segment_max_block = match self.writer.user_header().block_range() {
             Some(block_range) => Some(block_range.end()),
             None => {
@@ -138,19 +138,19 @@ impl<'a> StaticFileProviderRW<'a> {
         self.reader.update_index(self.writer.user_header().segment(), segment_max_block)
     }
 
-    /// Allows to increment the [`SegmentHeader`] end block. It will commit the current snapshot,
+    /// Allows to increment the [`SegmentHeader`] end block. It will commit the current static file,
     /// and create the next one if we are past the end range.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn increment_block(&mut self, segment: StaticFileSegment) -> ProviderResult<BlockNumber> {
         let start = Instant::now();
         if let Some(last_block) = self.writer.user_header().block_end() {
-            // We have finished the previous snapshot and must freeze it
+            // We have finished the previous static file and must freeze it
             if last_block == self.writer.user_header().expected_block_end() {
                 // Commits offsets and new user_header to disk
                 self.commit()?;
 
-                // Opens the new snapshot
+                // Opens the new static file
                 let (writer, data_path) =
                     Self::open(segment, last_block + 1, self.reader.clone(), self.metrics.clone())?;
                 self.writer = writer;
@@ -173,7 +173,7 @@ impl<'a> StaticFileProviderRW<'a> {
         Ok(block)
     }
 
-    /// Truncates a number of rows from disk. It deletes and loads an older snapshot file if block
+    /// Truncates a number of rows from disk. It deletes and loads an older static file if block
     /// goes beyond the start of the current block range.
     ///
     /// **last_block** should be passed only with transaction based segments.
@@ -197,8 +197,8 @@ impl<'a> StaticFileProviderRW<'a> {
             };
 
             if num_rows >= len {
-                // If there's more rows to delete than this snapshot contains, then just
-                // delete the whole file and go to the next snapshot
+                // If there's more rows to delete than this static file contains, then just
+                // delete the whole file and go to the next static file
                 let previous_snap = self.data_path.clone();
                 let block_start = self.writer.user_header().expected_block_start();
 
@@ -243,7 +243,7 @@ impl<'a> StaticFileProviderRW<'a> {
         Ok(())
     }
 
-    /// Appends column to snapshot file.
+    /// Appends column to static file.
     fn append_column<T: Compact>(&mut self, column: T) -> ProviderResult<()> {
         self.buf.clear();
         column.to_compact(&mut self.buf);
@@ -252,7 +252,7 @@ impl<'a> StaticFileProviderRW<'a> {
         Ok(())
     }
 
-    /// Appends to tx number-based snapshot file.
+    /// Appends to tx number-based static file.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
     fn append_with_tx_number<V: Compact>(
@@ -274,7 +274,7 @@ impl<'a> StaticFileProviderRW<'a> {
         Ok(self.writer.user_header().tx_end().expect("qed"))
     }
 
-    /// Appends header to snapshot file.
+    /// Appends header to static file.
     ///
     /// It **CALLS** `increment_block()` since the number of headers is equal to the number of
     /// blocks.
@@ -307,7 +307,7 @@ impl<'a> StaticFileProviderRW<'a> {
         Ok(block_number)
     }
 
-    /// Appends transaction to snapshot file.
+    /// Appends transaction to static file.
     ///
     /// It **DOES NOT CALL** `increment_block()`, it should be handled elsewhere. There might be
     /// empty blocks and this function wouldn't be called.
@@ -333,7 +333,7 @@ impl<'a> StaticFileProviderRW<'a> {
         Ok(result)
     }
 
-    /// Appends receipt to snapshot file.
+    /// Appends receipt to static file.
     ///
     /// It **DOES NOT** call `increment_block()`, it should be handled elsewhere. There might be
     /// empty blocks and this function wouldn't be called.

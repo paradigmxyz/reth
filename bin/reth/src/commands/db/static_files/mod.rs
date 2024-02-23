@@ -31,9 +31,9 @@ mod receipts;
 mod transactions;
 
 #[derive(Parser, Debug)]
-/// Arguments for the `reth db snapshot` command.
+/// Arguments for the `reth db static file` command.
 pub struct Command {
-    /// Snapshot segments to generate.
+    /// StaticFile segments to generate.
     segments: Vec<StaticFileSegment>,
 
     /// Starting block for the static_file.
@@ -53,15 +53,15 @@ pub struct Command {
     )]
     parallel: u64,
 
-    /// Flag to skip snapshot creation and print snapshot files stats.
+    /// Flag to skip static file creation and print static files stats.
     #[arg(long, default_value = "false")]
     only_stats: bool,
 
-    /// Flag to enable database-to-snapshot benchmarking.
+    /// Flag to enable database-to-static file benchmarking.
     #[arg(long, default_value = "false")]
     bench: bool,
 
-    /// Flag to skip snapshot creation and only run benchmarks on existing static_files.
+    /// Flag to skip static file creation and only run benchmarks on existing static_files.
     #[arg(long, default_value = "false")]
     only_bench: bool,
 
@@ -79,7 +79,7 @@ pub struct Command {
 }
 
 impl Command {
-    /// Execute `db snapshot` command
+    /// Execute `db static file` command
     pub fn execute(
         self,
         data_dir: ChainPath<DataDirPath>,
@@ -217,10 +217,10 @@ impl Command {
         self.stats(created_static_files)
     }
 
-    /// Prints detailed statistics for each snapshot, including loading time.
+    /// Prints detailed statistics for each static file, including loading time.
     ///
-    /// This function loads each snapshot from the provided paths and prints
-    /// statistics about various aspects of each snapshot, such as filters size,
+    /// This function loads each static file from the provided paths and prints
+    /// statistics about various aspects of each static file, such as filters size,
     /// offset index size, offset list size, and loading time.
     fn stats(&self, static_files: Vec<impl AsRef<Path>>) -> eyre::Result<()> {
         let mut total_filters_size = 0;
@@ -240,7 +240,7 @@ impl Command {
             total_duration += duration;
             total_file_size += file_size;
 
-            println!("Snapshot: {:?}", snap.as_ref().file_name());
+            println!("StaticFile: {:?}", snap.as_ref().file_name());
             println!("  File Size:           {:>7}", human_bytes(file_size as f64));
             println!("  Filters Size:        {:>7}", human_bytes(jar.filter_size() as f64));
             println!("  Offset Index Size:   {:>7}", human_bytes(jar.offsets_index_size() as f64));

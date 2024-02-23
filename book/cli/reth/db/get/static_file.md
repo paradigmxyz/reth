@@ -1,19 +1,20 @@
-# reth db snapshot
+# reth db get static-file
 
-Snapshots tables from database
+Gets the content of a static_file segment for the given key
 
 ```bash
-$ reth db snapshot --help
-Usage: reth db snapshot [OPTIONS] [SEGMENTS]...
+$ reth db get static-file --help
+Usage: reth db get static-file [OPTIONS] <SEGMENT> <KEY>
 
 Arguments:
-  [SEGMENTS]...
-          Snapshot segments to generate
-
+  <SEGMENT>
           Possible values:
-          - headers:      Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
-          - transactions: Snapshot segment responsible for the `Transactions` table
-          - receipts:     Snapshot segment responsible for the `Receipts` table
+          - headers:      StaticFile segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
+          - transactions: StaticFile segment responsible for the `Transactions` table
+          - receipts:     StaticFile segment responsible for the `Receipts` table
+
+  <KEY>
+          The key to get content for
 
 Options:
       --datadir <DATA_DIR>
@@ -27,15 +28,8 @@ Options:
           
           [default: default]
 
-  -f, --from <FROM>
-          Starting block for the snapshot
-          
-          [default: 0]
-
-  -b, --block-interval <BLOCK_INTERVAL>
-          Number of blocks in the snapshot
-          
-          [default: 500000]
+      --raw
+          Output bytes instead of human-readable decoded value
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
@@ -45,41 +39,6 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
           
           [default: mainnet]
-
-  -p, --parallel <PARALLEL>
-          Sets the number of snapshots built in parallel. Note: Each parallel build is memory-intensive
-          
-          [default: 1]
-
-      --only-stats
-          Flag to skip snapshot creation and print snapshot files stats
-
-      --bench
-          Flag to enable database-to-snapshot benchmarking
-
-      --only-bench
-          Flag to skip snapshot creation and only run benchmarks on existing snapshots
-
-  -c, --compression <COMPRESSION>
-          Compression algorithms to use
-          
-          [default: uncompressed]
-
-          Possible values:
-          - lz4:                  LZ4 compression algorithm
-          - zstd:                 Zstandard (Zstd) compression algorithm
-          - zstd-with-dictionary: Zstandard (Zstd) compression algorithm with a dictionary
-          - uncompressed:         No compression, uncompressed snapshot
-
-      --with-filters
-          Flag to enable inclusion list filters and PHFs
-
-      --phf <PHF>
-          Specifies the perfect hashing function to use
-
-          Possible values:
-          - fmph:    Fingerprint-Based Minimal Perfect Hash Function
-          - go-fmph: Fingerprint-Based Minimal Perfect Hash Function with Group Optimization
 
       --instance <INSTANCE>
           Add a new instance of a node.

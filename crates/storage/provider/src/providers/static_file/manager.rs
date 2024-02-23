@@ -38,15 +38,16 @@ use std::{
 use tracing::warn;
 
 /// Alias type for a map that can be queried for block ranges from a transaction
-/// segment respectively. It uses `TxNumber` to represent the transaction end of a snapshot range.
+/// segment respectively. It uses `TxNumber` to represent the transaction end of a static file
+/// range.
 type SegmentRanges = HashMap<StaticFileSegment, BTreeMap<TxNumber, SegmentRangeInclusive>>;
 
-/// [`SnapshotProvider`] manages all existing [`SnapshotJarProvider`].
+/// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
 #[derive(Debug, Default, Clone)]
 pub struct StaticFileProvider(Arc<StaticFileProviderInner>);
 
 impl StaticFileProvider {
-    /// Creates a new [`SnapshotProvider`].
+    /// Creates a new [`StaticFileProvider`].
     pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
         let provider = Self(Arc::new(StaticFileProviderInner::new(path)?));
         provider.initialize_index()?;
@@ -62,28 +63,28 @@ impl Deref for StaticFileProvider {
     }
 }
 
-/// [`SnapshotProviderInner`] manages all existing [`SnapshotJarProvider`].
+/// [`StaticFileProviderInner`] manages all existing [`StaticFileJarProvider`].
 #[derive(Debug, Default)]
 pub struct StaticFileProviderInner {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
-    /// Max snapshotted block for each snapshot segment
+    /// Max static file block for each segment
     static_files_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
-    /// Available snapshot block ranges on disk indexed by max transactions.
+    /// Available static file block ranges on disk indexed by max transactions.
     static_files_tx_index: RwLock<SegmentRanges>,
     /// Directory where static_files are located
     path: PathBuf,
-    /// Whether [`SnapshotJarProvider`] loads filters into memory. If not, `by_hash` queries won't
-    /// be able to be queried directly.
+    /// Whether [`StaticFileJarProvider`] loads filters into memory. If not, `by_hash` queries
+    /// won't be able to be queried directly.
     load_filters: bool,
-    /// Maintains a map of Snapshot writers for each [`SnapshotSegment`]
+    /// Maintains a map of StaticFile writers for each [`StaticFileSegment`]
     writers: DashMap<StaticFileSegment, StaticFileProviderRW<'static>>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
 }
 
 impl StaticFileProviderInner {
-    /// Creates a new [`SnapshotProviderInner`].
+    /// Creates a new [`StaticFileProviderInner`].
     fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
         let provider = Self {
             map: Default::default(),
@@ -100,7 +101,7 @@ impl StaticFileProviderInner {
 }
 
 impl StaticFileProvider {
-    /// Loads filters into memory when creating a [`SnapshotJarProvider`].
+    /// Loads filters into memory when creating a [`StaticFileJarProvider`].
     pub fn with_filters(self) -> Self {
         let mut provider =
             Arc::try_unwrap(self.0).expect("should be called when initializing only");
@@ -108,7 +109,7 @@ impl StaticFileProvider {
         Self(Arc::new(provider))
     }
 
-    /// Enables metrics on the [`SnapshotProvider`].
+    /// Enables metrics on the [`StaticFileProvider`].
     pub fn with_metrics(self) -> Self {
         let mut provider =
             Arc::try_unwrap(self.0).expect("should be called when initializing only");
@@ -116,7 +117,7 @@ impl StaticFileProvider {
         Self(Arc::new(provider))
     }
 
-    /// Gets the [`SnapshotJarProvider`] of the requested segment and block.
+    /// Gets the [`StaticFileJarProvider`] of the requested segment and block.
     pub fn get_segment_provider_from_block(
         &self,
         segment: StaticFileSegment,
@@ -131,7 +132,7 @@ impl StaticFileProvider {
         .ok_or_else(|| ProviderError::MissingStaticFileBlock(segment, block))
     }
 
-    /// Gets the [`SnapshotJarProvider`] of the requested segment and transaction.
+    /// Gets the [`StaticFileJarProvider`] of the requested segment and transaction.
     pub fn get_segment_provider_from_transaction(
         &self,
         segment: StaticFileSegment,
@@ -146,7 +147,7 @@ impl StaticFileProvider {
         .ok_or_else(|| ProviderError::MissingStaticFileTx(segment, tx))
     }
 
-    /// Gets the [`SnapshotJarProvider`] of the requested segment and block or transaction.
+    /// Gets the [`StaticFileJarProvider`] of the requested segment and block or transaction.
     ///
     /// `fn_range` should make sure the range goes through `find_fixed_range`.
     pub fn get_segment_provider(
@@ -225,7 +226,7 @@ impl StaticFileProvider {
     }
 
     /// Given a segment and block range it returns a cached
-    /// [`SnapshotJarProvider`]. TODO(joshie): we should check the size and pop N if there's too
+    /// [`StaticFileJarProvider`]. TODO(joshie): we should check the size and pop N if there's too
     /// many.
     fn get_or_create_jar_provider(
         &self,
@@ -253,7 +254,7 @@ impl StaticFileProvider {
         Ok(provider)
     }
 
-    /// Gets a snapshot segment's block range from the provider inner block
+    /// Gets a static file segment's block range from the provider inner block
     /// index.
     fn get_segment_ranges_from_block(
         &self,
@@ -267,7 +268,7 @@ impl StaticFileProvider {
             .map(|_| find_fixed_range(block))
     }
 
-    /// Gets a snapshot segment's fixed block range from the provider inner
+    /// Gets a static file segment's fixed block range from the provider inner
     /// transaction index.
     fn get_segment_ranges_from_transaction(
         &self,
@@ -283,7 +284,7 @@ impl StaticFileProvider {
 
         while let Some((tx_end, block_range)) = static_files_rev_iter.next() {
             if tx > *tx_end {
-                // request tx is higher than highest snapshot tx
+                // request tx is higher than highest static file tx
                 return None;
             }
             let tx_start = static_files_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
@@ -405,12 +406,12 @@ impl StaticFileProvider {
         Ok(())
     }
 
-    /// Gets the highest snapshot block if it exists for a snapshot segment.
+    /// Gets the highest static file block if it exists for a static file segment.
     pub fn get_highest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
         self.static_files_max_block.read().get(&segment).copied()
     }
 
-    /// Gets the highest snapshotted transaction.
+    /// Gets the highest static file transaction.
     pub fn get_highest_static_file_tx(&self, segment: StaticFileSegment) -> Option<TxNumber> {
         self.static_files_tx_index
             .read()
@@ -418,7 +419,7 @@ impl StaticFileProvider {
             .and_then(|index| index.last_key_value().map(|(last_tx, _)| *last_tx))
     }
 
-    /// Gets the highest snapshotted blocks for all segments.
+    /// Gets the highest static file block for all segments.
     pub fn get_highest_static_files(&self) -> HighestStaticFiles {
         HighestStaticFiles {
             headers: self.get_highest_static_file_block(StaticFileSegment::Headers),
@@ -450,7 +451,7 @@ impl StaticFileProvider {
         Ok(None)
     }
 
-    /// Fetches data within a specified range across multiple snapshot files.
+    /// Fetches data within a specified range across multiple static files.
     ///
     /// This function iteratively retrieves data using `get_fn` for each item in the given range.
     /// It continues fetching until the end of the range is reached or the provided `predicate`
@@ -486,7 +487,7 @@ impl StaticFileProvider {
             // an error, effectively preventing infinite retry loops.
             let mut retrying = false;
 
-            // advances snapshot files if `get_fn` returns None
+            // advances static files if `get_fn` returns None
             'inner: loop {
                 match get_fn(&mut cursor, number)? {
                     Some(res) => {
@@ -523,7 +524,7 @@ impl StaticFileProvider {
         Ok(result)
     }
 
-    /// Fetches data within a specified range across multiple snapshot files.
+    /// Fetches data within a specified range across multiple static files.
     ///
     /// Returns an iterator over the data
     pub fn fetch_range_iter<'a, T, F>(
@@ -562,15 +563,15 @@ impl StaticFileProvider {
         &self.path
     }
 
-    /// Retrieves data from the database or snapshot, wherever it's available.
+    /// Retrieves data from the database or static file, wherever it's available.
     ///
     /// # Arguments
-    /// * `segment` - The segment of the snapshot to check against.
+    /// * `segment` - The segment of the static file to check against.
     /// * `index_key` - Requested index key, usually a block or transaction number.
-    /// * `fetch_from_static_file` - A closure that defines how to fetch the data from the snapshot
-    ///   provider.
+    /// * `fetch_from_static_file` - A closure that defines how to fetch the data from the static
+    ///   file provider.
     /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
-    ///   when the snapshot doesn't contain the required data or is not available.
+    ///   when the static file doesn't contain the required data or is not available.
     pub fn get_with_static_file_or_database<T, FS, FD>(
         &self,
         segment: StaticFileSegment,
@@ -602,7 +603,7 @@ impl StaticFileProvider {
     /// database.
     ///
     /// # Arguments
-    /// * `segment` - The segment of the snapshot to query.
+    /// * `segment` - The segment of the static file to query.
     /// * `block_range` - The range of data to fetch.
     /// * `fetch_from_static_file` - A function to fetch data from the static_file.
     /// * `fetch_from_database` - A function to fetch data from the database.
@@ -656,22 +657,23 @@ impl StaticFileProvider {
     }
 }
 
-/// Helper trait to manage different [`SnapshotProviderRW`] of an `Arc<SnapshotProvider`
+/// Helper trait to manage different [`StaticFileProviderRW`] of an `Arc<StaticFileProvider`
 pub trait StaticFileWriter {
-    /// Returns a mutable reference to a [`SnapshotProviderRW`] of a [`SnapshotSegment`].
+    /// Returns a mutable reference to a [`StaticFileProviderRW`] of a [`StaticFileSegment`].
     fn get_writer(
         &self,
         block: BlockNumber,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_>>;
 
-    /// Returns a mutable reference to a [`SnapshotProviderRW`] of the latest [`SnapshotSegment`].
+    /// Returns a mutable reference to a [`StaticFileProviderRW`] of the latest
+    /// [`StaticFileSegment`].
     fn latest_writer(
         &self,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_>>;
 
-    /// Commits all changes of all [`SnapshotProviderRW`] of all [`SnapshotSegment`].
+    /// Commits all changes of all [`StaticFileProviderRW`] of all [`StaticFileSegment`].
     fn commit(&self) -> ProviderResult<()>;
 }
 

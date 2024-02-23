@@ -14,7 +14,7 @@ use reth_provider::{
 };
 use std::{ops::RangeInclusive, path::Path};
 
-/// Snapshot segment responsible for [SnapshotSegment::Transactions] part of data.
+/// StaticFile segment responsible for [StaticFileSegment::Transactions] part of data.
 #[derive(Debug, Default)]
 pub struct Transactions;
 
@@ -24,8 +24,8 @@ impl<DB: Database> Segment<DB> for Transactions {
     }
 
     /// Write transactions from database table [tables::Transactions] to static files with segment
-    /// [SnapshotSegment::Transactions] for the provided block range.
-    fn snapshot(
+    /// [StaticFileSegment::Transactions] for the provided block range.
+    fn copy_to_static_files(
         &self,
         provider: DatabaseProviderRO<DB>,
         static_file_provider: StaticFileProvider,

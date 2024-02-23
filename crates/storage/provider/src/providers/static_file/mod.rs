@@ -19,7 +19,7 @@ const BLOCKS_PER_STATIC_FILE: u64 = 500_000;
 /// Alias type for each specific `NippyJar`.
 type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, StaticFileSegment), LoadedJar>;
 
-/// Helper type to reuse an associated snapshot mmap handle on created cursors.
+/// Helper type to reuse an associated static file mmap handle on created cursors.
 #[derive(Debug)]
 pub struct LoadedJar {
     jar: NippyJar<SegmentHeader>,
@@ -103,7 +103,7 @@ mod tests {
         }
         provider_rw.commit().unwrap();
 
-        // Create Snapshot
+        // Create StaticFile
         {
             let with_compression = true;
             let with_filter = true;

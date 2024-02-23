@@ -8,7 +8,7 @@ Usage: reth db clear [OPTIONS] <COMMAND>
 
 Commands:
   mdbx      Deletes all database table entries
-  snapshot  Deletes all snapshot segment entries
+  static_file  Deletes all static_file segment entries
   help      Print this message or the help of the given subcommand(s)
 
 Options:

@@ -56,7 +56,7 @@ impl PrunePurpose {
         matches!(self, Self::User)
     }
 
-    /// Returns true if the purpose is [`PrunePurpose::Snapshot`].
+    /// Returns true if the purpose is [`PrunePurpose::StaticFile`].
     pub fn is_static_file(self) -> bool {
         matches!(self, Self::StaticFile)
     }

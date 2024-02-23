@@ -60,13 +60,13 @@ use tempfile::TempDir;
 ///
 /// A combination of (in order)
 ///
-/// - [`SnapshotStage`]
+/// - [`StaticFileStage`]
 /// - [`OnlineStages`]
 /// - [`OfflineStages`]
 /// - [`FinishStage`]
 ///
 /// This expands to the following series of stages:
-/// - [`SnapshotStage`]
+/// - [`StaticFileStage`]
 /// - [`HeaderStage`]
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]

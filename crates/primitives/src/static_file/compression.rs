@@ -1,6 +1,6 @@
 use strum::AsRefStr;
 
-/// Snapshot compression types.
+/// StaticFile compression types.
 #[derive(Debug, Copy, Clone, Default, AsRefStr)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Compression {

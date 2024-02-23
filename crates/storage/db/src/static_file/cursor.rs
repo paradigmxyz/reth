@@ -6,18 +6,18 @@ use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor};
 use reth_primitives::{static_file::SegmentHeader, B256};
 use std::sync::Arc;
 
-/// Cursor of a snapshot segment.
+/// Cursor of a static file segment.
 #[derive(Debug, Deref, DerefMut)]
 pub struct StaticFileCursor<'a>(NippyJarCursor<'a, SegmentHeader>);
 
 impl<'a> StaticFileCursor<'a> {
-    /// Returns a new [`SnapshotCursor`].
+    /// Returns a new [`StaticFileCursor`].
     pub fn new(jar: &'a NippyJar<SegmentHeader>, reader: Arc<DataReader>) -> ProviderResult<Self> {
         Ok(Self(NippyJarCursor::with_reader(jar, reader)?))
     }
 
     /// Returns the current `BlockNumber` or `TxNumber` of the cursor depending on the kind of
-    /// snapshot segment.
+    /// static file segment.
     pub fn number(&self) -> Option<u64> {
         self.jar().user_header().start().map(|start| self.row_index() + start)
     }

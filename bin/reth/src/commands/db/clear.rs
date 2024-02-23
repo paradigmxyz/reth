@@ -44,7 +44,7 @@ impl Command {
 enum Subcommands {
     /// Deletes all database table entries
     Mdbx { table: Tables },
-    /// Deletes all snapshot segment entries
+    /// Deletes all static file segment entries
     StaticFile { segment: StaticFileSegment },
 }
 

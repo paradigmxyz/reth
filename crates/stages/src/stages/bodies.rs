@@ -152,7 +152,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 let missing_block =
                     Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
 
-                return Err(StageError::MissingSnapshotData {
+                return Err(StageError::MissingStaticFileData {
                     block: missing_block,
                     segment: StaticFileSegment::Transactions,
                 })
@@ -177,7 +177,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 },
             };
 
-            // Increment block on snapshot header.
+            // Increment block on static file header.
             if block_number > 0 {
                 let appended_block_number =
                     static_file_producer.increment_block(StaticFileSegment::Transactions)?;
@@ -308,8 +308,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             .get_highest_static_file_tx(StaticFileSegment::Transactions)
             .unwrap_or_default();
 
-        // If there are more transactions on database, then we are missing snapshot data and we need
-        // to unwind further.
+        // If there are more transactions on database, then we are missing static file data and we
+        // need to unwind further.
         if db_tx_num > static_file_tx_num {
             let last_block = static_file_provider
                 .get_highest_static_file_block(StaticFileSegment::Transactions)
@@ -318,7 +318,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             let missing_block =
                 Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
 
-            return Err(StageError::MissingSnapshotData {
+            return Err(StageError::MissingStaticFileData {
                 block: missing_block,
                 segment: StaticFileSegment::Transactions,
             })

@@ -19,7 +19,7 @@ use reth_trie::{proof::Proof, updates::TrieUpdates};
 pub struct LatestStateProviderRef<'b, TX: DbTx> {
     /// database transaction
     db: &'b TX,
-    /// Snapshot provider
+    /// StaticFile provider
     static_file_provider: StaticFileProvider,
 }
 
@@ -125,7 +125,7 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
 pub struct LatestStateProvider<TX: DbTx> {
     /// database transaction
     db: TX,
-    /// Snapshot provider
+    /// StaticFile provider
     static_file_provider: StaticFileProvider,
 }
 

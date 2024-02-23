@@ -1,4 +1,4 @@
-//! Snapshot hook for the engine implementation.
+//! StaticFile hook for the engine implementation.
 
 use crate::{
     engine::hooks::{EngineContext, EngineHook, EngineHookError, EngineHookEvent},
@@ -14,7 +14,7 @@ use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
 use tracing::trace;
 
-/// Manages snapshotting under the control of the engine.
+/// Manages producing static files under the control of the engine.
 ///
 /// This type controls the [StaticFileProducer].
 #[derive(Debug)]
@@ -68,13 +68,14 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
     }
 
     /// This will try to spawn the static_file_producer if it is idle:
-    /// 1. Check if snapshotting is needed through [StaticFileProducer::get_static_file_targets] and
-    ///    then [SnapshotTargets::any](reth_static_file::SnapshotTargets::any).
+    /// 1. Check if producing static files is needed through
+    ///    [StaticFileProducer::get_static_file_targets] and then
+    ///    [StaticFileTargets::any](reth_static_file::StaticFileTargets::any).
     /// 2.
-    ///     1. If snapshotting is needed, pass snapshot request to the [StaticFileProducer::run] and
-    ///        spawn it in a separate task. Set static_file_producer state to
-    ///        [StaticFileProducerState::Running].
-    ///     2. If snapshotting is not needed, set static_file_producer state back to
+    ///     1. If producing static files is needed, pass static file request to the
+    ///        [StaticFileProducer::run] and spawn it in a separate task. Set static_file_producer
+    ///        state to [StaticFileProducerState::Running].
+    ///     2. If producing static files is not needed, set static_file_producer state back to
     ///        [StaticFileProducerState::Idle].
     ///
     /// If static_file_producer is already running, do nothing.
@@ -85,7 +86,7 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
         Ok(match &mut self.state {
             StaticFileProducerState::Idle(static_file_producer) => {
                 let Some(mut static_file_producer) = static_file_producer.take() else {
-                    trace!(target: "consensus::engine::hooks::snapshot", "StaticFileProducer is already running but the state is idle");
+                    trace!(target: "consensus::engine::hooks::static_file", "StaticFileProducer is already running but the state is idle");
                     return Ok(None);
                 };
 
@@ -95,7 +96,7 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
                     transactions: Some(finalized_block_number),
                 })?;
 
-                // Check if the snapshotting of any data has been requested.
+                // Check if the moving data to static files has been requested.
                 if targets.any() {
                     let (tx, rx) = oneshot::channel();
                     self.task_spawner.spawn_critical_blocking(
@@ -120,7 +121,7 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
 
 impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
     fn name(&self) -> &'static str {
-        "Snapshot"
+        "StaticFile"
     }
 
     fn poll(
@@ -129,7 +130,7 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
         ctx: EngineContext,
     ) -> Poll<RethResult<EngineHookEvent>> {
         let Some(finalized_block_number) = ctx.finalized_block_number else {
-            trace!(target: "consensus::engine::hooks::snapshot", ?ctx, "Finalized block number is not available");
+            trace!(target: "consensus::engine::hooks::static_file", ?ctx, "Finalized block number is not available");
             return Poll::Pending;
         };
 

@@ -1,16 +1,16 @@
 use strum::AsRefStr;
 
 #[derive(Debug, Copy, Clone)]
-/// Snapshot filters.
+/// StaticFile filters.
 pub enum Filters {
-    /// Snapshot uses filters with [InclusionFilter] and [PerfectHashingFunction].
+    /// StaticFile uses filters with [InclusionFilter] and [PerfectHashingFunction].
     WithFilters(InclusionFilter, PerfectHashingFunction),
-    /// Snapshot doesn't use any filters.
+    /// StaticFile doesn't use any filters.
     WithoutFilters,
 }
 
 impl Filters {
-    /// Returns `true` if snapshot uses filters.
+    /// Returns `true` if static file uses filters.
     pub const fn has_filters(&self) -> bool {
         matches!(self, Self::WithFilters(_, _))
     }
@@ -18,7 +18,7 @@ impl Filters {
 
 #[derive(Debug, Copy, Clone, AsRefStr)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-/// Snapshot inclusion filter. Also see [Filters].
+/// StaticFile inclusion filter. Also see [Filters].
 pub enum InclusionFilter {
     #[strum(serialize = "cuckoo")]
     /// Cuckoo filter
@@ -27,7 +27,7 @@ pub enum InclusionFilter {
 
 #[derive(Debug, Copy, Clone, AsRefStr)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-/// Snapshot perfect hashing  function. Also see [Filters].
+/// StaticFile perfect hashing  function. Also see [Filters].
 pub enum PerfectHashingFunction {
     #[strum(serialize = "fmph")]
     /// Fingerprint-Based Minimal Perfect Hash Function

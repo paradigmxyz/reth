@@ -1,4 +1,4 @@
-//! reth's snapshot database table import and access
+//! reth's static file database table import and access
 
 mod generation;
 use std::{
@@ -21,13 +21,13 @@ use reth_primitives::{
 
 mod masks;
 
-/// Alias type for a map of [`SnapshotSegment`] and sorted lists of existing snapshot ranges.
+/// Alias type for a map of [`StaticFileSegment`] and sorted lists of existing static file ranges.
 type SortedStaticFiles =
     HashMap<StaticFileSegment, Vec<(SegmentRangeInclusive, Option<SegmentRangeInclusive>)>>;
 
 /// Given the static_files directory path, it returns a list over the existing static_files
-/// organized by [`SnapshotSegment`]. Each segment has a sorted list of block ranges and transaction
-/// ranges as presented in the file configuration.
+/// organized by [`StaticFileSegment`]. Each segment has a sorted list of block ranges and
+/// transaction ranges as presented in the file configuration.
 pub fn iter_static_files(path: impl AsRef<Path>) -> Result<SortedStaticFiles, NippyJarError> {
     let path = path.as_ref();
     if !path.exists() {

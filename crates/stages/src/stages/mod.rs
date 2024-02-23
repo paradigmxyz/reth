@@ -18,7 +18,7 @@ mod index_storage_history;
 mod merkle;
 /// The sender recovery stage.
 mod sender_recovery;
-/// The snapshot stage.
+/// The static file stage.
 mod static_file;
 /// The transaction lookup stage
 mod tx_lookup;

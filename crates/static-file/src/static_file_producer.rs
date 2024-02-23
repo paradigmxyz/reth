@@ -1,4 +1,4 @@
-//! Support for snapshotting.
+//! Support for producing static files.
 
 use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use rayon::prelude::*;
@@ -20,21 +20,21 @@ pub type StaticFileProducerResult = RethResult<StaticFileTargets>;
 /// The static_file_producer type itself with the result of [StaticFileProducer::run]
 pub type StaticFileProducerWithResult<DB> = (StaticFileProducer<DB>, StaticFileProducerResult);
 
-/// Snapshotting routine. See [StaticFileProducer::run] for more detailed description.
+/// Static file producer routine. See [StaticFileProducer::run] for more detailed description.
 #[derive(Debug, Clone)]
 pub struct StaticFileProducer<DB> {
     /// Provider factory
     provider_factory: ProviderFactory<DB>,
-    /// Snapshot provider
+    /// StaticFile provider
     static_file_provider: StaticFileProvider,
     /// Pruning configuration for every part of the data that can be pruned. Set by user, and
-    /// needed in [StaticFileProducer] to prevent snapshotting the prunable data.
+    /// needed in [StaticFileProducer] to prevent attempting to move prunable data to static files.
     /// See [StaticFileProducer::get_static_file_targets].
     prune_modes: PruneModes,
     listeners: EventListeners<StaticFileProducerEvent>,
 }
 
-/// Snapshot targets, per data part, measured in [`BlockNumber`].
+/// StaticFile targets, per data part, measured in [`BlockNumber`].
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StaticFileTargets {
     headers: Option<RangeInclusive<BlockNumber>>,
@@ -85,9 +85,9 @@ impl<DB: Database> StaticFileProducer<DB> {
 
     /// Run the static_file_producer.
     ///
-    /// For each [Some] target in [SnapshotTargets], initializes a corresponding [Segment] and runs
-    /// it with the provided block range using [SnapshotProvider] and a read-only database
-    /// transaction from [ProviderFactory]. All segments are run in parallel.
+    /// For each [Some] target in [StaticFileTargets], initializes a corresponding [Segment] and
+    /// runs it with the provided block range using [StaticFileProvider] and a read-only
+    /// database transaction from [ProviderFactory]. All segments are run in parallel.
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
@@ -112,16 +112,16 @@ impl<DB: Database> StaticFileProducer<DB> {
         }
 
         segments.par_iter().try_for_each(|(segment, block_range)| -> RethResult<()> {
-            debug!(target: "static_file", segment = %segment.segment(), ?block_range, "Snapshotting segment");
+            debug!(target: "static_file", segment = %segment.segment(), ?block_range, "StaticFileProducer segment");
             let start = Instant::now();
 
             // Create a new database transaction on every segment to prevent long-lived read-only
             // transactions
             let provider = self.provider_factory.provider()?.disable_long_read_transaction_safety();
-            segment.snapshot(provider, self.static_file_provider.clone(), block_range.clone())?;
+            segment.copy_to_static_files(provider, self.static_file_provider.clone(), block_range.clone())?;
 
             let elapsed = start.elapsed(); // TODO(alexey): track in metrics
-            debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished snapshotting segment");
+            debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished StaticFileProducer segment");
 
             Ok(())
         })?;
@@ -140,9 +140,9 @@ impl<DB: Database> StaticFileProducer<DB> {
         Ok(targets)
     }
 
-    /// Returns a snapshot targets at the provided finalized block numbers per segment.
+    /// Returns a static file targets at the provided finalized block numbers per segment.
     /// The target is determined by the check against highest static_files using
-    /// [SnapshotProvider::get_highest_static_files].
+    /// [StaticFileProvider::get_highest_static_files].
     pub fn get_static_file_targets(
         &self,
         finalized_block_numbers: HighestStaticFiles,
@@ -153,7 +153,7 @@ impl<DB: Database> StaticFileProducer<DB> {
             headers: finalized_block_numbers.headers.and_then(|finalized_block_number| {
                 self.get_static_file_target(highest_static_files.headers, finalized_block_number)
             }),
-            // Snapshot receipts only if they're not pruned according to the user configuration
+            // StaticFile receipts only if they're not pruned according to the user configuration
             receipts: if self.prune_modes.receipts.is_none() &&
                 self.prune_modes.receipts_log_filter.is_empty()
             {
@@ -180,7 +180,7 @@ impl<DB: Database> StaticFileProducer<DB> {
             ?highest_static_files,
             ?targets,
             any = %targets.any(),
-            "Snapshot targets"
+            "StaticFile targets"
         );
 
         Ok(targets)
@@ -228,7 +228,7 @@ mod tests {
         db.factory
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
-            .expect("get snapshot writer for headers")
+            .expect("get static file writer for headers")
             .prune_headers(blocks.len() as u64)
             .expect("prune headers");
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
@@ -262,7 +262,7 @@ mod tests {
                 receipts: Some(1),
                 transactions: Some(1),
             })
-            .expect("get snapshot targets");
+            .expect("get static file targets");
         assert_eq!(
             targets,
             StaticFileTargets {
@@ -283,7 +283,7 @@ mod tests {
                 receipts: Some(3),
                 transactions: Some(3),
             })
-            .expect("get snapshot targets");
+            .expect("get static file targets");
         assert_eq!(
             targets,
             StaticFileTargets {
@@ -304,7 +304,7 @@ mod tests {
                 receipts: Some(4),
                 transactions: Some(4),
             })
-            .expect("get snapshot targets");
+            .expect("get static file targets");
         assert_eq!(
             targets,
             StaticFileTargets {

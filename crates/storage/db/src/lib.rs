@@ -164,7 +164,7 @@ pub mod test_utils {
     /// Error during database creation
     pub const ERROR_DB_CREATION: &str = "Not able to create the database file.";
     /// Error during database creation
-    pub const ERROR_STATIC_FILES_CREATION: &str = "Not able to create the snapshot path.";
+    pub const ERROR_STATIC_FILES_CREATION: &str = "Not able to create the static file path.";
     /// Error during table creation
     pub const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
     /// Error during tempdir creation

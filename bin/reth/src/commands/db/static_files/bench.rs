@@ -35,7 +35,7 @@ where
         let start = Instant::now();
         let result = static_file_method()?;
         let end = start.elapsed().as_micros();
-        println!("# snapshot {bench_kind:?} | {end} μs");
+        println!("# static file {bench_kind:?} | {end} μs");
         result
     };
 

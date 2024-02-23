@@ -1,4 +1,4 @@
-//! Snapshot segment implementations and utilities.
+//! StaticFile segment implementations and utilities.
 
 mod transactions;
 pub use transactions::Transactions;
@@ -26,22 +26,22 @@ use std::{ops::RangeInclusive, path::Path};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 
-/// A segment represents a snapshotting of some portion of the data.
+/// A segment represents moving some portion of the data to static files.
 pub trait Segment<DB: Database>: Send + Sync {
-    /// Returns the [`SnapshotSegment`].
+    /// Returns the [`StaticFileSegment`].
     fn segment(&self) -> StaticFileSegment;
 
-    /// Snapshot data for the provided block range. [SnapshotProvider] will handle the management of
-    /// and writing to files.
-    fn snapshot(
+    /// Move data to static files for the provided block range. [StaticFileProvider] will handle the
+    /// management of and writing to files.
+    fn copy_to_static_files(
         &self,
         provider: DatabaseProviderRO<DB>,
         static_file_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()>;
 
-    /// Create a snapshot file of data for the provided block range. The `directory` parameter
-    /// determines the snapshot file's save location.
+    /// Create a static file of data for the provided block range. The `directory` parameter
+    /// determines the static file's save location.
     fn create_static_file_file(
         &self,
         provider: &DatabaseProviderRO<DB>,
@@ -52,7 +52,7 @@ pub trait Segment<DB: Database>: Send + Sync {
 }
 
 /// Returns a [`NippyJar`] according to the desired configuration. The `directory` parameter
-/// determines the snapshot file's save location.
+/// determines the static file's save location.
 pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     provider: &DatabaseProviderRO<DB>,
     directory: impl AsRef<Path>,

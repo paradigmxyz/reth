@@ -24,16 +24,16 @@ use strum::{AsRefStr, EnumIter, EnumString};
     Display,
 )]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-/// Segment of the data that can be snapshotted.
+/// Segment of the data that can be moved to static files.
 pub enum StaticFileSegment {
     #[strum(serialize = "headers")]
-    /// Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables.
+    /// StaticFile segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables.
     Headers,
     #[strum(serialize = "transactions")]
-    /// Snapshot segment responsible for the `Transactions` table.
+    /// StaticFile segment responsible for the `Transactions` table.
     Transactions,
     #[strum(serialize = "receipts")]
-    /// Snapshot segment responsible for the `Receipts` table.
+    /// StaticFile segment responsible for the `Receipts` table.
     Receipts,
 }
 
@@ -101,7 +101,7 @@ impl StaticFileSegment {
         format!("{prefix}_{}_{}", filters_name, compression.as_ref())
     }
 
-    /// Parses a filename into a `SnapshotSegment` and its expected block range.
+    /// Parses a filename into a `StaticFileSegment` and its expected block range.
     ///
     /// The filename is expected to follow the format:
     /// "static_file_{segment}_{block_start}_{block_end}". This function checks
@@ -133,7 +133,7 @@ impl StaticFileSegment {
         Some((segment, SegmentRangeInclusive::new(block_start, block_end)))
     }
 
-    /// Returns `true` if the segment is `SnapshotSegment::Headers`.
+    /// Returns `true` if the segment is `StaticFileSegment::Headers`.
     pub fn is_headers(&self) -> bool {
         matches!(self, StaticFileSegment::Headers)
     }
@@ -142,14 +142,14 @@ impl StaticFileSegment {
 /// A segment header that contains information common to all segments. Used for storage.
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
 pub struct SegmentHeader {
-    /// Defines the expected block range for a snapshot segment. This attribute is crucial for
+    /// Defines the expected block range for a static file segment. This attribute is crucial for
     /// scenarios where the file contains no data, allowing for a representation beyond a
     /// simple `start..=start` range. It ensures clarity in differentiating between an empty file
     /// and a file with a single block numbered 0.
     expected_block_range: SegmentRangeInclusive,
-    /// Block range of data on the snapshot segment
+    /// Block range of data on the static file segment
     block_range: Option<SegmentRangeInclusive>,
-    /// Transaction range of data of the snapshot segment
+    /// Transaction range of data of the static file segment
     tx_range: Option<SegmentRangeInclusive>,
     /// Segment type
     segment: StaticFileSegment,
@@ -166,7 +166,7 @@ impl SegmentHeader {
         Self { expected_block_range, block_range, tx_range, segment }
     }
 
-    /// Returns the snapshot segment kind.
+    /// Returns the static file segment kind.
     pub fn segment(&self) -> StaticFileSegment {
         self.segment
     }

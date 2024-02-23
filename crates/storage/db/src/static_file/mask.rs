@@ -4,14 +4,14 @@ use crate::table::Decompress;
 ///
 /// #### Explanation:
 ///
-/// A `NippyJar` snapshot row can contain multiple column values. To specify the column values
+/// A `NippyJar` static file row can contain multiple column values. To specify the column values
 /// to be read, a mask is utilized.
 ///
-/// For example, a snapshot with three columns, if the first and last columns are queried, the mask
-/// `0b101` would be passed. To select only the second column, the mask `0b010` would be used.
+/// For example, a static file with three columns, if the first and last columns are queried, the
+/// mask `0b101` would be passed. To select only the second column, the mask `0b010` would be used.
 ///
-/// Since each snapshot has its own column distribution, different wrapper types are necessary. For
-/// instance, `B256` might be the third column in the `Header` segment, while being the second
+/// Since each static file has its own column distribution, different wrapper types are necessary.
+/// For instance, `B256` might be the third column in the `Header` segment, while being the second
 /// column in another segment. Hence, `Mask<B256>` would only be applicable to one of these
 /// scenarios.
 ///
@@ -24,7 +24,7 @@ macro_rules! add_segments {
     ($($segment:tt),+) => {
         paste::paste! {
             $(
-                #[doc = concat!("Mask for ", stringify!($segment), " snapshot segment. See [`Mask`] for more.")]
+                #[doc = concat!("Mask for ", stringify!($segment), " static file segment. See [`Mask`] for more.")]
                 #[derive(Debug)]
                 pub struct [<$segment Mask>]<FIRST, SECOND = (), THIRD = ()>(Mask<FIRST, SECOND, THIRD>);
             )+
@@ -64,7 +64,7 @@ pub trait ColumnSelectorThree {
 }
 
 #[macro_export]
-/// Add mask to select `N` column values from a specific snapshot segment row.
+/// Add mask to select `N` column values from a specific static file segment row.
 macro_rules! add_static_file_mask {
     ($mask_struct:tt, $type1:ty, $mask:expr) => {
         impl ColumnSelectorOne for $mask_struct<$type1> {

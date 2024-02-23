@@ -10,16 +10,16 @@ use reth_nippy_jar::{ColumnResult, NippyJar, NippyJarHeader, PHFKey};
 use reth_tracing::tracing::*;
 use std::{error::Error as StdError, ops::RangeInclusive};
 
-/// Macro that generates snapshot creation functions that take an arbitratry number of [`Table`] and
-/// creates a [`NippyJar`] file out of their [`Table::Value`]. Each list of [`Table::Value`] from a
-/// table is a column of values.
+/// Macro that generates static file creation functions that take an arbitratry number of [`Table`]
+/// and creates a [`NippyJar`] file out of their [`Table::Value`]. Each list of [`Table::Value`]
+/// from a table is a column of values.
 ///
 /// Has membership filter set and compression dictionary support.
 macro_rules! generate_static_file_func {
     ($(($($tbl:ident),+)),+ $(,)? ) => {
         $(
             paste::item! {
-                /// Creates a snapshot from specified tables. Each table's `Value` iterator represents a column.
+                /// Creates a static file from specified tables. Each table's `Value` iterator represents a column.
                 ///
                 /// **Ensure the range contains the same number of rows.**
                 ///
@@ -29,7 +29,7 @@ macro_rules! generate_static_file_func {
                 /// * `keys`: Iterator of keys (eg. `TxHash` or `BlockHash`) with length equal to `row_count` and ordered by future column insertion from `range`.
                 /// * `dict_compression_set`: Sets of column data for compression dictionaries. Max size is 2GB. Row count is independent.
                 /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
-                /// * `nippy_jar`: Snapshot object responsible for file generation.
+                /// * `nippy_jar`: StaticFile object responsible for file generation.
                 #[allow(non_snake_case)]
                 pub fn [<create_static_file$(_ $tbl)+>]<
                     $($tbl: Table<Key=K>,)+
@@ -48,22 +48,22 @@ macro_rules! generate_static_file_func {
                     where K: Key + Copy
                 {
                     let additional = additional.unwrap_or_default();
-                    debug!(target: "reth::snapshot", ?range, "Creating snapshot {:?} and {} more columns.", vec![$($tbl::NAME,)+], additional.len());
+                    debug!(target: "reth::static_file", ?range, "Creating static file {:?} and {} more columns.", vec![$($tbl::NAME,)+], additional.len());
 
                     let range: RangeInclusive<RawKey<K>> = RawKey::new(*range.start())..=RawKey::new(*range.end());
 
                     // Create PHF and Filter if required
                     if let Some(keys) = keys {
-                        debug!(target: "reth::snapshot", "Calculating Filter, PHF and offset index list");
+                        debug!(target: "reth::static_file", "Calculating Filter, PHF and offset index list");
                         nippy_jar.prepare_index(keys, row_count)?;
-                        debug!(target: "reth::snapshot", "Filter, PHF and offset index list calculated.");
+                        debug!(target: "reth::static_file", "Filter, PHF and offset index list calculated.");
                     }
 
                     // Create compression dictionaries if required
                     if let Some(data_sets) = dict_compression_set {
-                        debug!(target: "reth::snapshot", "Creating compression dictionaries.");
+                        debug!(target: "reth::static_file", "Creating compression dictionaries.");
                         nippy_jar.prepare_compression(data_sets)?;
-                        debug!(target: "reth::snapshot", "Compression dictionaries created.");
+                        debug!(target: "reth::static_file", "Compression dictionaries created.");
                     }
 
                     // Creates the cursors for the columns
@@ -80,17 +80,17 @@ macro_rules! generate_static_file_func {
 
                     )+
 
-                    // Create the snapshot from the data
+                    // Create the static file from the data
                     let col_iterators: Vec<Box<dyn Iterator<Item = Result<Vec<u8>,_>>>> = vec![
                         $(Box::new([< $tbl _iter>]),)+
                     ];
 
 
-                    debug!(target: "reth::snapshot", jar=?nippy_jar, "Generating snapshot file.");
+                    debug!(target: "reth::static_file", jar=?nippy_jar, "Generating static file.");
 
                     nippy_jar.freeze(col_iterators.into_iter().chain(additional).collect(), row_count as u64)?;
 
-                    debug!(target: "reth::snapshot", jar=?nippy_jar, "Snapshot file generated.");
+                    debug!(target: "reth::static_file", jar=?nippy_jar, "StaticFile file generated.");
 
                     Ok(())
                 }

@@ -14,7 +14,7 @@ use reth_provider::{
 };
 use std::{ops::RangeInclusive, path::Path};
 
-/// Snapshot segment responsible for [SnapshotSegment::Receipts] part of data.
+/// StaticFile segment responsible for [StaticFileSegment::Receipts] part of data.
 #[derive(Debug, Default)]
 pub struct Receipts;
 
@@ -23,7 +23,7 @@ impl<DB: Database> Segment<DB> for Receipts {
         StaticFileSegment::Receipts
     }
 
-    fn snapshot(
+    fn copy_to_static_files(
         &self,
         provider: DatabaseProviderRO<DB>,
         static_file_provider: StaticFileProvider,

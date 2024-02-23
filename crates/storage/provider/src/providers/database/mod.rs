@@ -43,7 +43,7 @@ pub struct ProviderFactory<DB> {
     db: DB,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
-    /// Snapshot Provider
+    /// StaticFile Provider
     static_file_provider: StaticFileProvider,
 }
 
@@ -76,7 +76,7 @@ impl<DB> ProviderFactory<DB> {
         })
     }
 
-    /// Enables metrics on the snapshot provider.
+    /// Enables metrics on the static file provider.
     pub fn with_static_files_metrics(mut self) -> Self {
         self.static_file_provider = self.static_file_provider.with_metrics();
         self
@@ -87,7 +87,7 @@ impl<DB> ProviderFactory<DB> {
         &self.db
     }
 
-    /// Returns snapshot provider
+    /// Returns static file provider
     pub fn static_file_provider(&self) -> StaticFileProvider {
         self.static_file_provider.clone()
     }

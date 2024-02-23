@@ -6,7 +6,7 @@ use std::time::Duration;
 pub enum StaticFileProducerEvent {
     /// Emitted when static_file_producer finished running.
     Finished {
-        /// Targets that were snapshotted
+        /// Targets that were moved to static files
         targets: StaticFileTargets,
         /// Time it took to run the static_file_producer
         elapsed: Duration,

@@ -83,7 +83,7 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
 }
 
 impl<DB: Database> DatabaseProviderRW<DB> {
-    /// Commit database transaction and snapshot if it exists.
+    /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<bool> {
         self.0.commit()
     }
@@ -102,12 +102,12 @@ pub struct DatabaseProvider<TX> {
     tx: TX,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
-    /// Snapshot provider
+    /// StaticFile provider
     static_file_provider: StaticFileProvider,
 }
 
 impl<TX> DatabaseProvider<TX> {
-    /// Returns a snapshot provider
+    /// Returns a static file provider
     pub fn static_file_provider(&self) -> &StaticFileProvider {
         &self.static_file_provider
     }

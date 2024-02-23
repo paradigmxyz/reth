@@ -1,17 +1,19 @@
-# reth db clear snapshot
+# reth db static-file
 
-Deletes all snapshot segment entries
+StaticFiles tables from database
 
 ```bash
-$ reth db clear snapshot --help
-Usage: reth db clear snapshot [OPTIONS] <SEGMENT>
+$ reth db static-file --help
+Usage: reth db static-file [OPTIONS] [SEGMENTS]...
 
 Arguments:
-  <SEGMENT>
+  [SEGMENTS]...
+          StaticFile segments to generate
+
           Possible values:
-          - headers:      Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
-          - transactions: Snapshot segment responsible for the `Transactions` table
-          - receipts:     Snapshot segment responsible for the `Receipts` table
+          - headers:      StaticFile segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
+          - transactions: StaticFile segment responsible for the `Transactions` table
+          - receipts:     StaticFile segment responsible for the `Receipts` table
 
 Options:
       --datadir <DATA_DIR>
@@ -25,6 +27,16 @@ Options:
           
           [default: default]
 
+  -f, --from <FROM>
+          Starting block for the static_file
+          
+          [default: 0]
+
+  -b, --block-interval <BLOCK_INTERVAL>
+          Number of blocks in the static_file
+          
+          [default: 500000]
+
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -33,6 +45,41 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
           
           [default: mainnet]
+
+  -p, --parallel <PARALLEL>
+          Sets the number of static files built in parallel. Note: Each parallel build is memory-intensive
+          
+          [default: 1]
+
+      --only-stats
+          Flag to skip static_file creation and print static_file files stats
+
+      --bench
+          Flag to enable database-to-static_file benchmarking
+
+      --only-bench
+          Flag to skip static_file creation and only run benchmarks on existing static files
+
+  -c, --compression <COMPRESSION>
+          Compression algorithms to use
+          
+          [default: uncompressed]
+
+          Possible values:
+          - lz4:                  LZ4 compression algorithm
+          - zstd:                 Zstandard (Zstd) compression algorithm
+          - zstd-with-dictionary: Zstandard (Zstd) compression algorithm with a dictionary
+          - uncompressed:         No compression, uncompressed static_file
+
+      --with-filters
+          Flag to enable inclusion list filters and PHFs
+
+      --phf <PHF>
+          Specifies the perfect hashing function to use
+
+          Possible values:
+          - fmph:    Fingerprint-Based Minimal Perfect Hash Function
+          - go-fmph: Fingerprint-Based Minimal Perfect Hash Function with Group Optimization
 
       --instance <INSTANCE>
           Add a new instance of a node.

@@ -3,7 +3,7 @@
 /// For custom stages, use [`StageId::Other`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StageId {
-    /// Snapshot stage in the process.
+    /// StaticFile stage in the process.
     StaticFile,
     /// Header stage in the process.
     Headers,
@@ -54,7 +54,7 @@ impl StageId {
     /// Return stage id formatted as string.
     pub fn as_str(&self) -> &str {
         match self {
-            StageId::StaticFile => "Snapshot",
+            StageId::StaticFile => "StaticFile",
             StageId::Headers => "Headers",
             StageId::Bodies => "Bodies",
             StageId::SenderRecovery => "SenderRecovery",
@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn stage_id_as_string() {
-        assert_eq!(StageId::StaticFile.to_string(), "Snapshot");
+        assert_eq!(StageId::StaticFile.to_string(), "StaticFile");
         assert_eq!(StageId::Headers.to_string(), "Headers");
         assert_eq!(StageId::Bodies.to_string(), "Bodies");
         assert_eq!(StageId::SenderRecovery.to_string(), "SenderRecovery");

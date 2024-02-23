@@ -82,7 +82,7 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
-    /// Snapshots tables from database
+    /// StaticFiles tables from database
     StaticFile(static_files::Command),
     /// Lists current and local database versions
     Version,

@@ -59,7 +59,7 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
         // Fetch the same number of latest canonical hashes from the static_files and merge them
         // with the database hashes. It is needed due to the fact that we're writing
         // directly to static_files in pipeline sync, but to the database in live sync,
-        // which means that the latest canonical hashes in the snapshot might be more recent
+        // which means that the latest canonical hashes in the static file might be more recent
         // than in the database, and vice versa, or even some ranges of the latest
         // `num_hashes` blocks may be in database, and some ranges in static_files.
         let static_file_provider = self.provider_factory.static_file_provider();

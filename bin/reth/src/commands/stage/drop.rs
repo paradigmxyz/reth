@@ -74,7 +74,7 @@ impl Command {
             _ => None,
         };
 
-        // Delete snapshot segment data before inserting the genesis header below
+        // Delete static file segment data before inserting the genesis header below
         if let Some(static_file_segment) = static_file_segment {
             let static_file_provider = tool.provider_factory.static_file_provider();
             let static_files = iter_static_files(static_file_provider.directory())?;

@@ -24,9 +24,9 @@ use std::{
 /// Provider over a specific `NippyJar` and range.
 #[derive(Debug)]
 pub struct StaticFileJarProvider<'a> {
-    /// Main snapshot segment
+    /// Main static file segment
     jar: LoadedJarRef<'a>,
-    /// Another kind of snapshot segment to help query data from the main one.
+    /// Another kind of static file segment to help query data from the main one.
     auxiliar_jar: Option<Box<Self>>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
 }
@@ -63,7 +63,7 @@ impl<'a> StaticFileJarProvider<'a> {
         Ok(result)
     }
 
-    /// Adds a new auxiliar snapshot to help query data from the main one
+    /// Adds a new auxiliar static file to help query data from the main one
     pub fn with_auxiliar(mut self, auxiliar_jar: StaticFileJarProvider<'a>) -> Self {
         self.auxiliar_jar = Some(Box::new(auxiliar_jar));
         self
@@ -242,7 +242,7 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
         &self,
         _block_id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
-        // Related to indexing tables. Live database should get the tx_range and call snapshot
+        // Related to indexing tables. Live database should get the tx_range and call static file
         // provider with `transactions_by_tx_range` instead.
         Err(ProviderError::UnsupportedProvider)
     }
@@ -251,7 +251,7 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
         &self,
         _range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
-        // Related to indexing tables. Live database should get the tx_range and call snapshot
+        // Related to indexing tables. Live database should get the tx_range and call static file
         // provider with `transactions_by_tx_range` instead.
         Err(ProviderError::UnsupportedProvider)
     }
@@ -325,7 +325,7 @@ impl<'a> ReceiptProvider for StaticFileJarProvider<'a> {
     }
 
     fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
-        // Related to indexing tables. Snapshot should get the tx_range and call snapshot
+        // Related to indexing tables. StaticFile should get the tx_range and call static file
         // provider with `receipt()` instead for each
         Err(ProviderError::UnsupportedProvider)
     }

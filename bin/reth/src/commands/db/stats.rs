@@ -13,10 +13,10 @@ use std::fs::File;
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
 pub struct Command {
-    /// Show only the total size for snapshot files.
+    /// Show only the total size for static files.
     #[arg(long, default_value_t = false)]
     only_total_size: bool,
-    /// Show only the summary per snapshot segment.
+    /// Show only the summary per static file segment.
     #[arg(long, default_value_t = false)]
     summary: bool,
 }

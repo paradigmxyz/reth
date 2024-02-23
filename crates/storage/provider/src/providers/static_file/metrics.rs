@@ -6,7 +6,7 @@ use reth_metrics::Metrics;
 use reth_primitives::StaticFileSegment;
 use strum::{EnumIter, IntoEnumIterator};
 
-/// Metrics for the snapshot provider.
+/// Metrics for the static file provider.
 #[derive(Debug)]
 pub struct StaticFileProviderMetrics {
     segment_operations: HashMap<
@@ -83,8 +83,8 @@ impl StaticFileProviderOperation {
 #[derive(Metrics)]
 #[metrics(scope = "static_files.jar_provider")]
 pub(crate) struct StaticFileProviderOperationMetrics {
-    /// Total number of snapshot jar provider operations made.
+    /// Total number of static file jar provider operations made.
     calls_total: Counter,
-    /// The time it took to execute the snapshot jar provider operation that writes data.
+    /// The time it took to execute the static file jar provider operation that writes data.
     write_duration_seconds: Histogram,
 }

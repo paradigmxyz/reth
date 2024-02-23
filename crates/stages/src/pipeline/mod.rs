@@ -463,13 +463,13 @@ fn on_stage_error<DB: Database>(
                 }))
             }
         }
-    } else if let StageError::MissingSnapshotData { block, segment } = err {
+    } else if let StageError::MissingStaticFileData { block, segment } = err {
         error!(
             target: "sync::pipeline",
             stage = %stage_id,
             bad_block = %block.number,
             segment = %segment,
-            "Stage is missing snapshot data."
+            "Stage is missing static file data."
         );
 
         Ok(Some(ControlFlow::Unwind { target: block.number - 1, bad_block: block }))

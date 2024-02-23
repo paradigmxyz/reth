@@ -534,7 +534,8 @@ impl ExecutionStageThresholds {
     }
 }
 
-/// Returns a `SnapshotProviderRWRefMut` static_file_producer after performing a consistency check.
+/// Returns a `StaticFileProviderRWRefMut` static_file_producer after performing a consistency
+/// check.
 ///
 /// This function compares the highest receipt number recorded in the database with that in the
 /// static file to detect any discrepancies due to unexpected shutdowns or database rollbacks. **If
@@ -581,7 +582,7 @@ where
                 tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
             );
 
-            return Err(StageError::MissingSnapshotData {
+            return Err(StageError::MissingStaticFileData {
                 block: missing_block,
                 segment: StaticFileSegment::Receipts,
             })
