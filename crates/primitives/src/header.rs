@@ -7,11 +7,11 @@ use crate::{
     },
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     keccak256, Address, BaseFeeParams, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes,
-    ChainSpec, GotExpected, GotExpectedBoxed, Hardfork, B256, B64, U256, U64,
+    ChainSpec, GotExpected, GotExpectedBoxed, Hardfork, B256, B64, U256,
 };
-use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
-use bytes::{Buf, BufMut, BytesMut};
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
+use alloy_rlp::{length_of_length, Decodable, Encodable};
+use bytes::{BufMut, BytesMut};
+use reth_codecs::{derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 /// Errors that can occur during header sanity checks.
