@@ -6732,7 +6732,6 @@ dependencies = [
 name = "reth-rpc-api-testing-util"
 version = "0.1.0-alpha.19"
 dependencies = [
- "async-trait",
  "futures",
  "jsonrpsee",
  "reth-primitives",
