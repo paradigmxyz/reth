@@ -3,7 +3,7 @@ use crate::{ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, Unw
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_interfaces::db::DatabaseError;
 use reth_provider::ProviderError;
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]
@@ -27,7 +27,6 @@ pub(crate) trait StageTestRunner {
     fn stage(&self) -> Self::S;
 }
 
-#[async_trait::async_trait]
 pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     type Seed: Send + Sync;
 
@@ -58,18 +57,23 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     }
 
     /// Run a hook after [Stage::execute]. Required for Headers & Bodies stages.
-    async fn after_execution(&self, _seed: Self::Seed) -> Result<(), TestRunnerError> {
-        Ok(())
+    fn after_execution(
+        &self,
+        _seed: Self::Seed,
+    ) -> impl Future<Output = Result<(), TestRunnerError>> + Send {
+        async { Ok(()) }
     }
 }
 
-#[async_trait::async_trait]
 pub(crate) trait UnwindStageTestRunner: StageTestRunner {
     /// Validate the unwind
     fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError>;
 
     /// Run [Stage::unwind] and return a receiver for the result.
-    async fn unwind(&self, input: UnwindInput) -> Result<UnwindOutput, StageError> {
+    fn unwind(
+        &self,
+        input: UnwindInput,
+    ) -> impl Future<Output = Result<UnwindOutput, StageError>> + Send {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().factory.clone(), self.stage());
         tokio::spawn(async move {
@@ -78,7 +82,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
             provider.commit().expect("failed to commit");
             tx.send(result).expect("failed to send result");
         });
-        Box::pin(rx).await.unwrap()
+        async { rx.await.unwrap() }
     }
 
     /// Run a hook before [Stage::unwind]. Required for MerkleStage.
