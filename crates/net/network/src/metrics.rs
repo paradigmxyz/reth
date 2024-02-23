@@ -43,6 +43,31 @@ pub struct NetworkMetrics {
 
     /// Number of Eth Requests dropped due to channel being at full capacity
     pub(crate) total_dropped_eth_requests_at_full_capacity: Counter,
+
+    /* ================ POLL DURATION ================ */
+
+    /* -- Total poll duration of `NetworksManager` future -- */
+    /// Duration in seconds of call to
+    /// [`NetworkManager`](crate::NetworkManager)'s poll function.
+    ///
+    /// True duration of this call, should be sum of the accumulated durations of calling nested
+    // items.
+    pub(crate) duration_poll_network_manager: Gauge,
+
+    /* -- Poll duration of items nested in `NetworkManager` future -- */
+    /// Accumulated time spent streaming messages sent over the
+    /// [`NetworkHandle`](crate::NetworkHandle), which can be cloned and shared via
+    /// [`NetworkManager::handle`](crate::NetworkManager::handle), in one call to poll the
+    /// [`NetworkManager`](crate::NetworkManager) future.
+    ///
+    /// Duration in seconds.
+    // todo: find out how many components hold the network handle.
+    pub(crate) acc_duration_poll_network_handle: Gauge,
+    /// Accumulated time spent polling [`Swarm`](crate::swarm::Swarm), in one call to poll the
+    /// [`NetworkManager`](crate::NetworkManager) future.
+    ///
+    /// Duration in seconds.
+    pub(crate) acc_duration_poll_swarm: Gauge,
 }
 
 /// Metrics for SessionManager
@@ -117,7 +142,7 @@ pub struct TransactionsManagerMetrics {
     /// [`TransactionsManager`](crate::transactions::TransactionsManager)'s poll function.
     ///
     /// Updating metrics could take time, so the true duration of this call could
-    /// be longer than the sum of the accumulated durations of polling nested streams.
+    /// be longer than the sum of the accumulated durations of polling nested items.
     pub(crate) duration_poll_tx_manager: Gauge,
 
     /* -- Poll duration of items nested in `TransactionsManager` future -- */
@@ -243,4 +268,17 @@ pub struct EthRequestHandlerMetrics {
 
     /// Number of received bodies requests
     pub(crate) received_bodies_requests: Counter,
+}
+
+/// Measures the duration of executing the given code block. The duration is added to the given
+/// accumulator value passed as a mutable reference.
+#[macro_export]
+macro_rules! duration_metered_exec {
+    ($code:block, $acc:ident) => {
+        let start = Instant::now();
+
+        $code;
+
+        *$acc += start.elapsed();
+    };
 }
