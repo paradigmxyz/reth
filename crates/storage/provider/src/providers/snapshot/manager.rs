@@ -12,7 +12,7 @@ use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
     models::StoredBlockBodyIndices,
-    snapshot::{
+    static_file::{
         iter_static_files, ColumnSelectorOne, HeaderMask, ReceiptMask, StaticFileCursor,
         TransactionMask,
     },

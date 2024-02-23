@@ -1,7 +1,7 @@
 use super::{ReceiptMask, TransactionMask};
 use crate::{
     add_static_file_mask,
-    snapshot::mask::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask},
+    static_file::mask::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask},
     table::Table,
     HeaderTD, Receipts, Transactions,
 };

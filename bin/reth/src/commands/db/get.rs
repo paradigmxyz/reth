@@ -2,7 +2,7 @@ use crate::utils::DbTool;
 use clap::Parser;
 use reth_db::{
     database::Database,
-    snapshot::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
+    static_file::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
     table::{Decompress, DupSort, Table},
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
 };

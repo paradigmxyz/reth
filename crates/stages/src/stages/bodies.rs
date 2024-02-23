@@ -574,7 +574,7 @@ mod tests {
         use reth_db::{
             cursor::DbCursorRO,
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
-            snapshot::HeaderMask,
+            static_file::HeaderMask,
             tables,
             test_utils::TempDatabase,
             transaction::{DbTx, DbTxMut},

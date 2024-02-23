@@ -56,7 +56,7 @@ mod tests {
     use rand::seq::SliceRandom;
     use reth_db::{
         cursor::DbCursorRO,
-        snapshot::create_snapshot_T1_T2_T3,
+        static_file::create_snapshot_T1_T2_T3,
         transaction::{DbTx, DbTxMut},
         CanonicalHeaders, HeaderNumbers, HeaderTD, Headers, RawTable,
     };

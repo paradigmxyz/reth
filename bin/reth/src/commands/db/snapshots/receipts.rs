@@ -3,7 +3,7 @@ use super::{
     Command, Compression, PerfectHashingFunction,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{snapshot::ReceiptMask, DatabaseEnv};
+use reth_db::{static_file::ReceiptMask, DatabaseEnv};
 use reth_primitives::{
     static_file::{Filters, InclusionFilter},
     Receipt, StaticFileSegment,

@@ -67,7 +67,7 @@ pub mod abstraction;
 
 mod implementation;
 mod metrics;
-pub mod snapshot;
+pub mod static_file;
 pub mod tables;
 mod utils;
 pub mod version;

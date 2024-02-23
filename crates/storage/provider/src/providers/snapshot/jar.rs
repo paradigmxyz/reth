@@ -8,7 +8,7 @@ use crate::{
 };
 use reth_db::{
     codecs::CompactU256,
-    snapshot::{ColumnSelectorOne, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
+    static_file::{ColumnSelectorOne, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
     RawValue,
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};

@@ -10,7 +10,7 @@ use crate::{
 };
 use clap::Parser;
 use reth_db::{
-    database::Database, mdbx::DatabaseArguments, open_db, snapshot::iter_static_files, tables,
+    database::Database, mdbx::DatabaseArguments, open_db, static_file::iter_static_files, tables,
     transaction::DbTxMut, DatabaseEnv,
 };
 use reth_node_core::init::{insert_genesis_header, insert_genesis_state};

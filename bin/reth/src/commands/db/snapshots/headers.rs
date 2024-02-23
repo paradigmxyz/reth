@@ -3,7 +3,7 @@ use super::{
     Command,
 };
 use rand::{seq::SliceRandom, Rng};
-use reth_db::{snapshot::HeaderMask, DatabaseEnv};
+use reth_db::{static_file::HeaderMask, DatabaseEnv};
 use reth_primitives::{
     static_file::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
     BlockHash, Header, StaticFileSegment,

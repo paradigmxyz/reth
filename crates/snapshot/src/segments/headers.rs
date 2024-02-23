@@ -1,6 +1,6 @@
 use crate::segments::{dataset_for_compression, prepare_jar, Segment, SegmentHeader};
 use reth_db::{
-    cursor::DbCursorRO, database::Database, snapshot::create_snapshot_T1_T2_T3, tables,
+    cursor::DbCursorRO, database::Database, static_file::create_snapshot_T1_T2_T3, tables,
     transaction::DbTx, RawKey, RawTable,
 };
 use reth_interfaces::provider::ProviderResult;

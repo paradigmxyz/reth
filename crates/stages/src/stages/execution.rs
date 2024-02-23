@@ -7,7 +7,7 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::BlockNumberAddress,
-    snapshot::HeaderMask,
+    static_file::HeaderMask,
     tables,
     transaction::{DbTx, DbTxMut},
 };

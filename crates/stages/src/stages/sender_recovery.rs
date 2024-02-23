@@ -2,7 +2,7 @@ use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInpu
 use reth_db::{
     cursor::DbCursorRW,
     database::Database,
-    snapshot::TransactionMask,
+    static_file::TransactionMask,
     tables,
     transaction::{DbTx, DbTxMut},
 };

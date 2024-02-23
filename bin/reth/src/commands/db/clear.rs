@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use reth_db::{
     database::Database,
-    snapshot::iter_static_files,
+    static_file::iter_static_files,
     table::Table,
     transaction::{DbTx, DbTxMut},
     TableViewer, Tables,
