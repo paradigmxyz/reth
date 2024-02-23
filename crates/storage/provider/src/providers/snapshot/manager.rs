@@ -1,6 +1,6 @@
 use super::{
     metrics::StaticFileProviderMetrics, LoadedJar, StaticFileJarProvider, StaticFileProviderRW,
-    StaticFileProviderRWRefMut, BLOCKS_PER_SNAPSHOT,
+    StaticFileProviderRWRefMut, BLOCKS_PER_STATIC_FILE,
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
@@ -441,8 +441,8 @@ impl StaticFileProvider {
                     return Ok(Some(res));
                 }
                 range = SegmentRangeInclusive::new(
-                    range.start().saturating_sub(BLOCKS_PER_SNAPSHOT),
-                    range.end().saturating_sub(BLOCKS_PER_SNAPSHOT),
+                    range.start().saturating_sub(BLOCKS_PER_STATIC_FILE),
+                    range.end().saturating_sub(BLOCKS_PER_STATIC_FILE),
                 );
             }
         }

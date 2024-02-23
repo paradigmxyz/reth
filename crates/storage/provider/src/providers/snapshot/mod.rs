@@ -14,7 +14,7 @@ use reth_nippy_jar::NippyJar;
 use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
 use std::{ops::Deref, sync::Arc};
 
-const BLOCKS_PER_SNAPSHOT: u64 = 500_000;
+const BLOCKS_PER_STATIC_FILE: u64 = 500_000;
 
 /// Alias type for each specific `NippyJar`.
 type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, StaticFileSegment), LoadedJar>;

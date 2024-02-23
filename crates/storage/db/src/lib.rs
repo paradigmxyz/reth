@@ -164,7 +164,7 @@ pub mod test_utils {
     /// Error during database creation
     pub const ERROR_DB_CREATION: &str = "Not able to create the database file.";
     /// Error during database creation
-    pub const ERROR_SNAPSHOTS_CREATION: &str = "Not able to create the snapshot path.";
+    pub const ERROR_STATIC_FILES_CREATION: &str = "Not able to create the snapshot path.";
     /// Error during table creation
     pub const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
     /// Error during tempdir creation
@@ -230,7 +230,7 @@ pub mod test_utils {
     /// Create snapshots path for testing
     pub fn create_test_snapshots_dir() -> PathBuf {
         let path = tempdir_path();
-        let emsg = format!("{}: {:?}", ERROR_SNAPSHOTS_CREATION, path);
+        let emsg = format!("{}: {:?}", ERROR_STATIC_FILES_CREATION, path);
 
         reth_primitives::fs::create_dir_all(path.clone()).expect(&emsg);
         path
