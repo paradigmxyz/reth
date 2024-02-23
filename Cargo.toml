@@ -239,6 +239,7 @@ async-trait = "0.1.68"
 futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"
+trait-variant = "0.1.1"
 
 # rpc
 jsonrpsee = { version = "0.20" }

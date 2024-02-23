@@ -1,6 +1,5 @@
 //! Perform DNS lookups
 
-use async_trait::async_trait;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use tracing::trace;
@@ -8,13 +7,12 @@ pub use trust_dns_resolver::{error::ResolveError, TokioAsyncResolver};
 use trust_dns_resolver::{name_server::ConnectionProvider, AsyncResolver};
 
 /// A type that can lookup DNS entries
-#[async_trait]
-pub trait Resolver: Send + Sync + Unpin + 'static {
+#[trait_variant::make(Resolver: Send)]
+pub trait LocalResolver: Send + Sync + Unpin + 'static {
     /// Performs a textual lookup and returns the first text
     async fn lookup_txt(&self, query: &str) -> Option<String>;
 }
 
-#[async_trait]
 impl<P: ConnectionProvider> Resolver for AsyncResolver<P> {
     async fn lookup_txt(&self, query: &str) -> Option<String> {
         // See: [AsyncResolver::txt_lookup]
@@ -67,7 +65,6 @@ impl DnsResolver {
     }
 }
 
-#[async_trait]
 impl Resolver for DnsResolver {
     async fn lookup_txt(&self, query: &str) -> Option<String> {
         Resolver::lookup_txt(&self.0, query).await
@@ -98,7 +95,6 @@ impl MapResolver {
     }
 }
 
-#[async_trait]
 impl Resolver for MapResolver {
     async fn lookup_txt(&self, query: &str) -> Option<String> {
         self.get(query)
@@ -110,7 +106,6 @@ impl Resolver for MapResolver {
 pub(crate) struct TimeoutResolver(pub(crate) std::time::Duration);
 
 #[cfg(test)]
-#[async_trait]
 impl Resolver for TimeoutResolver {
     async fn lookup_txt(&self, _query: &str) -> Option<String> {
         tokio::time::sleep(self.0).await;
