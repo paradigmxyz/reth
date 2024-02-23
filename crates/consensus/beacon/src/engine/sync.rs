@@ -398,12 +398,13 @@ mod tests {
     use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
-        Header, SealedHeader, MAINNET,
+        Header, PruneModes, SealedHeader, MAINNET,
     };
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
         BundleStateWithReceipts,
     };
+    use reth_snapshot::Snapshotter;
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, future::poll_fn, ops::Range};
@@ -465,7 +466,15 @@ mod tests {
                 pipeline = pipeline.with_max_block(max_block);
             }
 
-            pipeline.build(create_test_provider_factory_with_chain_spec(chain_spec))
+            let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+
+            let snapshotter = Snapshotter::new(
+                provider_factory.clone(),
+                provider_factory.snapshot_provider(),
+                PruneModes::default(),
+            );
+
+            pipeline.build(provider_factory, snapshotter)
         }
     }
 

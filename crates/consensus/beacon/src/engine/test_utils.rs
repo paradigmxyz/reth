@@ -406,7 +406,6 @@ where
                         header_downloader,
                         body_downloader,
                         executor_factory.clone(),
-                        snapshotter,
                     )
                     .expect("should build"),
                 )
@@ -417,7 +416,7 @@ where
             pipeline = pipeline.with_max_block(max_block);
         }
 
-        let pipeline = pipeline.build(provider_factory.clone());
+        let pipeline = pipeline.build(provider_factory.clone(), snapshotter);
 
         // Setup blockchain tree
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);

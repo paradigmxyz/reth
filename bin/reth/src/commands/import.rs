@@ -191,7 +191,6 @@ impl ImportCommand {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                    snapshotter,
                 )?
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
@@ -213,7 +212,7 @@ impl ImportCommand {
                     config.prune.map(|prune| prune.segments).unwrap_or_default(),
                 )),
             )
-            .build(provider_factory);
+            .build(provider_factory, snapshotter);
 
         let events = pipeline.events().map(Into::into);
 

@@ -25,9 +25,10 @@ use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]
 use reth_node_optimism::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{fs, ChainSpec};
+use reth_primitives::{fs, ChainSpec, PruneModes};
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory};
 use reth_revm::EvmProcessorFactory;
+use reth_snapshot::Snapshotter;
 use reth_stages::Pipeline;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::noop::NoopTransactionPool;
@@ -196,7 +197,14 @@ impl Command {
         let (consensus_engine_tx, consensus_engine_rx) = mpsc::unbounded_channel();
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             network_client,
-            Pipeline::builder().build(provider_factory),
+            Pipeline::builder().build(
+                provider_factory.clone(),
+                Snapshotter::new(
+                    provider_factory.clone(),
+                    provider_factory.snapshot_provider(),
+                    PruneModes::default(),
+                ),
+            ),
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),
             Box::new(network),

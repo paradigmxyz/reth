@@ -59,11 +59,10 @@
 //!             headers_downloader,
 //!             bodies_downloader,
 //!             executor_factory,
-//!             snapshotter,
 //!         )
 //!         .unwrap(),
 //!     )
-//!     .build(provider_factory);
+//!     .build(provider_factory, snapshotter);
 //! ```
 //!
 //! ## Feature Flags

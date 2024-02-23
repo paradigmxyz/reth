@@ -42,7 +42,7 @@ use crate::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        SnapshotStage, StorageHashingStage, TransactionLookupStage,
+        StorageHashingStage, TransactionLookupStage,
     },
     StageError, StageSet, StageSetBuilder,
 };
@@ -52,7 +52,6 @@ use reth_interfaces::{
     p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
 };
 use reth_provider::{ExecutorFactory, HeaderSyncGapProvider, HeaderSyncMode};
-use reth_snapshot::Snapshotter;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -60,13 +59,11 @@ use tempfile::TempDir;
 ///
 /// A combination of (in order)
 ///
-/// - [`SnapshotStage`]
 /// - [`OnlineStages`]
 /// - [`OfflineStages`]
 /// - [`FinishStage`]
 ///
 /// This expands to the following series of stages:
-/// - [`SnapshotStage`]
 /// - [`HeaderStage`]
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
@@ -80,15 +77,14 @@ use tempfile::TempDir;
 /// - [`IndexAccountHistoryStage`]
 /// - [`FinishStage`]
 #[derive(Debug)]
-pub struct DefaultStages<Provider, H, B, EF, DB> {
+pub struct DefaultStages<Provider, H, B, EF> {
     /// Configuration for the online stages
     online: OnlineStages<Provider, H, B>,
     /// Executor factory needs for execution stage
     executor_factory: EF,
-    snapshotter: Snapshotter<DB>,
 }
 
-impl<Provider, H, B, EF, DB> DefaultStages<Provider, H, B, EF, DB> {
+impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
     /// Create a new set of default stages with default values.
     pub fn new(
         provider: Provider,
@@ -97,7 +93,6 @@ impl<Provider, H, B, EF, DB> DefaultStages<Provider, H, B, EF, DB> {
         header_downloader: H,
         body_downloader: B,
         executor_factory: EF,
-        snapshotter: Snapshotter<DB>,
     ) -> Result<Self, StageError>
     where
         EF: ExecutorFactory,
@@ -112,31 +107,27 @@ impl<Provider, H, B, EF, DB> DefaultStages<Provider, H, B, EF, DB> {
                 Arc::new(TempDir::new()?),
             ),
             executor_factory,
-            snapshotter,
         })
     }
 }
 
-impl<Provider, H, B, EF, DB> DefaultStages<Provider, H, B, EF, DB>
+impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF>
 where
     EF: ExecutorFactory,
-    DB: Database + 'static,
 {
     /// Appends the default offline stages and default finish stage to the given builder.
-    pub fn add_offline_stages(
+    pub fn add_offline_stages<DB: Database>(
         default_offline: StageSetBuilder<DB>,
         executor_factory: EF,
-        snapshotter: Snapshotter<DB>,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(SnapshotStage::new(snapshotter))
             .add_set(default_offline)
             .add_set(OfflineStages::new(executor_factory))
             .add_stage(FinishStage)
     }
 }
 
-impl<Provider, H, B, EF, DB> StageSet<DB> for DefaultStages<Provider, H, B, EF, DB>
+impl<Provider, H, B, EF, DB> StageSet<DB> for DefaultStages<Provider, H, B, EF>
 where
     Provider: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
@@ -145,7 +136,7 @@ where
     DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
-        Self::add_offline_stages(self.online.builder(), self.executor_factory, self.snapshotter)
+        Self::add_offline_stages(self.online.builder(), self.executor_factory)
     }
 }
 
