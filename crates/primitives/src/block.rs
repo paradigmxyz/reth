@@ -346,10 +346,47 @@ impl proptest::arbitrary::Arbitrary for SealedBlock {
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::{collection::vec, prelude::*};
+        prop_compose! {
+            fn valid_header_strategy()(
+                mut header in any::<Header>(),
+                eip_4844_active in any::<bool>(),
+                blob_gas_used in any::<u64>(),
+                excess_blob_gas in any::<u64>(),
+                parent_beacon_block_root in any::<B256>()
+            ) -> Header {
+                // EIP-1559 logic
+                if header.base_fee_per_gas.is_none() {
+                    // If EIP-1559 is not active, clear related fields
+                    header.withdrawals_root = None;
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
+                } else {
+                    // EIP-4895 logic
+                    if header.withdrawals_root.is_none() {
+                        // If EIP-4895 is not active, clear related fields
+                        header.blob_gas_used = None;
+                        header.excess_blob_gas = None;
+                        header.parent_beacon_block_root = None;
+                    } else if !eip_4844_active {
+                        // If EIP-4844 is not active, clear related fields
+                        header.blob_gas_used = None;
+                        header.excess_blob_gas = None;
+                        header.parent_beacon_block_root = None;
+                    } else {
+                        // Set fields based on EIP-4844 being active
+                        header.blob_gas_used = Some(blob_gas_used);
+                        header.excess_blob_gas = Some(excess_blob_gas);
+                        header.parent_beacon_block_root = Some(parent_beacon_block_root);
+                    }
+                }
 
+                header
+            }
+        }
         let header_strategy = SealedHeader::arbitrary_with(Default::default());
         let body_strategy = vec(any::<TransactionSigned>(), 0..10);
-        let ommers_strategy = vec(any::<Header>(), 0..2);
+        let ommers_strategy = vec(valid_header_strategy(), 0..2);
         let withdrawals_strategy = any::<Option<Withdrawals>>();
 
         (header_strategy, body_strategy, ommers_strategy, withdrawals_strategy)
@@ -366,20 +403,76 @@ impl proptest::arbitrary::Arbitrary for SealedBlock {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedBlock {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let header: SealedHeader = SealedHeader::arbitrary(u)?;
-
+        let mut header: Header = Header::arbitrary(u)?;
+        let blob_gas_used: u64 = u.arbitrary()?;
+        let excess_blob_gas: u64 = u.arbitrary()?;
+        let parent_beacon_block_root: B256 = u.arbitrary()?;
+        // Determine if EIP-4844 is active using a random bool
+        let eip_4844_active: bool = u.arbitrary()?;
+        // EIP-1559 logic
+        if header.base_fee_per_gas.is_none() {
+            // If EIP-1559 is not active, clear related fields
+            header.withdrawals_root = None;
+            header.blob_gas_used = None;
+            header.excess_blob_gas = None;
+            header.parent_beacon_block_root = None;
+        } else {
+            // EIP-4895 logic
+            if header.withdrawals_root.is_none() {
+                // If EIP-4895 is not active, clear related fields
+                header.blob_gas_used = None;
+                header.excess_blob_gas = None;
+                header.parent_beacon_block_root = None;
+            } else if !eip_4844_active {
+                // If EIP-4844 is not active, clear related fields
+                header.blob_gas_used = None;
+                header.excess_blob_gas = None;
+                header.parent_beacon_block_root = None;
+            } else {
+                // Set fields based on EIP-4844 being active
+                header.blob_gas_used = Some(blob_gas_used);
+                header.excess_blob_gas = Some(excess_blob_gas);
+                header.parent_beacon_block_root = Some(parent_beacon_block_root);
+            }
+        }
         let body: Vec<TransactionSigned> = u.arbitrary()?;
 
         let ommers_count: usize = u.int_in_range(0..=2)?;
         let mut ommers = Vec::with_capacity(ommers_count);
         for _ in 0..ommers_count {
-            let ommer: Header = Header::arbitrary(u)?;
+            let mut ommer: Header = Header::arbitrary(u)?;
+            let blob_gas_used: u64 = u.arbitrary()?;
+            let excess_blob_gas: u64 = u.arbitrary()?;
+            let parent_beacon_block_root: B256 = u.arbitrary()?;
+            let eip_4844_active: bool = u.arbitrary()?;
+
+            if ommer.base_fee_per_gas.is_none() {
+                ommer.withdrawals_root = None;
+                ommer.blob_gas_used = None;
+                ommer.excess_blob_gas = None;
+                ommer.parent_beacon_block_root = None;
+            } else {
+                if ommer.withdrawals_root.is_none() {
+                    ommer.blob_gas_used = None;
+                    ommer.excess_blob_gas = None;
+                    ommer.parent_beacon_block_root = None;
+                } else if !eip_4844_active {
+                    ommer.blob_gas_used = None;
+                    ommer.excess_blob_gas = None;
+                    ommer.parent_beacon_block_root = None;
+                } else {
+                    ommer.blob_gas_used = Some(blob_gas_used);
+                    ommer.excess_blob_gas = Some(excess_blob_gas);
+                    ommer.parent_beacon_block_root = Some(parent_beacon_block_root);
+                }
+            }
+
             ommers.push(ommer);
         }
 
         let withdrawals: Option<Withdrawals> = u.arbitrary()?;
 
-        Ok(SealedBlock { header, body, ommers, withdrawals })
+        Ok(SealedBlock { header: header.seal_slow(), body, ommers, withdrawals })
     }
 }
 
