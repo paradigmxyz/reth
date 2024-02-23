@@ -1,4 +1,4 @@
-use reth_node_api::{evm::EvmConfig, ConfigureEvmEnv};
+use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
@@ -44,8 +44,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-// TODO
-impl EvmConfig for EthEvmConfig {}
+impl ConfigureEvm for EthEvmConfig {}
 
 #[cfg(test)]
 mod tests {

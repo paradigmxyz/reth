@@ -58,13 +58,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// * [BlockchainTree::make_canonical]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
-pub struct BlockchainTree<DB: Database, EF: ExecutorFactory> {
+pub struct BlockchainTree<DB: Database, EVM: ExecutorFactory> {
     /// The state of the tree
     ///
     /// Tracks all the chains, the block indices, and the block buffer.
     state: TreeState,
     /// External components (the database, consensus engine etc.)
-    externals: TreeExternals<DB, EF>,
+    externals: TreeExternals<DB, EVM>,
     /// Tree configuration
     config: BlockchainTreeConfig,
     /// Broadcast channel for canon state changes notifications.
@@ -76,10 +76,10 @@ pub struct BlockchainTree<DB: Database, EF: ExecutorFactory> {
     prune_modes: Option<PruneModes>,
 }
 
-impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
+impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
     /// Create a new blockchain tree.
     pub fn new(
-        externals: TreeExternals<DB, EF>,
+        externals: TreeExternals<DB, EVM>,
         config: BlockchainTreeConfig,
         prune_modes: Option<PruneModes>,
     ) -> RethResult<Self> {
