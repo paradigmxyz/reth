@@ -725,6 +725,7 @@ impl EnvironmentBuilder {
         Ok(Environment { inner: Arc::new(env) })
     }
 
+    /// Returns true if mdbx exclusive flag is set.
     pub fn is_exclusive(&self) -> bool {
         self.exclusive
     }
@@ -866,7 +867,7 @@ pub(crate) mod read_transactions {
             self.max_read_transaction_duration = Some(max_read_transaction_duration);
             self
         }
-        /// Set the mdbx exclusive mode see https://libmdbx.dqdkfa.ru/group__c__opening.html#gga9138119a904355d245777c4119534061aa516c74e6fed22c9812bb909c8c459ed
+        /// Set the mdbx exclusive flag.
         pub fn set_exclusive(&mut self, exclusive: bool) -> &mut Self {
             self.exclusive = exclusive;
             self
