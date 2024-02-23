@@ -68,7 +68,9 @@ impl<K: TransactionKind> Tx<K> {
         // NOTE: These constants are needed to initialize `OnceLock` at compile-time, as array
         // initialization is not allowed with non-Copy types, and `const { }` blocks are not stable
         // yet.
+        #[allow(clippy::declare_interior_mutable_const)]
         const ONCELOCK_DBI_NEW: OnceLock<DBI> = OnceLock::new();
+        #[allow(clippy::declare_interior_mutable_const)]
         const DB_HANDLES: [OnceLock<DBI>; Tables::COUNT] = [ONCELOCK_DBI_NEW; Tables::COUNT];
         Self { inner, db_handles: DB_HANDLES, metrics_handler }
     }
