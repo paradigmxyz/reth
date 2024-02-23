@@ -7,7 +7,7 @@ use crate::{
 };
 use reth_db::database::Database;
 use reth_primitives::{
-    BlockNumber, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SnapshotSegment,
+    BlockNumber, PruneMode, PruneProgress, PrunePurpose, PruneSegment, StaticFileSegment,
 };
 use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
 use reth_tokio_util::EventListeners;
@@ -204,20 +204,20 @@ impl<DB: Database> Pruner<DB> {
         let snapshot_provider = self.provider_factory.snapshot_provider();
 
         if let Some(to_block) =
-            snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Transactions)
+            snapshot_provider.get_highest_snapshot_block(StaticFileSegment::Transactions)
         {
             segments
                 .push(Box::new(segments::Transactions::new(PruneMode::before_inclusive(to_block))))
         }
 
         if let Some(to_block) =
-            snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers)
+            snapshot_provider.get_highest_snapshot_block(StaticFileSegment::Headers)
         {
             segments.push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
         }
 
         if let Some(to_block) =
-            snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Receipts)
+            snapshot_provider.get_highest_snapshot_block(StaticFileSegment::Receipts)
         {
             segments.push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
         }

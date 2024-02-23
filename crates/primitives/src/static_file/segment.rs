@@ -25,7 +25,7 @@ use strum::{AsRefStr, EnumIter, EnumString};
 )]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 /// Segment of the data that can be snapshotted.
-pub enum SnapshotSegment {
+pub enum StaticFileSegment {
     #[strum(serialize = "headers")]
     /// Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables.
     Headers,
@@ -37,13 +37,13 @@ pub enum SnapshotSegment {
     Receipts,
 }
 
-impl SnapshotSegment {
+impl StaticFileSegment {
     /// Returns the segment as a string.
     pub const fn as_str(&self) -> &'static str {
         match self {
-            SnapshotSegment::Headers => "headers",
-            SnapshotSegment::Transactions => "transactions",
-            SnapshotSegment::Receipts => "receipts",
+            StaticFileSegment::Headers => "headers",
+            StaticFileSegment::Transactions => "transactions",
+            StaticFileSegment::Receipts => "receipts",
         }
     }
 
@@ -58,18 +58,18 @@ impl SnapshotSegment {
         };
 
         match self {
-            SnapshotSegment::Headers => default_config,
-            SnapshotSegment::Transactions => default_config,
-            SnapshotSegment::Receipts => default_config,
+            StaticFileSegment::Headers => default_config,
+            StaticFileSegment::Transactions => default_config,
+            StaticFileSegment::Receipts => default_config,
         }
     }
 
     /// Returns the number of columns for the segment
     pub const fn columns(&self) -> usize {
         match self {
-            SnapshotSegment::Headers => 3,
-            SnapshotSegment::Transactions => 1,
-            SnapshotSegment::Receipts => 1,
+            StaticFileSegment::Headers => 3,
+            StaticFileSegment::Transactions => 1,
+            StaticFileSegment::Receipts => 1,
         }
     }
 
@@ -120,14 +120,14 @@ impl SnapshotSegment {
     pub fn parse_filename(name: &str) -> Option<(Self, SegmentRangeInclusive)> {
         let mut parts = name.split('_');
         if parts.next() != Some("snapshot") {
-            return None
+            return None;
         }
 
         let segment = Self::from_str(parts.next()?).ok()?;
         let (block_start, block_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
 
         if block_start > block_end {
-            return None
+            return None;
         }
 
         Some((segment, SegmentRangeInclusive::new(block_start, block_end)))
@@ -135,7 +135,7 @@ impl SnapshotSegment {
 
     /// Returns `true` if the segment is `SnapshotSegment::Headers`.
     pub fn is_headers(&self) -> bool {
-        matches!(self, SnapshotSegment::Headers)
+        matches!(self, StaticFileSegment::Headers)
     }
 }
 
@@ -152,7 +152,7 @@ pub struct SegmentHeader {
     /// Transaction range of data of the snapshot segment
     tx_range: Option<SegmentRangeInclusive>,
     /// Segment type
-    segment: SnapshotSegment,
+    segment: StaticFileSegment,
 }
 
 impl SegmentHeader {
@@ -161,13 +161,13 @@ impl SegmentHeader {
         expected_block_range: SegmentRangeInclusive,
         block_range: Option<SegmentRangeInclusive>,
         tx_range: Option<SegmentRangeInclusive>,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
     ) -> Self {
         Self { expected_block_range, block_range, tx_range, segment }
     }
 
     /// Returns the snapshot segment kind.
-    pub fn segment(&self) -> SnapshotSegment {
+    pub fn segment(&self) -> StaticFileSegment {
         self.segment
     }
 
@@ -238,8 +238,8 @@ impl SegmentHeader {
     /// Increments tx end range depending on segment
     pub fn increment_tx(&mut self) {
         match self.segment {
-            SnapshotSegment::Headers => (),
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+            StaticFileSegment::Headers => (),
+            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
                 if let Some(tx_range) = &mut self.tx_range {
                     tx_range.end += 1;
                 } else {
@@ -252,7 +252,7 @@ impl SegmentHeader {
     /// Removes `num` elements from end of tx or block range.
     pub fn prune(&mut self, num: u64) {
         match self.segment {
-            SnapshotSegment::Headers => {
+            StaticFileSegment::Headers => {
                 if let Some(range) = &mut self.block_range {
                     if num > range.end {
                         self.block_range = None;
@@ -261,7 +261,7 @@ impl SegmentHeader {
                     }
                 };
             }
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
                 if let Some(range) = &mut self.tx_range {
                     if num > range.end {
                         self.tx_range = None;
@@ -296,8 +296,8 @@ impl SegmentHeader {
     /// Returns the row offset which depends on whether the segment is block or transaction based.
     pub fn start(&self) -> Option<u64> {
         match self.segment {
-            SnapshotSegment::Headers => self.block_start(),
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => self.tx_start(),
+            StaticFileSegment::Headers => self.block_start(),
+            StaticFileSegment::Transactions | StaticFileSegment::Receipts => self.tx_start(),
         }
     }
 }
@@ -368,16 +368,16 @@ mod tests {
     #[test]
     fn test_filename() {
         let test_vectors = [
-            (SnapshotSegment::Headers, 2..=30, "snapshot_headers_2_30", None),
-            (SnapshotSegment::Receipts, 30..=300, "snapshot_receipts_30_300", None),
+            (StaticFileSegment::Headers, 2..=30, "snapshot_headers_2_30", None),
+            (StaticFileSegment::Receipts, 30..=300, "snapshot_receipts_30_300", None),
             (
-                SnapshotSegment::Transactions,
+                StaticFileSegment::Transactions,
                 1_123_233..=11_223_233,
                 "snapshot_transactions_1123233_11223233",
                 None,
             ),
             (
-                SnapshotSegment::Headers,
+                StaticFileSegment::Headers,
                 2..=30,
                 "snapshot_headers_2_30_cuckoo-fmph_lz4",
                 Some((
@@ -389,7 +389,7 @@ mod tests {
                 )),
             ),
             (
-                SnapshotSegment::Headers,
+                StaticFileSegment::Headers,
                 2..=30,
                 "snapshot_headers_2_30_cuckoo-fmph_zstd",
                 Some((
@@ -401,7 +401,7 @@ mod tests {
                 )),
             ),
             (
-                SnapshotSegment::Headers,
+                StaticFileSegment::Headers,
                 2..=30,
                 "snapshot_headers_2_30_cuckoo-fmph_zstd-dict",
                 Some((
@@ -425,10 +425,10 @@ mod tests {
                 assert_eq!(segment.filename(&block_range), filename);
             }
 
-            assert_eq!(SnapshotSegment::parse_filename(filename), Some((segment, block_range)));
+            assert_eq!(StaticFileSegment::parse_filename(filename), Some((segment, block_range)));
         }
 
-        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_2"), None);
-        assert_eq!(SnapshotSegment::parse_filename("snapshot_headers_"), None);
+        assert_eq!(StaticFileSegment::parse_filename("snapshot_headers_2"), None);
+        assert_eq!(StaticFileSegment::parse_filename("snapshot_headers_"), None);
     }
 }

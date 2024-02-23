@@ -13,7 +13,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    SnapshotSegment,
+    StaticFileSegment,
 };
 use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW, HeaderProvider, StatsReader};
 use std::{
@@ -126,12 +126,12 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         let snapshot_provider = provider.snapshot_provider();
         let mut snapshotter =
-            snapshot_provider.get_writer(from_block, SnapshotSegment::Transactions)?;
+            snapshot_provider.get_writer(from_block, StaticFileSegment::Transactions)?;
 
         // Make sure Transactions static file is at the same height. If it's further, this
         // input execution was interrupted previously and we need to unwind the static file.
         let next_snapshot_tx_num = snapshot_provider
-            .get_highest_snapshot_tx(SnapshotSegment::Transactions)
+            .get_highest_snapshot_tx(StaticFileSegment::Transactions)
             .map(|id| id + 1)
             .unwrap_or_default();
 
@@ -146,7 +146,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // static files.
             Ordering::Less => {
                 let last_block = snapshot_provider
-                    .get_highest_snapshot_block(SnapshotSegment::Transactions)
+                    .get_highest_snapshot_block(StaticFileSegment::Transactions)
                     .unwrap_or_default();
 
                 let missing_block =
@@ -154,7 +154,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
                 return Err(StageError::MissingSnapshotData {
                     block: missing_block,
-                    segment: SnapshotSegment::Transactions,
+                    segment: StaticFileSegment::Transactions,
                 })
             }
             Ordering::Equal => {}
@@ -180,13 +180,13 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // Increment block on snapshot header.
             if block_number > 0 {
                 let appended_block_number =
-                    snapshotter.increment_block(SnapshotSegment::Transactions)?;
+                    snapshotter.increment_block(StaticFileSegment::Transactions)?;
 
                 if appended_block_number != block_number {
                     // This scenario indicates a critical error in the logic of adding new
                     // items. It should be treated as an `expect()` failure.
                     return Err(StageError::InconsistentBlockNumber {
-                        segment: SnapshotSegment::Transactions,
+                        segment: StaticFileSegment::Transactions,
                         database: block_number,
                         static_file: appended_block_number,
                     })
@@ -209,7 +209,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                             // This scenario indicates a critical error in the logic of adding new
                             // items. It should be treated as an `expect()` failure.
                             return Err(StageError::InconsistentTxNumber {
-                                segment: SnapshotSegment::Transactions,
+                                segment: StaticFileSegment::Transactions,
                                 database: next_tx_num,
                                 static_file: appended_tx_number,
                             })
@@ -297,21 +297,21 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             rev_walker.delete_current()?;
         }
 
-        let mut snapshotter = snapshot_provider.latest_writer(SnapshotSegment::Transactions)?;
+        let mut snapshotter = snapshot_provider.latest_writer(StaticFileSegment::Transactions)?;
 
         // Unwind from static files. Get the current last expected transaction from DB, and match it
         // on static file
         let db_tx_num =
             body_cursor.last()?.map(|(_, block_meta)| block_meta.last_tx_num()).unwrap_or_default();
         let snapshot_tx_num: u64 = snapshot_provider
-            .get_highest_snapshot_tx(SnapshotSegment::Transactions)
+            .get_highest_snapshot_tx(StaticFileSegment::Transactions)
             .unwrap_or_default();
 
         // If there are more transactions on database, then we are missing snapshot data and we need
         // to unwind further.
         if db_tx_num > snapshot_tx_num {
             let last_block = snapshot_provider
-                .get_highest_snapshot_block(SnapshotSegment::Transactions)
+                .get_highest_snapshot_block(StaticFileSegment::Transactions)
                 .unwrap_or_default();
 
             let missing_block =
@@ -319,7 +319,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
             return Err(StageError::MissingSnapshotData {
                 block: missing_block,
-                segment: SnapshotSegment::Transactions,
+                segment: StaticFileSegment::Transactions,
             })
         }
 
@@ -540,7 +540,7 @@ mod tests {
         let snapshot_provider = runner.db().factory.snapshot_provider();
         {
             let mut snapshotter =
-                snapshot_provider.latest_writer(SnapshotSegment::Transactions).unwrap();
+                snapshot_provider.latest_writer(StaticFileSegment::Transactions).unwrap();
             snapshotter.prune_transactions(1, checkpoint.block_number).unwrap();
         }
         // Unwind all of it
@@ -597,7 +597,7 @@ mod tests {
             },
         };
         use reth_primitives::{
-            BlockBody, BlockHash, BlockNumber, Header, SealedBlock, SealedHeader, SnapshotSegment,
+            BlockBody, BlockHash, BlockNumber, Header, SealedBlock, SealedHeader, StaticFileSegment,
             TxNumber, B256,
         };
         use reth_provider::{
@@ -685,7 +685,7 @@ mod tests {
                     {
                         let tx = self.db.factory.provider_rw()?.into_tx();
                         let mut snapshotter =
-                            snapshot_provider.get_writer(start, SnapshotSegment::Transactions)?;
+                            snapshot_provider.get_writer(start, StaticFileSegment::Transactions)?;
 
                         let body = StoredBlockBodyIndices {
                             first_tx_num: 0,
@@ -892,7 +892,7 @@ mod tests {
                 let snapshot_provider = self.provider_factory.snapshot_provider();
 
                 for header in snapshot_provider.fetch_range_iter(
-                    SnapshotSegment::Headers,
+                    StaticFileSegment::Headers,
                     *range.start()..*range.end() + 1,
                     |cursor, number| cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into()),
                 )? {

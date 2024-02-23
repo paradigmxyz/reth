@@ -16,14 +16,14 @@ pub use mask::*;
 use reth_nippy_jar::{NippyJar, NippyJarError};
 use reth_primitives::{
     static_file::{SegmentHeader, SegmentRangeInclusive},
-    SnapshotSegment,
+    StaticFileSegment,
 };
 
 mod masks;
 
 /// Alias type for a map of [`SnapshotSegment`] and sorted lists of existing snapshot ranges.
 type SortedSnapshots =
-    HashMap<SnapshotSegment, Vec<(SegmentRangeInclusive, Option<SegmentRangeInclusive>)>>;
+    HashMap<StaticFileSegment, Vec<(SegmentRangeInclusive, Option<SegmentRangeInclusive>)>>;
 
 /// Given the snapshots directory path, it returns a list over the existing snapshots organized by
 /// [`SnapshotSegment`]. Each segment has a sorted list of block ranges and transaction ranges as
@@ -44,7 +44,7 @@ pub fn iter_snapshots(path: impl AsRef<Path>) -> Result<SortedSnapshots, NippyJa
     for entry in entries {
         if entry.metadata().map_or(false, |metadata| metadata.is_file()) {
             if let Some((segment, _)) =
-                SnapshotSegment::parse_filename(&entry.file_name().to_string_lossy())
+                StaticFileSegment::parse_filename(&entry.file_name().to_string_lossy())
             {
                 let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
 

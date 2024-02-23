@@ -11,13 +11,13 @@ mod metrics;
 
 use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
-use reth_primitives::{static_file::SegmentHeader, SnapshotSegment};
+use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
 use std::{ops::Deref, sync::Arc};
 
 const BLOCKS_PER_SNAPSHOT: u64 = 500_000;
 
 /// Alias type for each specific `NippyJar`.
-type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, SnapshotSegment), LoadedJar>;
+type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, StaticFileSegment), LoadedJar>;
 
 /// Helper type to reuse an associated snapshot mmap handle on created cursors.
 #[derive(Debug)]
@@ -37,7 +37,7 @@ impl LoadedJar {
         self.mmap_handle.clone()
     }
 
-    fn segment(&self) -> SnapshotSegment {
+    fn segment(&self) -> StaticFileSegment {
         self.jar.user_header().segment()
     }
 }
@@ -72,7 +72,7 @@ mod tests {
             range.clone().into(),
             Some(range.clone().into()),
             Some(range.clone().into()),
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
         );
 
         // Data sources
@@ -80,7 +80,7 @@ mod tests {
         let snap_path = tempfile::tempdir().unwrap();
         let snap_file = snap_path
             .path()
-            .join(SnapshotSegment::Headers.filename(&find_fixed_range(*range.end())));
+            .join(StaticFileSegment::Headers.filename(&find_fixed_range(*range.end())));
 
         // Setup data
         let mut headers = random_header_range(
@@ -149,7 +149,7 @@ mod tests {
             let db_provider = factory.provider().unwrap();
             let manager = SnapshotProvider::new(snap_path.path()).unwrap().with_filters();
             let jar_provider = manager
-                .get_segment_provider_from_block(SnapshotSegment::Headers, 0, Some(&snap_file))
+                .get_segment_provider_from_block(StaticFileSegment::Headers, 0, Some(&snap_file))
                 .unwrap();
 
             assert!(!headers.is_empty());

@@ -15,7 +15,7 @@ use reth_primitives::{
         Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentConfig,
         SegmentHeader, SegmentRangeInclusive,
     },
-    BlockNumber, ChainSpec, SnapshotSegment,
+    BlockNumber, ChainSpec, StaticFileSegment,
 };
 use reth_provider::{BlockNumReader, ProviderFactory};
 use reth_snapshot::{segments as snap_segments, segments::Segment};
@@ -34,7 +34,7 @@ mod transactions;
 /// Arguments for the `reth db snapshot` command.
 pub struct Command {
     /// Snapshot segments to generate.
-    segments: Vec<SnapshotSegment>,
+    segments: Vec<StaticFileSegment>,
 
     /// Starting block for the snapshot.
     #[arg(long, short, default_value = "0")]
@@ -115,17 +115,17 @@ impl Command {
                     };
 
                     match mode {
-                        SnapshotSegment::Headers => self.generate_snapshot::<DatabaseEnv>(
+                        StaticFileSegment::Headers => self.generate_snapshot::<DatabaseEnv>(
                             provider_factory.clone(),
                             snap_segments::Headers,
                             SegmentConfig { filters, compression },
                         )?,
-                        SnapshotSegment::Transactions => self.generate_snapshot::<DatabaseEnv>(
+                        StaticFileSegment::Transactions => self.generate_snapshot::<DatabaseEnv>(
                             provider_factory.clone(),
                             snap_segments::Transactions,
                             SegmentConfig { filters, compression },
                         )?,
-                        SnapshotSegment::Receipts => self.generate_snapshot::<DatabaseEnv>(
+                        StaticFileSegment::Receipts => self.generate_snapshot::<DatabaseEnv>(
                             provider_factory.clone(),
                             snap_segments::Receipts,
                             SegmentConfig { filters, compression },
@@ -138,19 +138,19 @@ impl Command {
         if self.only_bench || self.bench {
             for ((mode, compression), phf) in all_combinations {
                 match mode {
-                    SnapshotSegment::Headers => self.bench_headers_snapshot(
+                    StaticFileSegment::Headers => self.bench_headers_snapshot(
                         provider_factory.clone(),
                         compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
-                    SnapshotSegment::Transactions => self.bench_transactions_snapshot(
+                    StaticFileSegment::Transactions => self.bench_transactions_snapshot(
                         provider_factory.clone(),
                         compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
-                    SnapshotSegment::Receipts => self.bench_receipts_snapshot(
+                    StaticFileSegment::Receipts => self.bench_receipts_snapshot(
                         provider_factory.clone(),
                         compression,
                         InclusionFilter::Cuckoo,

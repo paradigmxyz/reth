@@ -6,7 +6,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     TableViewer, Tables,
 };
-use reth_primitives::{static_file::find_fixed_range, SnapshotSegment};
+use reth_primitives::{static_file::find_fixed_range, StaticFileSegment};
 use reth_provider::ProviderFactory;
 
 /// The arguments for the `reth db clear` command
@@ -45,7 +45,7 @@ enum Subcommands {
     /// Deletes all database table entries
     Mdbx { table: Tables },
     /// Deletes all snapshot segment entries
-    Snapshot { segment: SnapshotSegment },
+    Snapshot { segment: StaticFileSegment },
 }
 
 struct ClearViewer<'a, DB: Database> {

@@ -7,7 +7,7 @@ use reth_db::{snapshot::TransactionMask, DatabaseEnv};
 
 use reth_primitives::{
     static_file::{Filters, InclusionFilter},
-    SnapshotSegment, TransactionSignedNoHash,
+    StaticFileSegment, TransactionSignedNoHash,
 };
 use reth_provider::{
     providers::SnapshotProvider, BlockNumReader, ProviderError, ProviderFactory,
@@ -39,12 +39,12 @@ impl Command {
 
         let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
 
-        let path: PathBuf = SnapshotSegment::Transactions
+        let path: PathBuf = StaticFileSegment::Transactions
             .filename_with_configuration(filters, compression, &block_range)
             .into();
         let provider = SnapshotProvider::new(PathBuf::default())?;
         let jar_provider = provider.get_segment_provider_from_block(
-            SnapshotSegment::Transactions,
+            StaticFileSegment::Transactions,
             self.from,
             Some(&path),
         )?;
@@ -54,7 +54,7 @@ impl Command {
             bench(
                 bench_kind,
                 provider_factory.clone(),
-                SnapshotSegment::Transactions,
+                StaticFileSegment::Transactions,
                 filters,
                 compression,
                 || {
@@ -86,7 +86,7 @@ impl Command {
             bench(
                 BenchKind::RandomOne,
                 provider_factory.clone(),
-                SnapshotSegment::Transactions,
+                StaticFileSegment::Transactions,
                 filters,
                 compression,
                 || {
@@ -114,7 +114,7 @@ impl Command {
             bench(
                 BenchKind::RandomHash,
                 provider_factory,
-                SnapshotSegment::Transactions,
+                StaticFileSegment::Transactions,
                 filters,
                 compression,
                 || {

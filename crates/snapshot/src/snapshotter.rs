@@ -200,7 +200,7 @@ mod tests {
         },
         RethError,
     };
-    use reth_primitives::{static_file::HighestSnapshots, PruneModes, SnapshotSegment, B256, U256};
+    use reth_primitives::{static_file::HighestSnapshots, PruneModes, StaticFileSegment, B256, U256};
     use reth_provider::providers::SnapshotWriter;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
 
@@ -216,7 +216,7 @@ mod tests {
         // to check that snapshotter works
         db.factory
             .snapshot_provider()
-            .latest_writer(SnapshotSegment::Headers)
+            .latest_writer(StaticFileSegment::Headers)
             .expect("get snapshot writer for headers")
             .prune_headers(blocks.len() as u64)
             .expect("prune headers");

@@ -8,7 +8,7 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
     static_file::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
-    BlockHash, BlockNumber, Header, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
+    BlockHash, BlockNumber, Header, Receipt, StaticFileSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };
 use std::{
@@ -20,7 +20,7 @@ use std::{
 use tracing::debug;
 
 /// Mutable reference to a dashmap element of [`SnapshotProviderRW`].
-pub type SnapshotProviderRWRefMut<'a> = RefMut<'a, SnapshotSegment, SnapshotProviderRW<'static>>;
+pub type SnapshotProviderRWRefMut<'a> = RefMut<'a, StaticFileSegment, SnapshotProviderRW<'static>>;
 
 #[derive(Debug)]
 /// Extends `SnapshotProvider` with writing capabilities
@@ -35,7 +35,7 @@ pub struct SnapshotProviderRW<'a> {
 impl<'a> SnapshotProviderRW<'a> {
     /// Creates a new [`SnapshotProviderRW`] for a [`SnapshotSegment`].
     pub fn new(
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         block: BlockNumber,
         reader: SnapshotProvider,
         metrics: Option<Arc<SnapshotProviderMetrics>>,
@@ -45,7 +45,7 @@ impl<'a> SnapshotProviderRW<'a> {
     }
 
     fn open(
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         block: u64,
         reader: SnapshotProvider,
         metrics: Option<Arc<SnapshotProviderMetrics>>,
@@ -141,7 +141,7 @@ impl<'a> SnapshotProviderRW<'a> {
     /// and create the next one if we are past the end range.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
-    pub fn increment_block(&mut self, segment: SnapshotSegment) -> ProviderResult<BlockNumber> {
+    pub fn increment_block(&mut self, segment: StaticFileSegment) -> ProviderResult<BlockNumber> {
         let start = Instant::now();
         if let Some(last_block) = self.writer.user_header().block_end() {
             // We have finished the previous snapshot and must freeze it
@@ -181,16 +181,16 @@ impl<'a> SnapshotProviderRW<'a> {
     /// Commits to the configuration file at the end.
     fn truncate(
         &mut self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         mut num_rows: u64,
         last_block: Option<u64>,
     ) -> ProviderResult<()> {
         while num_rows > 0 {
             let len = match segment {
-                SnapshotSegment::Headers => {
+                StaticFileSegment::Headers => {
                     self.writer.user_header().block_len().unwrap_or_default()
                 }
-                SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+                StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
                     self.writer.user_header().tx_len().unwrap_or_default()
                 }
             };
@@ -256,7 +256,7 @@ impl<'a> SnapshotProviderRW<'a> {
     /// Returns the current [`TxNumber`] as seen in the static file.
     fn append_with_tx_number<V: Compact>(
         &mut self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         tx_num: TxNumber,
         value: V,
     ) -> ProviderResult<TxNumber> {
@@ -287,9 +287,9 @@ impl<'a> SnapshotProviderRW<'a> {
     ) -> ProviderResult<BlockNumber> {
         let start = Instant::now();
 
-        debug_assert!(self.writer.user_header().segment() == SnapshotSegment::Headers);
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        let block_number = self.increment_block(SnapshotSegment::Headers)?;
+        let block_number = self.increment_block(StaticFileSegment::Headers)?;
 
         self.append_column(header)?;
         self.append_column(CompactU256::from(terminal_difficulty))?;
@@ -297,7 +297,7 @@ impl<'a> SnapshotProviderRW<'a> {
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
-                SnapshotSegment::Headers,
+                StaticFileSegment::Headers,
                 SnapshotProviderOperation::Append,
                 Some(start.elapsed()),
             );
@@ -319,11 +319,11 @@ impl<'a> SnapshotProviderRW<'a> {
     ) -> ProviderResult<TxNumber> {
         let start = Instant::now();
 
-        let result = self.append_with_tx_number(SnapshotSegment::Transactions, tx_num, tx)?;
+        let result = self.append_with_tx_number(StaticFileSegment::Transactions, tx_num, tx)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
-                SnapshotSegment::Transactions,
+                StaticFileSegment::Transactions,
                 SnapshotProviderOperation::Append,
                 Some(start.elapsed()),
             );
@@ -345,11 +345,11 @@ impl<'a> SnapshotProviderRW<'a> {
     ) -> ProviderResult<TxNumber> {
         let start = Instant::now();
 
-        let result = self.append_with_tx_number(SnapshotSegment::Receipts, tx_num, receipt)?;
+        let result = self.append_with_tx_number(StaticFileSegment::Receipts, tx_num, receipt)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
-                SnapshotSegment::Receipts,
+                StaticFileSegment::Receipts,
                 SnapshotProviderOperation::Append,
                 Some(start.elapsed()),
             );
@@ -369,14 +369,14 @@ impl<'a> SnapshotProviderRW<'a> {
     ) -> ProviderResult<()> {
         let start = Instant::now();
 
-        let segment = SnapshotSegment::Transactions;
+        let segment = StaticFileSegment::Transactions;
         debug_assert!(self.writer.user_header().segment() == segment);
 
         self.truncate(segment, number, Some(last_block))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
-                SnapshotSegment::Transactions,
+                StaticFileSegment::Transactions,
                 SnapshotProviderOperation::Prune,
                 Some(start.elapsed()),
             );
@@ -396,14 +396,14 @@ impl<'a> SnapshotProviderRW<'a> {
     ) -> ProviderResult<()> {
         let start = Instant::now();
 
-        let segment = SnapshotSegment::Receipts;
+        let segment = StaticFileSegment::Receipts;
         debug_assert!(self.writer.user_header().segment() == segment);
 
         self.truncate(segment, to_delete, Some(last_block))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
-                SnapshotSegment::Receipts,
+                StaticFileSegment::Receipts,
                 SnapshotProviderOperation::Prune,
                 Some(start.elapsed()),
             );
@@ -419,14 +419,14 @@ impl<'a> SnapshotProviderRW<'a> {
     pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
         let start = Instant::now();
 
-        let segment = SnapshotSegment::Headers;
+        let segment = StaticFileSegment::Headers;
         debug_assert!(self.writer.user_header().segment() == segment);
 
         self.truncate(segment, to_delete, None)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
-                SnapshotSegment::Headers,
+                StaticFileSegment::Headers,
                 SnapshotProviderOperation::Prune,
                 Some(start.elapsed()),
             );
@@ -450,7 +450,7 @@ impl<'a> Deref for SnapshotProviderRW<'a> {
 }
 
 fn create_jar(
-    segment: SnapshotSegment,
+    segment: StaticFileSegment,
     path: &Path,
     expected_block_range: SegmentRangeInclusive,
 ) -> NippyJar<SegmentHeader> {

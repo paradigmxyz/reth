@@ -24,7 +24,7 @@ use reth_primitives::{
     keccak256,
     static_file::{find_fixed_range, HighestSnapshots, SegmentHeader, SegmentRangeInclusive},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment, TransactionMeta,
+    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
@@ -38,7 +38,7 @@ use tracing::warn;
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a snapshot range.
-type SegmentRanges = HashMap<SnapshotSegment, BTreeMap<TxNumber, SegmentRangeInclusive>>;
+type SegmentRanges = HashMap<StaticFileSegment, BTreeMap<TxNumber, SegmentRangeInclusive>>;
 
 /// [`SnapshotProvider`] manages all existing [`SnapshotJarProvider`].
 #[derive(Debug, Default, Clone)]
@@ -66,9 +66,9 @@ impl Deref for SnapshotProvider {
 pub struct SnapshotProviderInner {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
-    map: DashMap<(BlockNumber, SnapshotSegment), LoadedJar>,
+    map: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
     /// Max snapshotted block for each snapshot segment
-    snapshots_max_block: RwLock<HashMap<SnapshotSegment, u64>>,
+    snapshots_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
     /// Available snapshot block ranges on disk indexed by max transactions.
     snapshots_tx_index: RwLock<SegmentRanges>,
     /// Directory where snapshots are located
@@ -77,7 +77,7 @@ pub struct SnapshotProviderInner {
     /// be able to be queried directly.
     load_filters: bool,
     /// Maintains a map of Snapshot writers for each [`SnapshotSegment`]
-    writers: DashMap<SnapshotSegment, SnapshotProviderRW<'static>>,
+    writers: DashMap<StaticFileSegment, SnapshotProviderRW<'static>>,
     metrics: Option<Arc<SnapshotProviderMetrics>>,
 }
 
@@ -118,7 +118,7 @@ impl SnapshotProvider {
     /// Gets the [`SnapshotJarProvider`] of the requested segment and block.
     pub fn get_segment_provider_from_block(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         block: BlockNumber,
         path: Option<&Path>,
     ) -> ProviderResult<SnapshotJarProvider<'_>> {
@@ -133,7 +133,7 @@ impl SnapshotProvider {
     /// Gets the [`SnapshotJarProvider`] of the requested segment and transaction.
     pub fn get_segment_provider_from_transaction(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         tx: TxNumber,
         path: Option<&Path>,
     ) -> ProviderResult<SnapshotJarProvider<'_>> {
@@ -150,14 +150,14 @@ impl SnapshotProvider {
     /// `fn_range` should make sure the range goes through `find_fixed_range`.
     pub fn get_segment_provider(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         fn_range: impl Fn() -> Option<SegmentRangeInclusive>,
         path: Option<&Path>,
     ) -> ProviderResult<Option<SnapshotJarProvider<'_>>> {
         // If we have a path, then get the block range from its name.
         // Otherwise, check `self.available_snapshots`
         let block_range = match path {
-            Some(path) => SnapshotSegment::parse_filename(
+            Some(path) => StaticFileSegment::parse_filename(
                 &path
                     .file_name()
                     .ok_or_else(|| ProviderError::MissingSnapshotPath(segment, path.to_path_buf()))?
@@ -183,7 +183,7 @@ impl SnapshotProvider {
     /// Given a segment and block range it removes the cached provider from the map.
     pub fn remove_cached_provider(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         fixed_block_range_end: BlockNumber,
     ) {
         self.map.remove(&(fixed_block_range_end, segment));
@@ -194,7 +194,7 @@ impl SnapshotProvider {
     /// CAUTION: destructive. Deletes files on disk.
     pub fn delete_jar(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         fixed_block_range: SegmentRangeInclusive,
     ) -> ProviderResult<()> {
         let key = (fixed_block_range.end(), segment);
@@ -226,7 +226,7 @@ impl SnapshotProvider {
     /// many.
     fn get_or_create_jar_provider(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         fixed_block_range: &SegmentRangeInclusive,
     ) -> ProviderResult<SnapshotJarProvider<'_>> {
         let key = (fixed_block_range.end(), segment);
@@ -254,7 +254,7 @@ impl SnapshotProvider {
     /// index.
     fn get_segment_ranges_from_block(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         block: u64,
     ) -> Option<SegmentRangeInclusive> {
         self.snapshots_max_block
@@ -268,7 +268,7 @@ impl SnapshotProvider {
     /// transaction index.
     fn get_segment_ranges_from_transaction(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         tx: u64,
     ) -> Option<SegmentRangeInclusive> {
         let snapshots = self.snapshots_tx_index.read();
@@ -299,7 +299,7 @@ impl SnapshotProvider {
     /// If `segment_max_block` is None it means there's no static file for this segment.
     pub fn update_index(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         segment_max_block: Option<BlockNumber>,
     ) -> ProviderResult<()> {
         let mut max_block = self.snapshots_max_block.write();
@@ -347,7 +347,7 @@ impl SnapshotProvider {
                     if jar.user_header().expected_block_start() == 0 &&
                         matches!(
                             segment,
-                            SnapshotSegment::Receipts | SnapshotSegment::Transactions
+                            StaticFileSegment::Receipts | StaticFileSegment::Transactions
                         )
                     {
                         tx_index.remove(&segment);
@@ -403,12 +403,12 @@ impl SnapshotProvider {
     }
 
     /// Gets the highest snapshot block if it exists for a snapshot segment.
-    pub fn get_highest_snapshot_block(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
+    pub fn get_highest_snapshot_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
         self.snapshots_max_block.read().get(&segment).copied()
     }
 
     /// Gets the highest snapshotted transaction.
-    pub fn get_highest_snapshot_tx(&self, segment: SnapshotSegment) -> Option<TxNumber> {
+    pub fn get_highest_snapshot_tx(&self, segment: StaticFileSegment) -> Option<TxNumber> {
         self.snapshots_tx_index
             .read()
             .get(&segment)
@@ -418,9 +418,9 @@ impl SnapshotProvider {
     /// Gets the highest snapshotted blocks for all segments.
     pub fn get_highest_snapshots(&self) -> HighestSnapshots {
         HighestSnapshots {
-            headers: self.get_highest_snapshot_block(SnapshotSegment::Headers),
-            receipts: self.get_highest_snapshot_block(SnapshotSegment::Receipts),
-            transactions: self.get_highest_snapshot_block(SnapshotSegment::Transactions),
+            headers: self.get_highest_snapshot_block(StaticFileSegment::Headers),
+            receipts: self.get_highest_snapshot_block(StaticFileSegment::Receipts),
+            transactions: self.get_highest_snapshot_block(StaticFileSegment::Transactions),
         }
     }
 
@@ -428,7 +428,7 @@ impl SnapshotProvider {
     /// some object. Useful for finding objects by [`TxHash`] or [`BlockHash`].
     pub fn find_snapshot<T>(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         func: impl Fn(SnapshotJarProvider<'_>) -> ProviderResult<Option<T>>,
     ) -> ProviderResult<Option<T>> {
         if let Some(highest_block) = self.get_highest_snapshot_block(segment) {
@@ -454,7 +454,7 @@ impl SnapshotProvider {
     /// returns false.
     pub fn fetch_range_with_predicate<T, F, P>(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         range: Range<u64>,
         mut get_fn: F,
         mut predicate: P,
@@ -464,8 +464,8 @@ impl SnapshotProvider {
         P: FnMut(&T) -> bool,
     {
         let get_provider = |start: u64| match segment {
-            SnapshotSegment::Headers => self.get_segment_provider_from_block(segment, start, None),
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+            StaticFileSegment::Headers => self.get_segment_provider_from_block(segment, start, None),
+            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
         };
@@ -523,7 +523,7 @@ impl SnapshotProvider {
     /// Returns an iterator over the data
     pub fn fetch_range_iter<'a, T, F>(
         &'a self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         range: Range<u64>,
         get_fn: F,
     ) -> ProviderResult<impl Iterator<Item = ProviderResult<T>> + 'a>
@@ -532,8 +532,8 @@ impl SnapshotProvider {
         T: std::fmt::Debug,
     {
         let get_provider = move |start: u64| match segment {
-            SnapshotSegment::Headers => self.get_segment_provider_from_block(segment, start, None),
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+            StaticFileSegment::Headers => self.get_segment_provider_from_block(segment, start, None),
+            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
         };
@@ -566,7 +566,7 @@ impl SnapshotProvider {
     ///   when the snapshot doesn't contain the required data or is not available.
     pub fn get_with_snapshot_or_database<T, FS, FD>(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         number: u64,
         fetch_from_snapshot: FS,
         fetch_from_database: FD,
@@ -577,8 +577,8 @@ impl SnapshotProvider {
     {
         // If there is, check the maximum block or transaction number of the segment.
         let snapshot_upper_bound = match segment {
-            SnapshotSegment::Headers => self.get_highest_snapshot_block(segment),
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+            StaticFileSegment::Headers => self.get_highest_snapshot_block(segment),
+            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
                 self.get_highest_snapshot_tx(segment)
             }
         };
@@ -602,7 +602,7 @@ impl SnapshotProvider {
     ///   provided condition.
     pub fn get_range_with_snapshot_or_database<T, P, FS, FD>(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         mut block_or_tx_range: Range<u64>,
         fetch_from_snapshot: FS,
         mut fetch_from_database: FD,
@@ -617,8 +617,8 @@ impl SnapshotProvider {
 
         // If there is, check the maximum block or transaction number of the segment.
         if let Some(snapshot_upper_bound) = match segment {
-            SnapshotSegment::Headers => self.get_highest_snapshot_block(segment),
-            SnapshotSegment::Transactions | SnapshotSegment::Receipts => {
+            StaticFileSegment::Headers => self.get_highest_snapshot_block(segment),
+            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
                 self.get_highest_snapshot_tx(segment)
             }
         } {
@@ -653,13 +653,13 @@ pub trait SnapshotWriter {
     fn get_writer(
         &self,
         block: BlockNumber,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
     ) -> ProviderResult<SnapshotProviderRWRefMut<'_>>;
 
     /// Returns a mutable reference to a [`SnapshotProviderRW`] of the latest [`SnapshotSegment`].
     fn latest_writer(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
     ) -> ProviderResult<SnapshotProviderRWRefMut<'_>>;
 
     /// Commits all changes of all [`SnapshotProviderRW`] of all [`SnapshotSegment`].
@@ -670,7 +670,7 @@ impl SnapshotWriter for SnapshotProvider {
     fn get_writer(
         &self,
         block: BlockNumber,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
     ) -> ProviderResult<SnapshotProviderRWRefMut<'_>> {
         tracing::trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
         Ok(match self.writers.entry(segment) {
@@ -685,7 +685,7 @@ impl SnapshotWriter for SnapshotProvider {
 
     fn latest_writer(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
     ) -> ProviderResult<SnapshotProviderRWRefMut<'_>> {
         self.get_writer(self.get_highest_snapshot_block(segment).unwrap_or_default(), segment)
     }
@@ -700,7 +700,7 @@ impl SnapshotWriter for SnapshotProvider {
 
 impl HeaderProvider for SnapshotProvider {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
-        self.find_snapshot(SnapshotSegment::Headers, |jar_provider| {
+        self.find_snapshot(StaticFileSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
                 .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
@@ -714,12 +714,12 @@ impl HeaderProvider for SnapshotProvider {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?
+        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)?
             .header_by_number(num)
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        self.find_snapshot(SnapshotSegment::Headers, |jar_provider| {
+        self.find_snapshot(StaticFileSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
                 .get_two::<HeaderMask<CompactU256, BlockHash>>(block_hash.into())?
@@ -728,13 +728,13 @@ impl HeaderProvider for SnapshotProvider {
     }
 
     fn header_td_by_number(&self, num: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?
+        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)?
             .header_td_by_number(num)
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
         self.fetch_range_with_predicate(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             to_range(range),
             |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
             |_| true,
@@ -742,7 +742,7 @@ impl HeaderProvider for SnapshotProvider {
     }
 
     fn sealed_header(&self, num: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?
+        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)?
             .sealed_header(num)
     }
 
@@ -752,7 +752,7 @@ impl HeaderProvider for SnapshotProvider {
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
         self.fetch_range_with_predicate(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             to_range(range),
             |cursor, number| {
                 Ok(cursor
@@ -766,7 +766,7 @@ impl HeaderProvider for SnapshotProvider {
 
 impl BlockHashReader for SnapshotProvider {
     fn block_hash(&self, num: u64) -> ProviderResult<Option<B256>> {
-        self.get_segment_provider_from_block(SnapshotSegment::Headers, num, None)?.block_hash(num)
+        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)?.block_hash(num)
     }
 
     fn canonical_hashes_range(
@@ -775,7 +775,7 @@ impl BlockHashReader for SnapshotProvider {
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
         self.fetch_range_with_predicate(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             start..end,
             |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
             |_| true,
@@ -785,7 +785,7 @@ impl BlockHashReader for SnapshotProvider {
 
 impl ReceiptProvider for SnapshotProvider {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.get_segment_provider_from_transaction(SnapshotSegment::Receipts, num, None)?
+        self.get_segment_provider_from_transaction(StaticFileSegment::Receipts, num, None)?
             .receipt(num)
     }
 
@@ -805,7 +805,7 @@ impl ReceiptProvider for SnapshotProvider {
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
         self.fetch_range_with_predicate(
-            SnapshotSegment::Receipts,
+            StaticFileSegment::Receipts,
             to_range(range),
             |cursor, number| cursor.get_one::<ReceiptMask<Receipt>>(number.into()),
             |_| true,
@@ -853,7 +853,7 @@ impl TransactionsProviderExt for SnapshotProvider {
             rayon::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
                 let _ = manager.fetch_range_with_predicate(
-                    SnapshotSegment::Transactions,
+                    StaticFileSegment::Transactions,
                     chunk_range,
                     |cursor, number| {
                         Ok(cursor
@@ -885,7 +885,7 @@ impl TransactionsProviderExt for SnapshotProvider {
 
 impl TransactionsProvider for SnapshotProvider {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
+        self.find_snapshot(StaticFileSegment::Transactions, |jar_provider| {
             let mut cursor = jar_provider.cursor()?;
             if cursor
                 .get_one::<TransactionMask<TransactionSignedNoHash>>((&tx_hash).into())?
@@ -900,7 +900,7 @@ impl TransactionsProvider for SnapshotProvider {
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        self.get_segment_provider_from_transaction(SnapshotSegment::Transactions, num, None)?
+        self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)?
             .transaction_by_id(num)
     }
 
@@ -908,12 +908,12 @@ impl TransactionsProvider for SnapshotProvider {
         &self,
         num: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.get_segment_provider_from_transaction(SnapshotSegment::Transactions, num, None)?
+        self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)?
             .transaction_by_id_no_hash(num)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
-        self.find_snapshot(SnapshotSegment::Transactions, |jar_provider| {
+        self.find_snapshot(StaticFileSegment::Transactions, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
                 .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
@@ -965,7 +965,7 @@ impl TransactionsProvider for SnapshotProvider {
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
         self.fetch_range_with_predicate(
-            SnapshotSegment::Transactions,
+            StaticFileSegment::Transactions,
             to_range(range),
             |cursor, number| {
                 cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())
@@ -979,7 +979,7 @@ impl TransactionsProvider for SnapshotProvider {
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
         self.fetch_range_with_predicate(
-            SnapshotSegment::Transactions,
+            StaticFileSegment::Transactions,
             to_range(range),
             |cursor, number| {
                 cursor.get(number.into(), <TransactionMask<TransactionSignedNoHash>>::MASK).map(
@@ -1099,16 +1099,16 @@ impl StatsReader for SnapshotProvider {
         match T::NAME {
             tables::CanonicalHeaders::NAME | tables::Headers::NAME | tables::HeaderTD::NAME => {
                 Ok(self
-                    .get_highest_snapshot_block(SnapshotSegment::Headers)
+                    .get_highest_snapshot_block(StaticFileSegment::Headers)
                     .map(|block| block + 1)
                     .unwrap_or_default() as usize)
             }
             tables::Receipts::NAME => Ok(self
-                .get_highest_snapshot_tx(SnapshotSegment::Receipts)
+                .get_highest_snapshot_tx(StaticFileSegment::Receipts)
                 .map(|receipts| receipts + 1)
                 .unwrap_or_default() as usize),
             tables::Transactions::NAME => Ok(self
-                .get_highest_snapshot_tx(SnapshotSegment::Transactions)
+                .get_highest_snapshot_tx(StaticFileSegment::Transactions)
                 .map(|txs| txs + 1)
                 .unwrap_or_default() as usize),
             _ => Err(ProviderError::UnsupportedProvider),

@@ -15,7 +15,7 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, PruneModes, SnapshotSegment, U256,
+    BlockNumber, Header, PruneModes, StaticFileSegment, U256,
 };
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotProviderRWRefMut, SnapshotWriter},
@@ -333,7 +333,7 @@ fn calculate_gas_used_from_headers(
     let start = Instant::now();
 
     for entry in provider.fetch_range_iter(
-        SnapshotSegment::Headers,
+        StaticFileSegment::Headers,
         *range.start()..*range.end() + 1,
         |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
     )? {
@@ -554,9 +554,9 @@ where
 
     // Get next expected receipt number in static files
     let snapshot_provider = provider.snapshot_provider();
-    let mut snapshotter = snapshot_provider.get_writer(start_block, SnapshotSegment::Receipts)?;
+    let mut snapshotter = snapshot_provider.get_writer(start_block, StaticFileSegment::Receipts)?;
     let next_snapshot_receipt_num = snapshotter
-        .get_highest_snapshot_tx(SnapshotSegment::Receipts)
+        .get_highest_snapshot_tx(StaticFileSegment::Receipts)
         .map(|num| num + 1)
         .unwrap_or(0);
 
@@ -569,7 +569,7 @@ where
         )?,
         Ordering::Less => {
             let last_block = snapshot_provider
-                .get_highest_snapshot_block(SnapshotSegment::Receipts)
+                .get_highest_snapshot_block(StaticFileSegment::Receipts)
                 .unwrap_or(0);
 
             let missing_block = Box::new(
@@ -578,7 +578,7 @@ where
 
             return Err(StageError::MissingSnapshotData {
                 block: missing_block,
-                segment: SnapshotSegment::Receipts,
+                segment: StaticFileSegment::Receipts,
             })
         }
         Ordering::Equal => {}
@@ -668,7 +668,7 @@ mod tests {
             .unwrap();
         provider
             .snapshot_provider()
-            .latest_writer(SnapshotSegment::Headers)
+            .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();
@@ -711,7 +711,7 @@ mod tests {
             .unwrap();
         provider
             .snapshot_provider()
-            .latest_writer(SnapshotSegment::Headers)
+            .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();
@@ -754,7 +754,7 @@ mod tests {
             .unwrap();
         provider
             .snapshot_provider()
-            .latest_writer(SnapshotSegment::Headers)
+            .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();
@@ -791,7 +791,7 @@ mod tests {
             .unwrap();
         provider
             .snapshot_provider()
-            .latest_writer(SnapshotSegment::Headers)
+            .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();
@@ -936,7 +936,7 @@ mod tests {
             .unwrap();
         provider
             .snapshot_provider()
-            .latest_writer(SnapshotSegment::Headers)
+            .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();
@@ -1049,7 +1049,7 @@ mod tests {
             .unwrap();
         provider
             .snapshot_provider()
-            .latest_writer(SnapshotSegment::Headers)
+            .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();

@@ -73,7 +73,7 @@ pub use prune::{
     PruneSegmentError, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
-pub use static_file::SnapshotSegment;
+pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
 #[cfg(feature = "c-kzg")]

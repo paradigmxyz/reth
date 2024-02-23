@@ -7,7 +7,7 @@ mod segment;
 use alloy_primitives::BlockNumber;
 pub use compression::Compression;
 pub use filters::{Filters, InclusionFilter, PerfectHashingFunction};
-pub use segment::{SegmentConfig, SegmentHeader, SegmentRangeInclusive, SnapshotSegment};
+pub use segment::{SegmentConfig, SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
 
 /// Default snapshot block count.
 pub const BLOCKS_PER_SNAPSHOT: u64 = 500_000;
@@ -28,20 +28,20 @@ pub struct HighestSnapshots {
 
 impl HighestSnapshots {
     /// Returns the highest snapshot if it exists for a segment
-    pub fn highest(&self, segment: SnapshotSegment) -> Option<BlockNumber> {
+    pub fn highest(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
         match segment {
-            SnapshotSegment::Headers => self.headers,
-            SnapshotSegment::Transactions => self.transactions,
-            SnapshotSegment::Receipts => self.receipts,
+            StaticFileSegment::Headers => self.headers,
+            StaticFileSegment::Transactions => self.transactions,
+            StaticFileSegment::Receipts => self.receipts,
         }
     }
 
     /// Returns a mutable reference to a snapshot segment
-    pub fn as_mut(&mut self, segment: SnapshotSegment) -> &mut Option<BlockNumber> {
+    pub fn as_mut(&mut self, segment: StaticFileSegment) -> &mut Option<BlockNumber> {
         match segment {
-            SnapshotSegment::Headers => &mut self.headers,
-            SnapshotSegment::Transactions => &mut self.transactions,
-            SnapshotSegment::Receipts => &mut self.receipts,
+            StaticFileSegment::Headers => &mut self.headers,
+            StaticFileSegment::Transactions => &mut self.transactions,
+            StaticFileSegment::Receipts => &mut self.receipts,
         }
     }
 }

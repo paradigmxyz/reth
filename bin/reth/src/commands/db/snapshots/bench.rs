@@ -1,7 +1,7 @@
 use reth_db::DatabaseEnv;
 use reth_primitives::{
     static_file::{Compression, Filters},
-    SnapshotSegment,
+    StaticFileSegment,
 };
 use reth_provider::{DatabaseProviderRO, ProviderFactory};
 use std::{fmt::Debug, sync::Arc, time::Instant};
@@ -17,7 +17,7 @@ pub(crate) enum BenchKind {
 pub(crate) fn bench<F1, F2, R>(
     bench_kind: BenchKind,
     provider_factory: Arc<ProviderFactory<DatabaseEnv>>,
-    segment: SnapshotSegment,
+    segment: StaticFileSegment,
     filters: Filters,
     compression: Compression,
     mut snapshot_method: F1,

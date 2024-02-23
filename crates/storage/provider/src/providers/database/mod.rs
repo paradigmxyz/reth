@@ -17,7 +17,7 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
     ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, SnapshotSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    SealedHeader, StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
     TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
@@ -219,7 +219,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             num,
             |snapshot| snapshot.header_by_number(num),
             || self.provider()?.header_by_number(num),
@@ -238,7 +238,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         }
 
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             number,
             |snapshot| snapshot.header_td_by_number(number),
             || self.provider()?.header_td_by_number(number),
@@ -247,7 +247,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             to_range(range),
             |snapshot, range, _| snapshot.headers_range(range),
             |range, _| self.provider()?.headers_range(range),
@@ -257,7 +257,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             number,
             |snapshot| snapshot.sealed_header(number),
             || self.provider()?.sealed_header(number),
@@ -277,7 +277,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             to_range(range),
             |snapshot, range, predicate| snapshot.sealed_headers_while(range, predicate),
             |range, predicate| self.provider()?.sealed_headers_while(range, predicate),
@@ -289,7 +289,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
 impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             number,
             |snapshot| snapshot.block_hash(number),
             || self.provider()?.block_hash(number),
@@ -302,7 +302,7 @@ impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             start..end,
             |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
             |range, _| self.provider()?.canonical_hashes_range(range.start, range.end),
@@ -381,7 +381,7 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+            StaticFileSegment::Transactions,
             id,
             |snapshot| snapshot.transaction_by_id(id),
             || self.provider()?.transaction_by_id(id),
@@ -393,7 +393,7 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+            StaticFileSegment::Transactions,
             id,
             |snapshot| snapshot.transaction_by_id_no_hash(id),
             || self.provider()?.transaction_by_id_no_hash(id),
@@ -458,7 +458,7 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
 impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Receipts,
+            StaticFileSegment::Receipts,
             id,
             |snapshot| snapshot.receipt(id),
             || self.provider()?.receipt(id),
@@ -478,7 +478,7 @@ impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Receipts,
+            StaticFileSegment::Receipts,
             to_range(range),
             |snapshot, range, _| snapshot.receipts_by_tx_range(range),
             |range, _| self.provider()?.receipts_by_tx_range(range),
@@ -621,7 +621,7 @@ mod tests {
         RethError,
     };
     use reth_primitives::{
-        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, SnapshotSegment,
+        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, StaticFileSegment,
         TxNumber, B256, U256,
     };
     use std::{ops::RangeInclusive, sync::Arc};
@@ -774,7 +774,7 @@ mod tests {
 
         // Checkpoint and no gap
         let mut snapshot_writer =
-            provider.snapshot_provider().latest_writer(SnapshotSegment::Headers).unwrap();
+            provider.snapshot_provider().latest_writer(StaticFileSegment::Headers).unwrap();
         snapshot_writer.append_header(head.header().clone(), U256::ZERO, head.hash()).unwrap();
         snapshot_writer.commit().unwrap();
         drop(snapshot_writer);

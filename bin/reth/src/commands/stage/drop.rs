@@ -14,7 +14,7 @@ use reth_db::{
     transaction::DbTxMut, DatabaseEnv,
 };
 use reth_node_core::init::{insert_genesis_header, insert_genesis_state};
-use reth_primitives::{fs, static_file::find_fixed_range, stage::StageId, ChainSpec, SnapshotSegment};
+use reth_primitives::{fs, static_file::find_fixed_range, stage::StageId, ChainSpec, StaticFileSegment};
 use reth_provider::ProviderFactory;
 use std::sync::Arc;
 
@@ -66,9 +66,9 @@ impl Command {
         let tool = DbTool::new(provider_factory, self.chain.clone())?;
 
         let snapshot_segment = match self.stage {
-            StageEnum::Headers => Some(SnapshotSegment::Headers),
-            StageEnum::Bodies => Some(SnapshotSegment::Transactions),
-            StageEnum::Execution => Some(SnapshotSegment::Receipts),
+            StageEnum::Headers => Some(StaticFileSegment::Headers),
+            StageEnum::Bodies => Some(StaticFileSegment::Transactions),
+            StageEnum::Execution => Some(StaticFileSegment::Receipts),
             _ => None,
         };
 

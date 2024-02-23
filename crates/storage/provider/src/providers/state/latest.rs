@@ -9,7 +9,7 @@ use reth_db::{
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
-    trie::AccountProof, Account, Address, BlockNumber, Bytecode, SnapshotSegment, StorageKey,
+    trie::AccountProof, Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey,
     StorageValue, B256,
 };
 use reth_trie::{proof::Proof, updates::TrieUpdates};
@@ -41,7 +41,7 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             number,
             |snapshot| snapshot.block_hash(number),
             || Ok(self.db.get::<tables::CanonicalHeaders>(number)?),
@@ -54,7 +54,7 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             start..end,
             |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
             |range, _| {

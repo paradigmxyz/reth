@@ -99,7 +99,7 @@ impl AccountHashingStage {
         }
         provider
             .snapshot_provider()
-            .latest_writer(reth_primitives::SnapshotSegment::Headers)
+            .latest_writer(reth_primitives::StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();

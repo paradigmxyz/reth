@@ -14,7 +14,7 @@ use reth_db::{
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     constants::EPOCH_SLOTS, trie::AccountProof, Account, Address, BlockNumber, Bytecode,
-    SnapshotSegment, StorageKey, StorageValue, B256,
+    StaticFileSegment, StorageKey, StorageValue, B256,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 
@@ -113,7 +113,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             .cursor_read::<tables::CanonicalHeaders>()?
             .last()?
             .map(|(tip, _)| tip)
-            .or_else(|| self.snapshot_provider.get_highest_snapshot_block(SnapshotSegment::Headers))
+            .or_else(|| self.snapshot_provider.get_highest_snapshot_block(StaticFileSegment::Headers))
             .ok_or(ProviderError::BestBlockNotFound)?;
 
         if tip.saturating_sub(self.block_number) > EPOCH_SLOTS {
@@ -210,7 +210,7 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             number,
             |snapshot| snapshot.block_hash(number),
             || Ok(self.tx.get::<tables::CanonicalHeaders>(number)?),
@@ -223,7 +223,7 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             start..end,
             |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
             |range, _| {

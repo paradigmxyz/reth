@@ -18,7 +18,7 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
     },
-    BlockHash, BlockNumber, SealedHeader, SnapshotSegment,
+    BlockHash, BlockNumber, SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
@@ -108,7 +108,7 @@ where
         // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
         // when poll_execute_ready is polled.
         let mut last_header_number = snapshot_provider
-            .get_highest_snapshot_block(SnapshotSegment::Headers)
+            .get_highest_snapshot_block(StaticFileSegment::Headers)
             .unwrap_or_default();
 
         // Find the latest total difficulty
@@ -118,7 +118,7 @@ where
 
         // Although headers were downloaded in reverse order, the collector iterates it in ascending
         // order
-        let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+        let mut writer = snapshot_provider.latest_writer(StaticFileSegment::Headers)?;
         let interval = (total_headers / 10).max(1);
         for (index, header) in self.header_collector.iter()?.enumerate() {
             let (_, header_buf) = header?;
@@ -320,7 +320,7 @@ where
 
         let snapshot_provider = provider.snapshot_provider();
         let highest_block = snapshot_provider
-            .get_highest_snapshot_block(SnapshotSegment::Headers)
+            .get_highest_snapshot_block(StaticFileSegment::Headers)
             .unwrap_or_default();
         let unwound_headers = highest_block - input.unwind_to;
 
@@ -332,7 +332,7 @@ where
             provider.tx_ref().delete::<tables::HeaderNumbers>(header_hash, None)?;
         }
 
-        let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+        let mut writer = snapshot_provider.latest_writer(StaticFileSegment::Headers)?;
         writer.prune_headers(unwound_headers)?;
 
         let stage_checkpoint =

@@ -10,7 +10,7 @@ use reth_interfaces::consensus;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Address, PruneSegment, SnapshotSegment, TransactionSignedNoHash, TxNumber,
+    Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
@@ -112,7 +112,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             rayon::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
                 let _ = snapshot_provider.fetch_range_with_predicate(
-                    SnapshotSegment::Transactions,
+                    StaticFileSegment::Transactions,
                     chunk_range,
                     |cursor, number| {
                         Ok(cursor

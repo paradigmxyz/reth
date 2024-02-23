@@ -8,7 +8,7 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
-    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, SnapshotSegment,
+    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StaticFileSegment,
     StorageEntry, B256, U256,
 };
 use reth_trie::HashedPostState;
@@ -317,7 +317,7 @@ impl BundleStateWithReceipts {
 
             if let Some(snapshotter) = &mut snapshotter {
                 // Increment block on static file header.
-                snapshotter.increment_block(SnapshotSegment::Receipts)?;
+                snapshotter.increment_block(StaticFileSegment::Receipts)?;
 
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {
                     let receipt = receipt

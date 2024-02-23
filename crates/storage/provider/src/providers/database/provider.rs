@@ -38,7 +38,7 @@ use reth_primitives::{
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment,
+    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
     StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
@@ -184,7 +184,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             parent_ttd + block.difficulty
         };
 
-        let mut writer = self.snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+        let mut writer = self.snapshot_provider.latest_writer(StaticFileSegment::Headers)?;
         writer.append_header(block.header.as_ref().clone(), ttd, block.hash())?;
 
         self.insert_block(block, prune_modes)
@@ -291,7 +291,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         C: DbCursorRO<tables::Transactions>,
     {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+            StaticFileSegment::Transactions,
             to_range(range),
             |snapshot, range, _| snapshot.transactions_by_tx_range(range),
             |range, _| self.cursor_collect(cursor, range, Ok),
@@ -984,7 +984,7 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
         // Make sure Headers static file is at the same height. If it's further, this
         // input execution was interrupted previously and we need to unwind the static file.
         let next_snapshot_block_num = snapshot_provider
-            .get_highest_snapshot_block(SnapshotSegment::Headers)
+            .get_highest_snapshot_block(StaticFileSegment::Headers)
             .map(|id| id + 1)
             .unwrap_or_default();
         let next_block = highest_uninterrupted_block + 1;
@@ -993,7 +993,7 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
             // The node shutdown between an executed static file commit and before the database
             // commit, so we need to unwind the static files.
             Ordering::Greater => {
-                let mut snapshotter = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+                let mut snapshotter = snapshot_provider.latest_writer(StaticFileSegment::Headers)?;
                 snapshotter.prune_headers(next_snapshot_block_num - next_block)?
             }
             Ordering::Less => {
@@ -1027,7 +1027,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             num,
             |snapshot| snapshot.header_by_number(num),
             || Ok(self.tx.get::<tables::Headers>(num)?),
@@ -1050,7 +1050,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         }
 
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             number,
             |snapshot| snapshot.header_td_by_number(number),
             || Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0)),
@@ -1059,7 +1059,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             to_range(range),
             |snapshot, range, _| snapshot.headers_range(range),
             |range, _| {
@@ -1071,7 +1071,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             number,
             |snapshot| snapshot.sealed_header(number),
             || {
@@ -1093,7 +1093,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             to_range(range),
             |snapshot, range, predicate| snapshot.sealed_headers_while(range, predicate),
             |range, mut predicate| {
@@ -1119,7 +1119,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
 impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             number,
             |snapshot| snapshot.block_hash(number),
             || Ok(self.tx.get::<tables::CanonicalHeaders>(number)?),
@@ -1132,7 +1132,7 @@ impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             start..end,
             |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
             |range, _| {
@@ -1361,7 +1361,7 @@ impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
         tx_range: Range<TxNumber>,
     ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+            StaticFileSegment::Transactions,
             tx_range,
             |snapshot, range, _| snapshot.transaction_hashes_by_range(range),
             |tx_range, _| {
@@ -1429,7 +1429,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+            StaticFileSegment::Transactions,
             id,
             |snapshot| snapshot.transaction_by_id(id),
             || Ok(self.tx.get::<tables::Transactions>(id)?.map(Into::into)),
@@ -1441,7 +1441,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+            StaticFileSegment::Transactions,
             id,
             |snapshot| snapshot.transaction_by_id_no_hash(id),
             || Ok(self.tx.get::<tables::Transactions>(id)?),
@@ -1572,7 +1572,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+            StaticFileSegment::Transactions,
             to_range(range),
             |snapshot, range, _| snapshot.raw_transactions_by_tx_range(range),
             |range, _| {
@@ -1602,7 +1602,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
 impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Receipts,
+            StaticFileSegment::Receipts,
             id,
             |snapshot| snapshot.receipt(id),
             || Ok(self.tx.get::<tables::Receipts>(id)?),
@@ -1636,7 +1636,7 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
         self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Receipts,
+            StaticFileSegment::Receipts,
             to_range(range),
             |snapshot, range, _| snapshot.receipts_by_tx_range(range),
             |range, _| {

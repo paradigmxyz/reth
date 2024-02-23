@@ -3,7 +3,7 @@ use reth_interfaces::{
     consensus, db::DatabaseError as DbError, executor, p2p::error::DownloadError,
     provider::ProviderError, RethError,
 };
-use reth_primitives::{BlockNumber, SealedHeader, SnapshotSegment, TxNumber};
+use reth_primitives::{BlockNumber, SealedHeader, StaticFileSegment, TxNumber};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -82,7 +82,7 @@ pub enum StageError {
         /// Starting block with  missing data.
         block: Box<SealedHeader>,
         /// Snapshot segment
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
     },
     /// Unrecoverable inconsistency error related to a transaction number in a static file segment.
     #[error(
@@ -90,7 +90,7 @@ pub enum StageError {
     )]
     InconsistentTxNumber {
         /// Snapshot segment where this error was encountered.
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         /// Expected database transaction number.
         database: TxNumber,
         /// Expected static file transaction number.
@@ -100,7 +100,7 @@ pub enum StageError {
     #[error("inconsistent block number for {segment}. db: {database}, static_file: {static_file}")]
     InconsistentBlockNumber {
         /// Snapshot segment where this error was encountered.
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         /// Expected database block number.
         database: BlockNumber,
         /// Expected static file block number.

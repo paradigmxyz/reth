@@ -19,7 +19,7 @@ use reth_primitives::{
         find_fixed_range, Compression, Filters, InclusionFilter, PerfectHashingFunction,
         SegmentConfig, SegmentHeader,
     },
-    BlockNumber, SnapshotSegment,
+    BlockNumber, StaticFileSegment,
 };
 use reth_provider::{providers::SnapshotProvider, DatabaseProviderRO, TransactionsProviderExt};
 use std::{ops::RangeInclusive, path::Path};
@@ -29,7 +29,7 @@ pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
 /// A segment represents a snapshotting of some portion of the data.
 pub trait Segment<DB: Database>: Send + Sync {
     /// Returns the [`SnapshotSegment`].
-    fn segment(&self) -> SnapshotSegment;
+    fn segment(&self) -> StaticFileSegment;
 
     /// Snapshot data for the provided block range. [SnapshotProvider] will handle the management of
     /// and writing to files.
@@ -56,15 +56,15 @@ pub trait Segment<DB: Database>: Send + Sync {
 pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
     provider: &DatabaseProviderRO<DB>,
     directory: impl AsRef<Path>,
-    segment: SnapshotSegment,
+    segment: StaticFileSegment,
     segment_config: SegmentConfig,
     block_range: RangeInclusive<BlockNumber>,
     total_rows: usize,
     prepare_compression: impl Fn() -> ProviderResult<Rows<COLUMNS>>,
 ) -> ProviderResult<NippyJar<SegmentHeader>> {
     let tx_range = match segment {
-        SnapshotSegment::Headers => None,
-        SnapshotSegment::Receipts | SnapshotSegment::Transactions => {
+        StaticFileSegment::Headers => None,
+        StaticFileSegment::Receipts | StaticFileSegment::Transactions => {
             Some(provider.transaction_range_by_block_range(block_range.clone())?.into())
         }
     };

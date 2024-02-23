@@ -3,20 +3,20 @@ use std::{collections::HashMap, time::Duration};
 use itertools::Itertools;
 use metrics::{Counter, Histogram};
 use reth_metrics::Metrics;
-use reth_primitives::SnapshotSegment;
+use reth_primitives::StaticFileSegment;
 use strum::{EnumIter, IntoEnumIterator};
 
 /// Metrics for the snapshot provider.
 #[derive(Debug)]
 pub struct SnapshotProviderMetrics {
     segment_operations:
-        HashMap<(SnapshotSegment, SnapshotProviderOperation), SnapshotProviderOperationMetrics>,
+        HashMap<(StaticFileSegment, SnapshotProviderOperation), SnapshotProviderOperationMetrics>,
 }
 
 impl Default for SnapshotProviderMetrics {
     fn default() -> Self {
         Self {
-            segment_operations: SnapshotSegment::iter()
+            segment_operations: StaticFileSegment::iter()
                 .cartesian_product(SnapshotProviderOperation::iter())
                 .map(|(segment, operation)| {
                     (
@@ -35,7 +35,7 @@ impl Default for SnapshotProviderMetrics {
 impl SnapshotProviderMetrics {
     pub(crate) fn record_segment_operation(
         &self,
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
         operation: SnapshotProviderOperation,
         duration: Option<Duration>,
     ) {

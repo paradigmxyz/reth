@@ -7,7 +7,7 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
-    stage::StageId, Account, Bytecode, ChainSpec, Receipts, SnapshotSegment, StorageEntry, B256,
+    stage::StageId, Account, Bytecode, ChainSpec, Receipts, StaticFileSegment, StorageEntry, B256,
     U256,
 };
 use reth_provider::{
@@ -55,7 +55,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 
     // Check if we already have the genesis header or if we have the wrong one.
     match factory.block_hash(0) {
-        Ok(None) | Err(ProviderError::MissingSnapshotBlock(SnapshotSegment::Headers, 0)) => {}
+        Ok(None) | Err(ProviderError::MissingSnapshotBlock(StaticFileSegment::Headers, 0)) => {}
         Ok(Some(block_hash)) => {
             if block_hash == hash {
                 debug!("Genesis already written, skipping.");
@@ -215,9 +215,9 @@ pub fn insert_genesis_header<DB: Database>(
     let (header, block_hash) = chain.sealed_genesis_header().split();
 
     match snapshot_provider.block_hash(0) {
-        Ok(None) | Err(ProviderError::MissingSnapshotBlock(SnapshotSegment::Headers, 0)) => {
+        Ok(None) | Err(ProviderError::MissingSnapshotBlock(StaticFileSegment::Headers, 0)) => {
             let (difficulty, hash) = (header.difficulty, block_hash);
-            let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+            let mut writer = snapshot_provider.latest_writer(StaticFileSegment::Headers)?;
             writer.append_header(header, difficulty, hash)?;
             writer.commit()?;
         }

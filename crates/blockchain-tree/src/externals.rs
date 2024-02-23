@@ -4,7 +4,7 @@ use reth_db::{
     cursor::DbCursorRO, database::Database, snapshot::HeaderMask, tables, transaction::DbTx,
 };
 use reth_interfaces::{consensus::Consensus, RethResult};
-use reth_primitives::{BlockHash, BlockNumber, SnapshotSegment};
+use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
 use reth_provider::{ProviderFactory, StatsReader};
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -69,7 +69,7 @@ impl<DB: Database, EF> TreeExternals<DB, EF> {
                 total_headers.saturating_sub(1).saturating_sub(num_hashes as u64)..total_headers;
 
             hashes.extend(range.clone().zip(snapshot_provider.fetch_range_with_predicate(
-                SnapshotSegment::Headers,
+                StaticFileSegment::Headers,
                 range,
                 |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
                 |_| true,

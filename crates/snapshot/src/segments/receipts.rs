@@ -5,7 +5,7 @@ use reth_db::{
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     static_file::{SegmentConfig, SegmentHeader},
-    BlockNumber, SnapshotSegment, TxNumber,
+    BlockNumber, StaticFileSegment, TxNumber,
 };
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
@@ -18,8 +18,8 @@ use std::{ops::RangeInclusive, path::Path};
 pub struct Receipts;
 
 impl<DB: Database> Segment<DB> for Receipts {
-    fn segment(&self) -> SnapshotSegment {
-        SnapshotSegment::Receipts
+    fn segment(&self) -> StaticFileSegment {
+        StaticFileSegment::Receipts
     }
 
     fn snapshot(
@@ -29,10 +29,10 @@ impl<DB: Database> Segment<DB> for Receipts {
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
         let mut snapshot_writer =
-            snapshot_provider.get_writer(*block_range.start(), SnapshotSegment::Receipts)?;
+            snapshot_provider.get_writer(*block_range.start(), StaticFileSegment::Receipts)?;
 
         for block in block_range {
-            let _snapshot_block = snapshot_writer.increment_block(SnapshotSegment::Receipts)?;
+            let _snapshot_block = snapshot_writer.increment_block(StaticFileSegment::Receipts)?;
             debug_assert_eq!(_snapshot_block, block);
 
             let block_body_indices = provider
@@ -65,7 +65,7 @@ impl<DB: Database> Segment<DB> for Receipts {
         let mut jar = prepare_jar::<DB, 1>(
             provider,
             directory,
-            SnapshotSegment::Receipts,
+            StaticFileSegment::Receipts,
             config,
             block_range,
             tx_range_len,

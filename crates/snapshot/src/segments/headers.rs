@@ -4,7 +4,7 @@ use reth_db::{
     transaction::DbTx, RawKey, RawTable,
 };
 use reth_interfaces::provider::ProviderResult;
-use reth_primitives::{static_file::SegmentConfig, BlockNumber, SnapshotSegment};
+use reth_primitives::{static_file::SegmentConfig, BlockNumber, StaticFileSegment};
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
     DatabaseProviderRO,
@@ -16,8 +16,8 @@ use std::{ops::RangeInclusive, path::Path};
 pub struct Headers;
 
 impl<DB: Database> Segment<DB> for Headers {
-    fn segment(&self) -> SnapshotSegment {
-        SnapshotSegment::Headers
+    fn segment(&self) -> StaticFileSegment {
+        StaticFileSegment::Headers
     }
 
     fn snapshot(
@@ -27,7 +27,7 @@ impl<DB: Database> Segment<DB> for Headers {
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
         let mut snapshot_writer =
-            snapshot_provider.get_writer(*block_range.start(), SnapshotSegment::Headers)?;
+            snapshot_provider.get_writer(*block_range.start(), StaticFileSegment::Headers)?;
 
         let mut headers_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
         let headers_walker = headers_cursor.walk_range(block_range.clone())?;
@@ -68,7 +68,7 @@ impl<DB: Database> Segment<DB> for Headers {
         let mut jar = prepare_jar::<DB, 3>(
             provider,
             directory,
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             config,
             block_range.clone(),
             range_len,

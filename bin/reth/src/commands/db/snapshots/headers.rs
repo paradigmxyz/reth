@@ -6,7 +6,7 @@ use rand::{seq::SliceRandom, Rng};
 use reth_db::{snapshot::HeaderMask, DatabaseEnv};
 use reth_primitives::{
     static_file::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
-    BlockHash, Header, SnapshotSegment,
+    BlockHash, Header, StaticFileSegment,
 };
 use reth_provider::{
     providers::SnapshotProvider, BlockNumReader, HeaderProvider, ProviderError, ProviderFactory,
@@ -35,12 +35,12 @@ impl Command {
         let mut row_indexes = range.collect::<Vec<_>>();
         let mut rng = rand::thread_rng();
 
-        let path: PathBuf = SnapshotSegment::Headers
+        let path: PathBuf = StaticFileSegment::Headers
             .filename_with_configuration(filters, compression, &block_range)
             .into();
         let provider = SnapshotProvider::new(PathBuf::default())?;
         let jar_provider = provider.get_segment_provider_from_block(
-            SnapshotSegment::Headers,
+            StaticFileSegment::Headers,
             self.from,
             Some(&path),
         )?;
@@ -50,7 +50,7 @@ impl Command {
             bench(
                 bench_kind,
                 provider_factory.clone(),
-                SnapshotSegment::Headers,
+                StaticFileSegment::Headers,
                 filters,
                 compression,
                 || {
@@ -81,7 +81,7 @@ impl Command {
             bench(
                 BenchKind::RandomOne,
                 provider_factory.clone(),
-                SnapshotSegment::Headers,
+                StaticFileSegment::Headers,
                 filters,
                 compression,
                 || {
@@ -108,7 +108,7 @@ impl Command {
             bench(
                 BenchKind::RandomHash,
                 provider_factory.clone(),
-                SnapshotSegment::Headers,
+                StaticFileSegment::Headers,
                 filters,
                 compression,
                 || {

@@ -1,5 +1,5 @@
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, SnapshotSegment,
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, StaticFileSegment,
     TxHashOrNumber, TxNumber, B256, U256,
 };
 use std::path::PathBuf;
@@ -115,16 +115,16 @@ pub enum ProviderError {
     UnsupportedProvider,
     /// Snapshot file is not found at specified path.
     #[error("not able to find {0} snapshot file at {1}")]
-    MissingSnapshotPath(SnapshotSegment, PathBuf),
+    MissingSnapshotPath(StaticFileSegment, PathBuf),
     /// Snapshot file is not found for requested block.
     #[error("not able to find {0} snapshot file for block number {1}")]
-    MissingSnapshotBlock(SnapshotSegment, BlockNumber),
+    MissingSnapshotBlock(StaticFileSegment, BlockNumber),
     /// Snapshot file is not found for requested transaction.
     #[error("unable to find {0} snapshot file for transaction id {1}")]
-    MissingSnapshotTx(SnapshotSegment, TxNumber),
+    MissingSnapshotTx(StaticFileSegment, TxNumber),
     /// Snapshot is finalized and cannot be written to.
     #[error("unable to write block #{1} to finalized snapshot {0}")]
-    FinalizedSnapshot(SnapshotSegment, BlockNumber),
+    FinalizedSnapshot(StaticFileSegment, BlockNumber),
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]
     BlockNumberOverflow(U256),

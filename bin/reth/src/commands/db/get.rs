@@ -6,7 +6,7 @@ use reth_db::{
     table::{Decompress, DupSort, Table},
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
-use reth_primitives::{BlockHash, Header, SnapshotSegment};
+use reth_primitives::{BlockHash, Header, StaticFileSegment};
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -36,7 +36,7 @@ enum Subcommand {
     },
     /// Gets the content of a snapshot segment for the given key
     Snapshot {
-        segment: SnapshotSegment,
+        segment: StaticFileSegment,
 
         /// The key to get content for
         #[arg(value_parser = maybe_json_value_parser)]
@@ -57,14 +57,14 @@ impl Command {
             }
             Subcommand::Snapshot { segment, key, raw } => {
                 let (key, mask): (u64, _) = match segment {
-                    SnapshotSegment::Headers => {
+                    StaticFileSegment::Headers => {
                         (table_key::<tables::Headers>(&key)?, <HeaderMask<Header, BlockHash>>::MASK)
                     }
-                    SnapshotSegment::Transactions => (
+                    StaticFileSegment::Transactions => (
                         table_key::<tables::Transactions>(&key)?,
                         <TransactionMask<<Transactions as Table>::Value>>::MASK,
                     ),
-                    SnapshotSegment::Receipts => (
+                    StaticFileSegment::Receipts => (
                         table_key::<tables::Receipts>(&key)?,
                         <ReceiptMask<<Receipts as Table>::Value>>::MASK,
                     ),
@@ -88,7 +88,7 @@ impl Command {
                             println!("{:?}", content);
                         } else {
                             match segment {
-                                SnapshotSegment::Headers => {
+                                StaticFileSegment::Headers => {
                                     let header = Header::decompress(content[0].as_slice())?;
                                     let block_hash = BlockHash::decompress(content[1].as_slice())?;
                                     println!(
@@ -97,13 +97,13 @@ impl Command {
                                         serde_json::to_string_pretty(&block_hash)?
                                     );
                                 }
-                                SnapshotSegment::Transactions => {
+                                StaticFileSegment::Transactions => {
                                     let transaction = <<Transactions as Table>::Value>::decompress(
                                         content[0].as_slice(),
                                     )?;
                                     println!("{}", serde_json::to_string_pretty(&transaction)?);
                                 }
-                                SnapshotSegment::Receipts => {
+                                StaticFileSegment::Receipts => {
                                     let receipt = <<Receipts as Table>::Value>::decompress(
                                         content[0].as_slice(),
                                     )?;
