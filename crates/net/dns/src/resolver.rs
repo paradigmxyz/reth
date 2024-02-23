@@ -2,15 +2,15 @@
 
 use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::future::Future;
 use tracing::trace;
 pub use trust_dns_resolver::{error::ResolveError, TokioAsyncResolver};
 use trust_dns_resolver::{name_server::ConnectionProvider, AsyncResolver};
 
 /// A type that can lookup DNS entries
-#[trait_variant::make(Resolver: Send)]
-pub trait LocalResolver: Send + Sync + Unpin + 'static {
+pub trait Resolver: Send + Sync + Unpin + 'static {
     /// Performs a textual lookup and returns the first text
-    async fn lookup_txt(&self, query: &str) -> Option<String>;
+    fn lookup_txt(&self, query: &str) -> impl Future<Output = Option<String>> + Send;
 }
 
 impl<P: ConnectionProvider> Resolver for AsyncResolver<P> {
