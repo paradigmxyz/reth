@@ -275,12 +275,13 @@ where
 
         // After `Cancun` is enabled on optimism, an extra field `parent_beacon_block_root` is
         // included in the enveloped V3 payload. On ethereum, this field is not included.
-        resolved_payload.parent_beacon_block_root = (self.inner.chain_spec.is_optimism() &&
+        if self.inner.chain_spec.is_optimism() &&
             self.inner
                 .chain_spec
-                .is_fork_active_at_timestamp(Hardfork::Cancun, attributes.timestamp()))
-        .then(|| attributes.parent_beacon_block_root())
-        .flatten();
+                .is_fork_active_at_timestamp(Hardfork::Cancun, attributes.timestamp())
+        {
+            resolved_payload.parent_beacon_block_root = attributes.parent_beacon_block_root();
+        }
 
         Ok(resolved_payload)
     }
