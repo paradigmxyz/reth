@@ -1,6 +1,6 @@
 use crate::{
     bundle_state::{BundleStateInit, BundleStateWithReceipts, HashedStateChanges, RevertsInit},
-    providers::{database::metrics, snapshot::StaticFileWriter, StaticFileProvider},
+    providers::{database::metrics, static_file::StaticFileWriter, StaticFileProvider},
     to_range,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,

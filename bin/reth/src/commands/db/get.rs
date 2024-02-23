@@ -35,7 +35,7 @@ enum Subcommand {
         raw: bool,
     },
     /// Gets the content of a snapshot segment for the given key
-    Snapshot {
+    StaticFile {
         segment: StaticFileSegment,
 
         /// The key to get content for
@@ -55,7 +55,7 @@ impl Command {
             Subcommand::Mdbx { table, key, subkey, raw } => {
                 table.view(&GetValueViewer { tool, key, subkey, raw })?
             }
-            Subcommand::Snapshot { segment, key, raw } => {
+            Subcommand::StaticFile { segment, key, raw } => {
                 let (key, mask): (u64, _) = match segment {
                     StaticFileSegment::Headers => {
                         (table_key::<tables::Headers>(&key)?, <HeaderMask<Header, BlockHash>>::MASK)

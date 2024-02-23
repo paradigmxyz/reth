@@ -1,4 +1,4 @@
-use crate::providers::snapshot::metrics::StaticFileProviderOperation;
+use crate::providers::static_file::metrics::StaticFileProviderOperation;
 
 use super::{metrics::StaticFileProviderMetrics, StaticFileProvider};
 use dashmap::mapref::one::RefMut;

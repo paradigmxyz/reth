@@ -9,7 +9,9 @@
 
 mod event;
 pub mod segments;
-mod snapshotter;
+mod static_file_producer;
 
 pub use event::StaticFileProducerEvent;
-pub use snapshotter::{StaticFileTargets, StaticFileProducer, StaticFileProducerResult, StaticFileProducerWithResult};
+pub use static_file_producer::{
+    StaticFileProducer, StaticFileProducerResult, StaticFileProducerWithResult, StaticFileTargets,
+};

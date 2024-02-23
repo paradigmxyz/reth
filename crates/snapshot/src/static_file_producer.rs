@@ -190,7 +190,7 @@ impl<DB: Database> StaticFileProducer<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{snapshotter::StaticFileTargets, StaticFileProducer};
+    use crate::{static_file_producer::StaticFileTargets, StaticFileProducer};
     use assert_matches::assert_matches;
     use reth_db::{database::Database, transaction::DbTx};
     use reth_interfaces::{

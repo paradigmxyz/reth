@@ -23,7 +23,7 @@ impl Command {
             Subcommands::Mdbx { table } => {
                 table.view(&ClearViewer { db: provider_factory.db_ref() })?
             }
-            Subcommands::Snapshot { segment } => {
+            Subcommands::StaticFile { segment } => {
                 let snapshot_provider = provider_factory.snapshot_provider();
                 let snapshots = iter_static_files(snapshot_provider.directory())?;
 
@@ -45,7 +45,7 @@ enum Subcommands {
     /// Deletes all database table entries
     Mdbx { table: Tables },
     /// Deletes all snapshot segment entries
-    Snapshot { segment: StaticFileSegment },
+    StaticFile { segment: StaticFileSegment },
 }
 
 struct ClearViewer<'a, DB: Database> {

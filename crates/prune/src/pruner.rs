@@ -76,7 +76,7 @@ impl<DB: Database> Pruner<DB> {
             self.previous_tip_block_number = Some(tip_block_number);
 
             debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PruneProgress::Finished)
+            return Ok(PruneProgress::Finished);
         }
 
         debug!(target: "pruner", %tip_block_number, "Pruner started");
@@ -138,7 +138,7 @@ impl<DB: Database> Pruner<DB> {
         let snapshot_segments = self.snapshot_segments();
         let segments = snapshot_segments
             .iter()
-            .map(|segment| (segment, PrunePurpose::Snapshot))
+            .map(|segment| (segment, PrunePurpose::StaticFile))
             .chain(self.segments.iter().map(|segment| (segment, PrunePurpose::User)));
 
         let mut done = true;
@@ -146,7 +146,7 @@ impl<DB: Database> Pruner<DB> {
 
         for (segment, purpose) in segments {
             if delete_limit == 0 {
-                break
+                break;
             }
 
             if let Some((to_block, prune_mode)) = segment
@@ -232,8 +232,8 @@ impl<DB: Database> Pruner<DB> {
             // Saturating subtraction is needed for the case when the chain was reverted, meaning
             // current block number might be less than the previous tip block number.
             // If that's the case, no pruning is needed as outdated data is also reverted.
-            tip_block_number.saturating_sub(previous_tip_block_number) >=
-                self.min_block_interval as u64
+            tip_block_number.saturating_sub(previous_tip_block_number)
+                >= self.min_block_interval as u64
         }) {
             debug!(
                 target: "pruner",

@@ -168,9 +168,9 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
-                if status != ForkchoiceStatus::Valid ||
-                    (self.safe_block_hash != Some(safe_block_hash) &&
-                        self.finalized_block_hash != Some(finalized_block_hash))
+                if status != ForkchoiceStatus::Valid
+                    || (self.safe_block_hash != Some(safe_block_hash)
+                        && self.finalized_block_hash != Some(finalized_block_hash))
                 {
                     info!(
                         ?head_block_hash,
@@ -292,7 +292,7 @@ pub enum NodeEvent {
     /// A pruner event
     Pruner(PrunerEvent),
     /// A snapshotter event
-    Snapshotter(StaticFileProducerEvent),
+    StaticFileProducer(StaticFileProducerEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -327,7 +327,7 @@ impl From<PrunerEvent> for NodeEvent {
 
 impl From<StaticFileProducerEvent> for NodeEvent {
     fn from(event: StaticFileProducerEvent) -> Self {
-        NodeEvent::Snapshotter(event)
+        NodeEvent::StaticFileProducer(event)
     }
 }
 
@@ -447,7 +447,7 @@ where
                 NodeEvent::Pruner(event) => {
                     this.state.handle_pruner_event(event);
                 }
-                NodeEvent::Snapshotter(event) => {
+                NodeEvent::StaticFileProducer(event) => {
                     this.state.handle_snapshotter_event(event);
                 }
             }
@@ -502,8 +502,8 @@ impl Eta {
     /// It's not the case for network-dependent ([StageId::Headers] and [StageId::Bodies]) and
     /// [StageId::Execution] stages.
     fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
-        if !self.is_available() ||
-            matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)
+        if !self.is_available()
+            || matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)
         {
             None
         } else {
@@ -522,7 +522,7 @@ impl Display for Eta {
                     f,
                     "{}",
                     humantime::format_duration(Duration::from_secs(remaining.as_secs()))
-                )
+                );
             }
         }
 

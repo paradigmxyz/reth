@@ -25,7 +25,7 @@ mod clear;
 mod diff;
 mod get;
 mod list;
-mod snapshots;
+mod static_files;
 mod stats;
 /// DB List TUI
 mod tui;
@@ -83,7 +83,7 @@ pub enum Subcommands {
     /// Deletes all table entries
     Clear(clear::Command),
     /// Snapshots tables from database
-    Snapshot(snapshots::Command),
+    StaticFile(static_files::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -155,7 +155,7 @@ impl Command {
 
                     if !input.trim().eq_ignore_ascii_case("y") {
                         println!("Database drop aborted!");
-                        return Ok(())
+                        return Ok(());
                     }
                 }
 
@@ -175,7 +175,7 @@ impl Command {
 
                 command.execute(provider_factory)?;
             }
-            Subcommands::Snapshot(command) => {
+            Subcommands::StaticFile(command) => {
                 command.execute(data_dir, self.db.log_level, self.chain.clone())?;
             }
             Subcommands::Version => {

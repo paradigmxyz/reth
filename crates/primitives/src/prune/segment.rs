@@ -47,7 +47,7 @@ pub enum PrunePurpose {
     /// Prune data according to user configuration.
     User,
     /// Prune data according to highest snapshots to delete the data from database.
-    Snapshot,
+    StaticFile,
 }
 
 impl PrunePurpose {
@@ -58,7 +58,7 @@ impl PrunePurpose {
 
     /// Returns true if the purpose is [`PrunePurpose::Snapshot`].
     pub fn is_snapshot(self) -> bool {
-        matches!(self, Self::Snapshot)
+        matches!(self, Self::StaticFile)
     }
 }
 

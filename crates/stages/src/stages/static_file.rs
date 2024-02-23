@@ -24,7 +24,7 @@ impl<DB: Database> StaticFileStage<DB> {
 
 impl<DB: Database> Stage<DB> for StaticFileStage<DB> {
     fn id(&self) -> StageId {
-        StageId::Snapshot
+        StageId::StaticFile
     }
 
     fn execute(
