@@ -5,7 +5,7 @@ use reth_primitives::{
     static_file::HighestStaticFiles,
 };
 use reth_provider::{DatabaseProviderRW, StageCheckpointReader};
-use reth_snapshot::StaticFileProducer;
+use reth_static_file::StaticFileProducer;
 
 /// The snapshot stage _copies_ all data from database to static files using [StaticFileProducer]. The
 /// block range for copying is determined by the current highest blocks contained in static files

@@ -23,7 +23,7 @@ use reth_node_core::{events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
-use reth_snapshot::StaticFileProducer;
+use reth_static_file::StaticFileProducer;
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},

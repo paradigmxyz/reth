@@ -52,7 +52,7 @@ use reth_interfaces::{
     p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
 };
 use reth_provider::{ExecutorFactory, HeaderSyncGapProvider, HeaderSyncMode};
-use reth_snapshot::StaticFileProducer;
+use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
 use tempfile::TempDir;
 

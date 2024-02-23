@@ -13,7 +13,7 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_prune::PrunerEvent;
-use reth_snapshot::StaticFileProducerEvent;
+use reth_static_file::StaticFileProducerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     fmt::{Display, Formatter},

@@ -8,7 +8,7 @@ use futures::FutureExt;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
-use reth_snapshot::{StaticFileProducerWithResult, StaticFileProducer};
+use reth_static_file::{StaticFileProducerWithResult, StaticFileProducer};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
@@ -62,7 +62,7 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
 
     /// This will try to spawn the snapshotter if it is idle:
     /// 1. Check if snapshotting is needed through [Snapshotter::get_snapshot_targets] and then
-    ///    [SnapshotTargets::any](reth_snapshot::SnapshotTargets::any).
+    ///    [SnapshotTargets::any](reth_static_file::SnapshotTargets::any).
     /// 2.
     ///     1. If snapshotting is needed, pass snapshot request to the [Snapshotter::run] and spawn
     ///        it in a separate task. Set snapshotter state to [SnapshotterState::Running].

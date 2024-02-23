@@ -5745,8 +5745,8 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-rpc-types",
  "reth-rpc-types-compat",
- "reth-snapshot",
  "reth-stages",
+ "reth-static-file",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
@@ -5834,8 +5834,8 @@ dependencies = [
  "reth-revm",
  "reth-rpc-types",
  "reth-rpc-types-compat",
- "reth-snapshot",
  "reth-stages",
+ "reth-static-file",
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
@@ -6390,8 +6390,8 @@ dependencies = [
  "reth-revm",
  "reth-rpc",
  "reth-rpc-engine-api",
- "reth-snapshot",
  "reth-stages",
+ "reth-static-file",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
@@ -6452,8 +6452,8 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-rpc-types",
  "reth-rpc-types-compat",
- "reth-snapshot",
  "reth-stages",
+ "reth-static-file",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
@@ -6658,8 +6658,8 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
- "reth-snapshot",
  "reth-stages",
+ "reth-static-file",
  "reth-tokio-util",
  "thiserror",
  "tokio",
@@ -6872,27 +6872,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-snapshot"
-version = "0.1.0-alpha.19"
-dependencies = [
- "assert_matches",
- "clap",
- "rayon",
- "reth-db",
- "reth-interfaces",
- "reth-nippy-jar",
- "reth-primitives",
- "reth-provider",
- "reth-stages",
- "reth-tokio-util",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
 name = "reth-stages"
 version = "0.1.0-alpha.19"
 dependencies = [
@@ -6924,12 +6903,33 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-snapshot",
+ "reth-static-file",
  "reth-tokio-util",
  "reth-trie",
  "revm",
  "serde",
  "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
+name = "reth-static-file"
+version = "0.1.0-alpha.19"
+dependencies = [
+ "assert_matches",
+ "clap",
+ "rayon",
+ "reth-db",
+ "reth-interfaces",
+ "reth-nippy-jar",
+ "reth-primitives",
+ "reth-provider",
+ "reth-stages",
+ "reth-tokio-util",
  "tempfile",
  "thiserror",
  "tokio",

@@ -39,7 +39,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_rpc_engine_api::EngineApi;
-use reth_snapshot::StaticFileProducer;
+use reth_static_file::StaticFileProducer;
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_transaction_pool::TransactionPool;
 use std::{path::PathBuf, sync::Arc};

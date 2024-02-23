@@ -26,7 +26,7 @@
 //! # use reth_provider::ProviderFactory;
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
-//! # use reth_snapshot::Snapshotter;
+//! # use reth_static_file::Snapshotter;
 //! #
 //! # let chain_spec = MAINNET.clone();
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());

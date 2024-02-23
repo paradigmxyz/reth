@@ -31,7 +31,7 @@ use reth_primitives::{
     fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
 };
 use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
-use reth_snapshot::StaticFileProducer;
+use reth_static_file::StaticFileProducer;
 use reth_stages::{
     sets::DefaultStages,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},

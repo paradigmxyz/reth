@@ -18,7 +18,7 @@ use reth_primitives::{
     BlockNumber, ChainSpec, StaticFileSegment,
 };
 use reth_provider::{BlockNumReader, ProviderFactory};
-use reth_snapshot::{segments as snap_segments, segments::Segment};
+use reth_static_file::{segments as snap_segments, segments::Segment};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,

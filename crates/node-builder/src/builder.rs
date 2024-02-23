@@ -357,7 +357,7 @@ where
         )?;
 
         // configure snapshotter
-        let snapshotter = reth_snapshot::StaticFileProducer::new(
+        let snapshotter = reth_static_file::StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.snapshot_provider(),
             config.prune_config()?.unwrap_or_default().segments,

@@ -52,7 +52,7 @@ use reth_provider::{
     ProviderFactory, StageCheckpointReader,
 };
 use reth_revm::EvmProcessorFactory;
-use reth_snapshot::StaticFileProducer;
+use reth_static_file::StaticFileProducer;
 use reth_stages::{
     prelude::*,
     stages::{
