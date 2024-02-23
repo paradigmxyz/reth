@@ -402,7 +402,7 @@ impl Default for DiskFileBlobStoreConfig {
 
 impl DiskFileBlobStoreConfig {
     /// Set maximum number of blobs to keep in the in memory blob cache.
-    pub fn with_max_cached_entries(mut self, max_cached_entries: u32) -> Self {
+    pub const fn with_max_cached_entries(mut self, max_cached_entries: u32) -> Self {
         self.max_cached_entries = max_cached_entries;
         self
     }
