@@ -1,8 +1,7 @@
 //! Perform DNS lookups
 
 use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::future::Future;
+use std::{collections::HashMap, future::Future};
 use tracing::trace;
 pub use trust_dns_resolver::{error::ResolveError, TokioAsyncResolver};
 use trust_dns_resolver::{name_server::ConnectionProvider, AsyncResolver};
