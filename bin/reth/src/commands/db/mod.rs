@@ -82,8 +82,8 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
-    /// StaticFiles tables from database
-    StaticFile(static_files::Command),
+    /// Creates static files from database tables
+    CreateStaticFiles(static_files::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -155,7 +155,7 @@ impl Command {
 
                     if !input.trim().eq_ignore_ascii_case("y") {
                         println!("Database drop aborted!");
-                        return Ok(());
+                        return Ok(())
                     }
                 }
 
@@ -175,7 +175,7 @@ impl Command {
 
                 command.execute(provider_factory)?;
             }
-            Subcommands::StaticFile(command) => {
+            Subcommands::CreateStaticFiles(command) => {
                 command.execute(data_dir, self.db.log_level, self.chain.clone())?;
             }
             Subcommands::Version => {

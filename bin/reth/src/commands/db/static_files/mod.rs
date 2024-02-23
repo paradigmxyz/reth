@@ -31,20 +31,20 @@ mod receipts;
 mod transactions;
 
 #[derive(Parser, Debug)]
-/// Arguments for the `reth db static file` command.
+/// Arguments for the `reth db create-static-files` command.
 pub struct Command {
     /// StaticFile segments to generate.
     segments: Vec<StaticFileSegment>,
 
-    /// Starting block for the static_file.
+    /// Starting block for the static file.
     #[arg(long, short, default_value = "0")]
     from: BlockNumber,
 
-    /// Number of blocks in the static_file.
+    /// Number of blocks in the static file.
     #[arg(long, short, default_value = "500000")]
     block_interval: u64,
 
-    /// Sets the number of static_files built in parallel. Note: Each parallel build is
+    /// Sets the number of static files built in parallel. Note: Each parallel build is
     /// memory-intensive.
     #[arg(
         long, short,
@@ -61,7 +61,7 @@ pub struct Command {
     #[arg(long, default_value = "false")]
     bench: bool,
 
-    /// Flag to skip static file creation and only run benchmarks on existing static_files.
+    /// Flag to skip static file creation and only run benchmarks on existing static files.
     #[arg(long, default_value = "false")]
     only_bench: bool,
 
@@ -79,7 +79,7 @@ pub struct Command {
 }
 
 impl Command {
-    /// Execute `db static file` command
+    /// Execute `db create-static-files` command
     pub fn execute(
         self,
         data_dir: ChainPath<DataDirPath>,
@@ -178,7 +178,7 @@ impl Command {
         ranges
     }
 
-    /// Generates static_files from `self.from` with a `self.block_interval`. Generates them in
+    /// Generates static files from `self.from` with a `self.block_interval`. Generates them in
     /// parallel if specified.
     fn generate_static_file<DB: Database>(
         &self,
