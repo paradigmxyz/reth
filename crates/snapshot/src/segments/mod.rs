@@ -15,7 +15,7 @@ use reth_db::{
 use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
-    snapshot::{
+    static_file::{
         find_fixed_range, Compression, Filters, InclusionFilter, PerfectHashingFunction,
         SegmentConfig, SegmentHeader,
     },

@@ -1,5 +1,5 @@
 use crate::{
-    snapshot::{Compression, Filters, InclusionFilter},
+    static_file::{Compression, Filters, InclusionFilter},
     BlockNumber, TxNumber,
 };
 use derive_more::Display;
@@ -384,7 +384,7 @@ mod tests {
                     Compression::Lz4,
                     Filters::WithFilters(
                         InclusionFilter::Cuckoo,
-                        crate::snapshot::PerfectHashingFunction::Fmph,
+                        crate::static_file::PerfectHashingFunction::Fmph,
                     ),
                 )),
             ),
@@ -396,7 +396,7 @@ mod tests {
                     Compression::Zstd,
                     Filters::WithFilters(
                         InclusionFilter::Cuckoo,
-                        crate::snapshot::PerfectHashingFunction::Fmph,
+                        crate::static_file::PerfectHashingFunction::Fmph,
                     ),
                 )),
             ),
@@ -408,7 +408,7 @@ mod tests {
                     Compression::ZstdWithDictionary,
                     Filters::WithFilters(
                         InclusionFilter::Cuckoo,
-                        crate::snapshot::PerfectHashingFunction::Fmph,
+                        crate::static_file::PerfectHashingFunction::Fmph,
                     ),
                 )),
             ),

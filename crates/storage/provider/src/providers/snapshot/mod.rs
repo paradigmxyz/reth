@@ -11,7 +11,7 @@ mod metrics;
 
 use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
-use reth_primitives::{snapshot::SegmentHeader, SnapshotSegment};
+use reth_primitives::{static_file::SegmentHeader, SnapshotSegment};
 use std::{ops::Deref, sync::Arc};
 
 const BLOCKS_PER_SNAPSHOT: u64 = 500_000;
@@ -61,7 +61,7 @@ mod tests {
         CanonicalHeaders, HeaderNumbers, HeaderTD, Headers, RawTable,
     };
     use reth_interfaces::test_utils::generators::{self, random_header_range};
-    use reth_primitives::{snapshot::find_fixed_range, BlockNumber, B256, U256};
+    use reth_primitives::{static_file::find_fixed_range, BlockNumber, B256, U256};
 
     #[test]
     fn test_snap() {

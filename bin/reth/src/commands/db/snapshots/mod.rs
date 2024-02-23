@@ -11,7 +11,7 @@ use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::{NippyJar, NippyJarCursor};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::{
-    snapshot::{
+    static_file::{
         Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentConfig,
         SegmentHeader, SegmentRangeInclusive,
     },

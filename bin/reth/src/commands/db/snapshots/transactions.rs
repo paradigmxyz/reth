@@ -6,7 +6,7 @@ use rand::{seq::SliceRandom, Rng};
 use reth_db::{snapshot::TransactionMask, DatabaseEnv};
 
 use reth_primitives::{
-    snapshot::{Filters, InclusionFilter},
+    static_file::{Filters, InclusionFilter},
     SnapshotSegment, TransactionSignedNoHash,
 };
 use reth_provider::{

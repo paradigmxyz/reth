@@ -5,7 +5,7 @@ use super::{
 use rand::{seq::SliceRandom, Rng};
 use reth_db::{snapshot::ReceiptMask, DatabaseEnv};
 use reth_primitives::{
-    snapshot::{Filters, InclusionFilter},
+    static_file::{Filters, InclusionFilter},
     Receipt, SnapshotSegment,
 };
 use reth_provider::{

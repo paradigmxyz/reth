@@ -7,7 +7,7 @@ use crate::{
 use futures::FutureExt;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
-use reth_primitives::{snapshot::HighestSnapshots, BlockNumber};
+use reth_primitives::{static_file::HighestSnapshots, BlockNumber};
 use reth_snapshot::{Snapshotter, SnapshotterWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};

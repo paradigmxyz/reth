@@ -4,7 +4,7 @@ use reth_db::{
     transaction::DbTx, RawKey, RawTable,
 };
 use reth_interfaces::provider::ProviderResult;
-use reth_primitives::{snapshot::SegmentConfig, BlockNumber, SnapshotSegment};
+use reth_primitives::{static_file::SegmentConfig, BlockNumber, SnapshotSegment};
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
     DatabaseProviderRO,

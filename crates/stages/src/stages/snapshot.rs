@@ -1,7 +1,7 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_primitives::{
-    snapshot::HighestSnapshots,
+    static_file::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
 };
 use reth_provider::{DatabaseProviderRW, StageCheckpointReader};

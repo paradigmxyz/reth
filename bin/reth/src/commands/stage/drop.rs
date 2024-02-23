@@ -14,7 +14,7 @@ use reth_db::{
     transaction::DbTxMut, DatabaseEnv,
 };
 use reth_node_core::init::{insert_genesis_header, insert_genesis_state};
-use reth_primitives::{fs, snapshot::find_fixed_range, stage::StageId, ChainSpec, SnapshotSegment};
+use reth_primitives::{fs, static_file::find_fixed_range, stage::StageId, ChainSpec, SnapshotSegment};
 use reth_provider::ProviderFactory;
 use std::sync::Arc;
 

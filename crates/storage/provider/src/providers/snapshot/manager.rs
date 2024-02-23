@@ -22,7 +22,7 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     keccak256,
-    snapshot::{find_fixed_range, HighestSnapshots, SegmentHeader, SegmentRangeInclusive},
+    static_file::{find_fixed_range, HighestSnapshots, SegmentHeader, SegmentRangeInclusive},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,

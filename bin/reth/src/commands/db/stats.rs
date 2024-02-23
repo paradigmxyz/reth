@@ -6,7 +6,7 @@ use human_bytes::human_bytes;
 use itertools::Itertools;
 use reth_db::{database::Database, mdbx, snapshot::iter_snapshots, DatabaseEnv, Tables};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_primitives::snapshot::{find_fixed_range, SegmentRangeInclusive};
+use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
 use reth_provider::providers::SnapshotProvider;
 use std::fs::File;
 

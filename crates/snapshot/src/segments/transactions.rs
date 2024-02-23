@@ -4,7 +4,7 @@ use reth_db::{
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
-    snapshot::{SegmentConfig, SegmentHeader},
+    static_file::{SegmentConfig, SegmentHeader},
     BlockNumber, SnapshotSegment, TxNumber,
 };
 use reth_provider::{

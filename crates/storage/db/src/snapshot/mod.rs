@@ -15,7 +15,7 @@ mod mask;
 pub use mask::*;
 use reth_nippy_jar::{NippyJar, NippyJarError};
 use reth_primitives::{
-    snapshot::{SegmentHeader, SegmentRangeInclusive},
+    static_file::{SegmentHeader, SegmentRangeInclusive},
     SnapshotSegment,
 };
 

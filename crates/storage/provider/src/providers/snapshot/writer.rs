@@ -7,7 +7,7 @@ use reth_db::codecs::CompactU256;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
-    snapshot::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
+    static_file::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
     BlockHash, BlockNumber, Header, Receipt, SnapshotSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };

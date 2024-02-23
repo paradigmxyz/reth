@@ -1,6 +1,6 @@
 use reth_db::DatabaseEnv;
 use reth_primitives::{
-    snapshot::{Compression, Filters},
+    static_file::{Compression, Filters},
     SnapshotSegment,
 };
 use reth_provider::{DatabaseProviderRO, ProviderFactory};

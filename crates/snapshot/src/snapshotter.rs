@@ -4,7 +4,7 @@ use crate::{segments, segments::Segment, SnapshotterEvent};
 use rayon::prelude::*;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
-use reth_primitives::{snapshot::HighestSnapshots, BlockNumber, PruneModes};
+use reth_primitives::{static_file::HighestSnapshots, BlockNumber, PruneModes};
 use reth_provider::{
     providers::{SnapshotProvider, SnapshotWriter},
     ProviderFactory,
@@ -200,7 +200,7 @@ mod tests {
         },
         RethError,
     };
-    use reth_primitives::{snapshot::HighestSnapshots, PruneModes, SnapshotSegment, B256, U256};
+    use reth_primitives::{static_file::HighestSnapshots, PruneModes, SnapshotSegment, B256, U256};
     use reth_provider::providers::SnapshotWriter;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
 

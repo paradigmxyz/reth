@@ -5,7 +5,7 @@ use super::{
 use rand::{seq::SliceRandom, Rng};
 use reth_db::{snapshot::HeaderMask, DatabaseEnv};
 use reth_primitives::{
-    snapshot::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
+    static_file::{Compression, Filters, InclusionFilter, PerfectHashingFunction},
     BlockHash, Header, SnapshotSegment,
 };
 use reth_provider::{
