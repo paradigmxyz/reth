@@ -12,10 +12,10 @@ use reth_rpc_types::{
     TransactionRequest,
 };
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
-use std::future::Future;
 
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
 const JS_TRACER_TEMPLATE: &str = include_str!("../assets/tracer-template.js");
@@ -37,14 +37,14 @@ pub trait DebugApiExt {
         &self,
         hash: B256,
         opts: GethDebugTracingOptions,
-    ) -> impl Future<Output=Result<serde_json::Value, jsonrpsee::core::Error>> + Send;
+    ) -> impl Future<Output = Result<serde_json::Value, jsonrpsee::core::Error>> + Send;
 
     /// Trace all transactions in a block individually with the given tracing opts.
     fn debug_trace_transactions_in_block<B>(
         &self,
         block: B,
         opts: GethDebugTracingOptions,
-    ) -> impl Future<Output=Result<DebugTraceTransactionsStream<'_>, jsonrpsee::core::Error>> + Send
+    ) -> impl Future<Output = Result<DebugTraceTransactionsStream<'_>, jsonrpsee::core::Error>> + Send
     where
         B: Into<BlockId> + Send;
 
@@ -71,7 +71,7 @@ pub trait DebugApiExt {
         &self,
         request_json: String,
         opts_json: String,
-    ) -> impl Future<Output=Result<serde_json::Value, RpcError>> + Send;
+    ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send;
 }
 
 impl<T: DebugApiClient + Sync> DebugApiExt for T
