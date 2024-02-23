@@ -88,14 +88,18 @@ use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_B
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>> + Send + 'static>>;
 
-/// Api to interact with [`TransactionsManager`] task.
+/// Api to interact with [`TransactionsManager`] task. Only used in testnet type
+/// [`PeerHandle`](crate::test_utils::PeerHandle).
+#[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct TransactionsHandle {
     /// Command channel to the [`TransactionsManager`]
     manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
 }
 
-/// Implementation of the `TransactionsHandle` API.
+/// Implementation of the `TransactionsHandle` API for use in testnet via type
+/// [`PeerHandle`](crate::test_utils::PeerHandle).
+#[doc(hidden)]
 impl TransactionsHandle {
     fn send(&self, cmd: TransactionsCommand) {
         let _ = self.manager_tx.send(cmd);
@@ -180,8 +184,8 @@ impl TransactionsHandle {
 
 /// Manages transactions on top of the p2p network.
 ///
-/// This can be spawned to another task and is supposed to be run as background service while
-/// [`TransactionsHandle`] is used as frontend to send commands to.
+/// This can be spawned to another task and is supposed to be run as background service.
+/// [`TransactionsHandle`] can be used as frontend to send commands to it (only used in testnet).
 ///
 /// The [`TransactionsManager`] is responsible for:
 ///    - handling incoming eth messages for transactions.
@@ -220,10 +224,13 @@ pub struct TransactionsManager<Pool> {
     bad_imports: LruCache<TxHash>,
     /// All the connected peers.
     peers: HashMap<PeerId, Peer>,
-    /// Send half for the command channel.
-    #[cfg(test)]
+    /// Send half for the command channel. Note: only used in testnet type
+    /// [`PeerHandle`](crate::test_utils::PeerHandle).
+    #[doc(hidden)]
     command_tx: mpsc::UnboundedSender<TransactionsCommand>,
-    /// Incoming commands from [`TransactionsHandle`].
+    /// Incoming commands from [`TransactionsHandle`]. Note: only used in testnet type
+    /// [`PeerHandle`](crate::test_utils::PeerHandle).
+    #[doc(hidden)]
     command_rx: UnboundedReceiverStream<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
     pending_transactions: ReceiverStream<TxHash>,
@@ -245,7 +252,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
     ) -> Self {
         let network_events = network.event_listener();
 
-        #[cfg(test)]
+        // only testnet
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
         let transaction_fetcher = TransactionFetcher::default().with_transaction_fetcher_config(
@@ -279,10 +286,8 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS).unwrap(),
             ),
             peers: Default::default(),
-            #[cfg(test)]
-            command_tx,
-            #[cfg(test)]
-            command_rx: UnboundedReceiverStream::new(command_rx),
+            command_tx,                                           // only testnet
+            command_rx: UnboundedReceiverStream::new(command_rx), // only testnet
             pending_transactions: ReceiverStream::new(pending),
             transaction_events: UnboundedMeteredReceiver::new(
                 from_network,
@@ -295,7 +300,8 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
 
 // === impl TransactionsManager ===
 
-#[cfg(test)]
+/// Only used in testnet type [`PeerHandle`](crate::test_utils::PeerHandle).
+#[doc(hidden)]
 impl<Pool> TransactionsManager<Pool>
 where
     Pool: TransactionPool,
@@ -1198,20 +1204,18 @@ where
                 acc
             );
 
-            #[cfg(test)]
-            {
-                let acc = &mut poll_durations.acc_cmds;
-                duration_metered_exec!(
-                    {
-                        // advance commands
-                        if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
-                            this.on_command(cmd);
-                            some_ready = true;
-                        }
-                    },
-                    acc
-                );
-            }
+            // Note, commands only used in testnet
+            let acc = &mut poll_durations.acc_cmds;
+            duration_metered_exec!(
+                {
+                    // advance commands
+                    if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
+                        this.on_command(cmd);
+                        some_ready = true;
+                    }
+                },
+                acc
+            );
 
             let acc = &mut poll_durations.acc_tx_events;
             duration_metered_exec!(
