@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use reth_eth_wire::{DisconnectReason, EthVersion, Status};
 use reth_primitives::{NodeRecord, PeerId};
 use reth_rpc_types::NetworkStatus;
-use std::{net::SocketAddr, sync::Arc, time::Instant};
+use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
@@ -32,13 +32,12 @@ pub mod reputation;
 pub mod noop;
 
 /// Provides general purpose information about the network.
-#[async_trait]
 pub trait NetworkInfo: Send + Sync {
     /// Returns the [`SocketAddr`] that listens for incoming connections.
     fn local_addr(&self) -> SocketAddr;
 
     /// Returns the current status of the network being ran by the local node.
-    async fn network_status(&self) -> Result<NetworkStatus, NetworkError>;
+    fn network_status(&self) -> impl Future<Output = Result<NetworkStatus, NetworkError>> + Send;
 
     /// Returns the chain id
     fn chain_id(&self) -> u64;

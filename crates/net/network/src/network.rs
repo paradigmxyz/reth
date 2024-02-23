@@ -288,7 +288,6 @@ impl Peers for NetworkHandle {
     }
 }
 
-#[async_trait]
 impl NetworkInfo for NetworkHandle {
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()

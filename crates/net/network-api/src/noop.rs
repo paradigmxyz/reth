@@ -22,7 +22,6 @@ use std::net::{IpAddr, SocketAddr};
 #[non_exhaustive]
 pub struct NoopNetwork;
 
-#[async_trait]
 impl NetworkInfo for NoopNetwork {
     fn local_addr(&self) -> SocketAddr {
         (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), DEFAULT_DISCOVERY_PORT).into()
