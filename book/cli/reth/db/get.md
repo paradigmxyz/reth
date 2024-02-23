@@ -7,9 +7,9 @@ $ reth db get --help
 Usage: reth db get [OPTIONS] <COMMAND>
 
 Commands:
-  mdbx      Gets the content of a database table for the given key
-  static_file  Gets the content of a static_file segment for the given key
-  help      Print this message or the help of the given subcommand(s)
+  mdbx         Gets the content of a database table for the given key
+  static-file  Gets the content of a static file segment for the given key
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
       --datadir <DATA_DIR>

@@ -19,7 +19,7 @@ Options:
           [default: default]
 
       --only-total-size
-          Show only the total size for static_file files
+          Show only the total size for static files
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
@@ -31,7 +31,7 @@ Options:
           [default: mainnet]
 
       --summary
-          Show only the summary per static_file segment
+          Show only the summary per static file segment
 
       --instance <INSTANCE>
           Add a new instance of a node.

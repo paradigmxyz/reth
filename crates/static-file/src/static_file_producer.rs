@@ -17,15 +17,15 @@ use tracing::{debug, trace};
 /// Result of [StaticFileProducer::run] execution.
 pub type StaticFileProducerResult = RethResult<StaticFileTargets>;
 
-/// The static_file_producer type itself with the result of [StaticFileProducer::run]
+/// The [StaticFileProducer] instance itself with the result of [StaticFileProducer::run]
 pub type StaticFileProducerWithResult<DB> = (StaticFileProducer<DB>, StaticFileProducerResult);
 
-/// Static file producer routine. See [StaticFileProducer::run] for more detailed description.
+/// Static File producer routine. See [StaticFileProducer::run] for more detailed description.
 #[derive(Debug, Clone)]
 pub struct StaticFileProducer<DB> {
     /// Provider factory
     provider_factory: ProviderFactory<DB>,
-    /// StaticFile provider
+    /// Static File provider
     static_file_provider: StaticFileProvider,
     /// Pruning configuration for every part of the data that can be pruned. Set by user, and
     /// needed in [StaticFileProducer] to prevent attempting to move prunable data to static files.
@@ -34,7 +34,7 @@ pub struct StaticFileProducer<DB> {
     listeners: EventListeners<StaticFileProducerEvent>,
 }
 
-/// StaticFile targets, per data part, measured in [`BlockNumber`].
+/// Static File targets, per data part, measured in [`BlockNumber`].
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StaticFileTargets {
     headers: Option<RangeInclusive<BlockNumber>>,

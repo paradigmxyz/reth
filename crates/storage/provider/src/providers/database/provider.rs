@@ -102,7 +102,7 @@ pub struct DatabaseProvider<TX> {
     tx: TX,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
-    /// StaticFile provider
+    /// Static File provider
     static_file_provider: StaticFileProvider,
 }
 

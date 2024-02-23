@@ -113,16 +113,16 @@ pub enum ProviderError {
     /// Provider does not support this particular request.
     #[error("this provider does not support this request")]
     UnsupportedProvider,
-    /// StaticFile file is not found at specified path.
+    /// Static File is not found at specified path.
     #[error("not able to find {0} static file at {1}")]
     MissingStaticFilePath(StaticFileSegment, PathBuf),
-    /// StaticFile file is not found for requested block.
+    /// Static File is not found for requested block.
     #[error("not able to find {0} static file for block number {1}")]
     MissingStaticFileBlock(StaticFileSegment, BlockNumber),
-    /// StaticFile file is not found for requested transaction.
+    /// Static File is not found for requested transaction.
     #[error("unable to find {0} static file for transaction id {1}")]
     MissingStaticFileTx(StaticFileSegment, TxNumber),
-    /// StaticFile is finalized and cannot be written to.
+    /// Static File is finalized and cannot be written to.
     #[error("unable to write block #{1} to finalized static file {0}")]
     FinalizedStaticFile(StaticFileSegment, BlockNumber),
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.

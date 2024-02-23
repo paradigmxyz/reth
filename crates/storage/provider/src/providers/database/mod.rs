@@ -43,7 +43,7 @@ pub struct ProviderFactory<DB> {
     db: DB,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
-    /// StaticFile Provider
+    /// Static File Provider
     static_file_provider: StaticFileProvider,
 }
 

@@ -27,13 +27,13 @@ use strum::{AsRefStr, EnumIter, EnumString};
 /// Segment of the data that can be moved to static files.
 pub enum StaticFileSegment {
     #[strum(serialize = "headers")]
-    /// StaticFile segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables.
+    /// Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables.
     Headers,
     #[strum(serialize = "transactions")]
-    /// StaticFile segment responsible for the `Transactions` table.
+    /// Static File segment responsible for the `Transactions` table.
     Transactions,
     #[strum(serialize = "receipts")]
-    /// StaticFile segment responsible for the `Receipts` table.
+    /// Static File segment responsible for the `Receipts` table.
     Receipts,
 }
 
@@ -120,14 +120,14 @@ impl StaticFileSegment {
     pub fn parse_filename(name: &str) -> Option<(Self, SegmentRangeInclusive)> {
         let mut parts = name.split('_');
         if !(parts.next() == Some("static") && parts.next() == Some("file")) {
-            return None;
+            return None
         }
 
         let segment = Self::from_str(parts.next()?).ok()?;
         let (block_start, block_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
 
         if block_start > block_end {
-            return None;
+            return None
         }
 
         Some((segment, SegmentRangeInclusive::new(block_start, block_end)))

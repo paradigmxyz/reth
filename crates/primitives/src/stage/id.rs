@@ -3,7 +3,7 @@
 /// For custom stages, use [`StageId::Other`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StageId {
-    /// StaticFile stage in the process.
+    /// Static File stage in the process.
     StaticFile,
     /// Header stage in the process.
     Headers,

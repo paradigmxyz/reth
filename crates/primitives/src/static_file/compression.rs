@@ -1,6 +1,6 @@
 use strum::AsRefStr;
 
-/// StaticFile compression types.
+/// Static File compression types.
 #[derive(Debug, Copy, Clone, Default, AsRefStr)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Compression {
@@ -13,7 +13,7 @@ pub enum Compression {
     /// Zstandard (Zstd) compression algorithm with a dictionary.
     #[strum(serialize = "zstd-dict")]
     ZstdWithDictionary,
-    /// No compression, uncompressed static_file.
+    /// No compression.
     #[strum(serialize = "uncompressed")]
     #[default]
     Uncompressed,

@@ -29,7 +29,7 @@ macro_rules! generate_static_file_func {
                 /// * `keys`: Iterator of keys (eg. `TxHash` or `BlockHash`) with length equal to `row_count` and ordered by future column insertion from `range`.
                 /// * `dict_compression_set`: Sets of column data for compression dictionaries. Max size is 2GB. Row count is independent.
                 /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
-                /// * `nippy_jar`: StaticFile object responsible for file generation.
+                /// * `nippy_jar`: Static File object responsible for file generation.
                 #[allow(non_snake_case)]
                 pub fn [<create_static_file$(_ $tbl)+>]<
                     $($tbl: Table<Key=K>,)+

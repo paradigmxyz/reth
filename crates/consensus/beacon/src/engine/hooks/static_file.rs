@@ -73,9 +73,9 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
     ///    [StaticFileTargets::any](reth_static_file::StaticFileTargets::any).
     /// 2.
     ///     1. If producing static files is needed, pass static file request to the
-    ///        [StaticFileProducer::run] and spawn it in a separate task. Set static_file_producer
+    ///        [StaticFileProducer::run] and spawn it in a separate task. Set static file producer
     ///        state to [StaticFileProducerState::Running].
-    ///     2. If producing static files is not needed, set static_file_producer state back to
+    ///     2. If producing static files is not needed, set static file producer state back to
     ///        [StaticFileProducerState::Idle].
     ///
     /// If static_file_producer is already running, do nothing.
@@ -152,12 +152,12 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
 
 /// The possible static_file_producer states within the sync controller.
 ///
-/// [StaticFileProducerState::Idle] means that the static_file_producer is currently idle.
-/// [StaticFileProducerState::Running] means that the static_file_producer is currently running.
+/// [StaticFileProducerState::Idle] means that the static file producer is currently idle.
+/// [StaticFileProducerState::Running] means that the static file producer is currently running.
 #[derive(Debug)]
 enum StaticFileProducerState<DB> {
-    /// StaticFileProducer is idle.
+    /// [StaticFileProducer] is idle.
     Idle(Option<StaticFileProducer<DB>>),
-    /// StaticFileProducer is running and waiting for a response
+    /// [StaticFileProducer] is running and waiting for a response
     Running(oneshot::Receiver<StaticFileProducerWithResult<DB>>),
 }

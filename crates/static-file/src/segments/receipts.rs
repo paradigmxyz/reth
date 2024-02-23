@@ -14,7 +14,7 @@ use reth_provider::{
 };
 use std::{ops::RangeInclusive, path::Path};
 
-/// StaticFile segment responsible for [StaticFileSegment::Receipts] part of data.
+/// Static File segment responsible for [StaticFileSegment::Receipts] part of data.
 #[derive(Debug, Default)]
 pub struct Receipts;
 

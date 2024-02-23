@@ -81,7 +81,7 @@ pub enum StageError {
     MissingStaticFileData {
         /// Starting block with  missing data.
         block: Box<SealedHeader>,
-        /// StaticFile segment
+        /// Static File segment
         segment: StaticFileSegment,
     },
     /// Unrecoverable inconsistency error related to a transaction number in a static file segment.
@@ -89,7 +89,7 @@ pub enum StageError {
         "inconsistent transaction number for {segment}. db: {database}, static_file: {static_file}"
     )]
     InconsistentTxNumber {
-        /// StaticFile segment where this error was encountered.
+        /// Static File segment where this error was encountered.
         segment: StaticFileSegment,
         /// Expected database transaction number.
         database: TxNumber,
@@ -99,7 +99,7 @@ pub enum StageError {
     /// Unrecoverable inconsistency error related to a block number in a static file segment.
     #[error("inconsistent block number for {segment}. db: {database}, static_file: {static_file}")]
     InconsistentBlockNumber {
-        /// StaticFile segment where this error was encountered.
+        /// Static File segment where this error was encountered.
         segment: StaticFileSegment,
         /// Expected database block number.
         database: BlockNumber,

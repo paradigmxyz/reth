@@ -37,7 +37,7 @@ pub struct HistoricalStateProviderRef<'b, TX: DbTx> {
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
-    /// StaticFile provider
+    /// Static File provider
     static_file_provider: StaticFileProvider,
 }
 
@@ -319,7 +319,7 @@ pub struct HistoricalStateProvider<TX: DbTx> {
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
-    /// StaticFile provider
+    /// Static File provider
     static_file_provider: StaticFileProvider,
 }
 

@@ -1,22 +1,20 @@
-# reth db
+# reth db get static-file
 
-Database debugging utilities
+Gets the content of a static file segment for the given key
 
 ```bash
-$ reth db --help
-Usage: reth db [OPTIONS] <COMMAND>
+$ reth db get static-file --help
+Usage: reth db get static-file [OPTIONS] <SEGMENT> <KEY>
 
-Commands:
-  stats                Lists all the tables, their entry count and their size
-  list                 Lists the contents of a table
-  diff                 Create a diff between two database tables or two entire databases
-  get                  Gets the content of a table for the given key
-  drop                 Deletes all database entries
-  clear                Deletes all table entries
-  create-static-files  Creates static files from database tables
-  version              Lists current and local database versions
-  path                 Returns the full database path
-  help                 Print this message or the help of the given subcommand(s)
+Arguments:
+  <SEGMENT>
+          Possible values:
+          - headers:      Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
+          - transactions: Static File segment responsible for the `Transactions` table
+          - receipts:     Static File segment responsible for the `Receipts` table
+
+  <KEY>
+          The key to get content for
 
 Options:
       --datadir <DATA_DIR>
@@ -29,6 +27,9 @@ Options:
           - macOS: `$HOME/Library/Application Support/reth/`
           
           [default: default]
+
+      --raw
+          Output bytes instead of human-readable decoded value
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
@@ -52,20 +53,6 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
-
-Database:
-      --db.log-level <LOG_LEVEL>
-          Database logging level. Levels higher than "notice" require a debug build
-
-          Possible values:
-          - fatal:   Enables logging for critical conditions, i.e. assertion failures
-          - error:   Enables logging for error conditions
-          - warn:    Enables logging for warning conditions
-          - notice:  Enables logging for normal but significant condition
-          - verbose: Enables logging for verbose informational
-          - debug:   Enables logging for debug-level messages
-          - trace:   Enables logging for trace debug-level messages
-          - extra:   Enables logging for extra debug-level messages
 
 Logging:
       --log.stdout.format <FORMAT>

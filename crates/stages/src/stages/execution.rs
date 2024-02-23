@@ -534,7 +534,7 @@ impl ExecutionStageThresholds {
     }
 }
 
-/// Returns a `StaticFileProviderRWRefMut` static_file_producer after performing a consistency
+/// Returns a `StaticFileProviderRWRefMut` static file producer after performing a consistency
 /// check.
 ///
 /// This function compares the highest receipt number recorded in the database with that in the

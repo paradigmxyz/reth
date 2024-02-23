@@ -33,7 +33,7 @@ mod transactions;
 #[derive(Parser, Debug)]
 /// Arguments for the `reth db create-static-files` command.
 pub struct Command {
-    /// StaticFile segments to generate.
+    /// Static File segments to generate.
     segments: Vec<StaticFileSegment>,
 
     /// Starting block for the static file.
