@@ -852,23 +852,25 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
                     header.blob_gas_used = None;
                     header.excess_blob_gas = None;
                     header.parent_beacon_block_root = None;
-                } else {
-                    // EIP-4895 logic
+                }else {
+                    // 4895 is not active
                     if header.withdrawals_root.is_none() {
-                        // If EIP-4895 is not active, clear related fields
-                        header.blob_gas_used = None;
-                        header.excess_blob_gas = None;
-                        header.parent_beacon_block_root = None;
-                    } else if !eip_4844_active {
-                        // If EIP-4844 is not active, clear related fields
                         header.blob_gas_used = None;
                         header.excess_blob_gas = None;
                         header.parent_beacon_block_root = None;
                     } else {
-                        // Set fields based on EIP-4844 being active
-                        header.blob_gas_used = Some(blob_gas_used);
-                        header.excess_blob_gas = Some(excess_blob_gas);
-                        header.parent_beacon_block_root = Some(parent_beacon_block_root);
+                        // 4895 is active
+                        if eip_4844_active {
+                            // EIP-4844 is active
+                            header.blob_gas_used = Some(blob_gas_used);
+                            header.excess_blob_gas = Some(excess_blob_gas);
+                            header.parent_beacon_block_root = Some(parent_beacon_block_root);
+                        } else {
+                            // EIP-4844 is not active
+                            header.blob_gas_used = None;
+                            header.excess_blob_gas = None;
+                            header.parent_beacon_block_root = None;
+                        };
                     }
                 }
 
