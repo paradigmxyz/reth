@@ -652,7 +652,7 @@ where
 
         let this = self.get_mut();
 
-        // poll new block imports
+        // poll new block imports (dummy)
         while let Poll::Ready(outcome) = this.block_import.poll(cx) {
             this.on_block_import_result(outcome);
         }
