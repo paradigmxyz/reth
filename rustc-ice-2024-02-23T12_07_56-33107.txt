@@ -1,0 +1,60 @@
+thread 'main' panicked at src/tools/rustfmt/src/parse/session.rs:42:9:
+silent emitter attempted to translate a diagnostic
+stack backtrace:
+   0:        0x105444154 - std::backtrace::Backtrace::create::ha1fe76e2d582a1cc
+   1:        0x10e9b6464 - std[52910d6ba4c5fe25]::panicking::update_hook::<alloc[a7c8eabbbd76c168]::boxed::Box<rustc_driver_impl[f32760458b8529f2]::install_ice_hook::{closure#0}>>::{closure#0}
+   2:        0x10545cef4 - std::panicking::rust_panic_with_hook::hfc5079cd9be86c57
+   3:        0x10545c88c - std::panicking::begin_panic_handler::{{closure}}::h5532dad9383be66c
+   4:        0x10545a1f0 - std::sys_common::backtrace::__rust_end_short_backtrace::h39762fc8d44c97d9
+   5:        0x10545c630 - _rust_begin_unwind
+   6:        0x1054b7aec - core::panicking::panic_fmt::hdaff94c2cbb4d934
+   7:        0x1046e4d78 - <rustfmt_nightly[643ad837fc4cbea2]::parse::session::SilentEmitter as rustc_errors[a5ac202ac92c324e]::translation::Translate>::fallback_fluent_bundle
+   8:        0x1046e3064 - <rustfmt_nightly[643ad837fc4cbea2]::parse::session::SilentOnIgnoredFilesEmitter as rustc_errors[a5ac202ac92c324e]::translation::Translate>::translate_message
+   9:        0x10f96dfb0 - <rustc_errors[a5ac202ac92c324e]::DiagCtxt>::eagerly_translate::<indexmap[824d7610b60655a2]::map::iter::Iter<alloc[a7c8eabbbd76c168]::borrow::Cow<str>, rustc_errors[a5ac202ac92c324e]::diagnostic::DiagnosticArgValue>>
+  10:        0x10f927f94 - <rustc_parse[2faf9a7b2b1d1663]::errors::UnknownPrefix as rustc_errors[a5ac202ac92c324e]::diagnostic::IntoDiagnostic>::into_diagnostic
+  11:        0x10f905e48 - <rustc_parse[2faf9a7b2b1d1663]::lexer::StringReader>::report_unknown_prefix
+  12:        0x10f902c50 - <rustc_parse[2faf9a7b2b1d1663]::lexer::StringReader>::next_token
+  13:        0x10f95c340 - <rustc_parse[2faf9a7b2b1d1663]::lexer::tokentrees::TokenTreesReader>::bump
+  14:        0x10f95b204 - <rustc_parse[2faf9a7b2b1d1663]::lexer::tokentrees::TokenTreesReader>::parse_token_trees
+  15:        0x10f95b290 - <rustc_parse[2faf9a7b2b1d1663]::lexer::tokentrees::TokenTreesReader>::parse_token_trees
+  16:        0x10f95aff0 - <rustc_parse[2faf9a7b2b1d1663]::lexer::tokentrees::TokenTreesReader>::parse_all_token_trees
+  17:        0x10f908a9c - rustc_parse[2faf9a7b2b1d1663]::maybe_file_to_stream
+  18:        0x10f90875c - rustc_parse[2faf9a7b2b1d1663]::maybe_source_file_to_parser
+  19:        0x104674fb8 - <rustfmt_nightly[643ad837fc4cbea2]::parse::parser::Parser>::parse_crate
+  20:        0x104703778 - rustfmt_nightly[643ad837fc4cbea2]::formatting::format_project::<rustfmt_nightly[643ad837fc4cbea2]::Session<alloc[a7c8eabbbd76c168]::vec::Vec<u8>>>
+  21:        0x10464dd90 - <scoped_tls[6b721b8389a77e27]::ScopedKey<rustc_span[67bcdbfa6b15ae55]::SessionGlobals>>::with::<<rustfmt_nightly[643ad837fc4cbea2]::Session<alloc[a7c8eabbbd76c168]::vec::Vec<u8>>>::format_input_inner::{closure#0}, core[6e2277146c4388aa]::result::Result<rustfmt_nightly[643ad837fc4cbea2]::FormatReport, rustfmt_nightly[643ad837fc4cbea2]::ErrorKind>>
+  22:        0x1046dd518 - rustc_span[67bcdbfa6b15ae55]::create_session_if_not_set_then::<core[6e2277146c4388aa]::result::Result<rustfmt_nightly[643ad837fc4cbea2]::FormatReport, rustfmt_nightly[643ad837fc4cbea2]::ErrorKind>, <rustfmt_nightly[643ad837fc4cbea2]::Session<alloc[a7c8eabbbd76c168]::vec::Vec<u8>>>::format_input_inner::{closure#0}>
+  23:        0x1046f81f8 - std[52910d6ba4c5fe25]::panicking::try::<core[6e2277146c4388aa]::option::Option<rustfmt_nightly[643ad837fc4cbea2]::FormattedSnippet>, rustfmt_nightly[643ad837fc4cbea2]::format_snippet::{closure#0}>
+  24:        0x104675b44 - rustfmt_nightly[643ad837fc4cbea2]::format_snippet
+  25:        0x104675f3c - rustfmt_nightly[643ad837fc4cbea2]::format_code_block
+  26:        0x104654dcc - rustfmt_nightly[643ad837fc4cbea2]::comment::rewrite_comment_inner
+  27:        0x104651f04 - rustfmt_nightly[643ad837fc4cbea2]::comment::identify_comment
+  28:        0x10460fefc - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::process_comment
+  29:        0x10460f004 - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::format_missing_indent
+  30:        0x10461925c - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::push_rewrite
+  31:        0x10461a710 - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::walk_stmts
+  32:        0x10461ab78 - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::walk_stmts
+  33:        0x1046146b0 - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::visit_block
+  34:        0x10461694c - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::visit_fn
+  35:        0x104618678 - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::visit_assoc_item
+  36:        0x10460d2d0 - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::visit_impl_items
+  37:        0x104720240 - rustfmt_nightly[643ad837fc4cbea2]::items::format_impl
+  38:        0x10461b0b8 - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::with_context::<<rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::visit_item::{closure#0}>
+  39:        0x1046176a4 - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::visit_item
+  40:        0x104610d08 - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::visit_items_with_reordering
+  41:        0x10461adec - <rustfmt_nightly[643ad837fc4cbea2]::visitor::FmtVisitor>::format_separate_mod
+  42:        0x104567374 - rustfmt_nightly[643ad837fc4cbea2]::formatting::format_project::<rustfmt_nightly[643ad837fc4cbea2]::Session<std[52910d6ba4c5fe25]::io::stdio::Stdout>>
+  43:        0x1045774c8 - <scoped_tls[6b721b8389a77e27]::ScopedKey<rustc_span[67bcdbfa6b15ae55]::SessionGlobals>>::with::<<rustfmt_nightly[643ad837fc4cbea2]::Session<std[52910d6ba4c5fe25]::io::stdio::Stdout>>::format_input_inner::{closure#0}, core[6e2277146c4388aa]::result::Result<rustfmt_nightly[643ad837fc4cbea2]::FormatReport, rustfmt_nightly[643ad837fc4cbea2]::ErrorKind>>
+  44:        0x104578390 - <rustfmt_nightly[643ad837fc4cbea2]::Session<std[52910d6ba4c5fe25]::io::stdio::Stdout>>::format_input_inner
+  45:        0x10456627c - rustfmt[8b37d3e36bdd97bf]::format_and_emit_report::<std[52910d6ba4c5fe25]::io::stdio::Stdout>
+  46:        0x104575560 - <rustfmt_nightly[643ad837fc4cbea2]::Session<std[52910d6ba4c5fe25]::io::stdio::Stdout>>::override_config::<rustfmt[8b37d3e36bdd97bf]::format::{closure#0}, ()>
+  47:        0x1045653ac - rustfmt[8b37d3e36bdd97bf]::execute
+  48:        0x1045638b4 - rustfmt[8b37d3e36bdd97bf]::main
+  49:        0x1045700d8 - std[52910d6ba4c5fe25]::sys_common::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  50:        0x10457d33c - std[52910d6ba4c5fe25]::rt::lang_start::<()>::{closure#0}
+  51:        0x105442c00 - std::rt::lang_start_internal::hd4b478f82f9e99d3
+  52:        0x104566d18 - _main
+
+
+rustc version: 1.78.0-nightly (397937d81 2024-02-22)
+platform: aarch64-apple-darwin

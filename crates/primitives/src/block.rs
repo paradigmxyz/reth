@@ -417,6 +417,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedBlock {
         // Determine if EIP-4844 is active using a random bool
         let eip_4844_active: bool = u.arbitrary()?;
         // EIP-1559 logic
+        #[allow(clippy::collapsible_else_if)]
         if header.base_fee_per_gas.is_none() {
             // If EIP-1559 is not active, clear related fields
             header.withdrawals_root = None;
@@ -454,7 +455,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedBlock {
             let excess_blob_gas: u64 = u.arbitrary()?;
             let parent_beacon_block_root: B256 = u.arbitrary()?;
             let eip_4844_active: bool = u.arbitrary()?;
-
+            #[allow(clippy::collapsible_else_if)]
             if ommer.base_fee_per_gas.is_none() {
                 ommer.withdrawals_root = None;
                 ommer.blob_gas_used = None;
