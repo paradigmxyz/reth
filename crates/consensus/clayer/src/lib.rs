@@ -83,6 +83,7 @@ where
         clayer_consensus_messaging_agent: ClayerConsensusMessagingAgent,
         storages: CDB,
         auth_config: AuthHttpConfig,
+        validators_dir: std::path::PathBuf,
     ) -> Self {
         let latest_header = client
             .latest_header()
@@ -90,7 +91,7 @@ where
             .flatten()
             .unwrap_or_else(|| chain_spec.sealed_genesis_header());
 
-        let config = PbftConfig::new();
+        let config = PbftConfig::new(validators_dir);
         let state = PbftState::new(secret, latest_header.number, latest_header.timestamp, &config);
         Self {
             chain_spec,

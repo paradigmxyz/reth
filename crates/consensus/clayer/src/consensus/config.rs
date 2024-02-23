@@ -1,7 +1,7 @@
 use config::{Config, File, FileFormat};
 use reth_rpc_types::PeerId;
 use serde::Deserialize;
-use std::{str::FromStr, time::Duration};
+use std::{path::PathBuf, str::FromStr, time::Duration};
 
 #[derive(Debug, Clone)]
 pub struct PbftConfig {
@@ -62,18 +62,18 @@ impl Default for PbftConfig {
 }
 
 impl PbftConfig {
-    pub fn new() -> Self {
-        Self { members: load_members_config(), ..Default::default() }
+    pub fn new(path: PathBuf) -> Self {
+        Self { members: load_members_config(path), ..Default::default() }
     }
 }
 
-pub fn load_members_config() -> Vec<PeerId> {
+pub fn load_members_config(path: PathBuf) -> Vec<PeerId> {
     #[derive(Debug, Deserialize, Clone)]
     pub struct ValidatorsConfig {
         pub validators: Vec<String>,
     }
     let mut conf = Config::default();
-    conf.merge(File::new("members", FileFormat::Toml)).expect("members config file error");
+    conf.merge(File::from(path)).expect("members config file error");
     let config: ValidatorsConfig = conf.try_into().expect("try into ValidatorsConfig error");
 
     let mut members = Vec::new();

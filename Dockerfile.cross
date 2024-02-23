@@ -3,7 +3,7 @@
 # locatable in `./dist/bin/$TARGETARCH`
 FROM --platform=$TARGETPLATFORM ubuntu:22.04
 
-LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
+LABEL org.opencontainers.image.source=https://github.com/theone-pang/reth
 LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
 
 # Filled by docker buildx

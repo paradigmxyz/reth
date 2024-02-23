@@ -1,0 +1,38 @@
+version: '3.9'
+name: 'reth'
+
+services:
+  reth-v1:
+    restart: unless-stopped
+    image: ghcr.io/paradigmxyz/reth
+    ports:
+      - '9001:9001' # metrics
+      - '30303:30303' # eth/66 peering
+      - '8545:8545' # rpc
+      - '8551:8551' # engine
+    volumes:
+      - /datas/v1:/rethdata
+      - /logs/v1:/rethlogs
+    command: >
+      node
+      --datadir=rethdata
+      --chain=/app/deploy/genesis.json
+      --http
+      --http.api=admin,net,eth,web3,txpool,rpc,reth,debug,trace,ots
+      --http.corsdomain=*
+      --http.addr=0.0.0.0
+      --http.port=8445
+      --ws
+      --ws.addr=0.0.0.0
+      --ws.port=8446
+      --ws.origins=*
+      --ws.api=net,eth
+      --port=30313
+      --authrpc.port=8551
+      --authrpc.addr=0.0.0.0
+      --authrpc.jwtsecret=/app/deploy/secrets/jwt.hex
+      --log.file.directory=rethlogs
+      --log.file.filter=info
+      --p2p-secret-key=/app/deploy/secrets/p2pn1.hex
+      --ipcdisable
+      --membersdir=/app/deploy/members.toml
