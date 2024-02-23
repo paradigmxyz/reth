@@ -14,7 +14,7 @@ pub const BLOCKS_PER_SNAPSHOT: u64 = 500_000;
 
 /// Highest snapshotted block numbers, per data part.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
-pub struct HighestSnapshots {
+pub struct HighestStaticFiles {
     /// Highest snapshotted block of headers, inclusive.
     /// If [`None`], no snapshot is available.
     pub headers: Option<BlockNumber>,
@@ -26,7 +26,7 @@ pub struct HighestSnapshots {
     pub transactions: Option<BlockNumber>,
 }
 
-impl HighestSnapshots {
+impl HighestStaticFiles {
     /// Returns the highest snapshot if it exists for a segment
     pub fn highest(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
         match segment {

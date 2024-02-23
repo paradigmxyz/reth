@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 /// Cursor of a snapshot segment.
 #[derive(Debug, Deref, DerefMut)]
-pub struct SnapshotCursor<'a>(NippyJarCursor<'a, SegmentHeader>);
+pub struct StaticFileCursor<'a>(NippyJarCursor<'a, SegmentHeader>);
 
-impl<'a> SnapshotCursor<'a> {
+impl<'a> StaticFileCursor<'a> {
     /// Returns a new [`SnapshotCursor`].
     pub fn new(jar: &'a NippyJar<SegmentHeader>, reader: Arc<DataReader>) -> ProviderResult<Self> {
         Ok(Self(NippyJarCursor::with_reader(jar, reader)?))
@@ -29,7 +29,7 @@ impl<'a> SnapshotCursor<'a> {
         mask: usize,
     ) -> ProviderResult<Option<Vec<&'_ [u8]>>> {
         if self.jar().rows() == 0 {
-            return Ok(None)
+            return Ok(None);
         }
 
         let row = match key_or_num {
@@ -37,7 +37,7 @@ impl<'a> SnapshotCursor<'a> {
             KeyOrNumber::Number(n) => match self.jar().user_header().start() {
                 Some(offset) => {
                     if offset > n {
-                        return Ok(None)
+                        return Ok(None);
                     }
                     self.row_by_number_with_cols((n - offset) as usize, mask)
                 }

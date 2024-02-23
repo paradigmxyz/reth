@@ -41,8 +41,8 @@ mod chain_info;
 mod database;
 mod snapshot;
 pub use snapshot::{
-    SnapshotJarProvider, SnapshotProvider, SnapshotProviderRW, SnapshotProviderRWRefMut,
-    SnapshotWriter,
+    StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
+    StaticFileWriter,
 };
 mod state;
 use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};

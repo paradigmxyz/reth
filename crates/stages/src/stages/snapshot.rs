@@ -1,28 +1,28 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_primitives::{
-    static_file::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
+    static_file::HighestStaticFiles,
 };
 use reth_provider::{DatabaseProviderRW, StageCheckpointReader};
-use reth_snapshot::Snapshotter;
+use reth_snapshot::StaticFileProducer;
 
-/// The snapshot stage _copies_ all data from database to static files using [Snapshotter]. The
+/// The snapshot stage _copies_ all data from database to static files using [StaticFileProducer]. The
 /// block range for copying is determined by the current highest blocks contained in static files
 /// and stage checkpoints for each segment individually.
 #[derive(Debug)]
-pub struct SnapshotStage<DB: Database> {
-    snapshotter: Snapshotter<DB>,
+pub struct StaticFileStage<DB: Database> {
+    static_file_producer: StaticFileProducer<DB>,
 }
 
-impl<DB: Database> SnapshotStage<DB> {
+impl<DB: Database> StaticFileStage<DB> {
     /// Creates a new snapshot stage.
-    pub fn new(snapshotter: Snapshotter<DB>) -> Self {
-        Self { snapshotter }
+    pub fn new(static_file_producer: StaticFileProducer<DB>) -> Self {
+        Self { static_file_producer }
     }
 }
 
-impl<DB: Database> Stage<DB> for SnapshotStage<DB> {
+impl<DB: Database> Stage<DB> for StaticFileStage<DB> {
     fn id(&self) -> StageId {
         StageId::Snapshot
     }
@@ -32,7 +32,7 @@ impl<DB: Database> Stage<DB> for SnapshotStage<DB> {
         provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let targets = self.snapshotter.get_snapshot_targets(HighestSnapshots {
+        let targets = self.static_file_producer.get_snapshot_targets(HighestStaticFiles {
             headers: provider
                 .get_stage_checkpoint(StageId::Headers)?
                 .map(|checkpoint| checkpoint.block_number),
@@ -43,7 +43,7 @@ impl<DB: Database> Stage<DB> for SnapshotStage<DB> {
                 .get_stage_checkpoint(StageId::Bodies)?
                 .map(|checkpoint| checkpoint.block_number),
         })?;
-        self.snapshotter.run(targets)?;
+        self.static_file_producer.run(targets)?;
         Ok(ExecOutput::done(input.checkpoint()))
     }
 

@@ -15,7 +15,7 @@ use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     StaticFileSegment,
 };
-use reth_provider::{providers::SnapshotWriter, DatabaseProviderRW, HeaderProvider, StatsReader};
+use reth_provider::{providers::StaticFileWriter, DatabaseProviderRW, HeaderProvider, StatsReader};
 use std::{
     cmp::Ordering,
     task::{ready, Context, Poll},
@@ -601,7 +601,7 @@ mod tests {
             TxNumber, B256,
         };
         use reth_provider::{
-            providers::SnapshotWriter, HeaderProvider, ProviderFactory, TransactionsProvider,
+            providers::StaticFileWriter, HeaderProvider, ProviderFactory, TransactionsProvider,
         };
         use std::{
             collections::{HashMap, VecDeque},

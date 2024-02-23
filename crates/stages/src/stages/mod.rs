@@ -56,7 +56,7 @@ mod tests {
         PruneModes, SealedBlock, StaticFileSegment, U256,
     };
     use reth_provider::{
-        providers::SnapshotWriter, AccountExtReader, ProviderFactory, ReceiptProvider,
+        providers::StaticFileWriter, AccountExtReader, ProviderFactory, ReceiptProvider,
         StorageReader,
     };
     use reth_revm::EvmProcessorFactory;

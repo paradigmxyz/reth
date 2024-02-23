@@ -10,7 +10,7 @@ use crate::{
 };
 use clap::Parser;
 use reth_db::{
-    database::Database, mdbx::DatabaseArguments, open_db, snapshot::iter_snapshots, tables,
+    database::Database, mdbx::DatabaseArguments, open_db, snapshot::iter_static_files, tables,
     transaction::DbTxMut, DatabaseEnv,
 };
 use reth_node_core::init::{insert_genesis_header, insert_genesis_state};
@@ -75,7 +75,7 @@ impl Command {
         // Delete snapshot segment data before inserting the genesis header below
         if let Some(snapshot_segment) = snapshot_segment {
             let snapshot_provider = tool.provider_factory.snapshot_provider();
-            let snapshots = iter_snapshots(snapshot_provider.directory())?;
+            let snapshots = iter_static_files(snapshot_provider.directory())?;
             if let Some(segment_snapshots) = snapshots.get(&snapshot_segment) {
                 for (block_range, _) in segment_snapshots {
                     snapshot_provider

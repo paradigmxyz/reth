@@ -1,12 +1,12 @@
 //! Support for snapshotting.
 
-use crate::{segments, segments::Segment, SnapshotterEvent};
+use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use rayon::prelude::*;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
-use reth_primitives::{static_file::HighestSnapshots, BlockNumber, PruneModes};
+use reth_primitives::{static_file::HighestStaticFiles, BlockNumber, PruneModes};
 use reth_provider::{
-    providers::{SnapshotProvider, SnapshotWriter},
+    providers::{StaticFileProvider, StaticFileWriter},
     ProviderFactory,
 };
 use reth_tokio_util::EventListeners;
@@ -15,34 +15,34 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, trace};
 
 /// Result of [Snapshotter::run] execution.
-pub type SnapshotterResult = RethResult<SnapshotTargets>;
+pub type StaticFileProducerResult = RethResult<StaticFileTargets>;
 
 /// The snapshotter type itself with the result of [Snapshotter::run]
-pub type SnapshotterWithResult<DB> = (Snapshotter<DB>, SnapshotterResult);
+pub type StaticFileProducerWithResult<DB> = (StaticFileProducer<DB>, StaticFileProducerResult);
 
 /// Snapshotting routine. See [Snapshotter::run] for more detailed description.
 #[derive(Debug, Clone)]
-pub struct Snapshotter<DB> {
+pub struct StaticFileProducer<DB> {
     /// Provider factory
     provider_factory: ProviderFactory<DB>,
     /// Snapshot provider
-    snapshot_provider: SnapshotProvider,
+    snapshot_provider: StaticFileProvider,
     /// Pruning configuration for every part of the data that can be pruned. Set by user, and
     /// needed in [Snapshotter] to prevent snapshotting the prunable data.
     /// See [Snapshotter::get_snapshot_targets].
     prune_modes: PruneModes,
-    listeners: EventListeners<SnapshotterEvent>,
+    listeners: EventListeners<StaticFileProducerEvent>,
 }
 
 /// Snapshot targets, per data part, measured in [`BlockNumber`].
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct SnapshotTargets {
+pub struct StaticFileTargets {
     headers: Option<RangeInclusive<BlockNumber>>,
     receipts: Option<RangeInclusive<BlockNumber>>,
     transactions: Option<RangeInclusive<BlockNumber>>,
 }
 
-impl SnapshotTargets {
+impl StaticFileTargets {
     /// Returns `true` if any of the targets are [Some].
     pub fn any(&self) -> bool {
         self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
@@ -50,7 +50,7 @@ impl SnapshotTargets {
 
     // Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
     // highest snapshot.
-    fn is_contiguous_to_highest_snapshots(&self, snapshots: HighestSnapshots) -> bool {
+    fn is_contiguous_to_highest_snapshots(&self, snapshots: HighestStaticFiles) -> bool {
         [
             (self.headers.as_ref(), snapshots.headers),
             (self.receipts.as_ref(), snapshots.receipts),
@@ -59,26 +59,26 @@ impl SnapshotTargets {
         .iter()
         .all(|(target_block_range, highest_snapshotted_block)| {
             target_block_range.map_or(true, |target_block_range| {
-                *target_block_range.start() ==
-                    highest_snapshotted_block
+                *target_block_range.start()
+                    == highest_snapshotted_block
                         .map_or(0, |highest_snapshotted_block| highest_snapshotted_block + 1)
             })
         })
     }
 }
 
-impl<DB: Database> Snapshotter<DB> {
+impl<DB: Database> StaticFileProducer<DB> {
     /// Creates a new [Snapshotter].
     pub fn new(
         provider_factory: ProviderFactory<DB>,
-        snapshot_provider: SnapshotProvider,
+        snapshot_provider: StaticFileProvider,
         prune_modes: PruneModes,
     ) -> Self {
         Self { provider_factory, snapshot_provider, prune_modes, listeners: Default::default() }
     }
 
     /// Listen for events on the snapshotter.
-    pub fn events(&mut self) -> UnboundedReceiverStream<SnapshotterEvent> {
+    pub fn events(&mut self) -> UnboundedReceiverStream<StaticFileProducerEvent> {
         self.listeners.new_listener()
     }
 
@@ -90,7 +90,7 @@ impl<DB: Database> Snapshotter<DB> {
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
-    pub fn run(&mut self, targets: SnapshotTargets) -> SnapshotterResult {
+    pub fn run(&mut self, targets: StaticFileTargets) -> StaticFileProducerResult {
         debug_assert!(targets
             .is_contiguous_to_highest_snapshots(self.snapshot_provider.get_highest_snapshots()));
 
@@ -132,7 +132,8 @@ impl<DB: Database> Snapshotter<DB> {
         let elapsed = start.elapsed(); // TODO(alexey): track in metrics
         debug!(target: "snapshot", ?targets, ?elapsed, "Snapshotter finished");
 
-        self.listeners.notify(SnapshotterEvent::Finished { targets: targets.clone(), elapsed });
+        self.listeners
+            .notify(StaticFileProducerEvent::Finished { targets: targets.clone(), elapsed });
 
         Ok(targets)
     }
@@ -142,17 +143,17 @@ impl<DB: Database> Snapshotter<DB> {
     /// [SnapshotProvider::get_highest_snapshots].
     pub fn get_snapshot_targets(
         &self,
-        finalized_block_numbers: HighestSnapshots,
-    ) -> RethResult<SnapshotTargets> {
+        finalized_block_numbers: HighestStaticFiles,
+    ) -> RethResult<StaticFileTargets> {
         let highest_snapshots = self.snapshot_provider.get_highest_snapshots();
 
-        let targets = SnapshotTargets {
+        let targets = StaticFileTargets {
             headers: finalized_block_numbers.headers.and_then(|finalized_block_number| {
                 self.get_snapshot_target(highest_snapshots.headers, finalized_block_number)
             }),
             // Snapshot receipts only if they're not pruned according to the user configuration
-            receipts: if self.prune_modes.receipts.is_none() &&
-                self.prune_modes.receipts_log_filter.is_empty()
+            receipts: if self.prune_modes.receipts.is_none()
+                && self.prune_modes.receipts_log_filter.is_empty()
             {
                 finalized_block_numbers.receipts.and_then(|finalized_block_number| {
                     self.get_snapshot_target(highest_snapshots.receipts, finalized_block_number)
@@ -189,7 +190,7 @@ impl<DB: Database> Snapshotter<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{snapshotter::SnapshotTargets, Snapshotter};
+    use crate::{snapshotter::StaticFileTargets, StaticFileProducer};
     use assert_matches::assert_matches;
     use reth_db::{database::Database, transaction::DbTx};
     use reth_interfaces::{
@@ -200,8 +201,10 @@ mod tests {
         },
         RethError,
     };
-    use reth_primitives::{static_file::HighestSnapshots, PruneModes, StaticFileSegment, B256, U256};
-    use reth_provider::providers::SnapshotWriter;
+    use reth_primitives::{
+        static_file::HighestStaticFiles, PruneModes, StaticFileSegment, B256, U256,
+    };
+    use reth_provider::providers::StaticFileWriter;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
 
     #[test]
@@ -239,11 +242,14 @@ mod tests {
         let provider_factory = db.factory;
         let snapshot_provider = provider_factory.snapshot_provider();
 
-        let mut snapshotter =
-            Snapshotter::new(provider_factory, snapshot_provider.clone(), PruneModes::default());
+        let mut snapshotter = StaticFileProducer::new(
+            provider_factory,
+            snapshot_provider.clone(),
+            PruneModes::default(),
+        );
 
         let targets = snapshotter
-            .get_snapshot_targets(HighestSnapshots {
+            .get_snapshot_targets(HighestStaticFiles {
                 headers: Some(1),
                 receipts: Some(1),
                 transactions: Some(1),
@@ -251,7 +257,7 @@ mod tests {
             .expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets {
+            StaticFileTargets {
                 headers: Some(0..=1),
                 receipts: Some(0..=1),
                 transactions: Some(0..=1)
@@ -260,11 +266,11 @@ mod tests {
         assert_matches!(snapshotter.run(targets), Ok(_));
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: Some(1), receipts: Some(1), transactions: Some(1) }
+            HighestStaticFiles { headers: Some(1), receipts: Some(1), transactions: Some(1) }
         );
 
         let targets = snapshotter
-            .get_snapshot_targets(HighestSnapshots {
+            .get_snapshot_targets(HighestStaticFiles {
                 headers: Some(3),
                 receipts: Some(3),
                 transactions: Some(3),
@@ -272,7 +278,7 @@ mod tests {
             .expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets {
+            StaticFileTargets {
                 headers: Some(2..=3),
                 receipts: Some(2..=3),
                 transactions: Some(2..=3)
@@ -281,11 +287,11 @@ mod tests {
         assert_matches!(snapshotter.run(targets), Ok(_));
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
         );
 
         let targets = snapshotter
-            .get_snapshot_targets(HighestSnapshots {
+            .get_snapshot_targets(HighestStaticFiles {
                 headers: Some(4),
                 receipts: Some(4),
                 transactions: Some(4),
@@ -293,7 +299,7 @@ mod tests {
             .expect("get snapshot targets");
         assert_eq!(
             targets,
-            SnapshotTargets {
+            StaticFileTargets {
                 headers: Some(4..=4),
                 receipts: Some(4..=4),
                 transactions: Some(4..=4)
@@ -305,7 +311,7 @@ mod tests {
         );
         assert_eq!(
             snapshot_provider.get_highest_snapshots(),
-            HighestSnapshots { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
         );
     }
 }

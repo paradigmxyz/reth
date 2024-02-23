@@ -31,7 +31,7 @@ use reth_primitives::{
     fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
 };
 use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
-use reth_snapshot::Snapshotter;
+use reth_snapshot::StaticFileProducer;
 use reth_stages::{
     sets::DefaultStages,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
@@ -95,7 +95,7 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         provider_factory: ProviderFactory<DB>,
         task_executor: &TaskExecutor,
-        snapshotter: Snapshotter<DB>,
+        snapshotter: StaticFileProducer<DB>,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
@@ -232,7 +232,7 @@ impl Command {
             )
             .await?;
 
-        let snapshotter = Snapshotter::new(
+        let snapshotter = StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.snapshot_provider(),
             PruneModes::default(),

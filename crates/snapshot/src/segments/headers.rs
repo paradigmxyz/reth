@@ -6,7 +6,7 @@ use reth_db::{
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{static_file::SegmentConfig, BlockNumber, StaticFileSegment};
 use reth_provider::{
-    providers::{SnapshotProvider, SnapshotWriter},
+    providers::{StaticFileProvider, StaticFileWriter},
     DatabaseProviderRO,
 };
 use std::{ops::RangeInclusive, path::Path};
@@ -23,7 +23,7 @@ impl<DB: Database> Segment<DB> for Headers {
     fn snapshot(
         &self,
         provider: DatabaseProviderRO<DB>,
-        snapshot_provider: SnapshotProvider,
+        snapshot_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
         let mut snapshot_writer =

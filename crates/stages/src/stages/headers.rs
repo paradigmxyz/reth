@@ -21,7 +21,7 @@ use reth_primitives::{
     BlockHash, BlockNumber, SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
-    providers::{SnapshotProvider, SnapshotWriter},
+    providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HeaderSyncMode,
 };
@@ -99,7 +99,7 @@ where
     fn write_headers<DB: Database>(
         &mut self,
         tx: &<DB as Database>::TXMut,
-        snapshot_provider: SnapshotProvider,
+        snapshot_provider: StaticFileProvider,
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
 

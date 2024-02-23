@@ -12,7 +12,7 @@ mod prune;
 pub use prune::PruneHook;
 
 mod snapshot;
-pub use snapshot::SnapshotHook;
+pub use snapshot::StaticFileHook;
 
 /// Collection of [engine hooks][`EngineHook`].
 #[derive(Default)]

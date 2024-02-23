@@ -45,7 +45,7 @@ mod tests {
         generators::{random_header, random_header_range},
     };
     use reth_primitives::SealedHeader;
-    use reth_provider::providers::SnapshotWriter;
+    use reth_provider::providers::StaticFileWriter;
 
     stage_test_suite_ext!(FinishTestRunner, finish);
 

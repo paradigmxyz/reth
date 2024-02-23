@@ -6,7 +6,7 @@ use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::AutoSealBuilder;
 use reth_beacon_consensus::{
-    hooks::{EngineHooks, PruneHook, SnapshotHook},
+    hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{config::BlockchainTreeConfig, ShareableBlockchainTree};
@@ -39,7 +39,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_rpc_engine_api::EngineApi;
-use reth_snapshot::Snapshotter;
+use reth_snapshot::StaticFileProducer;
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_transaction_pool::TransactionPool;
 use std::{path::PathBuf, sync::Arc};
@@ -264,13 +264,13 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         let mut hooks = EngineHooks::new();
 
-        let mut snapshotter = Snapshotter::new(
+        let mut snapshotter = StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.snapshot_provider(),
             prune_config.clone().unwrap_or_default().segments,
         );
         let snapshotter_events = snapshotter.events();
-        hooks.add(SnapshotHook::new(snapshotter.clone(), Box::new(executor.clone())));
+        hooks.add(StaticFileHook::new(snapshotter.clone(), Box::new(executor.clone())));
         info!(target: "reth::cli", "Snapshotter initialized");
 
         // Configure the pipeline

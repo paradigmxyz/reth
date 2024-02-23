@@ -239,7 +239,7 @@ mod tests {
         generators::{random_block_range, random_contract_account_range},
     };
     use reth_primitives::{stage::StageUnitCheckpoint, Address, SealedBlock, B256, U256};
-    use reth_provider::providers::SnapshotWriter;
+    use reth_provider::providers::StaticFileWriter;
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 

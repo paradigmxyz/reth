@@ -23,7 +23,7 @@ use reth_node_core::{events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
-use reth_snapshot::Snapshotter;
+use reth_snapshot::StaticFileProducer;
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
@@ -108,7 +108,7 @@ impl ImportCommand {
         let tip = file_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
 
-        let snapshotter = Snapshotter::new(
+        let snapshotter = StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.snapshot_provider(),
             PruneModes::default(),
@@ -156,7 +156,7 @@ impl ImportCommand {
         provider_factory: ProviderFactory<DB>,
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
-        snapshotter: Snapshotter<DB>,
+        snapshotter: StaticFileProducer<DB>,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,

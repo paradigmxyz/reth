@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use reth_db::{
     database::Database,
-    snapshot::iter_snapshots,
+    snapshot::iter_static_files,
     table::Table,
     transaction::{DbTx, DbTxMut},
     TableViewer, Tables,
@@ -25,7 +25,7 @@ impl Command {
             }
             Subcommands::Snapshot { segment } => {
                 let snapshot_provider = provider_factory.snapshot_provider();
-                let snapshots = iter_snapshots(snapshot_provider.directory())?;
+                let snapshots = iter_static_files(snapshot_provider.directory())?;
 
                 if let Some(segment_snapshots) = snapshots.get(&segment) {
                     for (block_range, _) in segment_snapshots {

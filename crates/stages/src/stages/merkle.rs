@@ -354,7 +354,7 @@ mod tests {
     use reth_primitives::{
         keccak256, stage::StageUnitCheckpoint, SealedBlock, StaticFileSegment, StorageEntry, U256,
     };
-    use reth_provider::providers::SnapshotWriter;
+    use reth_provider::providers::StaticFileWriter;
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
 

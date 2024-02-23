@@ -7,8 +7,8 @@ use crate::{
 use futures::FutureExt;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
-use reth_primitives::{static_file::HighestSnapshots, BlockNumber};
-use reth_snapshot::{Snapshotter, SnapshotterWithResult};
+use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
+use reth_snapshot::{StaticFileProducerWithResult, StaticFileProducer};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
@@ -18,17 +18,17 @@ use tracing::trace;
 ///
 /// This type controls the [Snapshotter].
 #[derive(Debug)]
-pub struct SnapshotHook<DB> {
+pub struct StaticFileHook<DB> {
     /// The current state of the snapshotter.
-    state: SnapshotterState<DB>,
+    state: StaticFileProducerState<DB>,
     /// The type that can spawn the snapshotter task.
     task_spawner: Box<dyn TaskSpawner>,
 }
 
-impl<DB: Database + 'static> SnapshotHook<DB> {
+impl<DB: Database + 'static> StaticFileHook<DB> {
     /// Create a new instance
-    pub fn new(snapshotter: Snapshotter<DB>, task_spawner: Box<dyn TaskSpawner>) -> Self {
-        Self { state: SnapshotterState::Idle(Some(snapshotter)), task_spawner }
+    pub fn new(snapshotter: StaticFileProducer<DB>, task_spawner: Box<dyn TaskSpawner>) -> Self {
+        Self { state: StaticFileProducerState::Idle(Some(snapshotter)), task_spawner }
     }
 
     /// Advances the snapshotter state.
@@ -36,15 +36,15 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
     /// This checks for the result in the channel, or returns pending if the snapshotter is idle.
     fn poll_snapshotter(&mut self, cx: &mut Context<'_>) -> Poll<RethResult<EngineHookEvent>> {
         let result = match self.state {
-            SnapshotterState::Idle(_) => return Poll::Pending,
-            SnapshotterState::Running(ref mut fut) => {
+            StaticFileProducerState::Idle(_) => return Poll::Pending,
+            StaticFileProducerState::Running(ref mut fut) => {
                 ready!(fut.poll_unpin(cx))
             }
         };
 
         let event = match result {
             Ok((snapshotter, result)) => {
-                self.state = SnapshotterState::Idle(Some(snapshotter));
+                self.state = StaticFileProducerState::Idle(Some(snapshotter));
 
                 match result {
                     Ok(_) => EngineHookEvent::Finished(Ok(())),
@@ -75,13 +75,13 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
         finalized_block_number: BlockNumber,
     ) -> RethResult<Option<EngineHookEvent>> {
         Ok(match &mut self.state {
-            SnapshotterState::Idle(snapshotter) => {
+            StaticFileProducerState::Idle(snapshotter) => {
                 let Some(mut snapshotter) = snapshotter.take() else {
                     trace!(target: "consensus::engine::hooks::snapshot", "Snapshotter is already running but the state is idle");
-                    return Ok(None)
+                    return Ok(None);
                 };
 
-                let targets = snapshotter.get_snapshot_targets(HighestSnapshots {
+                let targets = snapshotter.get_snapshot_targets(HighestStaticFiles {
                     headers: Some(finalized_block_number),
                     receipts: Some(finalized_block_number),
                     transactions: Some(finalized_block_number),
@@ -97,20 +97,20 @@ impl<DB: Database + 'static> SnapshotHook<DB> {
                             let _ = tx.send((snapshotter, result));
                         }),
                     );
-                    self.state = SnapshotterState::Running(rx);
+                    self.state = StaticFileProducerState::Running(rx);
 
                     Some(EngineHookEvent::Started)
                 } else {
-                    self.state = SnapshotterState::Idle(Some(snapshotter));
+                    self.state = StaticFileProducerState::Idle(Some(snapshotter));
                     Some(EngineHookEvent::NotReady)
                 }
             }
-            SnapshotterState::Running(_) => None,
+            StaticFileProducerState::Running(_) => None,
         })
     }
 }
 
-impl<DB: Database + 'static> EngineHook for SnapshotHook<DB> {
+impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
     fn name(&self) -> &'static str {
         "Snapshot"
     }
@@ -122,7 +122,7 @@ impl<DB: Database + 'static> EngineHook for SnapshotHook<DB> {
     ) -> Poll<RethResult<EngineHookEvent>> {
         let Some(finalized_block_number) = ctx.finalized_block_number else {
             trace!(target: "consensus::engine::hooks::snapshot", ?ctx, "Finalized block number is not available");
-            return Poll::Pending
+            return Poll::Pending;
         };
 
         // Try to spawn a snapshotter
@@ -146,9 +146,9 @@ impl<DB: Database + 'static> EngineHook for SnapshotHook<DB> {
 /// [SnapshotterState::Idle] means that the snapshotter is currently idle.
 /// [SnapshotterState::Running] means that the snapshotter is currently running.
 #[derive(Debug)]
-enum SnapshotterState<DB> {
+enum StaticFileProducerState<DB> {
     /// Snapshotter is idle.
-    Idle(Option<Snapshotter<DB>>),
+    Idle(Option<StaticFileProducer<DB>>),
     /// Snapshotter is running and waiting for a response
-    Running(oneshot::Receiver<SnapshotterWithResult<DB>>),
+    Running(oneshot::Receiver<StaticFileProducerWithResult<DB>>),
 }

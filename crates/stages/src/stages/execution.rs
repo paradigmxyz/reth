@@ -18,7 +18,7 @@ use reth_primitives::{
     BlockNumber, Header, PruneModes, StaticFileSegment, U256,
 };
 use reth_provider::{
-    providers::{SnapshotProvider, SnapshotProviderRWRefMut, SnapshotWriter},
+    providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
 };
@@ -258,7 +258,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 }
 
 fn execution_checkpoint(
-    provider: &SnapshotProvider,
+    provider: &StaticFileProvider,
     start_block: BlockNumber,
     max_block: BlockNumber,
     checkpoint: StageCheckpoint,
@@ -325,7 +325,7 @@ fn execution_checkpoint(
 }
 
 fn calculate_gas_used_from_headers(
-    provider: &SnapshotProvider,
+    provider: &StaticFileProvider,
     range: RangeInclusive<BlockNumber>,
 ) -> Result<u64, ProviderError> {
     let mut gas_total = 0;
@@ -540,7 +540,7 @@ impl ExecutionStageThresholds {
 fn prepare_snapshotter<'a, 'b, DB: Database>(
     provider: &'b DatabaseProviderRW<DB>,
     start_block: u64,
-) -> Result<SnapshotProviderRWRefMut<'a>, StageError>
+) -> Result<StaticFileProviderRWRefMut<'a>, StageError>
 where
     'b: 'a,
 {

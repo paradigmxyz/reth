@@ -21,7 +21,7 @@ use reth_primitives::{
     },
     BlockNumber, StaticFileSegment,
 };
-use reth_provider::{providers::SnapshotProvider, DatabaseProviderRO, TransactionsProviderExt};
+use reth_provider::{providers::StaticFileProvider, DatabaseProviderRO, TransactionsProviderExt};
 use std::{ops::RangeInclusive, path::Path};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
@@ -36,7 +36,7 @@ pub trait Segment<DB: Database>: Send + Sync {
     fn snapshot(
         &self,
         provider: DatabaseProviderRO<DB>,
-        snapshot_provider: SnapshotProvider,
+        snapshot_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()>;
 

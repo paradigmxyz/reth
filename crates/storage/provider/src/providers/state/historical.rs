@@ -1,5 +1,5 @@
 use crate::{
-    providers::{state::macros::delegate_provider_impls, SnapshotProvider},
+    providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, BundleStateWithReceipts, ProviderError, StateProvider,
     StateRootProvider,
 };
@@ -38,7 +38,7 @@ pub struct HistoricalStateProviderRef<'b, TX: DbTx> {
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
     /// Snapshot provider
-    snapshot_provider: SnapshotProvider,
+    snapshot_provider: StaticFileProvider,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -51,7 +51,7 @@ pub enum HistoryInfo {
 
 impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
     /// Create new StateProvider for historical block number
-    pub fn new(tx: &'b TX, block_number: BlockNumber, snapshot_provider: SnapshotProvider) -> Self {
+    pub fn new(tx: &'b TX, block_number: BlockNumber, snapshot_provider: StaticFileProvider) -> Self {
         Self { tx, block_number, lowest_available_blocks: Default::default(), snapshot_provider }
     }
 
@@ -61,7 +61,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         tx: &'b TX,
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
-        snapshot_provider: SnapshotProvider,
+        snapshot_provider: StaticFileProvider,
     ) -> Self {
         Self { tx, block_number, lowest_available_blocks, snapshot_provider }
     }
@@ -314,12 +314,12 @@ pub struct HistoricalStateProvider<TX: DbTx> {
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
     /// Snapshot provider
-    snapshot_provider: SnapshotProvider,
+    snapshot_provider: StaticFileProvider,
 }
 
 impl<TX: DbTx> HistoricalStateProvider<TX> {
     /// Create new StateProvider for historical block number
-    pub fn new(tx: TX, block_number: BlockNumber, snapshot_provider: SnapshotProvider) -> Self {
+    pub fn new(tx: TX, block_number: BlockNumber, snapshot_provider: StaticFileProvider) -> Self {
         Self { tx, block_number, lowest_available_blocks: Default::default(), snapshot_provider }
     }
 

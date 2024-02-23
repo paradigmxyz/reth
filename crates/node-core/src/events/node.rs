@@ -13,7 +13,7 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_prune::PrunerEvent;
-use reth_snapshot::SnapshotterEvent;
+use reth_snapshot::StaticFileProducerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
 use std::{
     fmt::{Display, Formatter},
@@ -240,9 +240,9 @@ impl<DB> NodeState<DB> {
         }
     }
 
-    fn handle_snapshotter_event(&self, event: SnapshotterEvent) {
+    fn handle_snapshotter_event(&self, event: StaticFileProducerEvent) {
         match event {
-            SnapshotterEvent::Finished { targets, elapsed } => {
+            StaticFileProducerEvent::Finished { targets, elapsed } => {
                 info!(?targets, ?elapsed, "Snapshotter finished");
             }
         }
@@ -292,7 +292,7 @@ pub enum NodeEvent {
     /// A pruner event
     Pruner(PrunerEvent),
     /// A snapshotter event
-    Snapshotter(SnapshotterEvent),
+    Snapshotter(StaticFileProducerEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -325,8 +325,8 @@ impl From<PrunerEvent> for NodeEvent {
     }
 }
 
-impl From<SnapshotterEvent> for NodeEvent {
-    fn from(event: SnapshotterEvent) -> Self {
+impl From<StaticFileProducerEvent> for NodeEvent {
+    fn from(event: StaticFileProducerEvent) -> Self {
         NodeEvent::Snapshotter(event)
     }
 }

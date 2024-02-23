@@ -1,11 +1,11 @@
 mod manager;
-pub use manager::{SnapshotProvider, SnapshotWriter};
+pub use manager::{StaticFileProvider, StaticFileWriter};
 
 mod jar;
-pub use jar::SnapshotJarProvider;
+pub use jar::StaticFileJarProvider;
 
 mod writer;
-pub use writer::{SnapshotProviderRW, SnapshotProviderRWRefMut};
+pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 
 mod metrics;
 
@@ -147,7 +147,7 @@ mod tests {
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager = SnapshotProvider::new(snap_path.path()).unwrap().with_filters();
+            let manager = StaticFileProvider::new(snap_path.path()).unwrap().with_filters();
             let jar_provider = manager
                 .get_segment_provider_from_block(StaticFileSegment::Headers, 0, Some(&snap_file))
                 .unwrap();

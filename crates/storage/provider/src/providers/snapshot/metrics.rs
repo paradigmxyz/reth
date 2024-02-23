@@ -8,20 +8,22 @@ use strum::{EnumIter, IntoEnumIterator};
 
 /// Metrics for the snapshot provider.
 #[derive(Debug)]
-pub struct SnapshotProviderMetrics {
-    segment_operations:
-        HashMap<(StaticFileSegment, SnapshotProviderOperation), SnapshotProviderOperationMetrics>,
+pub struct StaticFileProviderMetrics {
+    segment_operations: HashMap<
+        (StaticFileSegment, StaticFileProviderOperation),
+        StaticFileProviderOperationMetrics,
+    >,
 }
 
-impl Default for SnapshotProviderMetrics {
+impl Default for StaticFileProviderMetrics {
     fn default() -> Self {
         Self {
             segment_operations: StaticFileSegment::iter()
-                .cartesian_product(SnapshotProviderOperation::iter())
+                .cartesian_product(StaticFileProviderOperation::iter())
                 .map(|(segment, operation)| {
                     (
                         (segment, operation),
-                        SnapshotProviderOperationMetrics::new_with_labels(&[
+                        StaticFileProviderOperationMetrics::new_with_labels(&[
                             ("segment", segment.as_str()),
                             ("operation", operation.as_str()),
                         ]),
@@ -32,11 +34,11 @@ impl Default for SnapshotProviderMetrics {
     }
 }
 
-impl SnapshotProviderMetrics {
+impl StaticFileProviderMetrics {
     pub(crate) fn record_segment_operation(
         &self,
         segment: StaticFileSegment,
-        operation: SnapshotProviderOperation,
+        operation: StaticFileProviderOperation,
         duration: Option<Duration>,
     ) {
         self.segment_operations
@@ -56,7 +58,7 @@ impl SnapshotProviderMetrics {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
-pub(crate) enum SnapshotProviderOperation {
+pub(crate) enum StaticFileProviderOperation {
     InitCursor,
     OpenWriter,
     Append,
@@ -65,7 +67,7 @@ pub(crate) enum SnapshotProviderOperation {
     CommitWriter,
 }
 
-impl SnapshotProviderOperation {
+impl StaticFileProviderOperation {
     const fn as_str(&self) -> &'static str {
         match self {
             Self::InitCursor => "init-cursor",
@@ -80,7 +82,7 @@ impl SnapshotProviderOperation {
 
 #[derive(Metrics)]
 #[metrics(scope = "snapshots.jar_provider")]
-pub(crate) struct SnapshotProviderOperationMetrics {
+pub(crate) struct StaticFileProviderOperationMetrics {
     /// Total number of snapshot jar provider operations made.
     calls_total: Counter,
     /// The time it took to execute the snapshot jar provider operation that writes data.

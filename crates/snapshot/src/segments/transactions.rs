@@ -8,7 +8,7 @@ use reth_primitives::{
     BlockNumber, StaticFileSegment, TxNumber,
 };
 use reth_provider::{
-    providers::{SnapshotProvider, SnapshotWriter},
+    providers::{StaticFileProvider, StaticFileWriter},
     BlockReader, DatabaseProviderRO, TransactionsProviderExt,
 };
 use std::{ops::RangeInclusive, path::Path};
@@ -27,7 +27,7 @@ impl<DB: Database> Segment<DB> for Transactions {
     fn snapshot(
         &self,
         provider: DatabaseProviderRO<DB>,
-        snapshot_provider: SnapshotProvider,
+        snapshot_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
         let mut snapshot_writer =

@@ -52,7 +52,7 @@ use reth_provider::{
     ProviderFactory, StageCheckpointReader,
 };
 use reth_revm::EvmProcessorFactory;
-use reth_snapshot::Snapshotter;
+use reth_snapshot::StaticFileProducer;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -543,7 +543,7 @@ impl NodeConfig {
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
-        snapshotter: Snapshotter<DB>,
+        snapshotter: StaticFileProducer<DB>,
         evm_config: EvmConfig,
     ) -> eyre::Result<Pipeline<DB>>
     where
@@ -793,7 +793,7 @@ impl NodeConfig {
         continuous: bool,
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
-        snapshotter: Snapshotter<DB>,
+        snapshotter: StaticFileProducer<DB>,
         evm_config: EvmConfig,
     ) -> eyre::Result<Pipeline<DB>>
     where

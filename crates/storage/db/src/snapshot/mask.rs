@@ -65,7 +65,7 @@ pub trait ColumnSelectorThree {
 
 #[macro_export]
 /// Add mask to select `N` column values from a specific snapshot segment row.
-macro_rules! add_snapshot_mask {
+macro_rules! add_static_file_mask {
     ($mask_struct:tt, $type1:ty, $mask:expr) => {
         impl ColumnSelectorOne for $mask_struct<$type1> {
             type FIRST = $type1;

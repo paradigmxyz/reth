@@ -1,6 +1,6 @@
 use crate::{
     bundle_state::{BundleStateInit, BundleStateWithReceipts, HashedStateChanges, RevertsInit},
-    providers::{database::metrics, snapshot::SnapshotWriter, SnapshotProvider},
+    providers::{database::metrics, snapshot::StaticFileWriter, StaticFileProvider},
     to_range,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
@@ -103,19 +103,19 @@ pub struct DatabaseProvider<TX> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot provider
-    snapshot_provider: SnapshotProvider,
+    snapshot_provider: StaticFileProvider,
 }
 
 impl<TX> DatabaseProvider<TX> {
     /// Returns a snapshot provider
-    pub fn snapshot_provider(&self) -> &SnapshotProvider {
+    pub fn snapshot_provider(&self) -> &StaticFileProvider {
         &self.snapshot_provider
     }
 }
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-write transaction.
-    pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>, snapshot_provider: SnapshotProvider) -> Self {
+    pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>, snapshot_provider: StaticFileProvider) -> Self {
         Self { tx, chain_spec, snapshot_provider }
     }
 }
@@ -241,7 +241,7 @@ where
 
 impl<TX: DbTx> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-only transaction.
-    pub fn new(tx: TX, chain_spec: Arc<ChainSpec>, snapshot_provider: SnapshotProvider) -> Self {
+    pub fn new(tx: TX, chain_spec: Arc<ChainSpec>, snapshot_provider: StaticFileProvider) -> Self {
         Self { tx, chain_spec, snapshot_provider }
     }
 

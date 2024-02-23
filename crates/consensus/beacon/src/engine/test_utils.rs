@@ -31,7 +31,7 @@ use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
-use reth_snapshot::Snapshotter;
+use reth_snapshot::StaticFileProducer;
 use reth_stages::{sets::DefaultStages, test_utils::TestStages, ExecOutput, Pipeline, StageError};
 use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};
@@ -377,7 +377,7 @@ where
             )),
         };
 
-        let snapshotter = Snapshotter::new(
+        let snapshotter = StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.snapshot_provider(),
             PruneModes::default(),

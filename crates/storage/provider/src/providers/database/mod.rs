@@ -1,7 +1,7 @@
 use crate::{
     providers::{
         state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
-        SnapshotProvider,
+        StaticFileProvider,
     },
     to_range,
     traits::{BlockSource, ReceiptProvider},
@@ -44,7 +44,7 @@ pub struct ProviderFactory<DB> {
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Snapshot Provider
-    snapshot_provider: SnapshotProvider,
+    snapshot_provider: StaticFileProvider,
 }
 
 impl<DB> ProviderFactory<DB> {
@@ -54,7 +54,7 @@ impl<DB> ProviderFactory<DB> {
         chain_spec: Arc<ChainSpec>,
         snapshots_path: PathBuf,
     ) -> RethResult<ProviderFactory<DB>> {
-        Ok(Self { db, chain_spec, snapshot_provider: SnapshotProvider::new(snapshots_path)? })
+        Ok(Self { db, chain_spec, snapshot_provider: StaticFileProvider::new(snapshots_path)? })
     }
 
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
@@ -68,7 +68,7 @@ impl<DB> ProviderFactory<DB> {
         Ok(ProviderFactory::<DatabaseEnv> {
             db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
             chain_spec,
-            snapshot_provider: SnapshotProvider::new(snapshots_path)?,
+            snapshot_provider: StaticFileProvider::new(snapshots_path)?,
         })
     }
 
@@ -84,7 +84,7 @@ impl<DB> ProviderFactory<DB> {
     }
 
     /// Returns snapshot provider
-    pub fn snapshot_provider(&self) -> SnapshotProvider {
+    pub fn snapshot_provider(&self) -> StaticFileProvider {
         self.snapshot_provider.clone()
     }
 
@@ -601,7 +601,7 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{
-        providers::SnapshotWriter, test_utils::create_test_provider_factory, BlockHashReader,
+        providers::StaticFileWriter, test_utils::create_test_provider_factory, BlockHashReader,
         BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
     };
     use alloy_rlp::Decodable;

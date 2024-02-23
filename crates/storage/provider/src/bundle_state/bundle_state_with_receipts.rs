@@ -1,4 +1,4 @@
-use crate::{providers::SnapshotProviderRWRefMut, StateChanges, StateReverts};
+use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,
@@ -294,7 +294,7 @@ impl BundleStateWithReceipts {
     pub fn write_to_storage<TX>(
         self,
         tx: &TX,
-        mut snapshotter: Option<SnapshotProviderRWRefMut<'_>>,
+        mut snapshotter: Option<StaticFileProviderRWRefMut<'_>>,
         is_value_known: OriginalValuesKnown,
     ) -> ProviderResult<()>
     where

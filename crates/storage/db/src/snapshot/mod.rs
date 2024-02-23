@@ -9,7 +9,7 @@ use std::{
 pub use generation::*;
 
 mod cursor;
-pub use cursor::SnapshotCursor;
+pub use cursor::StaticFileCursor;
 
 mod mask;
 pub use mask::*;
@@ -22,20 +22,20 @@ use reth_primitives::{
 mod masks;
 
 /// Alias type for a map of [`SnapshotSegment`] and sorted lists of existing snapshot ranges.
-type SortedSnapshots =
+type SortedStaticFiles =
     HashMap<StaticFileSegment, Vec<(SegmentRangeInclusive, Option<SegmentRangeInclusive>)>>;
 
 /// Given the snapshots directory path, it returns a list over the existing snapshots organized by
 /// [`SnapshotSegment`]. Each segment has a sorted list of block ranges and transaction ranges as
 /// presented in the file configuration.
-pub fn iter_snapshots(path: impl AsRef<Path>) -> Result<SortedSnapshots, NippyJarError> {
+pub fn iter_static_files(path: impl AsRef<Path>) -> Result<SortedStaticFiles, NippyJarError> {
     let path = path.as_ref();
     if !path.exists() {
         reth_primitives::fs::create_dir_all(path)
             .map_err(|err| NippyJarError::Custom(err.to_string()))?;
     }
 
-    let mut static_files = SortedSnapshots::default();
+    let mut static_files = SortedStaticFiles::default();
     let entries = reth_primitives::fs::read_dir(path)
         .map_err(|err| NippyJarError::Custom(err.to_string()))?
         .filter_map(Result::ok)

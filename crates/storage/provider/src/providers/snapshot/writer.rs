@@ -1,6 +1,6 @@
-use crate::providers::snapshot::metrics::SnapshotProviderOperation;
+use crate::providers::snapshot::metrics::StaticFileProviderOperation;
 
-use super::{metrics::SnapshotProviderMetrics, SnapshotProvider};
+use super::{metrics::StaticFileProviderMetrics, StaticFileProvider};
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_db::codecs::CompactU256;
@@ -20,25 +20,26 @@ use std::{
 use tracing::debug;
 
 /// Mutable reference to a dashmap element of [`SnapshotProviderRW`].
-pub type SnapshotProviderRWRefMut<'a> = RefMut<'a, StaticFileSegment, SnapshotProviderRW<'static>>;
+pub type StaticFileProviderRWRefMut<'a> =
+    RefMut<'a, StaticFileSegment, StaticFileProviderRW<'static>>;
 
 #[derive(Debug)]
 /// Extends `SnapshotProvider` with writing capabilities
-pub struct SnapshotProviderRW<'a> {
-    reader: SnapshotProvider,
+pub struct StaticFileProviderRW<'a> {
+    reader: StaticFileProvider,
     writer: NippyJarWriter<'a, SegmentHeader>,
     data_path: PathBuf,
     buf: Vec<u8>,
-    metrics: Option<Arc<SnapshotProviderMetrics>>,
+    metrics: Option<Arc<StaticFileProviderMetrics>>,
 }
 
-impl<'a> SnapshotProviderRW<'a> {
+impl<'a> StaticFileProviderRW<'a> {
     /// Creates a new [`SnapshotProviderRW`] for a [`SnapshotSegment`].
     pub fn new(
         segment: StaticFileSegment,
         block: BlockNumber,
-        reader: SnapshotProvider,
-        metrics: Option<Arc<SnapshotProviderMetrics>>,
+        reader: StaticFileProvider,
+        metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<Self> {
         let (writer, data_path) = Self::open(segment, block, reader.clone(), metrics.clone())?;
         Ok(Self { writer, data_path, buf: Vec::with_capacity(100), reader, metrics })
@@ -47,8 +48,8 @@ impl<'a> SnapshotProviderRW<'a> {
     fn open(
         segment: StaticFileSegment,
         block: u64,
-        reader: SnapshotProvider,
-        metrics: Option<Arc<SnapshotProviderMetrics>>,
+        reader: StaticFileProvider,
+        metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<(NippyJarWriter<'a, SegmentHeader>, PathBuf)> {
         let start = Instant::now();
 
@@ -58,7 +59,7 @@ impl<'a> SnapshotProviderRW<'a> {
                 Ok(provider) => {
                     (NippyJar::load(provider.data_path())?, provider.data_path().into())
                 }
-                Err(ProviderError::MissingSnapshotBlock(_, _)) => {
+                Err(ProviderError::MissingStaticFileBlock(_, _)) => {
                     let path = reader.directory().join(segment.filename(&block_range));
                     (create_jar(segment, &path, block_range), path)
                 }
@@ -69,7 +70,7 @@ impl<'a> SnapshotProviderRW<'a> {
             Ok(writer) => Ok((writer, path)),
             Err(NippyJarError::FrozenJar) => {
                 // This snapshot has been frozen, so we should
-                Err(ProviderError::FinalizedSnapshot(segment, block))
+                Err(ProviderError::FinalizedStaticFile(segment, block))
             }
             Err(e) => Err(e.into()),
         }?;
@@ -77,7 +78,7 @@ impl<'a> SnapshotProviderRW<'a> {
         if let Some(metrics) = &metrics {
             metrics.record_segment_operation(
                 segment,
-                SnapshotProviderOperation::OpenWriter,
+                StaticFileProviderOperation::OpenWriter,
                 Some(start.elapsed()),
             );
         }
@@ -95,7 +96,7 @@ impl<'a> SnapshotProviderRW<'a> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 self.writer.user_header().segment(),
-                SnapshotProviderOperation::CommitWriter,
+                StaticFileProviderOperation::CommitWriter,
                 Some(start.elapsed()),
             );
         }
@@ -164,7 +165,7 @@ impl<'a> SnapshotProviderRW<'a> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 segment,
-                SnapshotProviderOperation::IncrementBlock,
+                StaticFileProviderOperation::IncrementBlock,
                 Some(start.elapsed()),
             );
         }
@@ -216,7 +217,7 @@ impl<'a> SnapshotProviderRW<'a> {
                     // Update `SegmentHeader`
                     self.writer.user_header_mut().prune(len);
                     self.writer.prune_rows(len as usize)?;
-                    break
+                    break;
                 }
 
                 num_rows -= len;
@@ -298,7 +299,7 @@ impl<'a> SnapshotProviderRW<'a> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 StaticFileSegment::Headers,
-                SnapshotProviderOperation::Append,
+                StaticFileProviderOperation::Append,
                 Some(start.elapsed()),
             );
         }
@@ -324,7 +325,7 @@ impl<'a> SnapshotProviderRW<'a> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 StaticFileSegment::Transactions,
-                SnapshotProviderOperation::Append,
+                StaticFileProviderOperation::Append,
                 Some(start.elapsed()),
             );
         }
@@ -350,7 +351,7 @@ impl<'a> SnapshotProviderRW<'a> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 StaticFileSegment::Receipts,
-                SnapshotProviderOperation::Append,
+                StaticFileProviderOperation::Append,
                 Some(start.elapsed()),
             );
         }
@@ -377,7 +378,7 @@ impl<'a> SnapshotProviderRW<'a> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 StaticFileSegment::Transactions,
-                SnapshotProviderOperation::Prune,
+                StaticFileProviderOperation::Prune,
                 Some(start.elapsed()),
             );
         }
@@ -404,7 +405,7 @@ impl<'a> SnapshotProviderRW<'a> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 StaticFileSegment::Receipts,
-                SnapshotProviderOperation::Prune,
+                StaticFileProviderOperation::Prune,
                 Some(start.elapsed()),
             );
         }
@@ -427,7 +428,7 @@ impl<'a> SnapshotProviderRW<'a> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 StaticFileSegment::Headers,
-                SnapshotProviderOperation::Prune,
+                StaticFileProviderOperation::Prune,
                 Some(start.elapsed()),
             );
         }
@@ -442,8 +443,8 @@ impl<'a> SnapshotProviderRW<'a> {
     }
 }
 
-impl<'a> Deref for SnapshotProviderRW<'a> {
-    type Target = SnapshotProvider;
+impl<'a> Deref for StaticFileProviderRW<'a> {
+    type Target = StaticFileProvider;
     fn deref(&self) -> &Self::Target {
         &self.reader
     }

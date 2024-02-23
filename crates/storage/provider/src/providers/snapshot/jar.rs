@@ -1,5 +1,5 @@
 use super::{
-    metrics::{SnapshotProviderMetrics, SnapshotProviderOperation},
+    metrics::{StaticFileProviderOperation, StaticFileProviderMetrics},
     LoadedJarRef,
 };
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
 };
 use reth_db::{
     codecs::CompactU256,
-    snapshot::{ColumnSelectorOne, HeaderMask, ReceiptMask, SnapshotCursor, TransactionMask},
+    snapshot::{ColumnSelectorOne, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
     RawValue,
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
@@ -23,39 +23,39 @@ use std::{
 
 /// Provider over a specific `NippyJar` and range.
 #[derive(Debug)]
-pub struct SnapshotJarProvider<'a> {
+pub struct StaticFileJarProvider<'a> {
     /// Main snapshot segment
     jar: LoadedJarRef<'a>,
     /// Another kind of snapshot segment to help query data from the main one.
     auxiliar_jar: Option<Box<Self>>,
-    metrics: Option<Arc<SnapshotProviderMetrics>>,
+    metrics: Option<Arc<StaticFileProviderMetrics>>,
 }
 
-impl<'a> Deref for SnapshotJarProvider<'a> {
+impl<'a> Deref for StaticFileJarProvider<'a> {
     type Target = LoadedJarRef<'a>;
     fn deref(&self) -> &Self::Target {
         &self.jar
     }
 }
 
-impl<'a> From<LoadedJarRef<'a>> for SnapshotJarProvider<'a> {
+impl<'a> From<LoadedJarRef<'a>> for StaticFileJarProvider<'a> {
     fn from(value: LoadedJarRef<'a>) -> Self {
-        SnapshotJarProvider { jar: value, auxiliar_jar: None, metrics: None }
+        StaticFileJarProvider { jar: value, auxiliar_jar: None, metrics: None }
     }
 }
 
-impl<'a> SnapshotJarProvider<'a> {
+impl<'a> StaticFileJarProvider<'a> {
     /// Provides a cursor for more granular data access.
-    pub fn cursor<'b>(&'b self) -> ProviderResult<SnapshotCursor<'a>>
+    pub fn cursor<'b>(&'b self) -> ProviderResult<StaticFileCursor<'a>>
     where
         'b: 'a,
     {
-        let result = SnapshotCursor::new(self.value(), self.mmap_handle())?;
+        let result = StaticFileCursor::new(self.value(), self.mmap_handle())?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 self.segment(),
-                SnapshotProviderOperation::InitCursor,
+                StaticFileProviderOperation::InitCursor,
                 None,
             );
         }
@@ -64,19 +64,19 @@ impl<'a> SnapshotJarProvider<'a> {
     }
 
     /// Adds a new auxiliar snapshot to help query data from the main one
-    pub fn with_auxiliar(mut self, auxiliar_jar: SnapshotJarProvider<'a>) -> Self {
+    pub fn with_auxiliar(mut self, auxiliar_jar: StaticFileJarProvider<'a>) -> Self {
         self.auxiliar_jar = Some(Box::new(auxiliar_jar));
         self
     }
 
     /// Enables metrics on the provider.
-    pub fn with_metrics(mut self, metrics: Arc<SnapshotProviderMetrics>) -> Self {
+    pub fn with_metrics(mut self, metrics: Arc<StaticFileProviderMetrics>) -> Self {
         self.metrics = Some(metrics);
         self
     }
 }
 
-impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
+impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(self
             .cursor()?
@@ -139,7 +139,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
             {
                 let sealed = header.seal(hash);
                 if !predicate(&sealed) {
-                    break
+                    break;
                 }
                 headers.push(sealed);
             }
@@ -148,7 +148,7 @@ impl<'a> HeaderProvider for SnapshotJarProvider<'a> {
     }
 }
 
-impl<'a> BlockHashReader for SnapshotJarProvider<'a> {
+impl<'a> BlockHashReader for StaticFileJarProvider<'a> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())
     }
@@ -170,7 +170,7 @@ impl<'a> BlockHashReader for SnapshotJarProvider<'a> {
     }
 }
 
-impl<'a> BlockNumReader for SnapshotJarProvider<'a> {
+impl<'a> BlockNumReader for StaticFileJarProvider<'a> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         // Information on live database
         Err(ProviderError::UnsupportedProvider)
@@ -195,7 +195,7 @@ impl<'a> BlockNumReader for SnapshotJarProvider<'a> {
     }
 }
 
-impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
+impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
     fn transaction_id(&self, hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let mut cursor = self.cursor()?;
 
@@ -310,7 +310,7 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
     }
 }
 
-impl<'a> ReceiptProvider for SnapshotJarProvider<'a> {
+impl<'a> ReceiptProvider for StaticFileJarProvider<'a> {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.cursor()?.get_one::<ReceiptMask<Receipt>>(num.into())
     }
@@ -318,7 +318,7 @@ impl<'a> ReceiptProvider for SnapshotJarProvider<'a> {
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
         if let Some(tx_snapshot) = &self.auxiliar_jar {
             if let Some(num) = tx_snapshot.transaction_id(hash)? {
-                return self.receipt(num)
+                return self.receipt(num);
             }
         }
         Ok(None)

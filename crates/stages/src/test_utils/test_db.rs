@@ -17,7 +17,7 @@ use reth_primitives::{
     TxHash, TxNumber, B256, MAINNET, U256,
 };
 use reth_provider::{
-    providers::{SnapshotProviderRWRefMut, SnapshotWriter},
+    providers::{StaticFileProviderRWRefMut, StaticFileWriter},
     HistoryWriter, ProviderError, ProviderFactory,
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc};
@@ -133,7 +133,7 @@ impl TestStageDB {
 
     /// Insert header to static file if `writer` exists, otherwise to DB.
     pub fn insert_header<TX: DbTx + DbTxMut>(
-        writer: Option<&mut SnapshotProviderRWRefMut<'_>>,
+        writer: Option<&mut StaticFileProviderRWRefMut<'_>>,
         tx: &TX,
         header: &SealedHeader,
         td: U256,

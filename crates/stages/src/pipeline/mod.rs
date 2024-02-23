@@ -9,7 +9,7 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_provider::{
-    providers::SnapshotWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_tokio_util::EventListeners;
 use std::pin::Pin;

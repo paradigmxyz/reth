@@ -4,10 +4,10 @@ use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
 use itertools::Itertools;
-use reth_db::{database::Database, mdbx, snapshot::iter_snapshots, DatabaseEnv, Tables};
+use reth_db::{database::Database, mdbx, snapshot::iter_static_files, DatabaseEnv, Tables};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
-use reth_provider::providers::SnapshotProvider;
+use reth_provider::providers::StaticFileProvider;
 use std::fs::File;
 
 #[derive(Parser, Debug)]
@@ -145,8 +145,8 @@ impl Command {
             ]);
         }
 
-        let snapshots = iter_snapshots(data_dir.snapshots_path())?;
-        let snapshot_provider = SnapshotProvider::new(data_dir.snapshots_path())?;
+        let snapshots = iter_static_files(data_dir.snapshots_path())?;
+        let snapshot_provider = StaticFileProvider::new(data_dir.snapshots_path())?;
 
         let mut total_data_size = 0;
         let mut total_index_size = 0;

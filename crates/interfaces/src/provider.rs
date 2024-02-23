@@ -115,16 +115,16 @@ pub enum ProviderError {
     UnsupportedProvider,
     /// Snapshot file is not found at specified path.
     #[error("not able to find {0} snapshot file at {1}")]
-    MissingSnapshotPath(StaticFileSegment, PathBuf),
+    MissingStaticFilePath(StaticFileSegment, PathBuf),
     /// Snapshot file is not found for requested block.
     #[error("not able to find {0} snapshot file for block number {1}")]
-    MissingSnapshotBlock(StaticFileSegment, BlockNumber),
+    MissingStaticFileBlock(StaticFileSegment, BlockNumber),
     /// Snapshot file is not found for requested transaction.
     #[error("unable to find {0} snapshot file for transaction id {1}")]
-    MissingSnapshotTx(StaticFileSegment, TxNumber),
+    MissingStaticFileTx(StaticFileSegment, TxNumber),
     /// Snapshot is finalized and cannot be written to.
     #[error("unable to write block #{1} to finalized snapshot {0}")]
-    FinalizedSnapshot(StaticFileSegment, BlockNumber),
+    FinalizedStaticFile(StaticFileSegment, BlockNumber),
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]
     BlockNumberOverflow(U256),

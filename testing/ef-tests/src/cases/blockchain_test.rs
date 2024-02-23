@@ -8,7 +8,7 @@ use alloy_rlp::Decodable;
 use reth_db::test_utils::{create_test_rw_db, create_test_snapshots_dir};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
-use reth_provider::{providers::SnapshotWriter, HashingWriter, ProviderFactory};
+use reth_provider::{providers::StaticFileWriter, HashingWriter, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 

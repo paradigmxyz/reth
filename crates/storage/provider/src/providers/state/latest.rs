@@ -1,5 +1,5 @@
 use crate::{
-    providers::{state::macros::delegate_provider_impls, SnapshotProvider},
+    providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, BundleStateWithReceipts, StateProvider, StateRootProvider,
 };
 use reth_db::{
@@ -20,12 +20,12 @@ pub struct LatestStateProviderRef<'b, TX: DbTx> {
     /// database transaction
     db: &'b TX,
     /// Snapshot provider
-    snapshot_provider: SnapshotProvider,
+    snapshot_provider: StaticFileProvider,
 }
 
 impl<'b, TX: DbTx> LatestStateProviderRef<'b, TX> {
     /// Create new state provider
-    pub fn new(db: &'b TX, snapshot_provider: SnapshotProvider) -> Self {
+    pub fn new(db: &'b TX, snapshot_provider: StaticFileProvider) -> Self {
         Self { db, snapshot_provider }
     }
 }
@@ -126,12 +126,12 @@ pub struct LatestStateProvider<TX: DbTx> {
     /// database transaction
     db: TX,
     /// Snapshot provider
-    snapshot_provider: SnapshotProvider,
+    snapshot_provider: StaticFileProvider,
 }
 
 impl<TX: DbTx> LatestStateProvider<TX> {
     /// Create new state provider
-    pub fn new(db: TX, snapshot_provider: SnapshotProvider) -> Self {
+    pub fn new(db: TX, snapshot_provider: StaticFileProvider) -> Self {
         Self { db, snapshot_provider }
     }
 

@@ -11,5 +11,5 @@ mod event;
 pub mod segments;
 mod snapshotter;
 
-pub use event::SnapshotterEvent;
-pub use snapshotter::{SnapshotTargets, Snapshotter, SnapshotterResult, SnapshotterWithResult};
+pub use event::StaticFileProducerEvent;
+pub use snapshotter::{StaticFileTargets, StaticFileProducer, StaticFileProducerResult, StaticFileProducerWithResult};

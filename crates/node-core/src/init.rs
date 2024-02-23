@@ -12,7 +12,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
-    providers::{SnapshotProvider, SnapshotWriter},
+    providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BundleStateWithReceipts, ChainSpecProvider, DatabaseProviderRW, HashingWriter,
     HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
 };
@@ -55,7 +55,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 
     // Check if we already have the genesis header or if we have the wrong one.
     match factory.block_hash(0) {
-        Ok(None) | Err(ProviderError::MissingSnapshotBlock(StaticFileSegment::Headers, 0)) => {}
+        Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {}
         Ok(Some(block_hash)) => {
             if block_hash == hash {
                 debug!("Genesis already written, skipping.");
@@ -209,13 +209,13 @@ pub fn insert_genesis_history<DB: Database>(
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<DB: Database>(
     tx: &<DB as Database>::TXMut,
-    snapshot_provider: SnapshotProvider,
+    snapshot_provider: StaticFileProvider,
     chain: Arc<ChainSpec>,
 ) -> ProviderResult<()> {
     let (header, block_hash) = chain.sealed_genesis_header().split();
 
     match snapshot_provider.block_hash(0) {
-        Ok(None) | Err(ProviderError::MissingSnapshotBlock(StaticFileSegment::Headers, 0)) => {
+        Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
             let (difficulty, hash) = (header.difficulty, block_hash);
             let mut writer = snapshot_provider.latest_writer(StaticFileSegment::Headers)?;
             writer.append_header(header, difficulty, hash)?;
