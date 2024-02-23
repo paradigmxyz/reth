@@ -361,6 +361,9 @@ where
             warn!(
                 target: "consensus::engine",
                 hook = %hook.name(),
+                head_block_hash = ?state.head_block_hash,
+                safe_block_hash = ?state.safe_block_hash,
+                finalized_block_hash = ?state.finalized_block_hash,
                 "Hook is in progress, skipping forkchoice update. \
                 This may affect the performance of your node as a validator."
             );
