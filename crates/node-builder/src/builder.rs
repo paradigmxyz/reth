@@ -353,13 +353,13 @@ where
         let provider_factory = ProviderFactory::new(
             database.clone(),
             Arc::clone(&config.chain),
-            data_dir.snapshots_path(),
+            data_dir.static_files_path(),
         )?;
 
-        // configure snapshotter
-        let snapshotter = reth_snapshot::Snapshotter::new(
+        // configure static_file_producer
+        let static_file_producer = reth_static_file::StaticFileProducer::new(
             provider_factory.clone(),
-            provider_factory.snapshot_provider(),
+            provider_factory.static_file_provider(),
             config.prune_config()?.unwrap_or_default().segments,
         );
 
@@ -467,7 +467,7 @@ where
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
-                    snapshotter,
+                    static_file_producer,
                     evm_config,
                 )
                 .await?;
@@ -489,7 +489,7 @@ where
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
-                    snapshotter,
+                    static_file_producer,
                     evm_config,
                 )
                 .await?;

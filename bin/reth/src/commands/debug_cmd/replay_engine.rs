@@ -28,8 +28,8 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{fs, ChainSpec, PruneModes};
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory};
 use reth_revm::EvmProcessorFactory;
-use reth_snapshot::Snapshotter;
 use reth_stages::Pipeline;
+use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::noop::NoopTransactionPool;
 use std::{
@@ -105,7 +105,7 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).snapshots_path(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
             )?)
             .start_network()
             .await?;
@@ -127,7 +127,7 @@ impl Command {
         let db =
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.snapshots_path())?;
+            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 
@@ -199,9 +199,9 @@ impl Command {
             network_client,
             Pipeline::builder().build(
                 provider_factory.clone(),
-                Snapshotter::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
-                    provider_factory.snapshot_provider(),
+                    provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
             ),

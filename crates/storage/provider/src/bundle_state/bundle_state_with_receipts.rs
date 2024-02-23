@@ -1,4 +1,4 @@
-use crate::{providers::SnapshotProviderRWRefMut, StateChanges, StateReverts};
+use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,
@@ -8,7 +8,7 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
-    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, SnapshotSegment,
+    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StaticFileSegment,
     StorageEntry, B256, U256,
 };
 use reth_trie::HashedPostState;
@@ -286,7 +286,7 @@ impl BundleStateWithReceipts {
     }
 
     /// Write the [BundleStateWithReceipts] to database and receipts to either database or static
-    /// files if `snapshotter` is `Some`. It should be none if there is any kind of
+    /// files if `static_file_producer` is `Some`. It should be none if there is any kind of
     /// pruning/filtering over the receipts.
     ///
     /// `omit_changed_check` should be set to true of bundle has some of it data
@@ -294,7 +294,7 @@ impl BundleStateWithReceipts {
     pub fn write_to_storage<TX>(
         self,
         tx: &TX,
-        mut snapshotter: Option<SnapshotProviderRWRefMut<'_>>,
+        mut static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
         is_value_known: OriginalValuesKnown,
     ) -> ProviderResult<()>
     where
@@ -315,14 +315,14 @@ impl BundleStateWithReceipts {
                 .map(|(_, indices)| indices.first_tx_num())
                 .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
-            if let Some(snapshotter) = &mut snapshotter {
+            if let Some(static_file_producer) = &mut static_file_producer {
                 // Increment block on static file header.
-                snapshotter.increment_block(SnapshotSegment::Receipts)?;
+                static_file_producer.increment_block(StaticFileSegment::Receipts)?;
 
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {
                     let receipt = receipt
                         .expect("receipt should not be filtered when saving to static files.");
-                    snapshotter.append_receipt(first_tx_index + tx_idx as u64, receipt)?;
+                    static_file_producer.append_receipt(first_tx_index + tx_idx as u64, receipt)?;
                 }
             } else if !receipts.is_empty() {
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {

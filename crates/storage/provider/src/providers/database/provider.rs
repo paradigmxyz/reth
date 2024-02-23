@@ -1,6 +1,6 @@
 use crate::{
     bundle_state::{BundleStateInit, BundleStateWithReceipts, HashedStateChanges, RevertsInit},
-    providers::{database::metrics, snapshot::SnapshotWriter, SnapshotProvider},
+    providers::{database::metrics, static_file::StaticFileWriter, StaticFileProvider},
     to_range,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
@@ -38,7 +38,7 @@ use reth_primitives::{
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, SnapshotSegment,
+    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
     StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
@@ -83,7 +83,7 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
 }
 
 impl<DB: Database> DatabaseProviderRW<DB> {
-    /// Commit database transaction and snapshot if it exists.
+    /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<bool> {
         self.0.commit()
     }
@@ -102,21 +102,25 @@ pub struct DatabaseProvider<TX> {
     tx: TX,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
-    /// Snapshot provider
-    snapshot_provider: SnapshotProvider,
+    /// Static File provider
+    static_file_provider: StaticFileProvider,
 }
 
 impl<TX> DatabaseProvider<TX> {
-    /// Returns a snapshot provider
-    pub fn snapshot_provider(&self) -> &SnapshotProvider {
-        &self.snapshot_provider
+    /// Returns a static file provider
+    pub fn static_file_provider(&self) -> &StaticFileProvider {
+        &self.static_file_provider
     }
 }
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-write transaction.
-    pub fn new_rw(tx: TX, chain_spec: Arc<ChainSpec>, snapshot_provider: SnapshotProvider) -> Self {
-        Self { tx, chain_spec, snapshot_provider }
+    pub fn new_rw(
+        tx: TX,
+        chain_spec: Arc<ChainSpec>,
+        static_file_provider: StaticFileProvider,
+    ) -> Self {
+        Self { tx, chain_spec, static_file_provider }
     }
 }
 
@@ -184,7 +188,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             parent_ttd + block.difficulty
         };
 
-        let mut writer = self.snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+        let mut writer = self.static_file_provider.latest_writer(StaticFileSegment::Headers)?;
         writer.append_header(block.header.as_ref().clone(), ttd, block.hash())?;
 
         self.insert_block(block, prune_modes)
@@ -241,8 +245,12 @@ where
 
 impl<TX: DbTx> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-only transaction.
-    pub fn new(tx: TX, chain_spec: Arc<ChainSpec>, snapshot_provider: SnapshotProvider) -> Self {
-        Self { tx, chain_spec, snapshot_provider }
+    pub fn new(
+        tx: TX,
+        chain_spec: Arc<ChainSpec>,
+        static_file_provider: StaticFileProvider,
+    ) -> Self {
+        Self { tx, chain_spec, static_file_provider }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -290,10 +298,10 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     where
         C: DbCursorRO<tables::Transactions>,
     {
-        self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Transactions,
             to_range(range),
-            |snapshot, range, _| snapshot.transactions_by_tx_range(range),
+            |static_file, range, _| static_file.transactions_by_tx_range(range),
             |range, _| self.cursor_collect(cursor, range, Ok),
             |_| true,
         )
@@ -979,31 +987,32 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
         mode: HeaderSyncMode,
         highest_uninterrupted_block: BlockNumber,
     ) -> RethResult<HeaderSyncGap> {
-        let snapshot_provider = self.snapshot_provider();
+        let static_file_provider = self.static_file_provider();
 
         // Make sure Headers static file is at the same height. If it's further, this
         // input execution was interrupted previously and we need to unwind the static file.
-        let next_snapshot_block_num = snapshot_provider
-            .get_highest_snapshot_block(SnapshotSegment::Headers)
+        let next_static_file_block_num = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Headers)
             .map(|id| id + 1)
             .unwrap_or_default();
         let next_block = highest_uninterrupted_block + 1;
 
-        match next_snapshot_block_num.cmp(&next_block) {
+        match next_static_file_block_num.cmp(&next_block) {
             // The node shutdown between an executed static file commit and before the database
             // commit, so we need to unwind the static files.
             Ordering::Greater => {
-                let mut snapshotter = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
-                snapshotter.prune_headers(next_snapshot_block_num - next_block)?
+                let mut static_file_producer =
+                    static_file_provider.latest_writer(StaticFileSegment::Headers)?;
+                static_file_producer.prune_headers(next_static_file_block_num - next_block)?
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.
-                return Err(ProviderError::HeaderNotFound(next_snapshot_block_num.into()).into())
+                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()).into())
             }
             Ordering::Equal => {}
         }
 
-        let local_head = snapshot_provider
+        let local_head = static_file_provider
             .sealed_header(highest_uninterrupted_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(highest_uninterrupted_block.into()))?;
 
@@ -1026,10 +1035,10 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Headers,
             num,
-            |snapshot| snapshot.header_by_number(num),
+            |static_file| static_file.header_by_number(num),
             || Ok(self.tx.get::<tables::Headers>(num)?),
         )
     }
@@ -1049,19 +1058,19 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
             return Ok(Some(td))
         }
 
-        self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Headers,
             number,
-            |snapshot| snapshot.header_td_by_number(number),
+            |static_file| static_file.header_td_by_number(number),
             || Ok(self.tx.get::<tables::HeaderTD>(number)?.map(|td| td.0)),
         )
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Headers,
             to_range(range),
-            |snapshot, range, _| snapshot.headers_range(range),
+            |static_file, range, _| static_file.headers_range(range),
             |range, _| {
                 self.cursor_read_collect::<tables::Headers, _>(range, Ok).map_err(Into::into)
             },
@@ -1070,10 +1079,10 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Headers,
             number,
-            |snapshot| snapshot.sealed_header(number),
+            |static_file| static_file.sealed_header(number),
             || {
                 if let Some(header) = self.header_by_number(number)? {
                     let hash = self
@@ -1092,10 +1101,10 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Headers,
             to_range(range),
-            |snapshot, range, predicate| snapshot.sealed_headers_while(range, predicate),
+            |static_file, range, predicate| static_file.sealed_headers_while(range, predicate),
             |range, mut predicate| {
                 let mut headers = vec![];
                 for entry in self.tx.cursor_read::<tables::Headers>()?.walk_range(range)? {
@@ -1118,10 +1127,10 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
 
 impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Headers,
             number,
-            |snapshot| snapshot.block_hash(number),
+            |static_file| static_file.block_hash(number),
             || Ok(self.tx.get::<tables::CanonicalHeaders>(number)?),
         )
     }
@@ -1131,10 +1140,10 @@ impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Headers,
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Headers,
             start..end,
-            |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
+            |static_file, range, _| static_file.canonical_hashes_range(range.start, range.end),
             |range, _| {
                 self.cursor_read_collect::<tables::CanonicalHeaders, _>(range, Ok)
                     .map_err(Into::into)
@@ -1360,10 +1369,10 @@ impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
         &self,
         tx_range: Range<TxNumber>,
     ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
-        self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Transactions,
             tx_range,
-            |snapshot, range, _| snapshot.transaction_hashes_by_range(range),
+            |static_file, range, _| static_file.transaction_hashes_by_range(range),
             |tx_range, _| {
                 let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
                 let tx_range_size = tx_range.clone().count();
@@ -1428,10 +1437,10 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Transactions,
             id,
-            |snapshot| snapshot.transaction_by_id(id),
+            |static_file| static_file.transaction_by_id(id),
             || Ok(self.tx.get::<tables::Transactions>(id)?.map(Into::into)),
         )
     }
@@ -1440,10 +1449,10 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Transactions,
             id,
-            |snapshot| snapshot.transaction_by_id_no_hash(id),
+            |static_file| static_file.transaction_by_id_no_hash(id),
             || Ok(self.tx.get::<tables::Transactions>(id)?),
         )
     }
@@ -1571,10 +1580,10 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
-        self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Transactions,
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Transactions,
             to_range(range),
-            |snapshot, range, _| snapshot.raw_transactions_by_tx_range(range),
+            |static_file, range, _| static_file.raw_transactions_by_tx_range(range),
             |range, _| {
                 self.cursor_collect_with_capacity(
                     &mut self.tx.cursor_read::<RawTable<tables::Transactions>>()?,
@@ -1601,10 +1610,10 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
 
 impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.snapshot_provider.get_with_snapshot_or_database(
-            SnapshotSegment::Receipts,
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Receipts,
             id,
-            |snapshot| snapshot.receipt(id),
+            |static_file| static_file.receipt(id),
             || Ok(self.tx.get::<tables::Receipts>(id)?),
         )
     }
@@ -1635,10 +1644,10 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.snapshot_provider.get_range_with_snapshot_or_database(
-            SnapshotSegment::Receipts,
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Receipts,
             to_range(range),
-            |snapshot, range, _| snapshot.receipts_by_tx_range(range),
+            |static_file, range, _| static_file.receipts_by_tx_range(range),
             |range, _| {
                 self.cursor_read_collect::<tables::Receipts, _>(range, Ok).map_err(Into::into)
             },
@@ -2514,13 +2523,13 @@ impl<TX: DbTxMut> PruneCheckpointWriter for DatabaseProvider<TX> {
 impl<TX: DbTx> StatsReader for DatabaseProvider<TX> {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         let db_entries = self.tx.entries::<T>()?;
-        let snapshot_entries = match self.snapshot_provider.count_entries::<T>() {
+        let static_file_entries = match self.static_file_provider.count_entries::<T>() {
             Ok(entries) => entries,
             Err(ProviderError::UnsupportedProvider) => 0,
             Err(err) => return Err(err),
         };
 
-        Ok(db_entries + snapshot_entries)
+        Ok(db_entries + static_file_entries)
     }
 }
 

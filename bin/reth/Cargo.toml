@@ -50,7 +50,7 @@ reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
 reth-prune.workspace = true
-reth-snapshot = { workspace = true, features = ["clap"] }
+reth-static-file = { workspace = true, features = ["clap"] }
 reth-trie.workspace = true
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true

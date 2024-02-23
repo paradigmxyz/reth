@@ -44,7 +44,7 @@ reth-stages.workspace = true
 reth-prune.workspace = true
 reth-blockchain-tree.workspace = true
 revm-inspectors.workspace = true
-reth-snapshot.workspace = true
+reth-static-file.workspace = true
 reth-eth-wire.workspace = true
 
 # `optimism` feature

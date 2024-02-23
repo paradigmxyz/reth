@@ -1,12 +1,12 @@
 use clap::{Parser, Subcommand};
 use reth_db::{
     database::Database,
-    snapshot::iter_snapshots,
+    static_file::iter_static_files,
     table::Table,
     transaction::{DbTx, DbTxMut},
     TableViewer, Tables,
 };
-use reth_primitives::{snapshot::find_fixed_range, SnapshotSegment};
+use reth_primitives::{static_file::find_fixed_range, StaticFileSegment};
 use reth_provider::ProviderFactory;
 
 /// The arguments for the `reth db clear` command
@@ -23,13 +23,13 @@ impl Command {
             Subcommands::Mdbx { table } => {
                 table.view(&ClearViewer { db: provider_factory.db_ref() })?
             }
-            Subcommands::Snapshot { segment } => {
-                let snapshot_provider = provider_factory.snapshot_provider();
-                let snapshots = iter_snapshots(snapshot_provider.directory())?;
+            Subcommands::StaticFile { segment } => {
+                let static_file_provider = provider_factory.static_file_provider();
+                let static_files = iter_static_files(static_file_provider.directory())?;
 
-                if let Some(segment_snapshots) = snapshots.get(&segment) {
-                    for (block_range, _) in segment_snapshots {
-                        snapshot_provider
+                if let Some(segment_static_files) = static_files.get(&segment) {
+                    for (block_range, _) in segment_static_files {
+                        static_file_provider
                             .delete_jar(segment, find_fixed_range(block_range.start()))?;
                     }
                 }
@@ -44,8 +44,8 @@ impl Command {
 enum Subcommands {
     /// Deletes all database table entries
     Mdbx { table: Tables },
-    /// Deletes all snapshot segment entries
-    Snapshot { segment: SnapshotSegment },
+    /// Deletes all static file segment entries
+    StaticFile { segment: StaticFileSegment },
 }
 
 struct ClearViewer<'a, DB: Database> {

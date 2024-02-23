@@ -52,7 +52,6 @@ use reth_provider::{
     ProviderFactory, StageCheckpointReader,
 };
 use reth_revm::EvmProcessorFactory;
-use reth_snapshot::Snapshotter;
 use reth_stages::{
     prelude::*,
     stages::{
@@ -62,6 +61,7 @@ use reth_stages::{
     },
     MetricEvent,
 };
+use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
@@ -543,7 +543,7 @@ impl NodeConfig {
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
-        snapshotter: Snapshotter<DB>,
+        static_file_producer: StaticFileProducer<DB>,
         evm_config: EvmConfig,
     ) -> eyre::Result<Pipeline<DB>>
     where
@@ -571,7 +571,7 @@ impl NodeConfig {
                 self.debug.continuous,
                 metrics_tx,
                 prune_config,
-                snapshotter,
+                static_file_producer,
                 evm_config,
             )
             .await?;
@@ -793,7 +793,7 @@ impl NodeConfig {
         continuous: bool,
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
-        snapshotter: Snapshotter<DB>,
+        static_file_producer: StaticFileProducer<DB>,
         evm_config: EvmConfig,
     ) -> eyre::Result<Pipeline<DB>>
     where
@@ -887,7 +887,7 @@ impl NodeConfig {
                     prune_modes.storage_history,
                 )),
             )
-            .build(provider_factory, snapshotter);
+            .build(provider_factory, static_file_producer);
 
         Ok(pipeline)
     }

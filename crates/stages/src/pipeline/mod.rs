@@ -6,14 +6,14 @@ use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
-    snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
+    static_file::HighestStaticFiles,
     BlockNumber, B256,
 };
 use reth_provider::{
-    providers::SnapshotWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
 };
-use reth_snapshot::Snapshotter;
+use reth_static_file::StaticFileProducer;
 use reth_tokio_util::EventListeners;
 use std::pin::Pin;
 use tokio::sync::watch;
@@ -71,7 +71,7 @@ pub struct Pipeline<DB: Database> {
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    snapshotter: Snapshotter<DB>,
+    static_file_producer: StaticFileProducer<DB>,
     /// All listeners for events the pipeline emits.
     listeners: EventListeners<PipelineEvent>,
     /// Keeps track of the progress of the pipeline.
@@ -183,7 +183,7 @@ where
     /// pipeline (for example the `Finish` stage). Or [ControlFlow::Unwind] of the stage that caused
     /// the unwind.
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
-        self.run_snapshotter()?;
+        self.produce_static_files()?;
 
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
@@ -220,19 +220,18 @@ where
         Ok(self.progress.next_ctrl())
     }
 
-    /// Run [snapshotter](Snapshotter) and move all data from the database to static files for
-    /// corresponding [segments](reth_primitives::snapshot::SnapshotSegment), according to their
-    /// [stage checkpoints](StageCheckpoint):
-    /// - [SnapshotSegment::Headers](reth_primitives::snapshot::SnapshotSegment::Headers) ->
+    /// Run [static file producer](StaticFileProducer) and move all data from the database to static
+    /// files for corresponding [segments](reth_primitives::static_file::StaticFileSegment),
+    /// according to their [stage checkpoints](StageCheckpoint):
+    /// - [StaticFileSegment::Headers](reth_primitives::static_file::StaticFileSegment::Headers) ->
     ///   [StageId::Headers]
-    /// - [SnapshotSegment::Receipts](reth_primitives::snapshot::SnapshotSegment::Receipts) ->
-    ///   [StageId::Execution]
-    /// - [SnapshotSegment::Transactions](reth_primitives::snapshot::SnapshotSegment::Transactions)
+    /// - [StaticFileSegment::Receipts](reth_primitives::static_file::StaticFileSegment::Receipts)
+    ///   -> [StageId::Execution]
+    /// - [StaticFileSegment::Transactions](reth_primitives::static_file::StaticFileSegment::Transactions)
     ///   -> [StageId::Bodies]
-
-    fn run_snapshotter(&mut self) -> RethResult<()> {
+    fn produce_static_files(&mut self) -> RethResult<()> {
         let provider = self.provider_factory.provider()?;
-        let targets = self.snapshotter.get_snapshot_targets(HighestSnapshots {
+        let targets = self.static_file_producer.get_static_file_targets(HighestStaticFiles {
             headers: provider
                 .get_stage_checkpoint(StageId::Headers)?
                 .map(|checkpoint| checkpoint.block_number),
@@ -243,7 +242,7 @@ where
                 .get_stage_checkpoint(StageId::Bodies)?
                 .map(|checkpoint| checkpoint.block_number),
         })?;
-        self.snapshotter.run(targets)?;
+        self.static_file_producer.run(targets)?;
 
         Ok(())
     }
@@ -315,7 +314,7 @@ where
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
-                        self.provider_factory.snapshot_provider().commit()?;
+                        self.provider_factory.static_file_provider().commit()?;
                         provider_rw.commit()?;
 
                         provider_rw = self.provider_factory.provider_rw()?;
@@ -409,7 +408,7 @@ where
                         result: out.clone(),
                     });
 
-                    self.provider_factory.snapshot_provider().commit()?;
+                    self.provider_factory.static_file_provider().commit()?;
                     provider_rw.commit()?;
 
                     if done {
@@ -467,7 +466,7 @@ fn on_stage_error<DB: Database>(
                     StageId::MerkleExecute,
                     prev_checkpoint.unwrap_or_default(),
                 )?;
-                factory.snapshot_provider().commit()?;
+                factory.static_file_provider().commit()?;
                 provider_rw.commit()?;
 
                 // We unwind because of a validation error. If the unwind itself
@@ -497,13 +496,13 @@ fn on_stage_error<DB: Database>(
                 }))
             }
         }
-    } else if let StageError::MissingSnapshotData { block, segment } = err {
+    } else if let StageError::MissingStaticFileData { block, segment } = err {
         error!(
             target: "sync::pipeline",
             stage = %stage_id,
             bad_block = %block.number,
             segment = %segment,
-            "Stage is missing snapshot data."
+            "Stage is missing static file data."
         );
 
         Ok(Some(ControlFlow::Unwind { target: block.number - 1, bad_block: block }))
@@ -590,9 +589,9 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                Snapshotter::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
-                    provider_factory.snapshot_provider(),
+                    provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
             );
@@ -657,9 +656,9 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                Snapshotter::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
-                    provider_factory.snapshot_provider(),
+                    provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
             );
@@ -771,9 +770,9 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                Snapshotter::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
-                    provider_factory.snapshot_provider(),
+                    provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
             );
@@ -875,9 +874,9 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                Snapshotter::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
-                    provider_factory.snapshot_provider(),
+                    provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
             );
@@ -962,9 +961,9 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                Snapshotter::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
-                    provider_factory.snapshot_provider(),
+                    provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
             );
@@ -979,9 +978,9 @@ mod tests {
             )))
             .build(
                 provider_factory.clone(),
-                Snapshotter::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
-                    provider_factory.snapshot_provider(),
+                    provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
             );

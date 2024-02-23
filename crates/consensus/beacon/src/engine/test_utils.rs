@@ -31,8 +31,8 @@ use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
-use reth_snapshot::Snapshotter;
 use reth_stages::{sets::DefaultStages, test_utils::TestStages, ExecOutput, Pipeline, StageError};
+use reth_static_file::StaticFileProducer;
 use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{oneshot, watch};
@@ -377,9 +377,9 @@ where
             )),
         };
 
-        let snapshotter = Snapshotter::new(
+        let static_file_producer = StaticFileProducer::new(
             provider_factory.clone(),
-            provider_factory.snapshot_provider(),
+            provider_factory.static_file_provider(),
             PruneModes::default(),
         );
 
@@ -416,7 +416,7 @@ where
             pipeline = pipeline.with_max_block(max_block);
         }
 
-        let pipeline = pipeline.build(provider_factory.clone(), snapshotter);
+        let pipeline = pipeline.build(provider_factory.clone(), static_file_producer);
 
         // Setup blockchain tree
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);

@@ -10,11 +10,13 @@ use crate::{
 };
 use clap::Parser;
 use reth_db::{
-    database::Database, mdbx::DatabaseArguments, open_db, snapshot::iter_snapshots, tables,
+    database::Database, mdbx::DatabaseArguments, open_db, static_file::iter_static_files, tables,
     transaction::DbTxMut, DatabaseEnv,
 };
 use reth_node_core::init::{insert_genesis_header, insert_genesis_state};
-use reth_primitives::{fs, snapshot::find_fixed_range, stage::StageId, ChainSpec, SnapshotSegment};
+use reth_primitives::{
+    fs, stage::StageId, static_file::find_fixed_range, ChainSpec, StaticFileSegment,
+};
 use reth_provider::ProviderFactory;
 use std::sync::Arc;
 
@@ -60,26 +62,26 @@ impl Command {
         let db =
             open_db(db_path.as_ref(), DatabaseArguments::default().log_level(self.db.log_level))?;
         let provider_factory =
-            ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
-        let snapshot_provider = provider_factory.snapshot_provider();
+            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
+        let static_file_provider = provider_factory.static_file_provider();
 
         let tool = DbTool::new(provider_factory, self.chain.clone())?;
 
-        let snapshot_segment = match self.stage {
-            StageEnum::Headers => Some(SnapshotSegment::Headers),
-            StageEnum::Bodies => Some(SnapshotSegment::Transactions),
-            StageEnum::Execution => Some(SnapshotSegment::Receipts),
+        let static_file_segment = match self.stage {
+            StageEnum::Headers => Some(StaticFileSegment::Headers),
+            StageEnum::Bodies => Some(StaticFileSegment::Transactions),
+            StageEnum::Execution => Some(StaticFileSegment::Receipts),
             _ => None,
         };
 
-        // Delete snapshot segment data before inserting the genesis header below
-        if let Some(snapshot_segment) = snapshot_segment {
-            let snapshot_provider = tool.provider_factory.snapshot_provider();
-            let snapshots = iter_snapshots(snapshot_provider.directory())?;
-            if let Some(segment_snapshots) = snapshots.get(&snapshot_segment) {
-                for (block_range, _) in segment_snapshots {
-                    snapshot_provider
-                        .delete_jar(snapshot_segment, find_fixed_range(block_range.start()))?;
+        // Delete static file segment data before inserting the genesis header below
+        if let Some(static_file_segment) = static_file_segment {
+            let static_file_provider = tool.provider_factory.static_file_provider();
+            let static_files = iter_static_files(static_file_provider.directory())?;
+            if let Some(segment_static_files) = static_files.get(&static_file_segment) {
+                for (block_range, _) in segment_static_files {
+                    static_file_provider
+                        .delete_jar(static_file_segment, find_fixed_range(block_range.start()))?;
                 }
             }
         }
@@ -92,7 +94,7 @@ impl Command {
                     tx.clear::<tables::HeaderTD>()?;
                     tx.clear::<tables::HeaderNumbers>()?;
                     tx.put::<tables::SyncStage>(StageId::Headers.to_string(), Default::default())?;
-                    insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, static_file_provider, self.chain)?;
                 }
                 StageEnum::Bodies => {
                     tx.clear::<tables::BlockBodyIndices>()?;
@@ -101,7 +103,7 @@ impl Command {
                     tx.clear::<tables::BlockOmmers>()?;
                     tx.clear::<tables::BlockWithdrawals>()?;
                     tx.put::<tables::SyncStage>(StageId::Bodies.to_string(), Default::default())?;
-                    insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, static_file_provider, self.chain)?;
                 }
                 StageEnum::Senders => {
                     tx.clear::<tables::TxSenders>()?;
@@ -186,7 +188,7 @@ impl Command {
                         StageId::TransactionLookup.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, snapshot_provider, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, static_file_provider, self.chain)?;
                 }
             }
 

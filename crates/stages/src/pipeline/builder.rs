@@ -2,7 +2,7 @@ use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageSet}
 use reth_db::database::Database;
 use reth_primitives::{stage::StageId, BlockNumber, B256};
 use reth_provider::ProviderFactory;
-use reth_snapshot::Snapshotter;
+use reth_static_file::StaticFileProducer;
 use tokio::sync::watch;
 
 /// Builds a [`Pipeline`].
@@ -71,14 +71,14 @@ where
     pub fn build(
         self,
         provider_factory: ProviderFactory<DB>,
-        snapshotter: Snapshotter<DB>,
+        static_file_producer: StaticFileProducer<DB>,
     ) -> Pipeline<DB> {
         let Self { stages, max_block, tip_tx, metrics_tx } = self;
         Pipeline {
             provider_factory,
             stages,
             max_block,
-            snapshotter,
+            static_file_producer,
             tip_tx,
             listeners: Default::default(),
             progress: Default::default(),

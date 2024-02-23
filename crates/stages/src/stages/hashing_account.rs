@@ -88,7 +88,7 @@ impl AccountHashingStage {
             generators::{random_block_range, random_eoa_account_range},
         };
         use reth_primitives::{Account, B256, U256};
-        use reth_provider::providers::SnapshotWriter;
+        use reth_provider::providers::StaticFileWriter;
 
         let mut rng = generators::rng();
 
@@ -98,8 +98,8 @@ impl AccountHashingStage {
             provider.insert_historical_block(block.try_seal_with_senders().unwrap(), None).unwrap();
         }
         provider
-            .snapshot_provider()
-            .latest_writer(reth_primitives::SnapshotSegment::Headers)
+            .static_file_provider()
+            .latest_writer(reth_primitives::StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();
@@ -311,7 +311,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
-    use reth_provider::providers::SnapshotWriter;
+    use reth_provider::providers::StaticFileWriter;
     use test_utils::*;
 
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);

@@ -50,10 +50,10 @@ mod tests {
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
-        PruneModes, SealedBlock, SnapshotSegment, U256,
+        PruneModes, SealedBlock, StaticFileSegment, U256,
     };
     use reth_provider::{
-        providers::SnapshotWriter, AccountExtReader, ProviderFactory, ReceiptProvider,
+        providers::StaticFileWriter, AccountExtReader, ProviderFactory, ReceiptProvider,
         StorageReader,
     };
     use reth_revm::EvmProcessorFactory;
@@ -89,8 +89,8 @@ mod tests {
                 .unwrap();
         }
         provider_rw
-            .snapshot_provider()
-            .latest_writer(SnapshotSegment::Headers)
+            .static_file_provider()
+            .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();

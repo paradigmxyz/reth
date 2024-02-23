@@ -31,12 +31,12 @@ use reth_primitives::{
     fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
 };
 use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
-use reth_snapshot::Snapshotter;
 use reth_stages::{
     sets::DefaultStages,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
     Pipeline, StageSet,
 };
+use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use std::{
     net::{SocketAddr, SocketAddrV4},
@@ -95,7 +95,7 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         provider_factory: ProviderFactory<DB>,
         task_executor: &TaskExecutor,
-        snapshotter: Snapshotter<DB>,
+        static_file_producer: StaticFileProducer<DB>,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
@@ -147,7 +147,7 @@ impl Command {
                     config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
                 )),
             )
-            .build(provider_factory, snapshotter);
+            .build(provider_factory, static_file_producer);
 
         Ok(pipeline)
     }
@@ -173,7 +173,7 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).snapshots_path(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
             )?)
             .start_network()
             .await?;
@@ -211,7 +211,7 @@ impl Command {
         let db =
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.snapshots_path())?;
+            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(provider_factory.clone())?;
@@ -231,9 +231,9 @@ impl Command {
             )
             .await?;
 
-        let snapshotter = Snapshotter::new(
+        let static_file_producer = StaticFileProducer::new(
             provider_factory.clone(),
-            provider_factory.snapshot_provider(),
+            provider_factory.static_file_provider(),
             PruneModes::default(),
         );
 
@@ -245,7 +245,7 @@ impl Command {
             Arc::clone(&consensus),
             provider_factory.clone(),
             &ctx.task_executor,
-            snapshotter,
+            static_file_producer,
         )?;
 
         let provider = provider_factory.provider()?;

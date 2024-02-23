@@ -6,7 +6,7 @@ use reth_db::{
     table::Table,
     tables,
     test_utils::{
-        create_test_rw_db, create_test_rw_db_with_path, create_test_snapshots_dir, TempDatabase,
+        create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir, TempDatabase,
     },
     transaction::{DbTx, DbTxMut},
     DatabaseEnv, DatabaseError as DbError,
@@ -17,7 +17,7 @@ use reth_primitives::{
     TxHash, TxNumber, B256, MAINNET, U256,
 };
 use reth_provider::{
-    providers::{SnapshotProviderRWRefMut, SnapshotWriter},
+    providers::{StaticFileProviderRWRefMut, StaticFileWriter},
     HistoryWriter, ProviderError, ProviderFactory,
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc};
@@ -35,7 +35,7 @@ impl Default for TestStageDB {
             factory: ProviderFactory::new(
                 create_test_rw_db(),
                 MAINNET.clone(),
-                create_test_snapshots_dir(),
+                create_test_static_files_dir(),
             )
             .unwrap(),
         }
@@ -48,7 +48,7 @@ impl TestStageDB {
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
-                create_test_snapshots_dir(),
+                create_test_static_files_dir(),
             )
             .unwrap(),
         }
@@ -133,7 +133,7 @@ impl TestStageDB {
 
     /// Insert header to static file if `writer` exists, otherwise to DB.
     pub fn insert_header<TX: DbTx + DbTxMut>(
-        writer: Option<&mut SnapshotProviderRWRefMut<'_>>,
+        writer: Option<&mut StaticFileProviderRWRefMut<'_>>,
         tx: &TX,
         header: &SealedHeader,
         td: U256,
@@ -154,8 +154,8 @@ impl TestStageDB {
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
-        let provider = self.factory.snapshot_provider();
-        let mut writer = provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
+        let provider = self.factory.static_file_provider();
+        let mut writer = provider.latest_writer(reth_primitives::StaticFileSegment::Headers)?;
         let tx = self.factory.provider_rw()?.into_tx();
         let mut td = U256::ZERO;
 
@@ -202,14 +202,14 @@ impl TestStageDB {
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
-        let provider = self.factory.snapshot_provider();
+        let provider = self.factory.static_file_provider();
 
         let mut txs_writer = storage_kind.is_static().then(|| {
-            provider.latest_writer(reth_primitives::SnapshotSegment::Transactions).unwrap()
+            provider.latest_writer(reth_primitives::StaticFileSegment::Transactions).unwrap()
         });
 
         let mut headers_writer =
-            provider.latest_writer(reth_primitives::SnapshotSegment::Headers)?;
+            provider.latest_writer(reth_primitives::StaticFileSegment::Headers)?;
         let tx = self.factory.provider_rw().unwrap().into_tx();
 
         let mut next_tx_num = storage_kind.tx_offset();
@@ -238,7 +238,7 @@ impl TestStageDB {
             });
 
             if let Some(txs_writer) = &mut txs_writer {
-                txs_writer.increment_block(reth_primitives::SnapshotSegment::Transactions)?;
+                txs_writer.increment_block(reth_primitives::StaticFileSegment::Transactions)?;
             }
             res
         })?;

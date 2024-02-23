@@ -455,9 +455,9 @@ impl<H: NippyJarHeader> PerfectHashingFunction for NippyJar<H> {
     }
 }
 
-/// Manages the reading of snapshot data using memory-mapped files.
+/// Manages the reading of static file data using memory-mapped files.
 ///
-/// Holds file and mmap descriptors of the data and offsets files of a snapshot.
+/// Holds file and mmap descriptors of the data and offsets files of a static_file.
 #[derive(Debug)]
 pub struct DataReader {
     /// Data file descriptor. Needs to be kept alive as long as `data_mmap` handle.
@@ -930,7 +930,7 @@ mod tests {
                 let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();
                 data.shuffle(&mut rand::thread_rng());
 
-                // Imagine `Blocks` snapshot file has two columns: `Block | StoredWithdrawals`
+                // Imagine `Blocks` static file has two columns: `Block | StoredWithdrawals`
                 const BLOCKS_FULL_MASK: usize = 0b11;
 
                 // Read both columns

@@ -7,9 +7,9 @@ $ reth db clear --help
 Usage: reth db clear [OPTIONS] <COMMAND>
 
 Commands:
-  mdbx      Deletes all database table entries
-  snapshot  Deletes all snapshot segment entries
-  help      Print this message or the help of the given subcommand(s)
+  mdbx         Deletes all database table entries
+  static-file  Deletes all static file segment entries
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
       --datadir <DATA_DIR>

@@ -18,10 +18,10 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
     },
-    BlockHash, BlockNumber, SealedHeader, SnapshotSegment,
+    BlockHash, BlockNumber, SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
-    providers::{SnapshotProvider, SnapshotWriter},
+    providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HeaderSyncMode,
 };
@@ -99,7 +99,7 @@ where
     fn write_headers<DB: Database>(
         &mut self,
         tx: &<DB as Database>::TXMut,
-        snapshot_provider: SnapshotProvider,
+        static_file_provider: StaticFileProvider,
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
 
@@ -107,18 +107,18 @@ where
 
         // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
         // when poll_execute_ready is polled.
-        let mut last_header_number = snapshot_provider
-            .get_highest_snapshot_block(SnapshotSegment::Headers)
+        let mut last_header_number = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Headers)
             .unwrap_or_default();
 
         // Find the latest total difficulty
-        let mut td = snapshot_provider
+        let mut td = static_file_provider
             .header_td_by_number(last_header_number)?
             .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
 
         // Although headers were downloaded in reverse order, the collector iterates it in ascending
         // order
-        let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
         let interval = (total_headers / 10).max(1);
         for (index, header) in self.header_collector.iter()?.enumerate() {
             let (_, header_buf) = header?;
@@ -289,7 +289,7 @@ where
         // Write the headers and related tables to DB from ETL space
         let to_be_processed = self.hash_collector.len() as u64;
         let last_header_number =
-            self.write_headers::<DB>(provider.tx_ref(), provider.snapshot_provider().clone())?;
+            self.write_headers::<DB>(provider.tx_ref(), provider.static_file_provider().clone())?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(last_header_number).with_headers_stage_checkpoint(
@@ -318,21 +318,21 @@ where
     ) -> Result<UnwindOutput, StageError> {
         self.sync_gap.take();
 
-        let snapshot_provider = provider.snapshot_provider();
-        let highest_block = snapshot_provider
-            .get_highest_snapshot_block(SnapshotSegment::Headers)
+        let static_file_provider = provider.static_file_provider();
+        let highest_block = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Headers)
             .unwrap_or_default();
         let unwound_headers = highest_block - input.unwind_to;
 
         for block in (input.unwind_to + 1)..=highest_block {
-            let header_hash = snapshot_provider
+            let header_hash = static_file_provider
                 .block_hash(block)?
                 .ok_or(ProviderError::HeaderNotFound(block.into()))?;
 
             provider.tx_ref().delete::<tables::HeaderNumbers>(header_hash, None)?;
         }
 
-        let mut writer = snapshot_provider.latest_writer(SnapshotSegment::Headers)?;
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
         writer.prune_headers(unwound_headers)?;
 
         let stage_checkpoint =
@@ -565,7 +565,7 @@ mod tests {
         runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        runner.db().factory.snapshot_provider().commit().unwrap();
+        runner.db().factory.static_file_provider().commit().unwrap();
         assert_matches!( result, Ok(ExecOutput { checkpoint: StageCheckpoint {
             block_number,
             stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
