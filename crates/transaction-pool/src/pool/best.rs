@@ -58,7 +58,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
                     max_fee_per_blob_gas < self.base_fee_per_blob_gas as u128
                 }) {
                     crate::traits::BestTransactions::mark_invalid(self, &best);
-                    continue;
+                    continue
                 };
                 return Some(best)
             }

@@ -169,7 +169,7 @@ impl StaticFileProvider {
             )
             .and_then(|(parsed_segment, block_range)| {
                 if parsed_segment == segment {
-                    return Some(block_range);
+                    return Some(block_range)
                 }
                 None
             }),
@@ -178,7 +178,7 @@ impl StaticFileProvider {
 
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
         if let Some(block_range) = block_range {
-            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?));
+            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?))
         }
 
         Ok(None)
@@ -285,11 +285,11 @@ impl StaticFileProvider {
         while let Some((tx_end, block_range)) = static_files_rev_iter.next() {
             if tx > *tx_end {
                 // request tx is higher than highest static file tx
-                return None;
+                return None
             }
             let tx_start = static_files_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
-                return Some(find_fixed_range(block_range.end()));
+                return Some(find_fixed_range(block_range.end()))
             }
         }
         None
@@ -439,7 +439,7 @@ impl StaticFileProvider {
             let mut range = find_fixed_range(highest_block);
             while range.end() > 0 {
                 if let Some(res) = func(self.get_or_create_jar_provider(segment, &range)?)? {
-                    return Ok(Some(res));
+                    return Ok(Some(res))
                 }
                 range = SegmentRangeInclusive::new(
                     range.start().saturating_sub(BLOCKS_PER_STATIC_FILE),
@@ -492,10 +492,10 @@ impl StaticFileProvider {
                 match get_fn(&mut cursor, number)? {
                     Some(res) => {
                         if !predicate(&res) {
-                            break 'outer;
+                            break 'outer
                         }
                         result.push(res);
-                        break 'inner;
+                        break 'inner
                     }
                     None => {
                         if retrying {
@@ -511,7 +511,7 @@ impl StaticFileProvider {
                             } else {
                                 ProviderError::MissingStaticFileTx(segment, number)
                             };
-                            return Err(err);
+                            return Err(err)
                         }
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
@@ -594,7 +594,7 @@ impl StaticFileProvider {
         if static_file_upper_bound
             .map_or(false, |static_file_upper_bound| static_file_upper_bound >= number)
         {
-            return fetch_from_static_file(self);
+            return fetch_from_static_file(self)
         }
         fetch_from_database()
     }
@@ -717,7 +717,7 @@ impl HeaderProvider for StaticFileProvider {
                 .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
                 .and_then(|(header, hash)| {
                     if &hash == block_hash {
-                        return Some(header);
+                        return Some(header)
                     }
                     None
                 }))
@@ -802,7 +802,7 @@ impl ReceiptProvider for StaticFileProvider {
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
         if let Some(num) = self.transaction_id(hash)? {
-            return self.receipt(num);
+            return self.receipt(num)
         }
         Ok(None)
     }
