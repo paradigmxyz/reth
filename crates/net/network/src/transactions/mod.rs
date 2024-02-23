@@ -221,6 +221,7 @@ pub struct TransactionsManager<Pool> {
     /// All the connected peers.
     peers: HashMap<PeerId, Peer>,
     /// Send half for the command channel.
+    #[cfg(test)]
     command_tx: mpsc::UnboundedSender<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
     command_rx: UnboundedReceiverStream<TransactionsCommand>,
@@ -243,6 +244,8 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         transactions_manager_config: TransactionsManagerConfig,
     ) -> Self {
         let network_events = network.event_listener();
+
+        #[cfg(test)]
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
         let transaction_fetcher = TransactionFetcher::default().with_transaction_fetcher_config(
@@ -276,7 +279,9 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS).unwrap(),
             ),
             peers: Default::default(),
+            #[cfg(test)]
             command_tx,
+            #[cfg(test)]
             command_rx: UnboundedReceiverStream::new(command_rx),
             pending_transactions: ReceiverStream::new(pending),
             transaction_events: UnboundedMeteredReceiver::new(
@@ -290,6 +295,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
 
 // === impl TransactionsManager ===
 
+#[cfg(test)]
 impl<Pool> TransactionsManager<Pool>
 where
     Pool: TransactionPool,
@@ -1192,17 +1198,20 @@ where
                 acc
             );
 
-            let acc = &mut poll_durations.acc_cmds;
-            duration_metered_exec!(
-                {
-                    // advance commands
-                    if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
-                        this.on_command(cmd);
-                        some_ready = true;
-                    }
-                },
-                acc
-            );
+            #[cfg(test)]
+            {
+                let acc = &mut poll_durations.acc_cmds;
+                duration_metered_exec!(
+                    {
+                        // advance commands
+                        if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
+                            this.on_command(cmd);
+                            some_ready = true;
+                        }
+                    },
+                    acc
+                );
+            }
 
             let acc = &mut poll_durations.acc_tx_events;
             duration_metered_exec!(
