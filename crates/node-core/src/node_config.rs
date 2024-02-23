@@ -63,8 +63,8 @@ use reth_stages::{
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
-    TransactionValidationTaskExecutor,
+    blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
+    EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
 use revm_inspectors::stack::Hook;
 use secp256k1::SecretKey;
@@ -467,7 +467,11 @@ impl NodeConfig {
             + Clone
             + 'static,
     {
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
+        let blob_store = DiskFileBlobStore::open(
+            data_dir.blobstore_path(),
+            DiskFileBlobStoreConfig::default()
+                .with_max_cached_entries(self.txpool.max_cached_entries),
+        )?;
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
             .with_head_timestamp(head.timestamp)
             .kzg_settings(self.kzg_settings()?)
