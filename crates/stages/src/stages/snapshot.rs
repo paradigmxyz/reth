@@ -44,7 +44,7 @@ impl<DB: Database> Stage<DB> for SnapshotStage<DB> {
                 .map(|checkpoint| checkpoint.block_number),
         })?;
         self.snapshotter.run(targets)?;
-        Ok(ExecOutput::done(input.checkpoint()))
+        Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
     }
 
     fn unwind(
