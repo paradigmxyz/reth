@@ -24,12 +24,12 @@ impl Command {
                 table.view(&ClearViewer { db: provider_factory.db_ref() })?
             }
             Subcommands::StaticFile { segment } => {
-                let snapshot_provider = provider_factory.snapshot_provider();
-                let snapshots = iter_static_files(snapshot_provider.directory())?;
+                let static_file_provider = provider_factory.static_file_provider();
+                let static_files = iter_static_files(static_file_provider.directory())?;
 
-                if let Some(segment_snapshots) = snapshots.get(&segment) {
-                    for (block_range, _) in segment_snapshots {
-                        snapshot_provider
+                if let Some(segment_static_files) = static_files.get(&segment) {
+                    for (block_range, _) in segment_static_files {
+                        static_file_provider
                             .delete_jar(segment, find_fixed_range(block_range.start()))?;
                     }
                 }

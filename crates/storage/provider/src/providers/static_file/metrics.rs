@@ -81,7 +81,7 @@ impl StaticFileProviderOperation {
 }
 
 #[derive(Metrics)]
-#[metrics(scope = "snapshots.jar_provider")]
+#[metrics(scope = "static_files.jar_provider")]
 pub(crate) struct StaticFileProviderOperationMetrics {
     /// Total number of snapshot jar provider operations made.
     calls_total: Counter,

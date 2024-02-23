@@ -98,7 +98,7 @@ impl AccountHashingStage {
             provider.insert_historical_block(block.try_seal_with_senders().unwrap(), None).unwrap();
         }
         provider
-            .snapshot_provider()
+            .static_file_provider()
             .latest_writer(reth_primitives::StaticFileSegment::Headers)
             .unwrap()
             .commit()

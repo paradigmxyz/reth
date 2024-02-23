@@ -13,7 +13,7 @@ pub enum Compression {
     /// Zstandard (Zstd) compression algorithm with a dictionary.
     #[strum(serialize = "zstd-dict")]
     ZstdWithDictionary,
-    /// No compression, uncompressed snapshot.
+    /// No compression, uncompressed static_file.
     #[strum(serialize = "uncompressed")]
     #[default]
     Uncompressed,

@@ -20,13 +20,13 @@ pub struct LatestStateProviderRef<'b, TX: DbTx> {
     /// database transaction
     db: &'b TX,
     /// Snapshot provider
-    snapshot_provider: StaticFileProvider,
+    static_file_provider: StaticFileProvider,
 }
 
 impl<'b, TX: DbTx> LatestStateProviderRef<'b, TX> {
     /// Create new state provider
-    pub fn new(db: &'b TX, snapshot_provider: StaticFileProvider) -> Self {
-        Self { db, snapshot_provider }
+    pub fn new(db: &'b TX, static_file_provider: StaticFileProvider) -> Self {
+        Self { db, static_file_provider }
     }
 }
 
@@ -40,10 +40,10 @@ impl<'b, TX: DbTx> AccountReader for LatestStateProviderRef<'b, TX> {
 impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.snapshot_provider.get_with_snapshot_or_database(
+        self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             number,
-            |snapshot| snapshot.block_hash(number),
+            |static_file| static_file.block_hash(number),
             || Ok(self.db.get::<tables::CanonicalHeaders>(number)?),
         )
     }
@@ -53,10 +53,10 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.snapshot_provider.get_range_with_snapshot_or_database(
+        self.static_file_provider.get_range_with_static_file_or_database(
             StaticFileSegment::Headers,
             start..end,
-            |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
+            |static_file, range, _| static_file.canonical_hashes_range(range.start, range.end),
             |range, _| {
                 self.db
                     .cursor_read::<tables::CanonicalHeaders>()
@@ -126,19 +126,19 @@ pub struct LatestStateProvider<TX: DbTx> {
     /// database transaction
     db: TX,
     /// Snapshot provider
-    snapshot_provider: StaticFileProvider,
+    static_file_provider: StaticFileProvider,
 }
 
 impl<TX: DbTx> LatestStateProvider<TX> {
     /// Create new state provider
-    pub fn new(db: TX, snapshot_provider: StaticFileProvider) -> Self {
-        Self { db, snapshot_provider }
+    pub fn new(db: TX, static_file_provider: StaticFileProvider) -> Self {
+        Self { db, static_file_provider }
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     fn as_ref(&self) -> LatestStateProviderRef<'_, TX> {
-        LatestStateProviderRef::new(&self.db, self.snapshot_provider.clone())
+        LatestStateProviderRef::new(&self.db, self.static_file_provider.clone())
     }
 }
 

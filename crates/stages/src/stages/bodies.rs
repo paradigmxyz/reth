@@ -124,29 +124,29 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // Get id for the next tx_num of zero if there are no transactions.
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
-        let snapshot_provider = provider.snapshot_provider();
-        let mut snapshotter =
-            snapshot_provider.get_writer(from_block, StaticFileSegment::Transactions)?;
+        let static_file_provider = provider.static_file_provider();
+        let mut static_file_producer =
+            static_file_provider.get_writer(from_block, StaticFileSegment::Transactions)?;
 
         // Make sure Transactions static file is at the same height. If it's further, this
         // input execution was interrupted previously and we need to unwind the static file.
-        let next_snapshot_tx_num = snapshot_provider
-            .get_highest_snapshot_tx(StaticFileSegment::Transactions)
+        let next_static_file_tx_num = static_file_provider
+            .get_highest_static_file_tx(StaticFileSegment::Transactions)
             .map(|id| id + 1)
             .unwrap_or_default();
 
-        match next_snapshot_tx_num.cmp(&next_tx_num) {
+        match next_static_file_tx_num.cmp(&next_tx_num) {
             // If static files are ahead, then we didn't reach the database commit in a previous
             // stage run. So, our only solution is to unwind the static files and proceed from the
             // database expected height.
-            Ordering::Greater => snapshotter
-                .prune_transactions(next_snapshot_tx_num - next_tx_num, from_block - 1)?,
+            Ordering::Greater => static_file_producer
+                .prune_transactions(next_static_file_tx_num - next_tx_num, from_block - 1)?,
             // If static files are behind, then there was some corruption or loss of files. This
             // error will trigger an unwind, that will bring the database to the same height as the
             // static files.
             Ordering::Less => {
-                let last_block = snapshot_provider
-                    .get_highest_snapshot_block(StaticFileSegment::Transactions)
+                let last_block = static_file_provider
+                    .get_highest_static_file_block(StaticFileSegment::Transactions)
                     .unwrap_or_default();
 
                 let missing_block =
@@ -180,7 +180,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // Increment block on snapshot header.
             if block_number > 0 {
                 let appended_block_number =
-                    snapshotter.increment_block(StaticFileSegment::Transactions)?;
+                    static_file_producer.increment_block(StaticFileSegment::Transactions)?;
 
                 if appended_block_number != block_number {
                     // This scenario indicates a critical error in the logic of adding new
@@ -202,8 +202,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
                     // Write transactions
                     for transaction in block.body {
-                        let appended_tx_number =
-                            snapshotter.append_transaction(next_tx_num, transaction.into())?;
+                        let appended_tx_number = static_file_producer
+                            .append_transaction(next_tx_num, transaction.into())?;
 
                         if appended_tx_number != next_tx_num {
                             // This scenario indicates a critical error in the logic of adding new
@@ -261,7 +261,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     ) -> Result<UnwindOutput, StageError> {
         self.buffer.take();
 
-        let snapshot_provider = provider.snapshot_provider();
+        let static_file_provider = provider.static_file_provider();
         let tx = provider.tx_ref();
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
@@ -297,21 +297,22 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             rev_walker.delete_current()?;
         }
 
-        let mut snapshotter = snapshot_provider.latest_writer(StaticFileSegment::Transactions)?;
+        let mut static_file_producer =
+            static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
 
         // Unwind from static files. Get the current last expected transaction from DB, and match it
         // on static file
         let db_tx_num =
             body_cursor.last()?.map(|(_, block_meta)| block_meta.last_tx_num()).unwrap_or_default();
-        let snapshot_tx_num: u64 = snapshot_provider
-            .get_highest_snapshot_tx(StaticFileSegment::Transactions)
+        let static_file_tx_num: u64 = static_file_provider
+            .get_highest_static_file_tx(StaticFileSegment::Transactions)
             .unwrap_or_default();
 
         // If there are more transactions on database, then we are missing snapshot data and we need
         // to unwind further.
-        if db_tx_num > snapshot_tx_num {
-            let last_block = snapshot_provider
-                .get_highest_snapshot_block(StaticFileSegment::Transactions)
+        if db_tx_num > static_file_tx_num {
+            let last_block = static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::Transactions)
                 .unwrap_or_default();
 
             let missing_block =
@@ -324,8 +325,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         }
 
         // Unwinds static file
-        snapshotter
-            .prune_transactions(snapshot_tx_num.saturating_sub(db_tx_num), input.unwind_to)?;
+        static_file_producer
+            .prune_transactions(static_file_tx_num.saturating_sub(db_tx_num), input.unwind_to)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)
@@ -382,7 +383,7 @@ mod tests {
         // Check that we only synced around `batch_size` blocks even though the number of blocks
         // synced by the previous stage is higher
         let output = rx.await.unwrap();
-        runner.db().factory.snapshot_provider().commit().unwrap();
+        runner.db().factory.static_file_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -419,7 +420,7 @@ mod tests {
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
         let output = rx.await.unwrap();
-        runner.db().factory.snapshot_provider().commit().unwrap();
+        runner.db().factory.static_file_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput {
@@ -457,7 +458,7 @@ mod tests {
 
         // Check that we synced at least 10 blocks
         let first_run = rx.await.unwrap();
-        runner.db().factory.snapshot_provider().commit().unwrap();
+        runner.db().factory.static_file_provider().commit().unwrap();
         assert_matches!(
             first_run,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -478,7 +479,7 @@ mod tests {
 
         // Check that we synced more blocks
         let output = rx.await.unwrap();
-        runner.db().factory.snapshot_provider().commit().unwrap();
+        runner.db().factory.static_file_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -519,7 +520,7 @@ mod tests {
         // Check that we synced all blocks successfully, even though our `batch_size` allows us to
         // sync more (if there were more headers)
         let output = rx.await.unwrap();
-        runner.db().factory.snapshot_provider().commit().unwrap();
+        runner.db().factory.static_file_provider().commit().unwrap();
         assert_matches!(
             output,
             Ok(ExecOutput { checkpoint: StageCheckpoint {
@@ -537,11 +538,11 @@ mod tests {
             .expect("Written block data invalid");
 
         // Delete a transaction
-        let snapshot_provider = runner.db().factory.snapshot_provider();
+        let static_file_provider = runner.db().factory.static_file_provider();
         {
-            let mut snapshotter =
-                snapshot_provider.latest_writer(StaticFileSegment::Transactions).unwrap();
-            snapshotter.prune_transactions(1, checkpoint.block_number).unwrap();
+            let mut static_file_producer =
+                static_file_provider.latest_writer(StaticFileSegment::Transactions).unwrap();
+            static_file_producer.prune_transactions(1, checkpoint.block_number).unwrap();
         }
         // Unwind all of it
         let unwind_to = 1;
@@ -597,8 +598,8 @@ mod tests {
             },
         };
         use reth_primitives::{
-            BlockBody, BlockHash, BlockNumber, Header, SealedBlock, SealedHeader, StaticFileSegment,
-            TxNumber, B256,
+            BlockBody, BlockHash, BlockNumber, Header, SealedBlock, SealedHeader,
+            StaticFileSegment, TxNumber, B256,
         };
         use reth_provider::{
             providers::StaticFileWriter, HeaderProvider, ProviderFactory, TransactionsProvider,
@@ -673,7 +674,7 @@ mod tests {
                 let start = input.checkpoint().block_number;
                 let end = input.target();
 
-                let snapshot_provider = self.db.factory.snapshot_provider();
+                let static_file_provider = self.db.factory.static_file_provider();
 
                 let mut rng = generators::rng();
 
@@ -684,19 +685,21 @@ mod tests {
                     // Insert last progress data
                     {
                         let tx = self.db.factory.provider_rw()?.into_tx();
-                        let mut snapshotter =
-                            snapshot_provider.get_writer(start, StaticFileSegment::Transactions)?;
+                        let mut static_file_producer = static_file_provider
+                            .get_writer(start, StaticFileSegment::Transactions)?;
 
                         let body = StoredBlockBodyIndices {
                             first_tx_num: 0,
                             tx_count: progress.body.len() as u64,
                         };
 
-                        snapshotter.set_block_range(0..=progress.number);
+                        static_file_producer.set_block_range(0..=progress.number);
 
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);
-                            snapshotter.append_transaction(tx_num, transaction.into()).map(|_| ())
+                            static_file_producer
+                                .append_transaction(tx_num, transaction.into())
+                                .map(|_| ())
                         })?;
 
                         if body.tx_count != 0 {
@@ -715,7 +718,7 @@ mod tests {
                             )?;
                         }
 
-                        snapshotter.commit()?;
+                        static_file_producer.commit()?;
                         tx.commit()?;
                     }
                 }
@@ -778,7 +781,7 @@ mod tests {
                 prev_progress: BlockNumber,
                 highest_block: BlockNumber,
             ) -> Result<(), TestRunnerError> {
-                let snapshot_provider = self.db.factory.snapshot_provider();
+                let static_file_provider = self.db.factory.static_file_provider();
 
                 self.db.query(|tx| {
                     // Acquire cursors on body related tables
@@ -811,7 +814,7 @@ mod tests {
                             "We wrote a block body outside of our synced range. Found block with number {number}, highest block according to stage is {highest_block}",
                         );
 
-                        let header = snapshot_provider.header_by_number(number)?.expect("to be present");
+                        let header = static_file_provider.header_by_number(number)?.expect("to be present");
                         // Validate that ommers exist if any
                         let stored_ommers =  ommers_cursor.seek_exact(number)?;
                         if header.ommers_hash_is_empty() {
@@ -828,7 +831,7 @@ mod tests {
                         }
 
                         for tx_id in body.tx_num_range() {
-                            assert!(snapshot_provider.transaction_by_id(tx_id)?.is_some(), "Transaction is missing.");
+                            assert!(static_file_provider.transaction_by_id(tx_id)?.is_some(), "Transaction is missing.");
                         }
 
                         prev_number = Some(number);
@@ -889,9 +892,9 @@ mod tests {
                 &mut self,
                 range: RangeInclusive<BlockNumber>,
             ) -> DownloadResult<()> {
-                let snapshot_provider = self.provider_factory.snapshot_provider();
+                let static_file_provider = self.provider_factory.static_file_provider();
 
-                for header in snapshot_provider.fetch_range_iter(
+                for header in static_file_provider.fetch_range_iter(
                     StaticFileSegment::Headers,
                     *range.start()..*range.end() + 1,
                     |cursor, number| cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into()),

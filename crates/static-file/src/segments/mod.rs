@@ -36,13 +36,13 @@ pub trait Segment<DB: Database>: Send + Sync {
     fn snapshot(
         &self,
         provider: DatabaseProviderRO<DB>,
-        snapshot_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()>;
 
     /// Create a snapshot file of data for the provided block range. The `directory` parameter
     /// determines the snapshot file's save location.
-    fn create_snapshot_file(
+    fn create_static_file_file(
         &self,
         provider: &DatabaseProviderRO<DB>,
         directory: &Path,

@@ -965,7 +965,7 @@ mod tests {
         }
 
         // Insert more data in the database, so we hit the DB size limit error, and MDBX tries to
-        // kick long-lived readers and delete their snapshots
+        // kick long-lived readers and delete their static_files
         {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();

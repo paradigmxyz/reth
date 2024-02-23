@@ -77,7 +77,7 @@ impl StaticFileSegment {
     pub fn filename(&self, block_range: &SegmentRangeInclusive) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`].
-        format!("snapshot_{}_{}_{}", self.as_ref(), block_range.start(), block_range.end())
+        format!("static_file_{}_{}_{}", self.as_ref(), block_range.start(), block_range.end())
     }
 
     /// Returns file name for the provided segment and range, alongisde filters, compression.
@@ -104,8 +104,8 @@ impl StaticFileSegment {
     /// Parses a filename into a `SnapshotSegment` and its expected block range.
     ///
     /// The filename is expected to follow the format:
-    /// "snapshot_{segment}_{block_start}_{block_end}". This function checks
-    /// for the correct prefix ("snapshot"), and then parses the segment and the inclusive
+    /// "static_file_{segment}_{block_start}_{block_end}". This function checks
+    /// for the correct prefix ("static_file"), and then parses the segment and the inclusive
     /// ranges for blocks. It ensures that the start of each range is less than or equal to the
     /// end.
     ///
@@ -119,7 +119,7 @@ impl StaticFileSegment {
     /// Any changes in the filename format in `filename` should be reflected here.
     pub fn parse_filename(name: &str) -> Option<(Self, SegmentRangeInclusive)> {
         let mut parts = name.split('_');
-        if parts.next() != Some("snapshot") {
+        if !(parts.next() == Some("static") && parts.next() == Some("file")) {
             return None;
         }
 
@@ -368,18 +368,18 @@ mod tests {
     #[test]
     fn test_filename() {
         let test_vectors = [
-            (StaticFileSegment::Headers, 2..=30, "snapshot_headers_2_30", None),
-            (StaticFileSegment::Receipts, 30..=300, "snapshot_receipts_30_300", None),
+            (StaticFileSegment::Headers, 2..=30, "static_file_headers_2_30", None),
+            (StaticFileSegment::Receipts, 30..=300, "static_file_receipts_30_300", None),
             (
                 StaticFileSegment::Transactions,
                 1_123_233..=11_223_233,
-                "snapshot_transactions_1123233_11223233",
+                "static_file_transactions_1123233_11223233",
                 None,
             ),
             (
                 StaticFileSegment::Headers,
                 2..=30,
-                "snapshot_headers_2_30_cuckoo-fmph_lz4",
+                "static_file_headers_2_30_cuckoo-fmph_lz4",
                 Some((
                     Compression::Lz4,
                     Filters::WithFilters(
@@ -391,7 +391,7 @@ mod tests {
             (
                 StaticFileSegment::Headers,
                 2..=30,
-                "snapshot_headers_2_30_cuckoo-fmph_zstd",
+                "static_file_headers_2_30_cuckoo-fmph_zstd",
                 Some((
                     Compression::Zstd,
                     Filters::WithFilters(
@@ -403,7 +403,7 @@ mod tests {
             (
                 StaticFileSegment::Headers,
                 2..=30,
-                "snapshot_headers_2_30_cuckoo-fmph_zstd-dict",
+                "static_file_headers_2_30_cuckoo-fmph_zstd-dict",
                 Some((
                     Compression::ZstdWithDictionary,
                     Filters::WithFilters(
@@ -428,7 +428,7 @@ mod tests {
             assert_eq!(StaticFileSegment::parse_filename(filename), Some((segment, block_range)));
         }
 
-        assert_eq!(StaticFileSegment::parse_filename("snapshot_headers_2"), None);
-        assert_eq!(StaticFileSegment::parse_filename("snapshot_headers_"), None);
+        assert_eq!(StaticFileSegment::parse_filename("static_file_headers_2"), None);
+        assert_eq!(StaticFileSegment::parse_filename("static_file_headers_"), None);
     }
 }

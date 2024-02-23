@@ -26,7 +26,7 @@
 //! # use reth_provider::ProviderFactory;
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
-//! # use reth_static_file::Snapshotter;
+//! # use reth_static_file::StaticFileProducer;
 //! #
 //! # let chain_spec = MAINNET.clone();
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
@@ -42,9 +42,9 @@
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
 //! # let executor_factory = EvmProcessorFactory::new(chain_spec.clone(), EthEvmConfig::default());
-//! # let snapshotter = Snapshotter::new(
+//! # let static_file_producer = StaticFileProducer::new(
 //! #    provider_factory.clone(),
-//! #    provider_factory.snapshot_provider(),
+//! #    provider_factory.static_file_provider(),
 //! #    PruneModes::default()
 //! # );
 //! // Create a pipeline that can fully sync
@@ -59,7 +59,7 @@
 //!             headers_downloader,
 //!             bodies_downloader,
 //!             executor_factory,
-//!             snapshotter,
+//!             static_file_producer,
 //!         )
 //!         .unwrap(),
 //!     )

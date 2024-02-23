@@ -7,9 +7,9 @@ use reth_primitives::{
 use reth_provider::{DatabaseProviderRW, StageCheckpointReader};
 use reth_static_file::StaticFileProducer;
 
-/// The snapshot stage _copies_ all data from database to static files using [StaticFileProducer]. The
-/// block range for copying is determined by the current highest blocks contained in static files
-/// and stage checkpoints for each segment individually.
+/// The snapshot stage _copies_ all data from database to static files using [StaticFileProducer].
+/// The block range for copying is determined by the current highest blocks contained in static
+/// files and stage checkpoints for each segment individually.
 #[derive(Debug)]
 pub struct StaticFileStage<DB: Database> {
     static_file_producer: StaticFileProducer<DB>,
@@ -32,7 +32,7 @@ impl<DB: Database> Stage<DB> for StaticFileStage<DB> {
         provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let targets = self.static_file_producer.get_snapshot_targets(HighestStaticFiles {
+        let targets = self.static_file_producer.get_static_file_targets(HighestStaticFiles {
             headers: provider
                 .get_stage_checkpoint(StageId::Headers)?
                 .map(|checkpoint| checkpoint.block_number),

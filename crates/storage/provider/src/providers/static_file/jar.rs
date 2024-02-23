@@ -1,5 +1,5 @@
 use super::{
-    metrics::{StaticFileProviderOperation, StaticFileProviderMetrics},
+    metrics::{StaticFileProviderMetrics, StaticFileProviderOperation},
     LoadedJarRef,
 };
 use crate::{
@@ -316,8 +316,8 @@ impl<'a> ReceiptProvider for StaticFileJarProvider<'a> {
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
-        if let Some(tx_snapshot) = &self.auxiliar_jar {
-            if let Some(num) = tx_snapshot.transaction_id(hash)? {
+        if let Some(tx_static_file) = &self.auxiliar_jar {
+            if let Some(num) = tx_static_file.transaction_id(hash)? {
                 return self.receipt(num);
             }
         }

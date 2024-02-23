@@ -92,7 +92,7 @@ mod tests {
                 .unwrap();
         }
         provider_rw
-            .snapshot_provider()
+            .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()

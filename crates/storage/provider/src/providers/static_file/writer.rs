@@ -386,7 +386,7 @@ impl<'a> StaticFileProviderRW<'a> {
         Ok(())
     }
 
-    /// Prunes `to_delete` number of receipts from snapshots.
+    /// Prunes `to_delete` number of receipts from static_files.
     ///
     /// # Note
     /// Commits to the configuration file at the end.
@@ -413,7 +413,7 @@ impl<'a> StaticFileProviderRW<'a> {
         Ok(())
     }
 
-    /// Prunes `to_delete` number of headers from snapshots.
+    /// Prunes `to_delete` number of headers from static_files.
     ///
     /// # Note
     /// Commits to the configuration file at the end.

@@ -130,9 +130,9 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let provider_factory = ProviderFactory::new(
             Arc::clone(&self.db),
             Arc::clone(&self.config.chain),
-            self.data_dir.snapshots_path(),
+            self.data_dir.static_files_path(),
         )?
-        .with_snapshots_metrics();
+        .with_static_files_metrics();
 
         self.config.start_metrics_endpoint(prometheus_handle, Arc::clone(&self.db)).await?;
 
@@ -264,14 +264,14 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         let mut hooks = EngineHooks::new();
 
-        let mut snapshotter = StaticFileProducer::new(
+        let mut static_file_producer = StaticFileProducer::new(
             provider_factory.clone(),
-            provider_factory.snapshot_provider(),
+            provider_factory.static_file_provider(),
             prune_config.clone().unwrap_or_default().segments,
         );
-        let snapshotter_events = snapshotter.events();
-        hooks.add(StaticFileHook::new(snapshotter.clone(), Box::new(executor.clone())));
-        info!(target: "reth::cli", "Snapshotter initialized");
+        let static_file_producer_events = static_file_producer.events();
+        hooks.add(StaticFileHook::new(static_file_producer.clone(), Box::new(executor.clone())));
+        info!(target: "reth::cli", "StaticFileProducer initialized");
 
         // Configure the pipeline
         let (mut pipeline, client) = if self.config.dev.dev {
@@ -301,7 +301,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
-                    snapshotter,
+                    static_file_producer,
                     evm_config,
                 )
                 .await?;
@@ -324,7 +324,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
-                    snapshotter,
+                    static_file_producer,
                     evm_config,
                 )
                 .await?;
@@ -377,7 +377,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                 Either::Right(stream::empty())
             },
             pruner_events.map(Into::into),
-            snapshotter_events.map(Into::into),
+            static_file_producer_events.map(Into::into),
         );
         executor.spawn_critical(
             "events task",

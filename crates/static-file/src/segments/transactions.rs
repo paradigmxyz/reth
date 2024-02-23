@@ -1,6 +1,7 @@
 use crate::segments::{dataset_for_compression, prepare_jar, Segment};
 use reth_db::{
-    cursor::DbCursorRO, database::Database, static_file::create_snapshot_T1, tables, transaction::DbTx,
+    cursor::DbCursorRO, database::Database, static_file::create_static_file_T1, tables,
+    transaction::DbTx,
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
@@ -27,15 +28,16 @@ impl<DB: Database> Segment<DB> for Transactions {
     fn snapshot(
         &self,
         provider: DatabaseProviderRO<DB>,
-        snapshot_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
-        let mut snapshot_writer =
-            snapshot_provider.get_writer(*block_range.start(), StaticFileSegment::Transactions)?;
+        let mut static_file_writer = static_file_provider
+            .get_writer(*block_range.start(), StaticFileSegment::Transactions)?;
 
         for block in block_range {
-            let _snapshot_block = snapshot_writer.increment_block(StaticFileSegment::Transactions)?;
-            debug_assert_eq!(_snapshot_block, block);
+            let _static_file_block =
+                static_file_writer.increment_block(StaticFileSegment::Transactions)?;
+            debug_assert_eq!(_static_file_block, block);
 
             let block_body_indices = provider
                 .block_body_indices(block)?
@@ -49,14 +51,14 @@ impl<DB: Database> Segment<DB> for Transactions {
             for entry in transactions_walker {
                 let (tx_number, transaction) = entry?;
 
-                snapshot_writer.append_transaction(tx_number, transaction)?;
+                static_file_writer.append_transaction(tx_number, transaction)?;
             }
         }
 
         Ok(())
     }
 
-    fn create_snapshot_file(
+    fn create_static_file_file(
         &self,
         provider: &DatabaseProviderRO<DB>,
         directory: &Path,
@@ -93,7 +95,7 @@ impl<DB: Database> Segment<DB> for Transactions {
             );
         }
 
-        create_snapshot_T1::<tables::Transactions, TxNumber, SegmentHeader>(
+        create_static_file_T1::<tables::Transactions, TxNumber, SegmentHeader>(
             provider.tx_ref(),
             tx_range,
             None,

@@ -8,7 +8,7 @@ use futures::FutureExt;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
-use reth_static_file::{StaticFileProducerWithResult, StaticFileProducer};
+use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
@@ -16,25 +16,32 @@ use tracing::trace;
 
 /// Manages snapshotting under the control of the engine.
 ///
-/// This type controls the [Snapshotter].
+/// This type controls the [StaticFileProducer].
 #[derive(Debug)]
 pub struct StaticFileHook<DB> {
-    /// The current state of the snapshotter.
+    /// The current state of the static_file_producer.
     state: StaticFileProducerState<DB>,
-    /// The type that can spawn the snapshotter task.
+    /// The type that can spawn the static_file_producer task.
     task_spawner: Box<dyn TaskSpawner>,
 }
 
 impl<DB: Database + 'static> StaticFileHook<DB> {
     /// Create a new instance
-    pub fn new(snapshotter: StaticFileProducer<DB>, task_spawner: Box<dyn TaskSpawner>) -> Self {
-        Self { state: StaticFileProducerState::Idle(Some(snapshotter)), task_spawner }
+    pub fn new(
+        static_file_producer: StaticFileProducer<DB>,
+        task_spawner: Box<dyn TaskSpawner>,
+    ) -> Self {
+        Self { state: StaticFileProducerState::Idle(Some(static_file_producer)), task_spawner }
     }
 
-    /// Advances the snapshotter state.
+    /// Advances the static_file_producer state.
     ///
-    /// This checks for the result in the channel, or returns pending if the snapshotter is idle.
-    fn poll_snapshotter(&mut self, cx: &mut Context<'_>) -> Poll<RethResult<EngineHookEvent>> {
+    /// This checks for the result in the channel, or returns pending if the static_file_producer is
+    /// idle.
+    fn poll_static_file_producer(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<RethResult<EngineHookEvent>> {
         let result = match self.state {
             StaticFileProducerState::Idle(_) => return Poll::Pending,
             StaticFileProducerState::Running(ref mut fut) => {
@@ -43,8 +50,8 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
         };
 
         let event = match result {
-            Ok((snapshotter, result)) => {
-                self.state = StaticFileProducerState::Idle(Some(snapshotter));
+            Ok((static_file_producer, result)) => {
+                self.state = StaticFileProducerState::Idle(Some(static_file_producer));
 
                 match result {
                     Ok(_) => EngineHookEvent::Finished(Ok(())),
@@ -52,7 +59,7 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
                 }
             }
             Err(_) => {
-                // failed to receive the snapshotter
+                // failed to receive the static_file_producer
                 EngineHookEvent::Finished(Err(EngineHookError::ChannelClosed))
             }
         };
@@ -60,28 +67,29 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
         Poll::Ready(Ok(event))
     }
 
-    /// This will try to spawn the snapshotter if it is idle:
-    /// 1. Check if snapshotting is needed through [Snapshotter::get_snapshot_targets] and then
-    ///    [SnapshotTargets::any](reth_static_file::SnapshotTargets::any).
+    /// This will try to spawn the static_file_producer if it is idle:
+    /// 1. Check if snapshotting is needed through [StaticFileProducer::get_static_file_targets] and
+    ///    then [SnapshotTargets::any](reth_static_file::SnapshotTargets::any).
     /// 2.
-    ///     1. If snapshotting is needed, pass snapshot request to the [Snapshotter::run] and spawn
-    ///        it in a separate task. Set snapshotter state to [SnapshotterState::Running].
-    ///     2. If snapshotting is not needed, set snapshotter state back to
-    ///        [SnapshotterState::Idle].
+    ///     1. If snapshotting is needed, pass snapshot request to the [StaticFileProducer::run] and
+    ///        spawn it in a separate task. Set static_file_producer state to
+    ///        [StaticFileProducerState::Running].
+    ///     2. If snapshotting is not needed, set static_file_producer state back to
+    ///        [StaticFileProducerState::Idle].
     ///
-    /// If snapshotter is already running, do nothing.
-    fn try_spawn_snapshotter(
+    /// If static_file_producer is already running, do nothing.
+    fn try_spawn_static_file_producer(
         &mut self,
         finalized_block_number: BlockNumber,
     ) -> RethResult<Option<EngineHookEvent>> {
         Ok(match &mut self.state {
-            StaticFileProducerState::Idle(snapshotter) => {
-                let Some(mut snapshotter) = snapshotter.take() else {
-                    trace!(target: "consensus::engine::hooks::snapshot", "Snapshotter is already running but the state is idle");
+            StaticFileProducerState::Idle(static_file_producer) => {
+                let Some(mut static_file_producer) = static_file_producer.take() else {
+                    trace!(target: "consensus::engine::hooks::snapshot", "StaticFileProducer is already running but the state is idle");
                     return Ok(None);
                 };
 
-                let targets = snapshotter.get_snapshot_targets(HighestStaticFiles {
+                let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
                     headers: Some(finalized_block_number),
                     receipts: Some(finalized_block_number),
                     transactions: Some(finalized_block_number),
@@ -91,17 +99,17 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
                 if targets.any() {
                     let (tx, rx) = oneshot::channel();
                     self.task_spawner.spawn_critical_blocking(
-                        "snapshotter task",
+                        "static_file_producer task",
                         Box::pin(async move {
-                            let result = snapshotter.run(targets);
-                            let _ = tx.send((snapshotter, result));
+                            let result = static_file_producer.run(targets);
+                            let _ = tx.send((static_file_producer, result));
                         }),
                     );
                     self.state = StaticFileProducerState::Running(rx);
 
                     Some(EngineHookEvent::Started)
                 } else {
-                    self.state = StaticFileProducerState::Idle(Some(snapshotter));
+                    self.state = StaticFileProducerState::Idle(Some(static_file_producer));
                     Some(EngineHookEvent::NotReady)
                 }
             }
@@ -125,15 +133,15 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
             return Poll::Pending;
         };
 
-        // Try to spawn a snapshotter
-        match self.try_spawn_snapshotter(finalized_block_number)? {
+        // Try to spawn a static_file_producer
+        match self.try_spawn_static_file_producer(finalized_block_number)? {
             Some(EngineHookEvent::NotReady) => return Poll::Pending,
             Some(event) => return Poll::Ready(Ok(event)),
             None => (),
         }
 
-        // Poll snapshotter and check its status
-        self.poll_snapshotter(cx)
+        // Poll static_file_producer and check its status
+        self.poll_static_file_producer(cx)
     }
 
     fn db_access_level(&self) -> EngineHookDBAccessLevel {
@@ -141,14 +149,14 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
     }
 }
 
-/// The possible snapshotter states within the sync controller.
+/// The possible static_file_producer states within the sync controller.
 ///
-/// [SnapshotterState::Idle] means that the snapshotter is currently idle.
-/// [SnapshotterState::Running] means that the snapshotter is currently running.
+/// [StaticFileProducerState::Idle] means that the static_file_producer is currently idle.
+/// [StaticFileProducerState::Running] means that the static_file_producer is currently running.
 #[derive(Debug)]
 enum StaticFileProducerState<DB> {
-    /// Snapshotter is idle.
+    /// StaticFileProducer is idle.
     Idle(Option<StaticFileProducer<DB>>),
-    /// Snapshotter is running and waiting for a response
+    /// StaticFileProducer is running and waiting for a response
     Running(oneshot::Receiver<StaticFileProducerWithResult<DB>>),
 }

@@ -119,7 +119,7 @@ impl Command {
         let factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            self.datadir.unwrap_or_chain_default(self.chain.chain).snapshots_path(),
+            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
         )?;
         let provider = factory.provider()?;
 
@@ -162,7 +162,7 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             Arc::clone(&db),
             Arc::clone(&self.chain),
-            data_dir.snapshots_path(),
+            data_dir.static_files_path(),
         )?;
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));

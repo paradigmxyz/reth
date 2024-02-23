@@ -33,7 +33,7 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
             ProviderFactory::new(
                 output_db,
                 db_tool.chain.clone(),
-                output_datadir.snapshots_path(),
+                output_datadir.static_files_path(),
             )?,
             to,
             from,

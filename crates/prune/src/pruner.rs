@@ -125,7 +125,7 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Prunes the segments that the [Pruner] was initialized with, and the segments that needs to
-    /// be pruned according to the highest snapshots.
+    /// be pruned according to the highest static_files.
     ///
     /// Returns [PrunerStats], `delete_limit` that remained after pruning all segments, and
     /// [PruneProgress].
@@ -135,8 +135,8 @@ impl<DB: Database> Pruner<DB> {
         tip_block_number: BlockNumber,
         mut delete_limit: usize,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
-        let snapshot_segments = self.snapshot_segments();
-        let segments = snapshot_segments
+        let static_file_segments = self.static_file_segments();
+        let segments = static_file_segments
             .iter()
             .map(|segment| (segment, PrunePurpose::StaticFile))
             .chain(self.segments.iter().map(|segment| (segment, PrunePurpose::User)));
@@ -196,28 +196,29 @@ impl<DB: Database> Pruner<DB> {
         Ok((stats, delete_limit, PruneProgress::from_done(done)))
     }
 
-    /// Returns pre-configured segments that needs to be pruned according to the highest snapshots
-    /// for [PruneSegment::Transactions], [PruneSegment::Headers] and [PruneSegment::Receipts].
-    fn snapshot_segments(&self) -> Vec<Box<dyn Segment<DB>>> {
+    /// Returns pre-configured segments that needs to be pruned according to the highest
+    /// static_files for [PruneSegment::Transactions], [PruneSegment::Headers] and
+    /// [PruneSegment::Receipts].
+    fn static_file_segments(&self) -> Vec<Box<dyn Segment<DB>>> {
         let mut segments = Vec::<Box<dyn Segment<DB>>>::new();
 
-        let snapshot_provider = self.provider_factory.snapshot_provider();
+        let static_file_provider = self.provider_factory.static_file_provider();
 
         if let Some(to_block) =
-            snapshot_provider.get_highest_snapshot_block(StaticFileSegment::Transactions)
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Transactions)
         {
             segments
                 .push(Box::new(segments::Transactions::new(PruneMode::before_inclusive(to_block))))
         }
 
         if let Some(to_block) =
-            snapshot_provider.get_highest_snapshot_block(StaticFileSegment::Headers)
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers)
         {
             segments.push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
         }
 
         if let Some(to_block) =
-            snapshot_provider.get_highest_snapshot_block(StaticFileSegment::Receipts)
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts)
         {
             segments.push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
         }
@@ -232,8 +233,8 @@ impl<DB: Database> Pruner<DB> {
             // Saturating subtraction is needed for the case when the chain was reverted, meaning
             // current block number might be less than the previous tip block number.
             // If that's the case, no pruning is needed as outdated data is also reverted.
-            tip_block_number.saturating_sub(previous_tip_block_number)
-                >= self.min_block_interval as u64
+            tip_block_number.saturating_sub(previous_tip_block_number) >=
+                self.min_block_interval as u64
         }) {
             debug!(
                 target: "pruner",
@@ -251,7 +252,7 @@ impl<DB: Database> Pruner<DB> {
 #[cfg(test)]
 mod tests {
     use crate::Pruner;
-    use reth_db::test_utils::{create_test_rw_db, create_test_snapshots_dir};
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_primitives::MAINNET;
     use reth_provider::ProviderFactory;
 
@@ -259,8 +260,8 @@ mod tests {
     fn is_pruning_needed() {
         let db = create_test_rw_db();
         let provider_factory =
-            ProviderFactory::new(db, MAINNET.clone(), create_test_snapshots_dir())
-                .expect("create provide factory with snapshots");
+            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir())
+                .expect("create provide factory with static_files");
         let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5);
 
         // No last pruned block number was set before

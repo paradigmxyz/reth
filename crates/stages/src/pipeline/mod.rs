@@ -281,7 +281,7 @@ where
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
-                        self.provider_factory.snapshot_provider().commit()?;
+                        self.provider_factory.static_file_provider().commit()?;
                         provider_rw.commit()?;
 
                         provider_rw = self.provider_factory.provider_rw()?;
@@ -375,7 +375,7 @@ where
                         result: out.clone(),
                     });
 
-                    self.provider_factory.snapshot_provider().commit()?;
+                    self.provider_factory.static_file_provider().commit()?;
                     provider_rw.commit()?;
 
                     if done {
@@ -433,7 +433,7 @@ fn on_stage_error<DB: Database>(
                     StageId::MerkleExecute,
                     prev_checkpoint.unwrap_or_default(),
                 )?;
-                factory.snapshot_provider().commit()?;
+                factory.static_file_provider().commit()?;
                 provider_rw.commit()?;
 
                 // We unwind because of a validation error. If the unwind itself

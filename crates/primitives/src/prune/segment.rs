@@ -32,7 +32,7 @@ impl PruneSegment {
             Self::SenderRecovery | Self::TransactionLookup | Self::Headers | Self::Transactions => {
                 0
             }
-            Self::Receipts if purpose.is_snapshot() => 0,
+            Self::Receipts if purpose.is_static_file() => 0,
             Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
                 MINIMUM_PRUNING_DISTANCE
             }
@@ -46,7 +46,7 @@ impl PruneSegment {
 pub enum PrunePurpose {
     /// Prune data according to user configuration.
     User,
-    /// Prune data according to highest snapshots to delete the data from database.
+    /// Prune data according to highest static_files to delete the data from database.
     StaticFile,
 }
 
@@ -57,7 +57,7 @@ impl PrunePurpose {
     }
 
     /// Returns true if the purpose is [`PrunePurpose::Snapshot`].
-    pub fn is_snapshot(self) -> bool {
+    pub fn is_static_file(self) -> bool {
         matches!(self, Self::StaticFile)
     }
 }

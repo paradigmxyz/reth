@@ -107,7 +107,7 @@ impl Command {
         let db =
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         let provider_factory =
-            ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
         info!(target: "reth::cli", "Database opened");
 

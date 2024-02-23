@@ -38,7 +38,7 @@ pub struct HistoricalStateProviderRef<'b, TX: DbTx> {
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
     /// Snapshot provider
-    snapshot_provider: StaticFileProvider,
+    static_file_provider: StaticFileProvider,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -51,8 +51,12 @@ pub enum HistoryInfo {
 
 impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
     /// Create new StateProvider for historical block number
-    pub fn new(tx: &'b TX, block_number: BlockNumber, snapshot_provider: StaticFileProvider) -> Self {
-        Self { tx, block_number, lowest_available_blocks: Default::default(), snapshot_provider }
+    pub fn new(
+        tx: &'b TX,
+        block_number: BlockNumber,
+        static_file_provider: StaticFileProvider,
+    ) -> Self {
+        Self { tx, block_number, lowest_available_blocks: Default::default(), static_file_provider }
     }
 
     /// Create new StateProvider for historical block number and lowest block numbers at which
@@ -61,9 +65,9 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         tx: &'b TX,
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
-        snapshot_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider,
     ) -> Self {
-        Self { tx, block_number, lowest_available_blocks, snapshot_provider }
+        Self { tx, block_number, lowest_available_blocks, static_file_provider }
     }
 
     /// Lookup an account in the AccountHistory table
@@ -113,7 +117,9 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             .cursor_read::<tables::CanonicalHeaders>()?
             .last()?
             .map(|(tip, _)| tip)
-            .or_else(|| self.snapshot_provider.get_highest_snapshot_block(StaticFileSegment::Headers))
+            .or_else(|| {
+                self.static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers)
+            })
             .ok_or(ProviderError::BestBlockNotFound)?;
 
         if tip.saturating_sub(self.block_number) > EPOCH_SLOTS {
@@ -209,10 +215,10 @@ impl<'b, TX: DbTx> AccountReader for HistoricalStateProviderRef<'b, TX> {
 impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.snapshot_provider.get_with_snapshot_or_database(
+        self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             number,
-            |snapshot| snapshot.block_hash(number),
+            |static_file| static_file.block_hash(number),
             || Ok(self.tx.get::<tables::CanonicalHeaders>(number)?),
         )
     }
@@ -222,10 +228,10 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.snapshot_provider.get_range_with_snapshot_or_database(
+        self.static_file_provider.get_range_with_static_file_or_database(
             StaticFileSegment::Headers,
             start..end,
-            |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
+            |static_file, range, _| static_file.canonical_hashes_range(range.start, range.end),
             |range, _| {
                 self.tx
                     .cursor_read::<tables::CanonicalHeaders>()
@@ -314,13 +320,17 @@ pub struct HistoricalStateProvider<TX: DbTx> {
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
     /// Snapshot provider
-    snapshot_provider: StaticFileProvider,
+    static_file_provider: StaticFileProvider,
 }
 
 impl<TX: DbTx> HistoricalStateProvider<TX> {
     /// Create new StateProvider for historical block number
-    pub fn new(tx: TX, block_number: BlockNumber, snapshot_provider: StaticFileProvider) -> Self {
-        Self { tx, block_number, lowest_available_blocks: Default::default(), snapshot_provider }
+    pub fn new(
+        tx: TX,
+        block_number: BlockNumber,
+        static_file_provider: StaticFileProvider,
+    ) -> Self {
+        Self { tx, block_number, lowest_available_blocks: Default::default(), static_file_provider }
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -348,7 +358,7 @@ impl<TX: DbTx> HistoricalStateProvider<TX> {
             &self.tx,
             self.block_number,
             self.lowest_available_blocks,
-            self.snapshot_provider.clone(),
+            self.static_file_provider.clone(),
         )
     }
 }
@@ -414,7 +424,7 @@ mod tests {
     fn history_provider_get_account() {
         let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap().into_tx();
-        let snapshot_provider = factory.snapshot_provider();
+        let static_file_provider = factory.static_file_provider();
 
         tx.put::<tables::AccountHistory>(
             ShardedKey { key: ADDRESS, highest_block_number: 7 },
@@ -478,59 +488,59 @@ mod tests {
 
         // run
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 1, static_file_provider.clone())
                 .basic_account(ADDRESS)
                 .clone(),
             Ok(None)
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 2, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 2, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at3))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 3, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 3, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at3))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 4, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 4, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at7))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 7, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 7, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at7))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 9, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 9, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at10))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 10, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 10, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at10))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 11, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 11, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_at15))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 16, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 16, static_file_provider.clone())
                 .basic_account(ADDRESS),
             Ok(Some(acc_plain))
         );
 
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 1, static_file_provider.clone())
                 .basic_account(HIGHER_ADDRESS),
             Ok(None)
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1000, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 1000, static_file_provider.clone())
                 .basic_account(HIGHER_ADDRESS),
             Ok(Some(higher_acc_plain))
         );
@@ -540,7 +550,7 @@ mod tests {
     fn history_provider_get_storage() {
         let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap().into_tx();
-        let snapshot_provider = factory.snapshot_provider();
+        let static_file_provider = factory.static_file_provider();
 
         tx.put::<tables::StorageHistory>(
             StorageShardedKey {
@@ -591,52 +601,52 @@ mod tests {
 
         // run
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 0, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 0, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(None)
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 3, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 3, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(U256::ZERO))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 4, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 4, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_at7.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 7, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 7, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_at7.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 9, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 9, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_at10.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 10, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 10, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_at10.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 11, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 11, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_at15.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 16, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 16, static_file_provider.clone())
                 .storage(ADDRESS, STORAGE),
             Ok(Some(entry_plain.value))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1, snapshot_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 1, static_file_provider.clone())
                 .storage(HIGHER_ADDRESS, STORAGE),
             Ok(None)
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1000, snapshot_provider)
+            HistoricalStateProviderRef::new(&tx, 1000, static_file_provider)
                 .storage(HIGHER_ADDRESS, STORAGE),
             Ok(Some(higher_entry_plain.value))
         );
@@ -646,7 +656,7 @@ mod tests {
     fn history_provider_unavailable() {
         let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap().into_tx();
-        let snapshot_provider = factory.snapshot_provider();
+        let static_file_provider = factory.static_file_provider();
 
         // provider block_number < lowest available block number,
         // i.e. state at provider block is pruned
@@ -657,7 +667,7 @@ mod tests {
                 account_history_block_number: Some(3),
                 storage_history_block_number: Some(3),
             },
-            snapshot_provider.clone(),
+            static_file_provider.clone(),
         );
         assert_eq!(
             provider.account_history_lookup(ADDRESS),
@@ -677,7 +687,7 @@ mod tests {
                 account_history_block_number: Some(2),
                 storage_history_block_number: Some(2),
             },
-            snapshot_provider.clone(),
+            static_file_provider.clone(),
         );
         assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
         assert_eq!(
@@ -694,7 +704,7 @@ mod tests {
                 account_history_block_number: Some(1),
                 storage_history_block_number: Some(1),
             },
-            snapshot_provider.clone(),
+            static_file_provider.clone(),
         );
         assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
         assert_eq!(

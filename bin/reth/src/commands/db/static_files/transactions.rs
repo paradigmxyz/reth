@@ -16,7 +16,7 @@ use reth_provider::{
 use std::{path::PathBuf, sync::Arc};
 
 impl Command {
-    pub(crate) fn bench_transactions_snapshot(
+    pub(crate) fn bench_transactions_static_file(
         &self,
         provider_factory: Arc<ProviderFactory<DatabaseEnv>>,
         compression: Compression,

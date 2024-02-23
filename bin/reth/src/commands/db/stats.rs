@@ -28,8 +28,8 @@ impl Command {
         data_dir: ChainPath<DataDirPath>,
         tool: &DbTool<DatabaseEnv>,
     ) -> eyre::Result<()> {
-        let snapshots_stats_table = self.snapshots_stats_table(data_dir)?;
-        println!("{snapshots_stats_table}");
+        let static_files_stats_table = self.static_files_stats_table(data_dir)?;
+        println!("{static_files_stats_table}");
 
         println!("\n");
 
@@ -119,7 +119,10 @@ impl Command {
         Ok(table)
     }
 
-    fn snapshots_stats_table(&self, data_dir: ChainPath<DataDirPath>) -> eyre::Result<ComfyTable> {
+    fn static_files_stats_table(
+        &self,
+        data_dir: ChainPath<DataDirPath>,
+    ) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
 
@@ -145,15 +148,15 @@ impl Command {
             ]);
         }
 
-        let snapshots = iter_static_files(data_dir.snapshots_path())?;
-        let snapshot_provider = StaticFileProvider::new(data_dir.snapshots_path())?;
+        let static_files = iter_static_files(data_dir.static_files_path())?;
+        let static_file_provider = StaticFileProvider::new(data_dir.static_files_path())?;
 
         let mut total_data_size = 0;
         let mut total_index_size = 0;
         let mut total_offsets_size = 0;
         let mut total_config_size = 0;
 
-        for (segment, ranges) in snapshots.into_iter().sorted_by_key(|(segment, _)| *segment) {
+        for (segment, ranges) in static_files.into_iter().sorted_by_key(|(segment, _)| *segment) {
             let (
                 mut segment_columns,
                 mut segment_rows,
@@ -165,7 +168,7 @@ impl Command {
 
             for (block_range, tx_range) in &ranges {
                 let fixed_block_range = find_fixed_range(block_range.start());
-                let jar_provider = snapshot_provider
+                let jar_provider = static_file_provider
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
                     .expect("something went wrong");
 

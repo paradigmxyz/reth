@@ -40,7 +40,7 @@ async fn main() -> eyre::Result<()> {
     let db_path = Path::new(&db_path);
     let db = Arc::new(open_db_read_only(db_path.join("db").as_path(), Default::default())?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
-    let factory = ProviderFactory::new(db.clone(), spec.clone(), db_path.join("snapshots"))?;
+    let factory = ProviderFactory::new(db.clone(), spec.clone(), db_path.join("static_files"))?;
 
     // 2. Setup the blockchain provider using only the database provider and a noop for the tree to
     //    satisfy trait bounds. Tree is not used in this example since we are only operating on the

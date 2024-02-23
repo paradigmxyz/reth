@@ -13,8 +13,8 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_prune::PrunerEvent;
-use reth_static_file::StaticFileProducerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
+use reth_static_file::StaticFileProducerEvent;
 use std::{
     fmt::{Display, Formatter},
     future::Future,
@@ -168,9 +168,9 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
-                if status != ForkchoiceStatus::Valid
-                    || (self.safe_block_hash != Some(safe_block_hash)
-                        && self.finalized_block_hash != Some(finalized_block_hash))
+                if status != ForkchoiceStatus::Valid ||
+                    (self.safe_block_hash != Some(safe_block_hash) &&
+                        self.finalized_block_hash != Some(finalized_block_hash))
                 {
                     info!(
                         ?head_block_hash,
@@ -240,10 +240,10 @@ impl<DB> NodeState<DB> {
         }
     }
 
-    fn handle_snapshotter_event(&self, event: StaticFileProducerEvent) {
+    fn handle_static_file_producer_event(&self, event: StaticFileProducerEvent) {
         match event {
             StaticFileProducerEvent::Finished { targets, elapsed } => {
-                info!(?targets, ?elapsed, "Snapshotter finished");
+                info!(?targets, ?elapsed, "StaticFileProducer finished");
             }
         }
     }
@@ -291,7 +291,7 @@ pub enum NodeEvent {
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
     /// A pruner event
     Pruner(PrunerEvent),
-    /// A snapshotter event
+    /// A static_file_producer event
     StaticFileProducer(StaticFileProducerEvent),
 }
 
@@ -448,7 +448,7 @@ where
                     this.state.handle_pruner_event(event);
                 }
                 NodeEvent::StaticFileProducer(event) => {
-                    this.state.handle_snapshotter_event(event);
+                    this.state.handle_static_file_producer_event(event);
                 }
             }
         }
@@ -502,8 +502,8 @@ impl Eta {
     /// It's not the case for network-dependent ([StageId::Headers] and [StageId::Bodies]) and
     /// [StageId::Execution] stages.
     fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
-        if !self.is_available()
-            || matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)
+        if !self.is_available() ||
+            matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)
         {
             None
         } else {

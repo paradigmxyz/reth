@@ -69,10 +69,10 @@ pub struct StaticFileProviderInner {
     /// segments and ranges.
     map: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
     /// Max snapshotted block for each snapshot segment
-    snapshots_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
+    static_files_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
     /// Available snapshot block ranges on disk indexed by max transactions.
-    snapshots_tx_index: RwLock<SegmentRanges>,
-    /// Directory where snapshots are located
+    static_files_tx_index: RwLock<SegmentRanges>,
+    /// Directory where static_files are located
     path: PathBuf,
     /// Whether [`SnapshotJarProvider`] loads filters into memory. If not, `by_hash` queries won't
     /// be able to be queried directly.
@@ -88,8 +88,8 @@ impl StaticFileProviderInner {
         let provider = Self {
             map: Default::default(),
             writers: Default::default(),
-            snapshots_max_block: Default::default(),
-            snapshots_tx_index: Default::default(),
+            static_files_max_block: Default::default(),
+            static_files_tx_index: Default::default(),
             path: path.as_ref().to_path_buf(),
             load_filters: false,
             metrics: None,
@@ -156,7 +156,7 @@ impl StaticFileProvider {
         path: Option<&Path>,
     ) -> ProviderResult<Option<StaticFileJarProvider<'_>>> {
         // If we have a path, then get the block range from its name.
-        // Otherwise, check `self.available_snapshots`
+        // Otherwise, check `self.available_static_files`
         let block_range = match path {
             Some(path) => StaticFileSegment::parse_filename(
                 &path
@@ -260,7 +260,7 @@ impl StaticFileProvider {
         segment: StaticFileSegment,
         block: u64,
     ) -> Option<SegmentRangeInclusive> {
-        self.snapshots_max_block
+        self.static_files_max_block
             .read()
             .get(&segment)
             .filter(|max| **max >= block)
@@ -274,19 +274,19 @@ impl StaticFileProvider {
         segment: StaticFileSegment,
         tx: u64,
     ) -> Option<SegmentRangeInclusive> {
-        let snapshots = self.snapshots_tx_index.read();
-        let segment_snapshots = snapshots.get(&segment)?;
+        let static_files = self.static_files_tx_index.read();
+        let segment_static_files = static_files.get(&segment)?;
 
         // It's more probable that the request comes from a newer tx height, so we iterate
-        // the snapshots in reverse.
-        let mut snapshots_rev_iter = segment_snapshots.iter().rev().peekable();
+        // the static_files in reverse.
+        let mut static_files_rev_iter = segment_static_files.iter().rev().peekable();
 
-        while let Some((tx_end, block_range)) = snapshots_rev_iter.next() {
+        while let Some((tx_end, block_range)) = static_files_rev_iter.next() {
             if tx > *tx_end {
                 // request tx is higher than highest snapshot tx
                 return None;
             }
-            let tx_start = snapshots_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
+            let tx_start = static_files_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
                 return Some(find_fixed_range(block_range.end()));
             }
@@ -305,8 +305,8 @@ impl StaticFileProvider {
         segment: StaticFileSegment,
         segment_max_block: Option<BlockNumber>,
     ) -> ProviderResult<()> {
-        let mut max_block = self.snapshots_max_block.write();
-        let mut tx_index = self.snapshots_tx_index.write();
+        let mut max_block = self.static_files_max_block.write();
+        let mut tx_index = self.static_files_tx_index.write();
 
         match segment_max_block {
             Some(segment_max_block) => {
@@ -347,8 +347,8 @@ impl StaticFileProvider {
                 } else if let Some(1) = tx_index.get(&segment).map(|index| index.len()) {
                     // Only happens if we unwind all the txs/receipts from the first static file.
                     // Should only happen in test scenarios.
-                    if jar.user_header().expected_block_start() == 0
-                        && matches!(
+                    if jar.user_header().expected_block_start() == 0 &&
+                        matches!(
                             segment,
                             StaticFileSegment::Receipts | StaticFileSegment::Transactions
                         )
@@ -374,8 +374,8 @@ impl StaticFileProvider {
 
     /// Initializes the inner transaction and block index
     pub fn initialize_index(&self) -> ProviderResult<()> {
-        let mut max_block = self.snapshots_max_block.write();
-        let mut tx_index = self.snapshots_tx_index.write();
+        let mut max_block = self.static_files_max_block.write();
+        let mut tx_index = self.static_files_tx_index.write();
 
         tx_index.clear();
 
@@ -406,35 +406,35 @@ impl StaticFileProvider {
     }
 
     /// Gets the highest snapshot block if it exists for a snapshot segment.
-    pub fn get_highest_snapshot_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
-        self.snapshots_max_block.read().get(&segment).copied()
+    pub fn get_highest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
+        self.static_files_max_block.read().get(&segment).copied()
     }
 
     /// Gets the highest snapshotted transaction.
-    pub fn get_highest_snapshot_tx(&self, segment: StaticFileSegment) -> Option<TxNumber> {
-        self.snapshots_tx_index
+    pub fn get_highest_static_file_tx(&self, segment: StaticFileSegment) -> Option<TxNumber> {
+        self.static_files_tx_index
             .read()
             .get(&segment)
             .and_then(|index| index.last_key_value().map(|(last_tx, _)| *last_tx))
     }
 
     /// Gets the highest snapshotted blocks for all segments.
-    pub fn get_highest_snapshots(&self) -> HighestStaticFiles {
+    pub fn get_highest_static_files(&self) -> HighestStaticFiles {
         HighestStaticFiles {
-            headers: self.get_highest_snapshot_block(StaticFileSegment::Headers),
-            receipts: self.get_highest_snapshot_block(StaticFileSegment::Receipts),
-            transactions: self.get_highest_snapshot_block(StaticFileSegment::Transactions),
+            headers: self.get_highest_static_file_block(StaticFileSegment::Headers),
+            receipts: self.get_highest_static_file_block(StaticFileSegment::Receipts),
+            transactions: self.get_highest_static_file_block(StaticFileSegment::Transactions),
         }
     }
 
-    /// Iterates through segment snapshots in reverse order, executing a function until it returns
-    /// some object. Useful for finding objects by [`TxHash`] or [`BlockHash`].
-    pub fn find_snapshot<T>(
+    /// Iterates through segment static_files in reverse order, executing a function until it
+    /// returns some object. Useful for finding objects by [`TxHash`] or [`BlockHash`].
+    pub fn find_static_file<T>(
         &self,
         segment: StaticFileSegment,
         func: impl Fn(StaticFileJarProvider<'_>) -> ProviderResult<Option<T>>,
     ) -> ProviderResult<Option<T>> {
-        if let Some(highest_block) = self.get_highest_snapshot_block(segment) {
+        if let Some(highest_block) = self.get_highest_static_file_block(segment) {
             let mut range = find_fixed_range(highest_block);
             while range.end() > 0 {
                 if let Some(res) = func(self.get_or_create_jar_provider(segment, &range)?)? {
@@ -557,7 +557,7 @@ impl StaticFileProvider {
         }))
     }
 
-    /// Returns directory where snapshots are located.
+    /// Returns directory where static_files are located.
     pub fn directory(&self) -> &Path {
         &self.path
     }
@@ -567,15 +567,15 @@ impl StaticFileProvider {
     /// # Arguments
     /// * `segment` - The segment of the snapshot to check against.
     /// * `index_key` - Requested index key, usually a block or transaction number.
-    /// * `fetch_from_snapshot` - A closure that defines how to fetch the data from the snapshot
+    /// * `fetch_from_static_file` - A closure that defines how to fetch the data from the snapshot
     ///   provider.
     /// * `fetch_from_database` - A closure that defines how to fetch the data from the database
     ///   when the snapshot doesn't contain the required data or is not available.
-    pub fn get_with_snapshot_or_database<T, FS, FD>(
+    pub fn get_with_static_file_or_database<T, FS, FD>(
         &self,
         segment: StaticFileSegment,
         number: u64,
-        fetch_from_snapshot: FS,
+        fetch_from_static_file: FS,
         fetch_from_database: FD,
     ) -> ProviderResult<Option<T>>
     where
@@ -583,35 +583,37 @@ impl StaticFileProvider {
         FD: Fn() -> ProviderResult<Option<T>>,
     {
         // If there is, check the maximum block or transaction number of the segment.
-        let snapshot_upper_bound = match segment {
-            StaticFileSegment::Headers => self.get_highest_snapshot_block(segment),
+        let static_file_upper_bound = match segment {
+            StaticFileSegment::Headers => self.get_highest_static_file_block(segment),
             StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
-                self.get_highest_snapshot_tx(segment)
+                self.get_highest_static_file_tx(segment)
             }
         };
 
-        if snapshot_upper_bound.map_or(false, |snapshot_upper_bound| snapshot_upper_bound >= number)
+        if static_file_upper_bound
+            .map_or(false, |static_file_upper_bound| static_file_upper_bound >= number)
         {
-            return fetch_from_snapshot(self);
+            return fetch_from_static_file(self);
         }
         fetch_from_database()
     }
 
-    /// Gets data within a specified range, potentially spanning different snapshots and database.
+    /// Gets data within a specified range, potentially spanning different static_files and
+    /// database.
     ///
     /// # Arguments
     /// * `segment` - The segment of the snapshot to query.
     /// * `block_range` - The range of data to fetch.
-    /// * `fetch_from_snapshot` - A function to fetch data from the snapshot.
+    /// * `fetch_from_static_file` - A function to fetch data from the static_file.
     /// * `fetch_from_database` - A function to fetch data from the database.
     /// * `predicate` - A function used to evaluate each item in the fetched data. Fetching is
     ///   terminated when this function returns false, thereby filtering the data based on the
     ///   provided condition.
-    pub fn get_range_with_snapshot_or_database<T, P, FS, FD>(
+    pub fn get_range_with_static_file_or_database<T, P, FS, FD>(
         &self,
         segment: StaticFileSegment,
         mut block_or_tx_range: Range<u64>,
-        fetch_from_snapshot: FS,
+        fetch_from_static_file: FS,
         mut fetch_from_database: FD,
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
@@ -623,15 +625,15 @@ impl StaticFileProvider {
         let mut data = Vec::new();
 
         // If there is, check the maximum block or transaction number of the segment.
-        if let Some(snapshot_upper_bound) = match segment {
-            StaticFileSegment::Headers => self.get_highest_snapshot_block(segment),
+        if let Some(static_file_upper_bound) = match segment {
+            StaticFileSegment::Headers => self.get_highest_static_file_block(segment),
             StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
-                self.get_highest_snapshot_tx(segment)
+                self.get_highest_static_file_tx(segment)
             }
         } {
-            if block_or_tx_range.start <= snapshot_upper_bound {
-                let end = block_or_tx_range.end.min(snapshot_upper_bound + 1);
-                data.extend(fetch_from_snapshot(
+            if block_or_tx_range.start <= static_file_upper_bound {
+                let end = block_or_tx_range.end.min(static_file_upper_bound + 1);
+                data.extend(fetch_from_static_file(
                     self,
                     block_or_tx_range.start..end,
                     &mut predicate,
@@ -648,7 +650,7 @@ impl StaticFileProvider {
     }
 
     #[cfg(any(test, feature = "test-utils"))]
-    /// Returns snapshots directory
+    /// Returns static_files directory
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -694,7 +696,7 @@ impl StaticFileWriter for StaticFileProvider {
         &self,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_>> {
-        self.get_writer(self.get_highest_snapshot_block(segment).unwrap_or_default(), segment)
+        self.get_writer(self.get_highest_static_file_block(segment).unwrap_or_default(), segment)
     }
 
     fn commit(&self) -> ProviderResult<()> {
@@ -707,7 +709,7 @@ impl StaticFileWriter for StaticFileProvider {
 
 impl HeaderProvider for StaticFileProvider {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
-        self.find_snapshot(StaticFileSegment::Headers, |jar_provider| {
+        self.find_static_file(StaticFileSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
                 .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
@@ -726,7 +728,7 @@ impl HeaderProvider for StaticFileProvider {
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        self.find_snapshot(StaticFileSegment::Headers, |jar_provider| {
+        self.find_static_file(StaticFileSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
                 .get_two::<HeaderMask<CompactU256, BlockHash>>(block_hash.into())?
@@ -892,7 +894,7 @@ impl TransactionsProviderExt for StaticFileProvider {
 
 impl TransactionsProvider for StaticFileProvider {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        self.find_snapshot(StaticFileSegment::Transactions, |jar_provider| {
+        self.find_static_file(StaticFileSegment::Transactions, |jar_provider| {
             let mut cursor = jar_provider.cursor()?;
             if cursor
                 .get_one::<TransactionMask<TransactionSignedNoHash>>((&tx_hash).into())?
@@ -920,7 +922,7 @@ impl TransactionsProvider for StaticFileProvider {
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
-        self.find_snapshot(StaticFileSegment::Transactions, |jar_provider| {
+        self.find_static_file(StaticFileSegment::Transactions, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
                 .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
@@ -933,12 +935,12 @@ impl TransactionsProvider for StaticFileProvider {
         &self,
         _hash: TxHash,
     ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -946,7 +948,7 @@ impl TransactionsProvider for StaticFileProvider {
         &self,
         _block_id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -954,7 +956,7 @@ impl TransactionsProvider for StaticFileProvider {
         &self,
         _range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1010,22 +1012,22 @@ impl TransactionsProvider for StaticFileProvider {
 
 impl BlockNumReader for StaticFileProvider {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn block_number(&self, _hash: B256) -> ProviderResult<Option<BlockNumber>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 }
@@ -1036,37 +1038,37 @@ impl BlockReader for StaticFileProvider {
         _hash: B256,
         _source: BlockSource,
     ) -> ProviderResult<Option<Block>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1075,12 +1077,12 @@ impl BlockReader for StaticFileProvider {
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 }
@@ -1091,12 +1093,12 @@ impl WithdrawalsProvider for StaticFileProvider {
         _id: BlockHashOrNumber,
         _timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        // Required data not present in snapshots
+        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 }
@@ -1106,16 +1108,16 @@ impl StatsReader for StaticFileProvider {
         match T::NAME {
             tables::CanonicalHeaders::NAME | tables::Headers::NAME | tables::HeaderTD::NAME => {
                 Ok(self
-                    .get_highest_snapshot_block(StaticFileSegment::Headers)
+                    .get_highest_static_file_block(StaticFileSegment::Headers)
                     .map(|block| block + 1)
                     .unwrap_or_default() as usize)
             }
             tables::Receipts::NAME => Ok(self
-                .get_highest_snapshot_tx(StaticFileSegment::Receipts)
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
                 .map(|receipts| receipts + 1)
                 .unwrap_or_default() as usize),
             tables::Transactions::NAME => Ok(self
-                .get_highest_snapshot_tx(StaticFileSegment::Transactions)
+                .get_highest_static_file_tx(StaticFileSegment::Transactions)
                 .map(|txs| txs + 1)
                 .unwrap_or_default() as usize),
             _ => Err(ProviderError::UnsupportedProvider),

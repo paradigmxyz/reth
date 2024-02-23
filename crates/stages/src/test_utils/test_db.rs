@@ -6,7 +6,7 @@ use reth_db::{
     table::Table,
     tables,
     test_utils::{
-        create_test_rw_db, create_test_rw_db_with_path, create_test_snapshots_dir, TempDatabase,
+        create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir, TempDatabase,
     },
     transaction::{DbTx, DbTxMut},
     DatabaseEnv, DatabaseError as DbError,
@@ -35,7 +35,7 @@ impl Default for TestStageDB {
             factory: ProviderFactory::new(
                 create_test_rw_db(),
                 MAINNET.clone(),
-                create_test_snapshots_dir(),
+                create_test_static_files_dir(),
             )
             .unwrap(),
         }
@@ -48,7 +48,7 @@ impl TestStageDB {
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
-                create_test_snapshots_dir(),
+                create_test_static_files_dir(),
             )
             .unwrap(),
         }
@@ -154,7 +154,7 @@ impl TestStageDB {
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
-        let provider = self.factory.snapshot_provider();
+        let provider = self.factory.static_file_provider();
         let mut writer = provider.latest_writer(reth_primitives::StaticFileSegment::Headers)?;
         let tx = self.factory.provider_rw()?.into_tx();
         let mut td = U256::ZERO;
@@ -202,7 +202,7 @@ impl TestStageDB {
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
-        let provider = self.factory.snapshot_provider();
+        let provider = self.factory.static_file_provider();
 
         let mut txs_writer = storage_kind.is_static().then(|| {
             provider.latest_writer(reth_primitives::StaticFileSegment::Transactions).unwrap()

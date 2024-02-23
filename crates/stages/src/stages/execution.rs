@@ -122,18 +122,18 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let start_block = input.next_block();
         let max_block = input.target();
         let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
-        let snapshot_provider = provider.snapshot_provider();
+        let static_file_provider = provider.static_file_provider();
 
         // We only use static files for Receipts, if there is no receipt pruning of any kind.
-        let mut snapshotter = None;
+        let mut static_file_producer = None;
         if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
-            snapshotter = Some(prepare_snapshotter(provider, start_block)?);
+            static_file_producer = Some(prepare_static_file_producer(provider, start_block)?);
         }
 
         // Build executor
         let mut executor = self.executor_factory.with_state(LatestStateProviderRef::new(
             provider.tx_ref(),
-            provider.snapshot_provider().clone(),
+            provider.static_file_provider().clone(),
         ));
         executor.set_prune_modes(prune_modes);
         executor.set_tip(max_block);
@@ -141,7 +141,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Progress tracking
         let mut stage_progress = start_block;
         let mut stage_checkpoint =
-            execution_checkpoint(snapshot_provider, start_block, max_block, input.checkpoint())?;
+            execution_checkpoint(static_file_provider, start_block, max_block, input.checkpoint())?;
 
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
@@ -206,7 +206,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         let time = Instant::now();
         // write output
-        state.write_to_storage(provider.tx_ref(), snapshotter, OriginalValuesKnown::Yes)?;
+        state.write_to_storage(
+            provider.tx_ref(),
+            static_file_producer,
+            OriginalValuesKnown::Yes,
+        )?;
         let db_write_duration = time.elapsed();
         debug!(
             target: "sync::stages::execution",
@@ -440,10 +444,10 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
             // We only use static files for Receipts, if there is no receipt pruning of any kind.
 
-            // prepare_snapshotter does a consistency check that will unwind static files if the
-            // expected highest receipt in the files is higher than the database. Which is
-            // essentially what happens here when we unwind this stage.
-            let _snapshotter = prepare_snapshotter(provider, *range.start())?;
+            // prepare_static_file_producer does a consistency check that will unwind static files
+            // if the expected highest receipt in the files is higher than the database.
+            // Which is essentially what happens here when we unwind this stage.
+            let _static_file_producer = prepare_static_file_producer(provider, *range.start())?;
 
             // Update the checkpoint.
             if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
@@ -530,14 +534,14 @@ impl ExecutionStageThresholds {
     }
 }
 
-/// Returns a `SnapshotProviderRWRefMut` snapshotter after performing a consistency check.
+/// Returns a `SnapshotProviderRWRefMut` static_file_producer after performing a consistency check.
 ///
 /// This function compares the highest receipt number recorded in the database with that in the
 /// static file to detect any discrepancies due to unexpected shutdowns or database rollbacks. **If
 /// the height in the static file is higher**, it rolls back (unwinds) the static file.
 /// **Conversely, if the height in the database is lower**, it triggers a rollback in the database
 /// (by returning [`StageError`]) until the heights in both the database and static file match.
-fn prepare_snapshotter<'a, 'b, DB: Database>(
+fn prepare_static_file_producer<'a, 'b, DB: Database>(
     provider: &'b DatabaseProviderRW<DB>,
     start_block: u64,
 ) -> Result<StaticFileProviderRWRefMut<'a>, StageError>
@@ -553,23 +557,24 @@ where
         .unwrap_or(0);
 
     // Get next expected receipt number in static files
-    let snapshot_provider = provider.snapshot_provider();
-    let mut snapshotter = snapshot_provider.get_writer(start_block, StaticFileSegment::Receipts)?;
-    let next_snapshot_receipt_num = snapshotter
-        .get_highest_snapshot_tx(StaticFileSegment::Receipts)
+    let static_file_provider = provider.static_file_provider();
+    let mut static_file_producer =
+        static_file_provider.get_writer(start_block, StaticFileSegment::Receipts)?;
+    let next_static_file_receipt_num = static_file_producer
+        .get_highest_static_file_tx(StaticFileSegment::Receipts)
         .map(|num| num + 1)
         .unwrap_or(0);
 
     // Check if we had any unexpected shutdown after committing to static files, but
     // NOT committing to database.
-    match next_snapshot_receipt_num.cmp(&next_receipt_num) {
-        Ordering::Greater => snapshotter.prune_receipts(
-            next_snapshot_receipt_num - next_receipt_num,
+    match next_static_file_receipt_num.cmp(&next_receipt_num) {
+        Ordering::Greater => static_file_producer.prune_receipts(
+            next_static_file_receipt_num - next_receipt_num,
             start_block.saturating_sub(1),
         )?,
         Ordering::Less => {
-            let last_block = snapshot_provider
-                .get_highest_snapshot_block(StaticFileSegment::Receipts)
+            let last_block = static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::Receipts)
                 .unwrap_or(0);
 
             let missing_block = Box::new(
@@ -583,7 +588,7 @@ where
         }
         Ordering::Equal => {}
     }
-    Ok(snapshotter)
+    Ok(static_file_producer)
 }
 
 #[cfg(test)]
@@ -636,7 +641,7 @@ mod tests {
         };
 
         let stage_checkpoint = execution_checkpoint(
-            &factory.snapshot_provider(),
+            &factory.static_file_provider(),
             previous_stage_checkpoint.block_range.from,
             previous_stage_checkpoint.block_range.to,
             previous_checkpoint,
@@ -667,7 +672,7 @@ mod tests {
             .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
             .unwrap();
         provider
-            .snapshot_provider()
+            .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
@@ -684,7 +689,7 @@ mod tests {
         };
 
         let stage_checkpoint =
-            execution_checkpoint(&factory.snapshot_provider(), 1, 1, previous_checkpoint);
+            execution_checkpoint(&factory.static_file_provider(), 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 1, to: 1 },
@@ -710,7 +715,7 @@ mod tests {
             .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
             .unwrap();
         provider
-            .snapshot_provider()
+            .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
@@ -727,7 +732,7 @@ mod tests {
         };
 
         let stage_checkpoint =
-            execution_checkpoint(&factory.snapshot_provider(), 1, 1, previous_checkpoint);
+            execution_checkpoint(&factory.static_file_provider(), 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 1, to: 1 },
@@ -753,7 +758,7 @@ mod tests {
             .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
             .unwrap();
         provider
-            .snapshot_provider()
+            .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
@@ -763,7 +768,7 @@ mod tests {
         let previous_checkpoint = StageCheckpoint { block_number: 1, stage_checkpoint: None };
 
         let stage_checkpoint =
-            execution_checkpoint(&factory.snapshot_provider(), 1, 1, previous_checkpoint);
+            execution_checkpoint(&factory.static_file_provider(), 1, 1, previous_checkpoint);
 
         assert_matches!(stage_checkpoint, Ok(ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 1, to: 1 },
@@ -790,7 +795,7 @@ mod tests {
             .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
             .unwrap();
         provider
-            .snapshot_provider()
+            .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
@@ -935,7 +940,7 @@ mod tests {
             .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
             .unwrap();
         provider
-            .snapshot_provider()
+            .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()
@@ -1048,7 +1053,7 @@ mod tests {
             .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
             .unwrap();
         provider
-            .snapshot_provider()
+            .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
             .unwrap()
             .commit()

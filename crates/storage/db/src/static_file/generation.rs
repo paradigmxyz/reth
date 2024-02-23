@@ -15,7 +15,7 @@ use std::{error::Error as StdError, ops::RangeInclusive};
 /// table is a column of values.
 ///
 /// Has membership filter set and compression dictionary support.
-macro_rules! generate_snapshot_func {
+macro_rules! generate_static_file_func {
     ($(($($tbl:ident),+)),+ $(,)? ) => {
         $(
             paste::item! {
@@ -31,7 +31,7 @@ macro_rules! generate_snapshot_func {
                 /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
                 /// * `nippy_jar`: Snapshot object responsible for file generation.
                 #[allow(non_snake_case)]
-                pub fn [<create_snapshot$(_ $tbl)+>]<
+                pub fn [<create_static_file$(_ $tbl)+>]<
                     $($tbl: Table<Key=K>,)+
                     K,
                     H: NippyJarHeader
@@ -99,4 +99,4 @@ macro_rules! generate_snapshot_func {
     };
 }
 
-generate_snapshot_func!((T1), (T1, T2), (T1, T2, T3), (T1, T2, T3, T4), (T1, T2, T3, T4, T5),);
+generate_static_file_func!((T1), (T1, T2), (T1, T2, T3), (T1, T2, T3, T4), (T1, T2, T3, T4, T5),);

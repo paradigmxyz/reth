@@ -179,7 +179,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         // Cursors to unwind tx hash to number
         let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
-        let snapshot_provider = provider.snapshot_provider();
+        let static_file_provider = provider.static_file_provider();
         let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
         while let Some((number, body)) = rev_walker.next().transpose()? {
             if number <= unwind_to {
@@ -189,7 +189,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             // Delete all transactions that belong to this block
             for tx_id in body.tx_num_range() {
                 // First delete the transaction and hash to id mapping
-                if let Some(transaction) = snapshot_provider.transaction_by_id(tx_id)? {
+                if let Some(transaction) = static_file_provider.transaction_by_id(tx_id)? {
                     if tx_hash_number_cursor.seek_exact(transaction.hash())?.is_some() {
                         tx_hash_number_cursor.delete_current()?;
                     }
@@ -285,7 +285,7 @@ mod tests {
                     total
                 }))
             }, done: true }) if block_number == previous_stage && processed == total &&
-                total == runner.db.factory.snapshot_provider().count_entries::<tables::Transactions>().unwrap() as u64
+                total == runner.db.factory.static_file_provider().count_entries::<tables::Transactions>().unwrap() as u64
         );
 
         // Validate the stage execution
@@ -328,7 +328,7 @@ mod tests {
                     total
                 }))
             }, done: true }) if block_number == previous_stage && processed == total &&
-                total == runner.db.factory.snapshot_provider().count_entries::<tables::Transactions>().unwrap() as u64
+                total == runner.db.factory.static_file_provider().count_entries::<tables::Transactions>().unwrap() as u64
         );
 
         // Validate the stage execution

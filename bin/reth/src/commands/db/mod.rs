@@ -105,7 +105,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(data_dir, &tool)?;
@@ -116,7 +116,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
@@ -127,7 +127,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
@@ -138,7 +138,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
@@ -162,7 +162,7 @@ impl Command {
                 let db =
                     open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 let mut tool = DbTool::new(provider_factory, self.chain.clone())?;
                 tool.drop(db_path)?;
@@ -171,7 +171,7 @@ impl Command {
                 let db =
                     open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.snapshots_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
                 command.execute(provider_factory)?;
             }

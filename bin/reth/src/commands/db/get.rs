@@ -70,7 +70,7 @@ impl Command {
                     ),
                 };
 
-                let content = tool.provider_factory.snapshot_provider().find_snapshot(
+                let content = tool.provider_factory.static_file_provider().find_static_file(
                     segment,
                     |provider| {
                         let mut cursor = provider.cursor()?;

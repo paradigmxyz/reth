@@ -227,8 +227,8 @@ pub mod test_utils {
         }
     }
 
-    /// Create snapshots path for testing
-    pub fn create_test_snapshots_dir() -> PathBuf {
+    /// Create static_files path for testing
+    pub fn create_test_static_files_dir() -> PathBuf {
         let path = tempdir_path();
         let emsg = format!("{}: {:?}", ERROR_STATIC_FILES_CREATION, path);
 

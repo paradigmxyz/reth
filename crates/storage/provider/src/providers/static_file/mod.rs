@@ -56,7 +56,7 @@ mod tests {
     use rand::seq::SliceRandom;
     use reth_db::{
         cursor::DbCursorRO,
-        static_file::create_snapshot_T1_T2_T3,
+        static_file::create_static_file_T1_T2_T3,
         transaction::{DbTx, DbTxMut},
         CanonicalHeaders, HeaderNumbers, HeaderTD, Headers, RawTable,
     };
@@ -77,8 +77,8 @@ mod tests {
 
         // Data sources
         let factory = create_test_provider_factory();
-        let snap_path = tempfile::tempdir().unwrap();
-        let snap_file = snap_path
+        let static_files_path = tempfile::tempdir().unwrap();
+        let static_file = static_files_path
             .path()
             .join(StaticFileSegment::Headers.filename(&find_fixed_range(*range.end())));
 
@@ -108,7 +108,7 @@ mod tests {
             let with_compression = true;
             let with_filter = true;
 
-            let mut nippy_jar = NippyJar::new(3, snap_file.as_path(), segment_header);
+            let mut nippy_jar = NippyJar::new(3, static_file.as_path(), segment_header);
 
             if with_compression {
                 nippy_jar = nippy_jar.with_zstd(false, 0);
@@ -132,7 +132,7 @@ mod tests {
                 .unwrap()
                 .map(|row| row.map(|(_key, value)| value.into_value()).map_err(|e| e.into()));
 
-            create_snapshot_T1_T2_T3::<
+            create_static_file_T1_T2_T3::<
                 Headers,
                 HeaderTD,
                 CanonicalHeaders,
@@ -147,9 +147,9 @@ mod tests {
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager = StaticFileProvider::new(snap_path.path()).unwrap().with_filters();
+            let manager = StaticFileProvider::new(static_files_path.path()).unwrap().with_filters();
             let jar_provider = manager
-                .get_segment_provider_from_block(StaticFileSegment::Headers, 0, Some(&snap_file))
+                .get_segment_provider_from_block(StaticFileSegment::Headers, 0, Some(&static_file))
                 .unwrap();
 
             assert!(!headers.is_empty());

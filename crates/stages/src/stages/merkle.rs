@@ -552,8 +552,9 @@ mod tests {
                 Ok(state_root_prehashed(accounts.into_iter()))
             })?;
 
-            let snapshot_provider = self.db.factory.snapshot_provider();
-            let mut writer = snapshot_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            let static_file_provider = self.db.factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
             let mut last_header = last_block.header().clone();
             last_header.state_root = root;
 

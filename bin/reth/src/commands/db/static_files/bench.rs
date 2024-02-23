@@ -20,7 +20,7 @@ pub(crate) fn bench<F1, F2, R>(
     segment: StaticFileSegment,
     filters: Filters,
     compression: Compression,
-    mut snapshot_method: F1,
+    mut static_file_method: F1,
     database_method: F2,
 ) -> eyre::Result<()>
 where
@@ -31,9 +31,9 @@ where
     println!();
     println!("############");
     println!("## [{segment:?}] [{compression:?}] [{filters:?}] [{bench_kind:?}]");
-    let snap_result = {
+    let static_file_result = {
         let start = Instant::now();
-        let result = snapshot_method()?;
+        let result = static_file_method()?;
         let end = start.elapsed().as_micros();
         println!("# snapshot {bench_kind:?} | {end} μs");
         result
@@ -48,7 +48,7 @@ where
         result
     };
 
-    assert_eq!(snap_result, db_result);
+    assert_eq!(static_file_result, db_result);
 
     Ok(())
 }

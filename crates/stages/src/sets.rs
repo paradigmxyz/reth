@@ -85,7 +85,7 @@ pub struct DefaultStages<Provider, H, B, EF, DB> {
     online: OnlineStages<Provider, H, B>,
     /// Executor factory needs for execution stage
     executor_factory: EF,
-    snapshotter: StaticFileProducer<DB>,
+    static_file_producer: StaticFileProducer<DB>,
 }
 
 impl<Provider, H, B, EF, DB> DefaultStages<Provider, H, B, EF, DB> {
@@ -97,7 +97,7 @@ impl<Provider, H, B, EF, DB> DefaultStages<Provider, H, B, EF, DB> {
         header_downloader: H,
         body_downloader: B,
         executor_factory: EF,
-        snapshotter: StaticFileProducer<DB>,
+        static_file_producer: StaticFileProducer<DB>,
     ) -> Result<Self, StageError>
     where
         EF: ExecutorFactory,
@@ -112,7 +112,7 @@ impl<Provider, H, B, EF, DB> DefaultStages<Provider, H, B, EF, DB> {
                 Arc::new(TempDir::new()?),
             ),
             executor_factory,
-            snapshotter,
+            static_file_producer,
         })
     }
 }
@@ -126,10 +126,10 @@ where
     pub fn add_offline_stages(
         default_offline: StageSetBuilder<DB>,
         executor_factory: EF,
-        snapshotter: StaticFileProducer<DB>,
+        static_file_producer: StaticFileProducer<DB>,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(StaticFileStage::new(snapshotter))
+            .add_stage(StaticFileStage::new(static_file_producer))
             .add_set(default_offline)
             .add_set(OfflineStages::new(executor_factory))
             .add_stage(FinishStage)
@@ -145,7 +145,11 @@ where
     DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
-        Self::add_offline_stages(self.online.builder(), self.executor_factory, self.snapshotter)
+        Self::add_offline_stages(
+            self.online.builder(),
+            self.executor_factory,
+            self.static_file_producer,
+        )
     }
 }
 

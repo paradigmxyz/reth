@@ -1,6 +1,6 @@
 use crate::segments::{dataset_for_compression, prepare_jar, Segment, SegmentHeader};
 use reth_db::{
-    cursor::DbCursorRO, database::Database, static_file::create_snapshot_T1_T2_T3, tables,
+    cursor::DbCursorRO, database::Database, static_file::create_static_file_T1_T2_T3, tables,
     transaction::DbTx, RawKey, RawTable,
 };
 use reth_interfaces::provider::ProviderResult;
@@ -23,11 +23,11 @@ impl<DB: Database> Segment<DB> for Headers {
     fn snapshot(
         &self,
         provider: DatabaseProviderRO<DB>,
-        snapshot_provider: StaticFileProvider,
+        static_file_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
-        let mut snapshot_writer =
-            snapshot_provider.get_writer(*block_range.start(), StaticFileSegment::Headers)?;
+        let mut static_file_writer =
+            static_file_provider.get_writer(*block_range.start(), StaticFileSegment::Headers)?;
 
         let mut headers_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
         let headers_walker = headers_cursor.walk_range(block_range.clone())?;
@@ -49,15 +49,15 @@ impl<DB: Database> Segment<DB> for Headers {
             debug_assert_eq!(header_block, header_td_block);
             debug_assert_eq!(header_td_block, canonical_header_block);
 
-            let _snapshot_block =
-                snapshot_writer.append_header(header, header_td.0, canonical_header)?;
-            debug_assert_eq!(_snapshot_block, header_block);
+            let _static_file_block =
+                static_file_writer.append_header(header, header_td.0, canonical_header)?;
+            debug_assert_eq!(_static_file_block, header_block);
         }
 
         Ok(())
     }
 
-    fn create_snapshot_file(
+    fn create_static_file_file(
         &self,
         provider: &DatabaseProviderRO<DB>,
         directory: &Path,
@@ -105,7 +105,7 @@ impl<DB: Database> Segment<DB> for Headers {
             );
         }
 
-        create_snapshot_T1_T2_T3::<
+        create_static_file_T1_T2_T3::<
             tables::Headers,
             tables::HeaderTD,
             tables::CanonicalHeaders,

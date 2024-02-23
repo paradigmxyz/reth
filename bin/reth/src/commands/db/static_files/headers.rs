@@ -14,7 +14,7 @@ use reth_provider::{
 use std::{ops::RangeInclusive, path::PathBuf, sync::Arc};
 
 impl Command {
-    pub(crate) fn bench_headers_snapshot(
+    pub(crate) fn bench_headers_static_file(
         &self,
         provider_factory: Arc<ProviderFactory<DatabaseEnv>>,
         compression: Compression,

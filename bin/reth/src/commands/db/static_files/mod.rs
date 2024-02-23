@@ -18,7 +18,7 @@ use reth_primitives::{
     BlockNumber, ChainSpec, StaticFileSegment,
 };
 use reth_provider::{BlockNumReader, ProviderFactory};
-use reth_static_file::{segments as snap_segments, segments::Segment};
+use reth_static_file::{segments as static_file_segments, segments::Segment};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -36,15 +36,15 @@ pub struct Command {
     /// Snapshot segments to generate.
     segments: Vec<StaticFileSegment>,
 
-    /// Starting block for the snapshot.
+    /// Starting block for the static_file.
     #[arg(long, short, default_value = "0")]
     from: BlockNumber,
 
-    /// Number of blocks in the snapshot.
+    /// Number of blocks in the static_file.
     #[arg(long, short, default_value = "500000")]
     block_interval: u64,
 
-    /// Sets the number of snapshots built in parallel. Note: Each parallel build is
+    /// Sets the number of static_files built in parallel. Note: Each parallel build is
     /// memory-intensive.
     #[arg(
         long, short,
@@ -61,7 +61,7 @@ pub struct Command {
     #[arg(long, default_value = "false")]
     bench: bool,
 
-    /// Flag to skip snapshot creation and only run benchmarks on existing snapshots.
+    /// Flag to skip snapshot creation and only run benchmarks on existing static_files.
     #[arg(long, default_value = "false")]
     only_bench: bool,
 
@@ -103,7 +103,7 @@ impl Command {
                 .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )?;
         let provider_factory =
-            Arc::new(ProviderFactory::new(db, chain.clone(), data_dir.snapshots_path())?);
+            Arc::new(ProviderFactory::new(db, chain.clone(), data_dir.static_files_path())?);
 
         {
             if !self.only_bench {
@@ -115,19 +115,20 @@ impl Command {
                     };
 
                     match mode {
-                        StaticFileSegment::Headers => self.generate_snapshot::<DatabaseEnv>(
+                        StaticFileSegment::Headers => self.generate_static_file::<DatabaseEnv>(
                             provider_factory.clone(),
-                            snap_segments::Headers,
+                            static_file_segments::Headers,
                             SegmentConfig { filters, compression },
                         )?,
-                        StaticFileSegment::Transactions => self.generate_snapshot::<DatabaseEnv>(
+                        StaticFileSegment::Transactions => self
+                            .generate_static_file::<DatabaseEnv>(
+                                provider_factory.clone(),
+                                static_file_segments::Transactions,
+                                SegmentConfig { filters, compression },
+                            )?,
+                        StaticFileSegment::Receipts => self.generate_static_file::<DatabaseEnv>(
                             provider_factory.clone(),
-                            snap_segments::Transactions,
-                            SegmentConfig { filters, compression },
-                        )?,
-                        StaticFileSegment::Receipts => self.generate_snapshot::<DatabaseEnv>(
-                            provider_factory.clone(),
-                            snap_segments::Receipts,
+                            static_file_segments::Receipts,
                             SegmentConfig { filters, compression },
                         )?,
                     }
@@ -138,19 +139,19 @@ impl Command {
         if self.only_bench || self.bench {
             for ((mode, compression), phf) in all_combinations {
                 match mode {
-                    StaticFileSegment::Headers => self.bench_headers_snapshot(
+                    StaticFileSegment::Headers => self.bench_headers_static_file(
                         provider_factory.clone(),
                         compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
-                    StaticFileSegment::Transactions => self.bench_transactions_snapshot(
+                    StaticFileSegment::Transactions => self.bench_transactions_static_file(
                         provider_factory.clone(),
                         compression,
                         InclusionFilter::Cuckoo,
                         phf,
                     )?,
-                    StaticFileSegment::Receipts => self.bench_receipts_snapshot(
+                    StaticFileSegment::Receipts => self.bench_receipts_static_file(
                         provider_factory.clone(),
                         compression,
                         InclusionFilter::Cuckoo,
@@ -177,9 +178,9 @@ impl Command {
         ranges
     }
 
-    /// Generates snapshots from `self.from` with a `self.block_interval`. Generates them in
+    /// Generates static_files from `self.from` with a `self.block_interval`. Generates them in
     /// parallel if specified.
-    fn generate_snapshot<DB: Database>(
+    fn generate_static_file<DB: Database>(
         &self,
         factory: Arc<ProviderFactory<DB>>,
         segment: impl Segment<DB> + Send + Sync,
@@ -188,7 +189,7 @@ impl Command {
         let dir = PathBuf::default();
         let ranges = self.block_ranges(factory.best_block_number()?);
 
-        let mut created_snapshots = vec![];
+        let mut created_static_files = vec![];
 
         // Filter/PHF is memory intensive, so we have to limit the parallelism.
         for block_ranges in ranges.chunks(self.parallel as usize) {
@@ -198,7 +199,7 @@ impl Command {
                     let provider = factory.provider()?;
 
                     if !self.only_stats {
-                        segment.create_snapshot_file(
+                        segment.create_static_file_file(
                             &provider,
                             dir.as_path(),
                             config,
@@ -210,10 +211,10 @@ impl Command {
                 })
                 .collect::<Result<Vec<_>, eyre::Report>>()?;
 
-            created_snapshots.extend(created_files);
+            created_static_files.extend(created_files);
         }
 
-        self.stats(created_snapshots)
+        self.stats(created_static_files)
     }
 
     /// Prints detailed statistics for each snapshot, including loading time.
@@ -221,13 +222,13 @@ impl Command {
     /// This function loads each snapshot from the provided paths and prints
     /// statistics about various aspects of each snapshot, such as filters size,
     /// offset index size, offset list size, and loading time.
-    fn stats(&self, snapshots: Vec<impl AsRef<Path>>) -> eyre::Result<()> {
+    fn stats(&self, static_files: Vec<impl AsRef<Path>>) -> eyre::Result<()> {
         let mut total_filters_size = 0;
         let mut total_index_size = 0;
         let mut total_duration = Duration::new(0, 0);
         let mut total_file_size = 0;
 
-        for snap in &snapshots {
+        for snap in &static_files {
             let start_time = Instant::now();
             let jar = NippyJar::<SegmentHeader>::load(snap.as_ref())?;
             let _cursor = NippyJarCursor::new(&jar)?;
@@ -250,7 +251,7 @@ impl Command {
             );
         }
 
-        let avg_duration = total_duration / snapshots.len() as u32;
+        let avg_duration = total_duration / static_files.len() as u32;
 
         println!("Total Filters Size:     {:>7}", human_bytes(total_filters_size as f64));
         println!("Total Offset Index Size: {:>7}", human_bytes(total_index_size as f64));
