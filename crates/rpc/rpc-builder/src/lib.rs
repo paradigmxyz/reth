@@ -201,6 +201,10 @@ use reth_rpc::{
 use reth_rpc_api::servers::*;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
+
+#[cfg(feature = "optimism")]
+use reth_rpc::eth::SequencerClient;
+
 // re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
 
@@ -1325,6 +1329,8 @@ where
             blocking_task_pool.clone(),
             fee_history_cache,
             self.evm_config.clone(),
+            #[cfg(feature = "optimism")]
+            SequencerClient::default(),
         );
         let filter = EthFilter::new(
             self.provider.clone(),

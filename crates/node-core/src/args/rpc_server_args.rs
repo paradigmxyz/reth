@@ -43,6 +43,10 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
+
+#[cfg(feature = "optimism")]
+use reth_rpc::eth::SequencerClient;
+
 use tracing::{debug, info};
 
 /// Default max number of subscriptions per connection.
@@ -394,6 +398,7 @@ impl RpcServerArgs {
         engine_api: EngineApi<Provider, EngineT>,
         jwt_secret: JwtSecret,
         evm_config: EvmConfig,
+        #[cfg(feature = "optimism")] sequencer_client: SequencerClient,
     ) -> Result<AuthServerHandle, RpcError>
     where
         Provider: BlockReaderIdExt
@@ -421,6 +426,8 @@ impl RpcServerArgs {
             socket_address,
             jwt_secret,
             evm_config,
+            #[cfg(feature = "optimism")]
+            sequencer_client,
         )
         .await
     }
