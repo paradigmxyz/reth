@@ -170,8 +170,8 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { version = "6.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "2.0", features = ["std"], default-features = false }
+revm = { version = "6.1.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "2.1.0", features = ["std"], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "75a187b" }
 
 # eth
@@ -276,7 +276,3 @@ test-fuzz = "5"
 [workspace.metadata.cargo-udeps.ignore]
 # ignored because this is mutually exclusive with the optimism payload builder via feature flags
 normal = ["reth-ethereum-payload-builder", "reth-node-ethereum"]
-
-[patch.crates-io]
-revm = { git = "https://github.com/clabby/revm", branch = "cl/l1-block-caching" }
-revm-primitives = { git = "https://github.com/clabby/revm", branch = "cl/l1-block-caching" }
