@@ -195,7 +195,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<S> CanDisconnect<Bytes> for P2PStream<S>
 where
     S: Sink<Bytes, Error = io::Error> + Unpin + Send + Sync,
