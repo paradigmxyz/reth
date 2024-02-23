@@ -60,11 +60,11 @@ pub trait DebugApiExt {
         B: Into<BlockId> + Send;
 
     ///  method  for debug_traceCall
-    async fn debug_trace_call_json(
+    fn debug_trace_call_json(
         &self,
         request: TransactionRequest,
         opts: GethDebugTracingOptions,
-    ) -> Result<serde_json::Value, jsonrpsee::core::Error>;
+    ) -> impl Future<Output = Result<serde_json::Value, jsonrpsee::core::Error>> + Send;
 
     ///  method for debug_traceCall using raw JSON strings for the request and options.
     fn debug_trace_call_raw_json(
