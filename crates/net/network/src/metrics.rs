@@ -55,19 +55,18 @@ pub struct NetworkMetrics {
     pub(crate) duration_poll_network_manager: Gauge,
 
     /* -- Poll duration of items nested in `NetworkManager` future -- */
-    /// Accumulated time spent streaming messages sent over the
-    /// [`NetworkHandle`](crate::NetworkHandle), which can be cloned and shared via
-    /// [`NetworkManager::handle`](crate::NetworkManager::handle), in one call to poll the
-    /// [`NetworkManager`](crate::NetworkManager) future.
+    /// Time spent streaming messages sent over the [`NetworkHandle`](crate::NetworkHandle), which
+    /// can be cloned and shared via [`NetworkManager::handle`](crate::NetworkManager::handle), in
+    /// one call to poll the [`NetworkManager`](crate::NetworkManager) future.
     ///
     /// Duration in seconds.
     // todo: find out how many components hold the network handle.
-    pub(crate) acc_duration_poll_network_handle: Gauge,
-    /// Accumulated time spent polling [`Swarm`](crate::swarm::Swarm), in one call to poll the
+    pub(crate) duration_poll_network_handle: Gauge,
+    /// Time spent polling [`Swarm`](crate::swarm::Swarm), in one call to poll the
     /// [`NetworkManager`](crate::NetworkManager) future.
     ///
     /// Duration in seconds.
-    pub(crate) acc_duration_poll_swarm: Gauge,
+    pub(crate) duration_poll_swarm: Gauge,
 }
 
 /// Metrics for SessionManager
