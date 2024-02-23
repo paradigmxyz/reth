@@ -70,38 +70,12 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 /// block.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive_arbitrary(rlp, 25)]
 pub struct NewBlock {
     /// A new block.
     pub block: Block,
     /// The current total difficulty.
     pub td: U128,
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for NewBlock {
-    type Parameters = ();
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        let block_strategy = Block::arbitrary_with(Default::default());
-
-        let td_strategy = any::<U128>();
-
-        (block_strategy, td_strategy).prop_map(|(block, td)| Self { block, td }).boxed()
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for NewBlock {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let block: Block = u.arbitrary()?;
-
-        let td: U128 = u.arbitrary()?;
-
-        Ok(NewBlock { block, td })
-    }
 }
 
 /// This informs peers of transactions that have appeared on the network and are not yet included
