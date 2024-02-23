@@ -64,7 +64,8 @@ pub struct DatabaseArguments {
     /// Maximum duration of a read transaction. If [None], the default value is used.
     max_read_transaction_duration: Option<MaxReadTransactionDuration>,
     /// Mdbx exclusive flag. If [None], the default value is used.
-    /// https://libmdbx.dqdkfa.ru/group__c__opening.html#gga9138119a904355d245777c4119534061aa516c74e6fed22c9812bb909c8c459ed
+    ///
+    /// See docs at: <https://libmdbx.dqdkfa.ru/group__c__opening.html#gga9138119a904355d245777c4119534061aa516c74e6fed22c9812bb909c8c459ed>
     exclusive: Option<bool>,
 }
 
