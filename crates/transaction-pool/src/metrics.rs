@@ -57,6 +57,18 @@ pub struct BlobStoreMetrics {
     pub(crate) blobstore_entries: Gauge,
 }
 
+/// Pool events broadcaster metrics
+#[derive(Metrics)]
+#[metrics(scope = "transaction_pool")]
+pub struct PoolEventBroadcastMetrics {
+    /// Number of hashes tracked by the broadcasters
+    pub(crate) broadcasters: Gauge,
+    /// Number of broadcasters for all transaction events
+    pub(crate) all_events_broadcaster: Gauge,
+    /// Total number of broadcasters by hash
+    pub(crate) all_broadcasters_by_hash: Gauge,
+}
+
 /// Transaction pool maintenance metrics
 #[derive(Metrics)]
 #[metrics(scope = "transaction_pool")]

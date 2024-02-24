@@ -1,6 +1,7 @@
 //! Listeners for the transaction-pool
 
 use crate::{
+    metrics::PoolEventBroadcastMetrics,
     pool::events::{FullTransactionEvent, TransactionEvent},
     traits::PropagateKind,
     PoolTransaction, ValidPoolTransaction,
@@ -71,6 +72,8 @@ pub(crate) struct PoolEventBroadcast<T: PoolTransaction> {
     all_events_broadcaster: AllPoolEventsBroadcaster<T>,
     /// All listeners for events for a certain transaction hash.
     broadcasters_by_hash: HashMap<TxHash, PoolEventBroadcaster>,
+    /// Pool events broadcast metrics
+    metrics: PoolEventBroadcastMetrics,
 }
 
 impl<T: PoolTransaction> Default for PoolEventBroadcast<T> {
@@ -78,11 +81,22 @@ impl<T: PoolTransaction> Default for PoolEventBroadcast<T> {
         Self {
             all_events_broadcaster: AllPoolEventsBroadcaster::default(),
             broadcasters_by_hash: HashMap::default(),
+            metrics: PoolEventBroadcastMetrics::default(),
         }
     }
 }
 
 impl<T: PoolTransaction> PoolEventBroadcast<T> {
+    /// Updates the metrics for all the broadcasters
+    pub(crate) fn update_metrics(&self) {
+        self.metrics.broadcasters.set(self.broadcasters_by_hash.len() as f64);
+        self.metrics.all_events_broadcaster.set(self.all_events_broadcaster.senders.len() as f64);
+        self.metrics.all_broadcasters_by_hash.set(
+            self.broadcasters_by_hash.values().map(|broadcaster| broadcaster.len()).sum::<usize>()
+                as f64,
+        );
+    }
+
     /// Calls the broadcast callback with the `PoolEventBroadcaster` that belongs to the hash.
     fn broadcast_event(
         &mut self,
@@ -101,6 +115,7 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
 
         // Broadcast to all listeners for all transactions.
         self.all_events_broadcaster.broadcast(pool_event);
+        self.update_metrics();
     }
 
     /// Create a new subscription for the given transaction hash.
@@ -115,6 +130,7 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
                 entry.insert(PoolEventBroadcaster { senders: vec![tx] });
             }
         };
+        self.update_metrics();
         TransactionEvents { hash: tx_hash, events: rx }
     }
 
@@ -133,6 +149,7 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
             // notify listeners that this transaction was replaced
             self.replaced(replaced, *tx);
         }
+        self.update_metrics();
     }
 
     /// Notify listeners about a transaction that was replaced.
@@ -143,11 +160,13 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
             TransactionEvent::Replaced(replaced_by),
             FullTransactionEvent::Replaced { transaction, replaced_by },
         );
+        self.update_metrics();
     }
 
     /// Notify listeners about a transaction that was added to the queued pool.
     pub(crate) fn queued(&mut self, tx: &TxHash) {
         self.broadcast_event(tx, TransactionEvent::Queued, FullTransactionEvent::Queued(*tx));
+        self.update_metrics();
     }
 
     /// Notify listeners about a transaction that was propagated.
@@ -158,11 +177,13 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
             TransactionEvent::Propagated(Arc::clone(&peers)),
             FullTransactionEvent::Propagated(peers),
         );
+        self.update_metrics();
     }
 
     /// Notify listeners about a transaction that was discarded.
     pub(crate) fn discarded(&mut self, tx: &TxHash) {
         self.broadcast_event(tx, TransactionEvent::Discarded, FullTransactionEvent::Discarded(*tx));
+        self.update_metrics();
     }
 
     /// Notify listeners that the transaction was mined
@@ -172,6 +193,7 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
             TransactionEvent::Mined(block_hash),
             FullTransactionEvent::Mined { tx_hash: *tx, block_hash },
         );
+        self.update_metrics();
     }
 }
 
@@ -213,6 +235,11 @@ impl PoolEventBroadcaster {
     /// Returns `true` if there are no more listeners remaining.
     fn is_empty(&self) -> bool {
         self.senders.is_empty()
+    }
+
+    /// Returns the total number of listeners
+    fn len(&self) -> usize {
+        self.senders.len()
     }
 
     // Broadcast an event to all listeners. Dropped listeners are silently evicted.

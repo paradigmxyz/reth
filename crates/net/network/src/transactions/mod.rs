@@ -1076,8 +1076,7 @@ where
             if !new_txs.is_empty() {
                 let pool = self.pool.clone();
                 // update metrics
-                let metric_pending_pool_imports = self.metrics.pending_pool_imports.clone();
-                metric_pending_pool_imports.increment(new_txs.len() as f64);
+                self.metrics.pending_pool_imports.increment(new_txs.len() as f64);
 
                 // update self-monitoring info
                 self.pending_pool_imports_info
@@ -1091,7 +1090,7 @@ where
                     let res = pool.add_external_transactions(new_txs).await;
 
                     // update metrics
-                    metric_pending_pool_imports.decrement(added as f64);
+                    self.metrics.pending_pool_imports.decrement(added as f64);
                     // update self-monitoring info
                     tx_manager_info_pending_pool_imports.fetch_sub(added, Ordering::Relaxed);
 
