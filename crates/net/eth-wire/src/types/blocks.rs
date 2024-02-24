@@ -8,6 +8,9 @@ use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B2
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+// #[cfg(any(test, feature = "arbitrary"))]
+// use proptest::{collection::vec, prelude::*};
+
 /// A request for a peer to return block headers starting at the requested block.
 /// The peer must return at most [`limit`](#structfield.limit) headers.
 /// If the [`reverse`](#structfield.reverse) field is `true`, the headers will be returned starting

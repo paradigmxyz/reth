@@ -379,17 +379,14 @@ impl proptest::arbitrary::Arbitrary for SealedBlock {
                 header
             }
         }
-        let header_strategy = {
-            <Self as Default>::default();
-            SealedHeader::arbitrary_with(())
-        };
+
         let body_strategy = vec(any::<TransactionSigned>(), 0..10);
         let ommers_strategy = vec(valid_header_strategy(), 0..2);
         let withdrawals_strategy = any::<Option<Withdrawals>>();
 
-        (header_strategy, body_strategy, ommers_strategy, withdrawals_strategy)
+        (valid_header_strategy(), body_strategy, ommers_strategy, withdrawals_strategy)
             .prop_map(|(header, body, ommers, withdrawals)| Self {
-                header,
+                header: header.seal_slow(),
                 body,
                 ommers,
                 withdrawals,
