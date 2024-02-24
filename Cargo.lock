@@ -6956,6 +6956,7 @@ dependencies = [
  "criterion",
  "fnv",
  "futures-util",
+ "itertools 0.12.1",
  "metrics",
  "parking_lot 0.12.1",
  "paste",
