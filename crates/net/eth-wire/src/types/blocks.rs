@@ -2,7 +2,7 @@
 //! types.
 
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use reth_codecs::derive_arbitrary;
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
 
 #[cfg(feature = "serde")]
@@ -40,6 +40,7 @@ pub struct GetBlockHeaders {
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[add_arbitrary_tests(rlp, 10)]
 pub struct BlockHeaders(
     /// The requested headers.
     pub Vec<Header>,
@@ -52,8 +53,42 @@ impl proptest::arbitrary::Arbitrary for BlockHeaders {
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::{collection::vec, prelude::*};
+        prop_compose! {
+            fn valid_header_strategy()(
+                mut header in any::<Header>(),
+                eip_4844_active in any::<bool>(),
+                blob_gas_used in any::<u64>(),
+                excess_blob_gas in any::<u64>(),
+                parent_beacon_block_root in any::<B256>()
+            ) -> Header {
+                // EIP-1559 logic
+                if header.base_fee_per_gas.is_none() {
+                    // If EIP-1559 is not active, clear related fields
+                    header.withdrawals_root = None;
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
+                } else if header.withdrawals_root.is_none() {
+                    // If EIP-4895 is not active, clear related fields
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
+                } else if eip_4844_active {
+                    // Set fields based on EIP-4844 being active
+                    header.blob_gas_used = Some(blob_gas_used);
+                    header.excess_blob_gas = Some(excess_blob_gas);
+                    header.parent_beacon_block_root = Some(parent_beacon_block_root);
+                } else {
+                    // If EIP-4844 is not active, clear related fields
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
+                }
 
-        let headers_strategy = vec(Header::arbitrary_with(Default::default()), 0..10); // Adjust the range as needed
+                header
+            }
+        }
+        let headers_strategy = vec(valid_header_strategy(), 0..10); // Adjust the range as needed
 
         headers_strategy.prop_map(BlockHeaders).boxed()
     }
@@ -66,7 +101,40 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
         let mut headers = Vec::with_capacity(headers_count);
 
         for _ in 0..headers_count {
-            let header = Header::arbitrary(u)?;
+            let mut header: Header = Header::arbitrary(u)?;
+            let blob_gas_used: u64 = u.arbitrary()?;
+            let excess_blob_gas: u64 = u.arbitrary()?;
+            let parent_beacon_block_root: B256 = u.arbitrary()?;
+            // Determine if EIP-4844 is active using a random bool
+            let eip_4844_active: bool = u.arbitrary()?;
+            // EIP-1559 logic
+            if header.base_fee_per_gas.is_none() {
+                // If EIP-1559 is not active, clear related fields
+                header.withdrawals_root = None;
+                header.blob_gas_used = None;
+                header.excess_blob_gas = None;
+                header.parent_beacon_block_root = None;
+            } else {
+                // EIP-4895 logic
+                if header.withdrawals_root.is_none() {
+                    // If EIP-4895 is not active, clear related fields
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
+                } else {
+                    if eip_4844_active {
+                        // Set fields based on EIP-4844 being active
+                        header.blob_gas_used = Some(blob_gas_used);
+                        header.excess_blob_gas = Some(excess_blob_gas);
+                        header.parent_beacon_block_root = Some(parent_beacon_block_root);
+                    } else {
+                        // If EIP-4844 is not active, clear related fields
+                        header.blob_gas_used = None;
+                        header.excess_blob_gas = None;
+                        header.parent_beacon_block_root = None;
+                    }
+                }
+            }
             headers.push(header);
         }
 

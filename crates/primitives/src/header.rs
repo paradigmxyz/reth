@@ -11,7 +11,9 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{BufMut, BytesMut};
-use reth_codecs::{derive_arbitrary, main_codec, Compact};
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 /// Errors that can occur during header sanity checks.
@@ -446,12 +448,12 @@ impl Decodable for Header {
             this.base_fee_per_gas = Some(u64::decode(buf)?);
         }
 
-        // // Withdrawals root for post-shanghai headers
+        // Withdrawals root for post-shanghai headers
         if started_len - buf.len() < rlp_head.payload_length {
             this.withdrawals_root = Some(Decodable::decode(buf)?);
         }
 
-        // // Blob gas used and excess blob gas for post-cancun headers
+        // Blob gas used and excess blob gas for post-cancun headers
         if started_len - buf.len() < rlp_head.payload_length {
             this.blob_gas_used = Some(u64::decode(buf)?);
         }
@@ -571,6 +573,7 @@ pub enum HeaderValidationError {
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[add_arbitrary_tests(rlp)]
 pub struct SealedHeader {
     /// Locked Header fields.
     header: Header,
@@ -852,26 +855,21 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
                     header.blob_gas_used = None;
                     header.excess_blob_gas = None;
                     header.parent_beacon_block_root = None;
-                }else {
-                    // 4895 is not active
-                    if header.withdrawals_root.is_none() {
-                        header.blob_gas_used = None;
-                        header.excess_blob_gas = None;
-                        header.parent_beacon_block_root = None;
-                    } else {
-                        // 4895 is active
-                        if eip_4844_active {
-                            // EIP-4844 is active
-                            header.blob_gas_used = Some(blob_gas_used);
-                            header.excess_blob_gas = Some(excess_blob_gas);
-                            header.parent_beacon_block_root = Some(parent_beacon_block_root);
-                        } else {
-                            // EIP-4844 is not active
-                            header.blob_gas_used = None;
-                            header.excess_blob_gas = None;
-                            header.parent_beacon_block_root = None;
-                        };
-                    }
+                } else if header.withdrawals_root.is_none() {
+                    // If EIP-4895 is not active, clear related fields
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
+                } else if eip_4844_active {
+                    // Set fields based on EIP-4844 being active
+                    header.blob_gas_used = Some(blob_gas_used);
+                    header.excess_blob_gas = Some(excess_blob_gas);
+                    header.parent_beacon_block_root = Some(parent_beacon_block_root);
+                } else {
+                    // If EIP-4844 is not active, clear related fields
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
                 }
 
                 // Seal the header
@@ -883,8 +881,6 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
     }
     type Strategy = proptest::strategy::BoxedStrategy<SealedHeader>;
 }
-
-use proptest::prelude::*;
 
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {

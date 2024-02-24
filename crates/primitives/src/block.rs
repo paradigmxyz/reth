@@ -17,7 +17,7 @@ pub use reth_rpc_types::{
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
-#[add_arbitrary_tests(rlp)]
+#[add_arbitrary_tests(rlp, 25)]
 #[rlp(trailing)]
 pub struct Block {
     /// Block header.
@@ -53,26 +53,21 @@ impl proptest::arbitrary::Arbitrary for Block {
                     header.blob_gas_used = None;
                     header.excess_blob_gas = None;
                     header.parent_beacon_block_root = None;
-                }else {
-                    // 4895 is not active
-                    if header.withdrawals_root.is_none() {
-                        header.blob_gas_used = None;
-                        header.excess_blob_gas = None;
-                        header.parent_beacon_block_root = None;
-                    } else {
-                        // 4895 is active
-                        if eip_4844_active {
-                            // EIP-4844 is active
-                            header.blob_gas_used = Some(blob_gas_used);
-                            header.excess_blob_gas = Some(excess_blob_gas);
-                            header.parent_beacon_block_root = Some(parent_beacon_block_root);
-                        } else {
-                            // EIP-4844 is not active
-                            header.blob_gas_used = None;
-                            header.excess_blob_gas = None;
-                            header.parent_beacon_block_root = None;
-                        };
-                    }
+                } else if header.withdrawals_root.is_none() {
+                    // If EIP-4895 is not active, clear related fields
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
+                } else if eip_4844_active {
+                    // Set fields based on EIP-4844 being active
+                    header.blob_gas_used = Some(blob_gas_used);
+                    header.excess_blob_gas = Some(excess_blob_gas);
+                    header.parent_beacon_block_root = Some(parent_beacon_block_root);
+                } else {
+                    // If EIP-4844 is not active, clear related fields
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
                 }
 
                 header
@@ -329,6 +324,7 @@ impl std::ops::DerefMut for BlockWithSenders {
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
+#[add_arbitrary_tests(rlp)]
 #[rlp(trailing)]
 pub struct SealedBlock {
     /// Locked block header.
@@ -363,26 +359,21 @@ impl proptest::arbitrary::Arbitrary for SealedBlock {
                     header.blob_gas_used = None;
                     header.excess_blob_gas = None;
                     header.parent_beacon_block_root = None;
+                } else if header.withdrawals_root.is_none() {
+                    // If EIP-4895 is not active, clear related fields
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
+                } else if eip_4844_active {
+                    // Set fields based on EIP-4844 being active
+                    header.blob_gas_used = Some(blob_gas_used);
+                    header.excess_blob_gas = Some(excess_blob_gas);
+                    header.parent_beacon_block_root = Some(parent_beacon_block_root);
                 } else {
-                    // 4895 is not active
-                    if header.withdrawals_root.is_none() {
-                        header.blob_gas_used = None;
-                        header.excess_blob_gas = None;
-                        header.parent_beacon_block_root = None;
-                    } else {
-                        // 4895 is active
-                        if eip_4844_active {
-                            // EIP-4844 is active
-                            header.blob_gas_used = Some(blob_gas_used);
-                            header.excess_blob_gas = Some(excess_blob_gas);
-                            header.parent_beacon_block_root = Some(parent_beacon_block_root);
-                        } else {
-                            // EIP-4844 is not active
-                            header.blob_gas_used = None;
-                            header.excess_blob_gas = None;
-                            header.parent_beacon_block_root = None;
-                        };
-                    }
+                    // If EIP-4844 is not active, clear related fields
+                    header.blob_gas_used = None;
+                    header.excess_blob_gas = None;
+                    header.parent_beacon_block_root = None;
                 }
 
                 header
@@ -417,33 +408,27 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedBlock {
         // Determine if EIP-4844 is active using a random bool
         let eip_4844_active: bool = u.arbitrary()?;
         // EIP-1559 logic
-        #[allow(clippy::collapsible_else_if)]
         if header.base_fee_per_gas.is_none() {
             // If EIP-1559 is not active, clear related fields
             header.withdrawals_root = None;
             header.blob_gas_used = None;
             header.excess_blob_gas = None;
             header.parent_beacon_block_root = None;
+        } else if header.withdrawals_root.is_none() {
+            // If EIP-4895 is not active, clear related fields
+            header.blob_gas_used = None;
+            header.excess_blob_gas = None;
+            header.parent_beacon_block_root = None;
+        } else if eip_4844_active {
+            // Set fields based on EIP-4844 being active
+            header.blob_gas_used = Some(blob_gas_used);
+            header.excess_blob_gas = Some(excess_blob_gas);
+            header.parent_beacon_block_root = Some(parent_beacon_block_root);
         } else {
-            // EIP-4895 logic
-            if header.withdrawals_root.is_none() {
-                // If EIP-4895 is not active, clear related fields
-                header.blob_gas_used = None;
-                header.excess_blob_gas = None;
-                header.parent_beacon_block_root = None;
-            } else {
-                if eip_4844_active {
-                    // Set fields based on EIP-4844 being active
-                    header.blob_gas_used = Some(blob_gas_used);
-                    header.excess_blob_gas = Some(excess_blob_gas);
-                    header.parent_beacon_block_root = Some(parent_beacon_block_root);
-                } else {
-                    // If EIP-4844 is not active, clear related fields
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                }
-            }
+            // If EIP-4844 is not active, clear related fields
+            header.blob_gas_used = None;
+            header.excess_blob_gas = None;
+            header.parent_beacon_block_root = None;
         }
         let body: Vec<TransactionSigned> = u.arbitrary()?;
 
@@ -455,32 +440,27 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedBlock {
             let excess_blob_gas: u64 = u.arbitrary()?;
             let parent_beacon_block_root: B256 = u.arbitrary()?;
             let eip_4844_active: bool = u.arbitrary()?;
-            #[allow(clippy::collapsible_else_if)]
             if ommer.base_fee_per_gas.is_none() {
+                // If EIP-1559 is not active, clear related fields
                 ommer.withdrawals_root = None;
                 ommer.blob_gas_used = None;
                 ommer.excess_blob_gas = None;
                 ommer.parent_beacon_block_root = None;
+            } else if ommer.withdrawals_root.is_none() {
+                // If EIP-4895 is not active, clear related fields
+                ommer.blob_gas_used = None;
+                ommer.excess_blob_gas = None;
+                ommer.parent_beacon_block_root = None;
+            } else if eip_4844_active {
+                // Set fields based on EIP-4844 being active
+                ommer.blob_gas_used = Some(blob_gas_used);
+                ommer.excess_blob_gas = Some(excess_blob_gas);
+                ommer.parent_beacon_block_root = Some(parent_beacon_block_root);
             } else {
-                // EIP-4895 logic
-                if ommer.withdrawals_root.is_none() {
-                    // If EIP-4895 is not active, clear related fields
-                    ommer.blob_gas_used = None;
-                    ommer.excess_blob_gas = None;
-                    ommer.parent_beacon_block_root = None;
-                } else {
-                    if eip_4844_active {
-                        // Set fields based on EIP-4844 being active
-                        ommer.blob_gas_used = Some(blob_gas_used);
-                        ommer.excess_blob_gas = Some(excess_blob_gas);
-                        ommer.parent_beacon_block_root = Some(parent_beacon_block_root);
-                    } else {
-                        // If EIP-4844 is not active, clear related fields
-                        ommer.blob_gas_used = None;
-                        ommer.excess_blob_gas = None;
-                        ommer.parent_beacon_block_root = None;
-                    }
-                }
+                // If EIP-4844 is not active, clear related fields
+                ommer.blob_gas_used = None;
+                ommer.excess_blob_gas = None;
+                ommer.parent_beacon_block_root = None;
             }
 
             ommers.push(ommer);
