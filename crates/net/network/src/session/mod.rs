@@ -395,7 +395,7 @@ impl SessionManager {
                         remote_addr,
                         error,
                     } => {
-                        trace!(target: "net::session",  ?peer_id, ?error,"closed session.");
+                        trace!(target: "net::session", ?peer_id, ?error,"closed session.");
                         self.remove_active_session(&peer_id);
                         Poll::Ready(SessionEvent::SessionClosedOnConnectionError {
                             remote_addr,
