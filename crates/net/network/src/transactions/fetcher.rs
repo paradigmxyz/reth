@@ -346,11 +346,17 @@ impl TransactionFetcher {
                 *retries += 1;
             }
 
-            let maybe_evicted_hash = self.hashes_pending_fetch.peek_oldest();
+            let maybe_evicted_hash = {
+                let maybe_evicted_hash = match self.hashes_pending_fetch.peek_oldest() {
+                    Some((hash, _)) => Some(*hash),
+                    None => None,
+                };
+                maybe_evicted_hash
+            };
             self.hashes_pending_fetch.insert(hash, ());
-            if let Some((evicted_hash, _)) = maybe_evicted_hash {
-                if self.hashes_pending_fetch.get(evicted_hash).is_none() {
-                    max_retried_and_evicted_hashes.push(*evicted_hash);
+            if let Some(evicted_hash) = maybe_evicted_hash {
+                if self.hashes_pending_fetch.get(&evicted_hash).is_none() {
+                    max_retried_and_evicted_hashes.push(evicted_hash);
                 }
             }
         }
@@ -683,7 +689,7 @@ impl TransactionFetcher {
         // also seen by peer
         for (hash, _) in self.hashes_pending_fetch.iter() {
             // 1. Check if a hash pending fetch is seen by peer.
-            if !seen_hashes.get(hash).is_some() {
+            if !seen_hashes.peek(hash).is_some() {
                 continue
             };
 
