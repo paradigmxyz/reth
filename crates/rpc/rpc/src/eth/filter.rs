@@ -11,7 +11,7 @@ use core::fmt;
 
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{IntoRecoveredTransaction, TxHash};
+use reth_primitives::{ChainInfo, IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{
@@ -191,7 +191,7 @@ where
 
                 let logs = self
                     .inner
-                    .get_logs_in_block_range(&filter, from_block_number, to_block_number)
+                    .get_logs_in_block_range(&filter, from_block_number, to_block_number,self.inner.provider.chain_info()?)
                     .await?;
                 Ok(FilterChanges::Logs(logs))
             }
@@ -383,7 +383,7 @@ where
                     .flatten();
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
-                self.get_logs_in_block_range(&filter, from_block_number, to_block_number).await
+                self.get_logs_in_block_range(&filter, from_block_number, to_block_number,self.provider.chain_info()?).await
             }
         }
     }
@@ -414,10 +414,10 @@ where
         filter: &Filter,
         from_block: u64,
         to_block: u64,
+        chain_info: ChainInfo
     ) -> Result<Vec<Log>, FilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
-        let info = self.provider.chain_info()?;
-        let best_number = info.best_number;
+        let best_number = chain_info.best_number;
 
         if to_block - from_block > self.max_blocks_per_filter {
             return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter));
@@ -432,14 +432,7 @@ where
 
         if (to_block == best_number) && (from_block == best_number) {
             let mut all_logs = Vec::new();
-            let header = self
-                .provider
-                .header_by_number(to_block)?
-                .ok_or(ProviderError::HeaderNotFound(to_block.into()))?;
-            let block_hash = self
-                .provider
-                .block_hash(header.clone().number)?
-                .ok_or(ProviderError::BlockNotFound(header.number.into()))?;
+            let block_hash = chain_info.best_hash;
             if let Some((_block, receipts)) =
                 self.eth_cache.get_block_and_receipts(block_hash).await?
             {
