@@ -2,7 +2,7 @@
 
 use futures::StreamExt;
 use rand::thread_rng;
-use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEvents};
+use reth_network::{test_utils::Testnet, EthNetwork, NetworkEvent, NetworkEvents};
 use reth_network_api::PeersInfo;
 use reth_primitives::{TransactionSigned, TxLegacy, U256};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};

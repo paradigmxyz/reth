@@ -32,7 +32,7 @@ use crate::{
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    NetworkEvents, NetworkHandle,
+    EthNetwork, NetworkEvents, NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
@@ -244,6 +244,8 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
     ) -> Self {
         let network_events = network.event_listener();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
+
+        network.set_tx_handle(TransactionsHandle { manager_tx: command_tx.clone() });
 
         let transaction_fetcher = TransactionFetcher::default().with_transaction_fetcher_config(
             &transactions_manager_config.transaction_fetcher_config,
