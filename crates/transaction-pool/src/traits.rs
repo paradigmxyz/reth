@@ -568,7 +568,7 @@ impl TransactionOrigin {
 /// known block hash.
 ///
 /// This is used to update the pool state accordingly.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CanonicalStateUpdate<'a> {
     /// Hash of the tip block.
     pub new_tip: &'a SealedBlock,
@@ -613,7 +613,7 @@ impl<'a> CanonicalStateUpdate<'a> {
     }
 }
 
-impl fmt::Debug for CanonicalStateUpdate<'_> {
+impl fmt::Display for CanonicalStateUpdate<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CanonicalStateUpdate")
             .field("hash", &self.hash())
