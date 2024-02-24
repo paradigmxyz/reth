@@ -164,7 +164,7 @@ where
                 Ok(())
             }
             Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
-                error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
+                error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
                 Err(StageError::DetachedHead { local_head, header, error })
             }
             None => Err(StageError::ChannelClosed),

@@ -460,10 +460,10 @@ impl PeersManager {
         err: impl SessionError,
         reputation_change: ReputationChangeKind,
     ) {
-        trace!(target: "net::peers", ?remote_addr, ?peer_id, ?err, "handling failed connection");
+        trace!(target: "net::peers", ?remote_addr, ?peer_id, %err, "handling failed connection");
 
         if err.is_fatal_protocol_error() {
-            trace!(target: "net::peers", ?remote_addr, ?peer_id, ?err, "fatal connection error");
+            trace!(target: "net::peers", ?remote_addr, ?peer_id, %err, "fatal connection error");
             // remove the peer to which we can't establish a connection due to protocol related
             // issues.
             if let Some((peer_id, peer)) = self.peers.remove_entry(peer_id) {

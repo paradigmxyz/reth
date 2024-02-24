@@ -74,7 +74,7 @@ where
                 self.chain_spec.as_ref(),
                 block.timestamp,
             ) {
-                debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
+                debug!(target: "evm", %error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
             self.stats.receipt_root_duration += time.elapsed();
