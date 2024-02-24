@@ -512,7 +512,7 @@ mod tests {
         runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        assert_matches!( result, Ok(ExecOutput { checkpoint: StageCheckpoint {
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint {
             block_number,
             stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
                 block_range: CheckpointBlockRange {

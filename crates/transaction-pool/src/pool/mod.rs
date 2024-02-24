@@ -343,7 +343,7 @@ where
 
     /// Updates the entire pool after a new block was executed.
     pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
-        trace!(target: "txpool", %update, "updating pool on canonical state change");
+        trace!(target: "txpool", ?update, "updating pool on canonical state change");
 
         let block_info = update.block_info();
         let CanonicalStateUpdate { new_tip, changed_accounts, mined_transactions, .. } = update;

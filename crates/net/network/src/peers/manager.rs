@@ -615,11 +615,11 @@ impl PeersManager {
         }
         let mut peer = entry.remove();
 
-        trace!(target: "net::peers",  ?peer_id, "remove discovered node");
+        trace!(target: "net::peers", ?peer_id, "remove discovered node");
         self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
 
         if peer.state.is_connected() {
-            trace!(target: "net::peers",  ?peer_id, "disconnecting on remove from discovery");
+            trace!(target: "net::peers", ?peer_id, "disconnecting on remove from discovery");
             // we terminate the active session here, but only remove the peer after the session
             // was disconnected, this prevents the case where the session is scheduled for
             // disconnect but the node is immediately rediscovered, See also
@@ -711,7 +711,7 @@ impl PeersManager {
                     break
                 }
 
-                trace!(target: "net::peers",  ?peer_id, addr=?peer.addr, "schedule outbound connection");
+                trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
                 peer.state = PeerConnectionState::Out;
                 PeerAction::Connect { peer_id, remote_addr: peer.addr }
