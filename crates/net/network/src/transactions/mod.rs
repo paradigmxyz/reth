@@ -1084,13 +1084,15 @@ where
                     .fetch_add(new_txs.len(), Ordering::Relaxed);
                 let tx_manager_info_pending_pool_imports =
                     self.pending_pool_imports_info.pending_pool_imports.clone();
+                let added = new_txs.len();
+
+                // update metrics
+                self.metrics.pending_pool_imports.decrement(added as f64);
 
                 let import = Box::pin(async move {
                     let added = new_txs.len();
                     let res = pool.add_external_transactions(new_txs).await;
 
-                    // update metrics
-                    self.metrics.pending_pool_imports.decrement(added as f64);
                     // update self-monitoring info
                     tx_manager_info_pending_pool_imports.fetch_sub(added, Ordering::Relaxed);
 
