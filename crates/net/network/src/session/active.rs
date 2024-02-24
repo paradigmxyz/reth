@@ -1,5 +1,14 @@
 //! Represents an established session.
 
+pub static ACTIVE_SESSION_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+impl Drop for ActiveSession {
+    fn drop(&mut self) {
+        let num = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire);
+        println!("Dropping active session, count: {}", num);
+    }
+}
+
 use crate::{
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerResponse, PeerResponseResult},
     session::{
@@ -31,6 +40,7 @@ use std::{
     task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
+use std::sync::atomic::AtomicUsize;
 use tokio::{
     sync::{mpsc::error::TrySendError, oneshot},
     time::Interval,
@@ -472,6 +482,16 @@ impl Future for ActiveSession {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.inflight_requests.len() > 10 {
+           trace!(target: "dbg-session", "inflight_requests: {}", self.inflight_requests.len());
+        }
+        if self.received_requests_from_remote.len() > 10 {
+           trace!(target: "dbg-session", "received_requests_from_remote: {}", self.received_requests_from_remote.len());
+        }
+        if self.queued_outgoing.len() > 10 {
+           trace!(target: "dbg-session", "received_requests_from_remote: {}", self.queued_outgoing.len());
+        }
+
         let this = self.get_mut();
 
         // if the session is terminate we have to send the termination message before we can close

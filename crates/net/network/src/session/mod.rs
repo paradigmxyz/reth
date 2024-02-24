@@ -52,6 +52,7 @@ pub use handle::{
 };
 use reth_eth_wire::multiplex::RlpxProtocolMultiplexer;
 pub use reth_network_api::{Direction, PeerInfo};
+use crate::session::active::ACTIVE_SESSION_COUNT;
 
 /// Maximum allowed graceful disconnects at a time.
 const MAX_GRACEFUL_DISCONNECTS: usize = 15;
@@ -500,6 +501,8 @@ impl SessionManager {
                 };
 
                 self.spawn(session);
+
+                ACTIVE_SESSION_COUNT.fetch_add(1, std::sync::atomic::Ordering::Acquire);
 
                 let client_version = client_id.into();
                 let handle = ActiveSessionHandle {
