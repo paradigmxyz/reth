@@ -400,6 +400,14 @@ impl Default for DiskFileBlobStoreConfig {
     }
 }
 
+impl DiskFileBlobStoreConfig {
+    /// Set maximum number of blobs to keep in the in memory blob cache.
+    pub const fn with_max_cached_entries(mut self, max_cached_entries: u32) -> Self {
+        self.max_cached_entries = max_cached_entries;
+        self
+    }
+}
+
 /// How to open a disk file blob store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OpenDiskFileBlobStore {
