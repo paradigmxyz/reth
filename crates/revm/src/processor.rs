@@ -434,7 +434,7 @@ where
             if let Err(error) =
                 verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
             {
-                debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
+                debug!(target: "evm", %error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
             self.stats.receipt_root_duration += time.elapsed();

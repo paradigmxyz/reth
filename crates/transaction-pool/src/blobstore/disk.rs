@@ -86,7 +86,7 @@ impl BlobStore for DiskFileBlobStore {
             });
             let _ = fs::remove_file(&path).map_err(|e| {
                 let err = DiskFileBlobStoreError::DeleteFile(tx, path, e);
-                debug!(target:"txpool::blob", ?err);
+                debug!(target:"txpool::blob", %err);
             });
         }
         self.inner.size_tracker.sub_size(subsize as usize);
@@ -197,7 +197,7 @@ impl DiskFileBlobStoreInner {
             let _lock = self.file_lock.write();
             for (path, data) in raw {
                 if let Err(err) = fs::write(&path, &data) {
-                    debug!(target:"txpool::blob", ?err, ?path, "Failed to write blob file");
+                    debug!(target:"txpool::blob", %err, ?path, "Failed to write blob file");
                 } else {
                     add += data.len();
                     num += 1;
@@ -284,7 +284,7 @@ impl DiskFileBlobStoreInner {
                     res.push((tx, data));
                 }
                 Err(err) => {
-                    debug!(target:"txpool::blob", ?err, ?tx, "Failed to read blob file");
+                    debug!(target:"txpool::blob", %err, ?tx, "Failed to read blob file");
                 }
             };
         }
