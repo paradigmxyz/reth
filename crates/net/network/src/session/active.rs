@@ -36,11 +36,13 @@ use std::{
     future::Future,
     net::SocketAddr,
     pin::Pin,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize},
+        Arc,
+    },
     task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
-use std::sync::atomic::AtomicUsize;
 use tokio::{
     sync::{mpsc::error::TrySendError, oneshot},
     time::Interval,
@@ -483,13 +485,13 @@ impl Future for ActiveSession {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.inflight_requests.len() > 10 {
-           trace!(target: "dbg-session", "inflight_requests: {}", self.inflight_requests.len());
+            trace!(target: "dbg-session", "inflight_requests: {}", self.inflight_requests.len());
         }
         if self.received_requests_from_remote.len() > 10 {
-           trace!(target: "dbg-session", "received_requests_from_remote: {}", self.received_requests_from_remote.len());
+            trace!(target: "dbg-session", "received_requests_from_remote: {}", self.received_requests_from_remote.len());
         }
         if self.queued_outgoing.len() > 10 {
-           trace!(target: "dbg-session", "received_requests_from_remote: {}", self.queued_outgoing.len());
+            trace!(target: "dbg-session", "received_requests_from_remote: {}", self.queued_outgoing.len());
         }
 
         let this = self.get_mut();
