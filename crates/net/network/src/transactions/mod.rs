@@ -93,7 +93,7 @@ pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>>
 /// This can be obtained via [TransactionsManager::handle] and can be used to manually interact with
 /// the [TransactionsManager] task once it is spawned.
 ///
-/// For example [TransactionsManager::get_peer_transaction_hashes] returns the transaction hashes
+/// For example [TransactionsHandle::get_peer_transaction_hashes] returns the transaction hashes
 /// known by a specific peer.
 #[derive(Debug, Clone)]
 pub struct TransactionsHandle {
