@@ -578,7 +578,6 @@ impl SessionManager {
                 Poll::Ready(SessionEvent::OutgoingConnectionError { remote_addr, peer_id, error })
             }
             PendingSessionEvent::EciesAuthError { remote_addr, session_id, error, direction } => {
-                self.remove_pending_session(&session_id);
                 trace!(
                     target: "net::session",
                     ?error,
