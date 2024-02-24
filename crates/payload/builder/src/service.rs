@@ -391,7 +391,7 @@ where
                         trace!(%id, "payload job finished");
                     }
                     Poll::Ready(Err(err)) => {
-                        warn!(?err, ?id, "Payload builder job failed; resolving payload");
+                        warn!(%err, ?id, "Payload builder job failed; resolving payload");
                         this.metrics.inc_failed_jobs();
                         this.metrics.set_active_jobs(this.payload_jobs.len());
                     }
@@ -426,7 +426,7 @@ where
                                 }
                                 Err(err) => {
                                     this.metrics.inc_failed_jobs();
-                                    warn!(?err, %id, "Failed to create payload builder job");
+                                    warn!(%err, %id, "Failed to create payload builder job");
                                     res = Err(err);
                                 }
                             }

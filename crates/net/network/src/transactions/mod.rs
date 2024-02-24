@@ -1234,7 +1234,7 @@ where
                                 );
                             }
                             FetchEvent::FetchError { peer_id, error } => {
-                                trace!(target: "net::tx", ?peer_id, ?error, "requesting transactions from peer failed");
+                                trace!(target: "net::tx", ?peer_id, %error, "requesting transactions from peer failed");
                                 this.on_request_error(peer_id, error);
                             }
                         }
@@ -1265,7 +1265,7 @@ where
                                     // known that this transaction is bad. (e.g. consensus
                                     // rules)
                                     if err.is_bad_transaction() && !this.network.is_syncing() {
-                                        debug!(target: "net::tx", ?err, "bad pool transaction import");
+                                        debug!(target: "net::tx", %err, "bad pool transaction import");
                                         this.on_bad_import(err.hash);
                                         continue
                                     }

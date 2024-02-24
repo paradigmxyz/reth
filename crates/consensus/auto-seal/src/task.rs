@@ -182,7 +182,7 @@ where
                                         }
                                     }
                                     Err(err) => {
-                                        error!(target: "consensus::auto", ?err, "Autoseal fork choice update failed");
+                                        error!(target: "consensus::auto", %err, "Autoseal fork choice update failed");
                                         return None
                                     }
                                 }
@@ -219,7 +219,7 @@ where
                                 .send(reth_provider::CanonStateNotification::Commit { new: chain });
                         }
                         Err(err) => {
-                            warn!(target: "consensus::auto", ?err, "failed to execute block")
+                            warn!(target: "consensus::auto", %err, "failed to execute block")
                         }
                     }
 

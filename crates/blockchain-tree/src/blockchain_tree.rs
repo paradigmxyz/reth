@@ -837,7 +837,7 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
                 .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation)
                 .map_err(|err| {
                     debug!(
-                        target: "blockchain_tree", ?err,
+                        target: "blockchain_tree", %err,
                         "Failed to insert buffered block",
                     );
                     err

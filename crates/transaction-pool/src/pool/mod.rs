@@ -761,7 +761,7 @@ where
     /// Inserts a blob transaction into the blob store
     fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecar) {
         if let Err(err) = self.blob_store.insert(hash, blob) {
-            warn!(target: "txpool", ?err, "[{:?}] failed to insert blob", hash);
+            warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
             self.blob_store_metrics.blobstore_failed_inserts.increment(1);
         }
         self.update_blob_store_metrics();
@@ -770,7 +770,7 @@ where
     /// Delete a blob from the blob store
     pub(crate) fn delete_blob(&self, blob: TxHash) {
         if let Err(err) = self.blob_store.delete(blob) {
-            warn!(target: "txpool", ?err, "[{:?}] failed to delete blobs", blob);
+            warn!(target: "txpool", %err, "[{:?}] failed to delete blobs", blob);
             self.blob_store_metrics.blobstore_failed_deletes.increment(1);
         }
         self.update_blob_store_metrics();
@@ -780,7 +780,7 @@ where
     pub(crate) fn delete_blobs(&self, txs: Vec<TxHash>) {
         let num = txs.len();
         if let Err(err) = self.blob_store.delete_all(txs) {
-            warn!(target: "txpool", ?err,?num, "failed to delete blobs");
+            warn!(target: "txpool", %err,?num, "failed to delete blobs");
             self.blob_store_metrics.blobstore_failed_deletes.increment(num as u64);
         }
         self.update_blob_store_metrics();

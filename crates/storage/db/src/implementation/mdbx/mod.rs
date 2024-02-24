@@ -167,10 +167,10 @@ impl DatabaseMetrics for DatabaseEnv {
 
                 Ok::<(), eyre::Report>(())
             })
-            .map_err(|error| error!(?error, "Failed to read db table stats"));
+            .map_err(|error| error!(%error, "Failed to read db table stats"));
 
         if let Ok(freelist) =
-            self.freelist().map_err(|error| error!(?error, "Failed to read db.freelist"))
+            self.freelist().map_err(|error| error!(%error, "Failed to read db.freelist"))
         {
             metrics.push(("db.freelist", freelist as f64, vec![]));
         }

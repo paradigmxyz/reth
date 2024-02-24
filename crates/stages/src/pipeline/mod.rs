@@ -403,7 +403,7 @@ fn on_stage_error<DB: Database>(
     err: StageError,
 ) -> Result<Option<ControlFlow>, PipelineError> {
     if let StageError::DetachedHead { local_head, header, error } = err {
-        warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, ?error, "Stage encountered detached head");
+        warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, %error, "Stage encountered detached head");
 
         // We unwind because of a detached head.
         let unwind_to =

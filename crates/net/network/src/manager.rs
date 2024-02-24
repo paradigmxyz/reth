@@ -690,7 +690,7 @@ where
                             trace!(target: "net", ?remote_addr, "TCP listener closed.");
                         }
                         SwarmEvent::TcpListenerError(err) => {
-                            trace!(target: "net", ?err, "TCP connection error.");
+                            trace!(target: "net", %err, "TCP connection error.");
                         }
                         SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
                             trace!(target: "net", ?session_id, ?remote_addr, "Incoming connection");
@@ -883,7 +883,7 @@ where
                                 target: "net",
                                 ?remote_addr,
                                 ?peer_id,
-                                ?error,
+                                %error,
                                 "Outgoing connection error"
                             );
 
