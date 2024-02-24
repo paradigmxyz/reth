@@ -49,6 +49,7 @@ fnv = "1.0.7"
 bitflags.workspace = true
 auto_impl = "1.0"
 smallvec.workspace = true
+itertools.workspace = true
 
 # testing
 rand = { workspace = true, optional = true }

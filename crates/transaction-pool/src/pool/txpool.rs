@@ -19,6 +19,7 @@ use crate::{
     ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
+use itertools::Itertools;
 use reth_primitives::{
     constants::{
         eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
@@ -1819,21 +1820,21 @@ pub struct PruneResult<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(fmt, "PruneResult {{ ")?;
-        write!(
-            fmt,
-            "promoted: {:?}, ",
-            self.promoted.iter().map(|tx| *tx.hash()).collect::<Vec<_>>()
-        )?;
-        write!(fmt, "failed: {:?}, ", self.failed)?;
-        write!(
-            fmt,
-            "pruned: {:?}, ",
-            self.pruned.iter().map(|tx| *tx.transaction.hash()).collect::<Vec<_>>()
-        )?;
-        write!(fmt, "}}")?;
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PruneResult")
+            .field(
+                "promoted",
+                &format_args!("[{}]", self.promoted.iter().map(|tx| tx.hash()).format(", ")),
+            )
+            .field("failed", &self.failed)
+            .field(
+                "pruned",
+                &format_args!(
+                    "[{}]",
+                    self.pruned.iter().map(|tx| tx.transaction.hash()).format(", ")
+                ),
+            )
+            .finish()
     }
 }
 
