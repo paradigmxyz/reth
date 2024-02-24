@@ -18,6 +18,8 @@ use std::{
     fmt::{Display, Formatter},
     sync::Arc,
 };
+use std::fs::File;
+use std::io::Read;
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -239,6 +241,116 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ]),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         deposit_contract: None, // TODO: do we even have?
+        ..Default::default()
+    }
+    .into()
+});
+
+/// The Optimism Goerli spec
+#[cfg(feature = "optimism")]
+pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::optimism_goerli(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_op.json"))
+            .expect("Can't deserialize Optimism Goerli genesis json"),
+        genesis_hash: Some(b256!(
+            "0f783549ea4313b784eadd9b8e8a69913b368b7366363ea814d7707ac505175f"
+        )),
+        fork_timestamps: ForkTimestamps::default()
+            .shanghai(1699981200)
+            .canyon(1699981200)
+            .cancun(1707238800)
+            .ecotone(1707238800),
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Bedrock, ForkCondition::Block(4061224)),
+            (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1707238800)),
+            (Hardfork::Ecotone, ForkCondition::Timestamp(1707238800)),
+        ]),
+        base_fee_params: BaseFeeParamsKind::Variable(
+            vec![
+                (Hardfork::London, BaseFeeParams::optimism_goerli()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
+            ]
+            .into(),
+        ),
+        prune_delete_limit: 1700,
+        snapshot_block_interval: 1_000_000,
+        ..Default::default()
+    }
+    .into()
+});
+
+/// The Base Goerli spec
+#[cfg(feature = "optimism")]
+pub static BASE_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::base_goerli(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_base.json"))
+            .expect("Can't deserialize Base Goerli genesis json"),
+        genesis_hash: Some(b256!(
+            "a3ab140f15ea7f7443a4702da64c10314eb04d488e72974e02e2d728096b4f76"
+        )),
+        fork_timestamps: ForkTimestamps::default()
+            .shanghai(1699981200)
+            .canyon(1699981200)
+            .cancun(1707238800)
+            .ecotone(1707238800),
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Bedrock, ForkCondition::Block(0)),
+            (Hardfork::Regolith, ForkCondition::Timestamp(1683219600)),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1707238800)),
+            (Hardfork::Ecotone, ForkCondition::Timestamp(1707238800)),
+        ]),
+        base_fee_params: BaseFeeParamsKind::Variable(
+            vec![
+                (Hardfork::London, BaseFeeParams::optimism_goerli()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
+            ]
+            .into(),
+        ),
+        prune_delete_limit: 1700,
+        snapshot_block_interval: 1_000_000,
         ..Default::default()
     }
     .into()
