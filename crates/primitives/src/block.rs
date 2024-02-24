@@ -701,6 +701,7 @@ impl std::ops::DerefMut for SealedBlockWithSenders {
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
+#[add_arbitrary_tests(rlp, 10)]
 #[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
