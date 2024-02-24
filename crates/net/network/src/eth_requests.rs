@@ -3,8 +3,8 @@
 use crate::{metrics::EthRequestHandlerMetrics, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{
-    message::EncodableExt, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetReceipts, NodeData, Receipts,
+    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
+    Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
@@ -37,18 +37,18 @@ const MAX_HEADERS_SERVE: usize = 1024;
 /// SOFT_RESPONSE_LIMIT.
 const MAX_BODIES_SERVE: usize = 1024;
 
-/// Maximum size of replies to data retrievals.
-const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
-
-/// Estimated size in bytes of an RLP encoded header.
-const APPROX_HEADER_SIZE: usize = 500;
+/// Estimated size in bytes of an RLP encoded receipt.
+const APPROX_RECEIPT_SIZE: usize = 24 * 1024;
 
 /// Estimated size in bytes of an RLP encoded body.
 // TODO: check 24kb blocksize assumption
 const APPROX_BODY_SIZE: usize = 24 * 1024;
 
-/// Estimated size in bytes of an RLP encoded receipt.
-const APPROX_RECEIPT_SIZE: usize = 24 * 1024;
+/// Maximum size of replies to data retrievals.
+const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
+
+/// Estimated size in bytes of an RLP encoded header.
+const APPROX_HEADER_SIZE: usize = 500;
 
 /// Manages eth related requests on top of the p2p network.
 ///
@@ -98,6 +98,7 @@ where
         };
 
         let skip = skip as u64;
+        let mut total_bytes = 0;
 
         for _ in 0..limit {
             if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
@@ -127,18 +128,13 @@ where
                 }
 
                 headers.push(header);
-
                 if headers.len() >= MAX_HEADERS_SERVE {
                     break
                 }
-                match headers.encode_max(APPROX_HEADER_SIZE, SOFT_RESPONSE_LIMIT) {
-                    Ok(_) => {
-                        // If encode_max succeeds, continue accumulating headers
-                    }
-                    Err(_) => {
-                        // If encode_max fails,stop the loop
-                        break;
-                    }
+
+                total_bytes += APPROX_HEADER_SIZE;
+                if total_bytes > SOFT_RESPONSE_LIMIT {
+                    break
                 }
             } else {
                 break
@@ -168,6 +164,8 @@ where
         self.metrics.received_bodies_requests.increment(1);
         let mut bodies = Vec::new();
 
+        let mut total_bytes = 0;
+
         for hash in request.0 {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
                 let body = BlockBody {
@@ -180,17 +178,16 @@ where
                 if bodies.len() >= MAX_BODIES_SERVE {
                     break
                 }
-                match bodies.encode_max(APPROX_BODY_SIZE, SOFT_RESPONSE_LIMIT) {
-                    Ok(_) => {
-                        // If encode_max succeeds, continue accumulating bodies
-                    }
-                    Err(_) => {
-                        // If encode_max fails,stop the loop
-                        break;
-                    }
+
+                total_bytes += APPROX_BODY_SIZE;
+                if total_bytes > SOFT_RESPONSE_LIMIT {
+                    break
                 }
+            } else {
+                break
             }
         }
+
         let _ = response.send(Ok(BlockBodies(bodies)));
     }
 
@@ -202,6 +199,8 @@ where
     ) {
         let mut receipts = Vec::new();
 
+        let mut total_bytes = 0;
+
         for hash in request.0 {
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
@@ -210,24 +209,25 @@ where
                     .into_iter()
                     .map(|receipt| receipt.with_bloom())
                     .collect::<Vec<_>>();
+
                 receipts.push(receipt);
                 if receipts.len() >= MAX_RECEIPTS_SERVE {
                     break
                 }
-                match receipts.encode_max(APPROX_RECEIPT_SIZE, SOFT_RESPONSE_LIMIT) {
-                    Ok(_) => {
-                        // If encode_max succeeds, continue accumulating receipts
-                    }
-                    Err(_) => {
-                        // If encode_max fails,stop the loop
-                        break;
-                    }
+
+                total_bytes += APPROX_RECEIPT_SIZE;
+                if total_bytes > SOFT_RESPONSE_LIMIT {
+                    break
                 }
+            } else {
+                break
             }
         }
+
         let _ = response.send(Ok(Receipts(receipts)));
     }
 }
+
 /// An endless future.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
