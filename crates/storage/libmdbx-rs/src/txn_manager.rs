@@ -1,7 +1,7 @@
 use crate::{
     environment::EnvPtr,
     error::{mdbx_result, Result},
-    CommitLatency,
+    CommitLatency, Error,
 };
 use std::{
     ptr,
@@ -29,6 +29,13 @@ pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
     #[cfg(feature = "read-tx-timeouts")]
     read_transactions: Option<std::sync::Arc<read_transactions::ReadTransactions>>,
+    /// List of transactions aborted by [TxnManagerMessage::Abort].
+    /// We keep them until user tries to abort the transaction, so we're able to report a nice
+    /// [Error::ReadTransactionAborted] error.
+    ///
+    /// We store `usize` instead of a raw pointer, because pointers are not comparable.
+    #[cfg(not(feature = "read-tx-timeouts"))]
+    aborted: std::sync::Arc<dashmap::DashSet<usize>>,
 }
 
 impl TxnManager {
@@ -38,6 +45,8 @@ impl TxnManager {
             sender: tx,
             #[cfg(feature = "read-tx-timeouts")]
             read_transactions: None,
+            #[cfg(not(feature = "read-tx-timeouts"))]
+            aborted: Default::default(),
         };
 
         txn_manager.start_message_listener(env, rx);
@@ -54,6 +63,8 @@ impl TxnManager {
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
         #[cfg(feature = "read-tx-timeouts")]
         let read_transactions = self.read_transactions.clone();
+        #[cfg(not(feature = "read-tx-timeouts"))]
+        let aborted = self.aborted.clone();
 
         std::thread::spawn(move || {
             #[allow(clippy::redundant_locals)]
@@ -91,11 +102,34 @@ impl TxnManager {
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
                             #[cfg(feature = "read-tx-timeouts")]
-                            if let Some(read_transactions) = &read_transactions {
-                                read_transactions.remove_active(tx.0);
+                            {
+                                if let Some(read_transactions) = &read_transactions {
+                                    read_transactions.remove_active(tx.0);
+
+                                    let new_aborted = read_transactions.add_aborted(tx.0);
+
+                                    let result = if let Some(true) = new_aborted {
+                                        mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })
+                                    } else {
+                                        Err(Error::ReadTransactionAborted)
+                                    };
+
+                                    sender.send(result).unwrap();
+                                }
                             }
 
-                            sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
+                            #[cfg(not(feature = "read-tx-timeouts"))]
+                            {
+                                let new_aborted = aborted.insert(tx.0 as usize);
+
+                                let result = if new_aborted {
+                                    mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })
+                                } else {
+                                    Err(Error::ReadTransactionAborted)
+                                };
+
+                                sender.send(result).unwrap();
+                            }
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
                             #[cfg(feature = "read-tx-timeouts")]
@@ -172,6 +206,12 @@ mod read_transactions {
         ) -> Option<usize> {
             self.read_transactions.as_ref()?.remove_aborted(ptr)
         }
+
+        /// Adds a transaction to the list of aborted read transactions. Returns `Some(true)` if
+        /// the key was not already in the set.
+        pub(crate) fn add_aborted_read_transaction(&self, ptr: *mut ffi::MDBX_txn) -> Option<bool> {
+            self.read_transactions.as_ref()?.add_aborted(ptr)
+        }
     }
 
     #[derive(Debug, Default)]
@@ -207,9 +247,10 @@ mod read_transactions {
             self.active.remove(&(ptr as usize))
         }
 
-        /// Adds a new transaction to the list of aborted read transactions.
-        pub(super) fn add_aborted(&self, ptr: *mut ffi::MDBX_txn) {
-            self.aborted.insert(ptr as usize);
+        /// Adds a new transaction to the list of aborted read transactions. Returns `Some(true)`
+        /// if the key was not already in the set.
+        pub(super) fn add_aborted(&self, ptr: *mut ffi::MDBX_txn) -> Option<bool> {
+            Some(self.aborted.insert(ptr as usize))
         }
 
         /// Removes a transaction from the list of aborted read transactions.
@@ -243,10 +284,12 @@ mod read_transactions {
 
                             // Add the transaction to the list of aborted transactions, so further
                             // usages report the correct error when the transaction is closed.
-                            self.add_aborted(ptr);
-
-                            // Abort the transaction
-                            let result = mdbx_result(unsafe { ffi::mdbx_txn_abort(ptr) });
+                            let result = if let Some(true) = self.add_aborted(ptr) {
+                                // Abort the transaction
+                                mdbx_result(unsafe { ffi::mdbx_txn_abort(ptr) })
+                            } else {
+                                Err(Error::ReadTransactionAborted)
+                            };
 
                             // Add the transaction to `aborted_active`. We can't remove it instantly
                             // from the list of active transactions, because we iterate through it.
@@ -311,10 +354,12 @@ mod read_transactions {
     #[cfg(test)]
     mod tests {
         use crate::{
-            txn_manager::read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, Environment, Error,
-            MaxReadTransactionDuration,
+            txn_manager::{
+                read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, TxnManagerMessage, TxnPtr,
+            },
+            Environment, Error, MaxReadTransactionDuration,
         };
-        use std::{thread::sleep, time::Duration};
+        use std::{sync::mpsc::sync_channel, thread::sleep, time::Duration};
         use tempfile::tempdir;
 
         #[test]
@@ -386,6 +431,31 @@ mod read_transactions {
             let tx = env.begin_ro_txn().unwrap();
             sleep(READ_TRANSACTIONS_CHECK_INTERVAL);
             assert!(tx.commit().is_ok())
+        }
+
+        #[test]
+        #[cfg(feature = "read-tx-timeouts")]
+        fn txn_manager_abort_read_transaction_twice() {
+            const MAX_DURATION: Duration = Duration::from_secs(1);
+
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
+                .open(dir.path())
+                .unwrap();
+
+            // Create a read-only transaction, successfully use it, close it by message to tx
+            // manager.
+            {
+                let tx = env.begin_ro_txn().unwrap();
+                let tx_ptr = TxnPtr(tx.txn());
+                let (sender, rx) = sync_channel(0);
+                env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+                assert!(rx.recv().unwrap().is_ok());
+                let (sender, rx) = sync_channel(0);
+                env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+                assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
+            }
         }
     }
 }

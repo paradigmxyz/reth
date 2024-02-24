@@ -359,10 +359,15 @@ where
             if !self.has_committed() {
                 if K::IS_READ_ONLY {
                     #[cfg(feature = "read-tx-timeouts")]
-                    self.env.txn_manager().remove_active_read_transaction(txn);
+                    {
+                        self.env.txn_manager().remove_active_read_transaction(txn);
 
-                    unsafe {
-                        ffi::mdbx_txn_abort(txn);
+                        let new_aborted = self.env.txn_manager().add_aborted_read_transaction(txn);
+                        if let Some(true) = new_aborted {
+                            unsafe {
+                                ffi::mdbx_txn_abort(txn);
+                            }
+                        }
                     }
                 } else {
                     let (sender, rx) = sync_channel(0);
