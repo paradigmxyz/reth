@@ -568,7 +568,7 @@ impl TransactionOrigin {
 /// known block hash.
 ///
 /// This is used to update the pool state accordingly.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct CanonicalStateUpdate<'a> {
     /// Hash of the tip block.
     pub new_tip: &'a SealedBlock,
@@ -613,10 +613,16 @@ impl<'a> CanonicalStateUpdate<'a> {
     }
 }
 
-impl<'a> fmt::Display for CanonicalStateUpdate<'a> {
+impl fmt::Display for CanonicalStateUpdate<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{ hash: {}, number: {}, pending_block_base_fee: {}, pending_block_blob_fee: {:?}, changed_accounts: {}, mined_transactions: {} }}",
-            self.hash(), self.number(), self.pending_block_base_fee, self.pending_block_blob_fee,  self.changed_accounts.len(), self.mined_transactions.len())
+        f.debug_struct("CanonicalStateUpdate")
+            .field("hash", &self.hash())
+            .field("number", &self.number())
+            .field("pending_block_base_fee", &self.pending_block_base_fee)
+            .field("pending_block_blob_fee", &self.pending_block_blob_fee)
+            .field("changed_accounts", &self.changed_accounts.len())
+            .field("mined_transactions", &self.mined_transactions.len())
+            .finish()
     }
 }
 
