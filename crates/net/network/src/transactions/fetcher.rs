@@ -1,11 +1,15 @@
 use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
-    transactions::{validation, PartiallyFilterMessage},
+    transactions::{
+        config::TransactionFetcherConfig,
+        constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
+        validation, MessageFilter, PartiallyFilterMessage, PeerMetadata, PooledTransactions,
+        SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    },
 };
 use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
-
 use pin_project::pin_project;
 use reth_eth_wire::{
     DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
@@ -29,18 +33,11 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 use validation::FilterOutcome;
 
-use super::{
-    config::TransactionFetcherConfig,
-    constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
-    MessageFilter, PeerMetadata, PooledTransactions,
-    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-};
-
 /// The type responsible for fetching missing transactions from peers.
 ///
 /// This will keep track of unique transaction hashes that are currently being fetched and submits
 /// new requests on announced hashes.
-#[derive(Debug)]
+// #[derive(Debug)]
 #[pin_project]
 pub struct TransactionFetcher {
     /// All peers with to which a [`GetPooledTransactions`] request is inflight.
@@ -56,7 +53,7 @@ pub struct TransactionFetcher {
     ///
     /// This is a subset of all hashes in the fetcher, and is disjoint from the set of hashes for
     /// which a [`GetPooledTransactions`] request is inflight.
-    pub hashes_pending_fetch: LruCache<TxHash>,
+    pub(super) hashes_pending_fetch: schnellru::LruMap<TxHash, ()>,
     /// Tracks all hashes in the transaction fetcher.
     pub(super) hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, Unlimited>,
     /// Filter for valid announcement and response data.
@@ -130,7 +127,7 @@ impl TransactionFetcher {
         let TxFetchMetadata { fallback_peers, .. } =
             self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
 
-        for peer_id in fallback_peers.iter() {
+        for (peer_id, _) in fallback_peers.iter() {
             if self.is_idle(peer_id) && is_session_active(peer_id) {
                 return Some(peer_id)
             }
@@ -153,12 +150,12 @@ impl TransactionFetcher {
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
         let idle_peer = loop {
-            let &hash = hashes_pending_fetch_iter.next()?;
+            let (hash, ()) = hashes_pending_fetch_iter.next()?;
 
-            let idle_peer = self.get_idle_peer_for(hash, &is_session_active);
+            let idle_peer = self.get_idle_peer_for(*hash, &is_session_active);
 
             if idle_peer.is_some() {
-                hashes_to_request.push(hash);
+                hashes_to_request.push(*hash);
                 break idle_peer.copied()
             }
 
@@ -323,8 +320,7 @@ impl TransactionFetcher {
             debug_assert!(
                 self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_some(),
                 "`%hash` in `@buffered_hashes` that's not in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
-`%hash`: {hash},
-`@self`: {self:?}",
+`%hash`: {hash},"
             );
 
             let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
@@ -335,7 +331,7 @@ impl TransactionFetcher {
 
             if let Some(peer_id) = fallback_peer {
                 // peer has not yet requested hash
-                fallback_peers.insert(peer_id);
+                fallback_peers.insert(peer_id, ());
             } else {
                 if *retries >= DEFAULT_MAX_RETRIES {
                     trace!(target: "net::tx",
@@ -349,9 +345,13 @@ impl TransactionFetcher {
                 }
                 *retries += 1;
             }
-            if let (_, Some(evicted_hash)) = self.hashes_pending_fetch.insert_and_get_evicted(hash)
-            {
-                max_retried_and_evicted_hashes.push(evicted_hash);
+
+            let maybe_evicted_hash = self.hashes_pending_fetch.peek_oldest();
+            self.hashes_pending_fetch.insert(hash, ());
+            if let Some((evicted_hash, _)) = maybe_evicted_hash {
+                if self.hashes_pending_fetch.get(evicted_hash).is_none() {
+                    max_retried_and_evicted_hashes.push(*evicted_hash);
+                }
             }
         }
 
@@ -473,7 +473,7 @@ impl TransactionFetcher {
                 }
 
                 // hash has been seen but is not inflight
-                if self.hashes_pending_fetch.remove(hash) {
+                if self.hashes_pending_fetch.remove(hash).is_some() {
                     return true
                 }
                 // hash has been seen and is in flight. store peer as fallback peer.
@@ -481,7 +481,7 @@ impl TransactionFetcher {
                 // remove any ended sessions, so that in case of a full cache, alive peers aren't
                 // removed in favour of lru dead peers
                 let mut ended_sessions = vec!();
-                for &peer_id in fallback_peers.iter() {
+                for (&peer_id, _) in fallback_peers.iter() {
                     if is_session_active(peer_id) {
                         ended_sessions.push(peer_id);
                     }
@@ -506,11 +506,10 @@ impl TransactionFetcher {
             #[cfg(debug_assertions)]
             previously_unseen_hashes.push(*hash);
 
-            // todo: allow `MAX_ALTERNATIVE_PEERS_PER_TX` to be zero
-            let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into()).expect("MAX_ALTERNATIVE_PEERS_PER_TX should be non-zero");
+            let limit = DEFAULT_MAX_COUNT_FALLBACK_PEERS.into();
 
             if self.hashes_fetch_inflight_and_pending_fetch.get_or_insert(*hash, ||
-                TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(limit), tx_encoded_length: None}
+                TxFetchMetadata{retries: 0, fallback_peers: schnellru::LruMap::new(ByLength::new(limit)), tx_encoded_length: None}
             ).is_none() {
 
                 debug!(target: "net::tx",
@@ -599,16 +598,15 @@ impl TransactionFetcher {
         debug_assert!(
             || -> bool {
                 for hash in new_announced_hashes.iter() {
-                    if self.hashes_pending_fetch.contains(hash) {
+                    if self.hashes_pending_fetch.get(hash).is_some() {
                         return false
                     }
                 }
                 true
             }(),
             "`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@buffered_hashes` and `@inflight_requests`,
-`%new_announced_hashes`: {:?},
-`@self`: {:?}",
-            new_announced_hashes, self
+`%new_announced_hashes`: {:?},",
+            new_announced_hashes
         );
 
         let (response, rx) = oneshot::channel();
@@ -663,7 +661,7 @@ impl TransactionFetcher {
     pub fn fill_request_from_hashes_pending_fetch(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        seen_hashes: &LruCache<TxHash>,
+        seen_hashes: &schnellru::LruMap<TxHash, ()>,
         mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
     ) {
         let Some(hash) = hashes_to_request.first() else { return };
@@ -683,9 +681,9 @@ impl TransactionFetcher {
 
         // try to fill request by checking if any other hashes pending fetch (in lru order) are
         // also seen by peer
-        for hash in self.hashes_pending_fetch.iter() {
+        for (hash, _) in self.hashes_pending_fetch.iter() {
             // 1. Check if a hash pending fetch is seen by peer.
-            if !seen_hashes.contains(hash) {
+            if !seen_hashes.get(hash).is_some() {
                 continue
             };
 
@@ -843,9 +841,8 @@ impl TransactionFetcher {
         debug_assert!(
                 self.active_peers.get(&peer_id).is_some(),
                 "`%peer_id` has been removed from `@active_peers` before inflight request(s) resolved, broken invariant `@active_peers` and `@inflight_requests`,
-`%peer_id`: {},
-`@self`: {:?}",
-                peer_id, self
+`%peer_id`: {},",
+                peer_id
             );
 
         self.decrement_inflight_request_count_for(&peer_id);
@@ -945,10 +942,11 @@ impl Default for TransactionFetcher {
         Self {
             active_peers: LruMap::new(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS),
             inflight_requests: Default::default(),
-            hashes_pending_fetch: LruCache::new(
-                NonZeroUsize::new(DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH)
-                    .expect("buffered cache limit should be non-zero"),
-            ),
+            hashes_pending_fetch: schnellru::LruMap::new(ByLength::new(
+                DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH
+                    .try_into()
+                    .expect("todo: better message, 32 bit limit"),
+            )),
             hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
             filter_valid_message: Default::default(),
             info: TransactionFetcherInfo::default(),
@@ -959,12 +957,13 @@ impl Default for TransactionFetcher {
 }
 
 /// Metadata of a transaction hash that is yet to be fetched.
-#[derive(Debug, Constructor)]
-pub struct TxFetchMetadata {
+// #[derive(Debug)]
+#[derive(Constructor)]
+pub(super) struct TxFetchMetadata {
     /// The number of times a request attempt has been made for the hash.
     retries: u8,
     /// Peers that have announced the hash, but to which a request attempt has not yet been made.
-    fallback_peers: LruCache<PeerId>,
+    fallback_peers: schnellru::LruMap<PeerId, ()>,
     /// Size metadata of the transaction if it has been seen in an eth68 announcement.
     // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
     // another size tx than they announced. alt enter in request (won't catch peers announcing
@@ -974,7 +973,7 @@ pub struct TxFetchMetadata {
 
 impl TxFetchMetadata {
     /// Returns a mutable reference to the fallback peers cache for this transaction hash.
-    pub fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
+    pub fn fallback_peers_mut(&mut self) -> &mut schnellru::LruMap<PeerId, ()> {
         &mut self.fallback_peers
     }
 
@@ -1310,11 +1309,11 @@ mod test {
         let (mut peer_1_data, mut peer_1_mock_session_rx) =
             new_mock_session(peer_1, EthVersion::Eth66);
         for hash in &seen_hashes {
-            peer_1_data.seen_transactions.insert(*hash);
+            peer_1_data.seen_transactions.insert(*hash, ());
         }
         let (mut peer_2_data, _) = new_mock_session(peer_2, EthVersion::Eth66);
         for hash in &seen_hashes {
-            peer_2_data.seen_transactions.insert(*hash);
+            peer_2_data.seen_transactions.insert(*hash, ());
         }
         let mut peers = HashMap::new();
         peers.insert(peer_1, peer_1_data);
@@ -1336,7 +1335,7 @@ mod test {
         tx_fetcher
             .hashes_fetch_inflight_and_pending_fetch
             .insert(hash_other, TxFetchMetadata::new(0, backups, None));
-        tx_fetcher.hashes_pending_fetch.insert(hash_other);
+        tx_fetcher.hashes_pending_fetch.insert(hash_other, ());
 
         // add peer_1 as lru fallback peer for seen hashes
         for hash in &seen_hashes {
@@ -1345,12 +1344,12 @@ mod test {
                 .get(hash)
                 .unwrap()
                 .fallback_peers_mut()
-                .insert(peer_1);
+                .insert(peer_1, ());
         }
 
         // mark seen hashes as pending fetch
         for hash in &seen_hashes {
-            tx_fetcher.hashes_pending_fetch.insert(*hash);
+            tx_fetcher.hashes_pending_fetch.insert(*hash, ());
         }
 
         // seen hashes and the random hash from peer_2 are pending fetch

@@ -55,6 +55,7 @@ use reth_transaction_pool::{
     error::PoolResult, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
 };
+use schnellru::{ByLength, LruMap};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     num::NonZeroUsize,
@@ -208,7 +209,7 @@ impl TransactionsHandle {
 ///
 /// It is directly connected to the [`TransactionPool`] to retrieve requested transactions and
 /// propagate new transactions over the network.
-#[derive(Debug)]
+// #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
 pub struct TransactionsManager<Pool> {
     /// Access to the transaction pool.
@@ -401,7 +402,10 @@ where
 
             // we sent a response at which point we assume that the peer is aware of the
             // transactions
-            peer.seen_transactions.extend(transactions.iter().map(|tx| *tx.hash()));
+            for tx in transactions.iter() {
+                peer.seen_transactions.insert(*tx.hash(), ());
+            }
+            // peer.seen_transactions.extend(transactions.iter().map(|tx| *tx.hash()));
 
             let resp = PooledTransactions(transactions);
             let _ = response.send(Ok(resp));
@@ -469,7 +473,7 @@ where
             // transaction lists, before deciding whether or not to send full transactions to the
             // peer.
             for tx in to_propagate.iter() {
-                if peer.seen_transactions.insert(tx.hash()) {
+                if peer.seen_transactions.insert(tx.hash(), ()) {
                     hashes.push(tx);
 
                     // Do not send full 4844 transaction hashes to peers.
@@ -555,7 +559,7 @@ where
 
         // Iterate through the transactions to propagate and fill the hashes and full transaction
         for tx in to_propagate {
-            if peer.seen_transactions.insert(tx.hash()) {
+            if peer.seen_transactions.insert(tx.hash(), ()) {
                 full_transactions.push(&tx);
             }
         }
@@ -601,7 +605,7 @@ where
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
 
             for tx in to_propagate {
-                if !peer.seen_transactions.insert(tx.hash()) {
+                if !peer.seen_transactions.insert(tx.hash(), ()) {
                     hashes.push(&tx);
                 }
             }
@@ -659,7 +663,7 @@ where
         // keep track of the transactions the peer knows
         let mut count_txns_already_seen_by_peer = 0;
         for tx in msg.iter_hashes().copied() {
-            if !peer.seen_transactions.insert(tx) {
+            if !peer.seen_transactions.insert(tx, ()) {
                 count_txns_already_seen_by_peer += 1;
             }
         }
@@ -911,7 +915,13 @@ where
                     let hashes = self
                         .peers
                         .get(&peer_id)
-                        .map(|peer| peer.seen_transactions.iter().copied().collect::<HashSet<_>>())
+                        .map(|peer| {
+                            peer.seen_transactions
+                                .iter()
+                                .map(|(hash, _)| hash)
+                                .copied()
+                                .collect::<HashSet<_>>()
+                        })
                         .unwrap_or_default();
                     res.insert(peer_id, hashes);
                 }
@@ -961,7 +971,7 @@ where
 
                 let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
                 for pooled_tx in pooled_txs {
-                    peer.seen_transactions.insert(*pooled_tx.hash());
+                    peer.seen_transactions.insert(*pooled_tx.hash(), ());
                     msg_builder.push_pooled(pooled_tx);
                 }
 
@@ -997,7 +1007,7 @@ where
         // recorded the hashes as seen by this peer in `Self::on_new_pooled_transaction_hashes`.
         let mut num_already_seen_by_peer = 0;
         for tx in transactions.iter() {
-            if source.is_broadcast() && !peer.seen_transactions.insert(*tx.hash()) {
+            if source.is_broadcast() && !peer.seen_transactions.insert(*tx.hash(), ()) {
                 num_already_seen_by_peer += 1;
             }
         }
@@ -1490,12 +1500,12 @@ impl TransactionSource {
 }
 
 /// Tracks a single peer in the context of [`TransactionsManager`].
-#[derive(Debug)]
-pub struct PeerMetadata {
+// #[derive(Debug)]
+struct PeerMetadata {
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.
-    seen_transactions: LruCache<TxHash>,
+    seen_transactions: LruMap<TxHash, ()>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
@@ -1508,9 +1518,9 @@ impl PeerMetadata {
     /// Returns a new instance of [`PeerMetadata`].
     fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
         Self {
-            seen_transactions: LruCache::new(
-                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER).expect("infallible"),
-            ),
+            seen_transactions: LruMap::new(ByLength::new(
+                DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER.try_into().expect("todo: this message etc"),
+            )),
             request_tx,
             version,
             client_version,
@@ -2029,8 +2039,8 @@ mod tests {
         let (mut peer_1, mut to_mock_session_rx) = new_mock_session(peer_id_1, eth_version);
         // mark hashes as seen by peer so it can fish them out from the cache for hashes pending
         // fetch
-        peer_1.seen_transactions.insert(seen_hashes[0]);
-        peer_1.seen_transactions.insert(seen_hashes[1]);
+        peer_1.seen_transactions.insert(seen_hashes[0], ());
+        peer_1.seen_transactions.insert(seen_hashes[1], ());
         tx_manager.peers.insert(peer_id_1, peer_1);
 
         // hashes are seen and currently not inflight, with one fallback peer, and are buffered
@@ -2044,8 +2054,8 @@ mod tests {
         tx_fetcher
             .hashes_fetch_inflight_and_pending_fetch
             .insert(seen_hashes[0], TxFetchMetadata::new(retries, backups, None));
-        tx_fetcher.hashes_pending_fetch.insert(seen_hashes[1]);
-        tx_fetcher.hashes_pending_fetch.insert(seen_hashes[0]);
+        tx_fetcher.hashes_pending_fetch.insert(seen_hashes[1], ());
+        tx_fetcher.hashes_pending_fetch.insert(seen_hashes[0], ());
 
         // peer_1 is idle
         assert!(tx_fetcher.is_idle(&peer_id_1));
