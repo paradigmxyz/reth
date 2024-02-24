@@ -197,7 +197,7 @@ impl DiskFileBlobStoreInner {
             let _lock = self.file_lock.write();
             for (path, data) in raw {
                 if let Err(err) = fs::write(&path, &data) {
-                    debug!( target:"txpool::blob", ?err, ?path, "Failed to write blob file");
+                    debug!(target:"txpool::blob", ?err, ?path, "Failed to write blob file");
                 } else {
                     add += data.len();
                     num += 1;
@@ -284,7 +284,7 @@ impl DiskFileBlobStoreInner {
                     res.push((tx, data));
                 }
                 Err(err) => {
-                    debug!( target:"txpool::blob", ?err, ?tx, "Failed to read blob file");
+                    debug!(target:"txpool::blob", ?err, ?tx, "Failed to read blob file");
                 }
             };
         }
@@ -294,7 +294,7 @@ impl DiskFileBlobStoreInner {
     /// Retries the blob data for the given transaction hash.
     #[inline]
     fn write_one_encoded(&self, tx: B256, data: &[u8]) -> Result<usize, DiskFileBlobStoreError> {
-        trace!( target:"txpool::blob", "[{:?}] writing blob file", tx);
+        trace!(target:"txpool::blob", "[{:?}] writing blob file", tx);
         let path = self.blob_disk_file(tx);
         {
             let _lock = self.file_lock.write();

@@ -352,7 +352,7 @@ where
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
-        trace!(target: "net", ?peer_id,  "received unexpected message");
+        trace!(target: "net", ?peer_id, "received unexpected message");
         self.swarm
             .state_mut()
             .peers_mut()

@@ -147,7 +147,7 @@ where
                 })
             }
             SessionEvent::AlreadyConnected { peer_id, remote_addr, direction } => {
-                trace!( target: "net", ?peer_id, ?remote_addr, ?direction, "already connected");
+                trace!(target: "net", ?peer_id, ?remote_addr, ?direction, "already connected");
                 self.state.peers_mut().on_already_connected(direction);
                 None
             }

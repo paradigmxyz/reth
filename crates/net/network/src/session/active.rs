@@ -557,7 +557,7 @@ impl Future for ActiveSession {
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
                     };
                     if let Err(err) = res {
-                        debug!(target: "net::session", ?err,  remote_peer_id=?this.remote_peer_id, "failed to send message");
+                        debug!(target: "net::session", ?err, remote_peer_id=?this.remote_peer_id, "failed to send message");
                         // notify the manager
                         return this.close_on_error(err, cx)
                     }
@@ -614,7 +614,7 @@ impl Future for ActiveSession {
                                         progress = true;
                                     }
                                     OnIncomingMessageOutcome::BadMessage { error, message } => {
-                                        debug!(target: "net::session", ?error, msg=?message,  remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
+                                        debug!(target: "net::session", ?error, msg=?message, remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
                                         return this.close_on_error(error, cx)
                                     }
                                     OnIncomingMessageOutcome::NoCapacity(msg) => {

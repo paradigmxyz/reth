@@ -100,7 +100,7 @@ where
         stop_handle: StopHandle,
         on_ready: oneshot::Sender<Result<(), String>>,
     ) -> io::Result<()> {
-        trace!( endpoint = ?self.endpoint.path(), "starting ipc server");
+        trace!(endpoint = ?self.endpoint.path(), "starting ipc server");
 
         if cfg!(unix) {
             // ensure the file does not exist
