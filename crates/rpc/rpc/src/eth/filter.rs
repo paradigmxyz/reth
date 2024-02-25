@@ -191,7 +191,12 @@ where
 
                 let logs = self
                     .inner
-                    .get_logs_in_block_range(&filter, from_block_number, to_block_number,self.inner.provider.chain_info()?)
+                    .get_logs_in_block_range(
+                        &filter,
+                        from_block_number,
+                        to_block_number,
+                        self.inner.provider.chain_info()?,
+                    )
                     .await?;
                 Ok(FilterChanges::Logs(logs))
             }
@@ -383,7 +388,13 @@ where
                     .flatten();
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
-                self.get_logs_in_block_range(&filter, from_block_number, to_block_number,self.provider.chain_info()?).await
+                self.get_logs_in_block_range(
+                    &filter,
+                    from_block_number,
+                    to_block_number,
+                    self.provider.chain_info()?,
+                )
+                .await
             }
         }
     }
@@ -414,7 +425,7 @@ where
         filter: &Filter,
         from_block: u64,
         to_block: u64,
-        chain_info: ChainInfo
+        chain_info: ChainInfo,
     ) -> Result<Vec<Log>, FilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
         let best_number = chain_info.best_number;
