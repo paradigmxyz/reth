@@ -114,15 +114,15 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// inserted into the pool that are allowed to be propagated.
     ///
     /// Note: This is intended for networking and will __only__ yield transactions that are allowed
-    /// to be propagated over the network.
+    /// to be propagated over the network, see also [TransactionListenerKind].
     ///
     /// Consumer: RPC/P2P
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
         self.pending_transactions_listener_for(TransactionListenerKind::PropagateOnly)
     }
 
-    /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
-    /// inserted into the pool depending on the given [TransactionListenerKind] argument.
+    /// Returns a new [Receiver] that yields transactions hashes for new __pending__ transactions
+    /// inserted into the pending pool depending on the given [TransactionListenerKind] argument.
     fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
@@ -130,7 +130,7 @@ pub trait TransactionPool: Send + Sync + Clone {
         self.new_transactions_listener_for(TransactionListenerKind::PropagateOnly)
     }
 
-    /// Returns a new Stream that yields blob "sidecars" (blobs w/ assoc. kzg
+    /// Returns a new [Receiver] that yields blob "sidecars" (blobs w/ assoc. kzg
     /// commitments/proofs) for eip-4844 transactions inserted into the pool
     fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar>;
 
@@ -568,7 +568,7 @@ impl TransactionOrigin {
 /// known block hash.
 ///
 /// This is used to update the pool state accordingly.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct CanonicalStateUpdate<'a> {
     /// Hash of the tip block.
     pub new_tip: &'a SealedBlock,
@@ -613,10 +613,16 @@ impl<'a> CanonicalStateUpdate<'a> {
     }
 }
 
-impl<'a> fmt::Display for CanonicalStateUpdate<'a> {
+impl fmt::Display for CanonicalStateUpdate<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{ hash: {}, number: {}, pending_block_base_fee: {}, pending_block_blob_fee: {:?}, changed_accounts: {}, mined_transactions: {} }}",
-            self.hash(), self.number(), self.pending_block_base_fee, self.pending_block_blob_fee,  self.changed_accounts.len(), self.mined_transactions.len())
+        f.debug_struct("CanonicalStateUpdate")
+            .field("hash", &self.hash())
+            .field("number", &self.number())
+            .field("pending_block_base_fee", &self.pending_block_base_fee)
+            .field("pending_block_blob_fee", &self.pending_block_blob_fee)
+            .field("changed_accounts", &self.changed_accounts.len())
+            .field("mined_transactions", &self.mined_transactions.len())
+            .finish()
     }
 }
 

@@ -17,6 +17,7 @@ use reth_downloaders::{
 };
 use reth_interfaces::{
     consensus::Consensus,
+    executor::BlockExecutionError,
     p2p::{bodies::client::BodiesClient, either::EitherDownloader, headers::client::HeadersClient},
     sync::NoopSyncStateUpdater,
     test_utils::{NoopFullBlockClient, TestConsensus},
@@ -174,7 +175,7 @@ where
     fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
         &'a self,
         sp: SP,
-    ) -> Box<dyn PrunableBlockExecutor + 'a> {
+    ) -> Box<dyn PrunableBlockExecutor<Error = BlockExecutionError> + 'a> {
         match self {
             EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
             EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),

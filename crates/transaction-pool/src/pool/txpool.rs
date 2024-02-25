@@ -19,12 +19,14 @@ use crate::{
     ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
+use itertools::Itertools;
 use reth_primitives::{
     constants::{
         eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
     },
     Address, TxHash, B256,
 };
+use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
@@ -366,7 +368,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn queued_and_pending_txs_by_sender(
         &self,
         sender: SenderId,
-    ) -> (Vec<TransactionId>, Vec<TransactionId>) {
+    ) -> (SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]>, Vec<TransactionId>) {
         (self.queued_pool.get_txs_by_sender(sender), self.pending_pool.get_txs_by_sender(sender))
     }
 
@@ -793,6 +795,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 while $this.$pool.exceeds(&$this.config.$limit)
                     {
                         trace!(
+                            target: "txpool",
                             "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             stringify!($pool),
                             $this.config.$limit,
@@ -804,6 +807,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         let removed_from_subpool = $this.$pool.truncate_pool($this.config.$limit.clone());
 
                         trace!(
+                            target: "txpool",
                             "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             removed_from_subpool.len(),
                             stringify!($pool),
@@ -863,7 +867,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn assert_invariants(&self) {
         let size = self.size();
         let actual = size.basefee + size.pending + size.queued + size.blob;
-        assert_eq!(size.total, actual,  "total size must be equal to the sum of all sub-pools, basefee:{}, pending:{}, queued:{}, blob:{}", size.basefee, size.pending, size.queued, size.blob);
+        assert_eq!(size.total, actual, "total size must be equal to the sum of all sub-pools, basefee:{}, pending:{}, queued:{}, blob:{}", size.basefee, size.pending, size.queued, size.blob);
         self.all_transactions.assert_invariants();
         self.pending_pool.assert_invariants();
         self.basefee_pool.assert_invariants();
@@ -1581,7 +1585,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             } else {
                 // The transaction was added above so the _inclusive_ descendants iterator
                 // returns at least 1 tx.
-                let (id, tx) = descendants.peek().expect("Includes >= 1; qed.");
+                let (id, tx) = descendants.peek().expect("includes >= 1");
                 if id.nonce < inserted_tx_id.nonce {
                     !tx.state.is_pending()
                 } else {
@@ -1816,21 +1820,21 @@ pub struct PruneResult<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(fmt, "PruneResult {{ ")?;
-        write!(
-            fmt,
-            "promoted: {:?}, ",
-            self.promoted.iter().map(|tx| *tx.hash()).collect::<Vec<_>>()
-        )?;
-        write!(fmt, "failed: {:?}, ", self.failed)?;
-        write!(
-            fmt,
-            "pruned: {:?}, ",
-            self.pruned.iter().map(|tx| *tx.transaction.hash()).collect::<Vec<_>>()
-        )?;
-        write!(fmt, "}}")?;
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PruneResult")
+            .field(
+                "promoted",
+                &format_args!("[{}]", self.promoted.iter().map(|tx| tx.hash()).format(", ")),
+            )
+            .field("failed", &self.failed)
+            .field(
+                "pruned",
+                &format_args!(
+                    "[{}]",
+                    self.pruned.iter().map(|tx| tx.transaction.hash()).format(", ")
+                ),
+            )
+            .finish()
     }
 }
 

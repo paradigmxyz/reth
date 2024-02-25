@@ -206,8 +206,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             "Execution time"
         );
 
-        executor.stats().log_info();
-
         let done = stage_progress == max_block;
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(stage_progress)
