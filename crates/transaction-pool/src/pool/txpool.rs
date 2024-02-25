@@ -1164,6 +1164,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             }
         }
 
+        updates.shrink_to_fit();
         updates
     }
 

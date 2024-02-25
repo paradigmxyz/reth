@@ -2,6 +2,8 @@ use fnv::FnvHashMap;
 use reth_primitives::Address;
 use std::collections::HashMap;
 
+use crate::metrics::SenderIdMetrics;
+
 /// An internal mapping of addresses.
 ///
 /// This assigns a _unique_ `SenderId` for a new `Address`.
@@ -14,6 +16,8 @@ pub(crate) struct SenderIdentifiers {
     address_to_id: HashMap<Address, SenderId>,
     /// Reverse mapping of `SenderId` to `Address`.
     sender_to_address: FnvHashMap<SenderId, Address>,
+    /// Metrics for the sender identifiers
+    metrics: SenderIdMetrics,
 }
 
 impl SenderIdentifiers {
@@ -23,6 +27,12 @@ impl SenderIdentifiers {
         self.sender_to_address.get(id)
     }
 
+    /// Updates the metrics for the sender identifiers
+    pub(crate) fn update_metrics(&self) {
+        self.metrics.address_to_id_size.set(self.address_to_id.len() as f64);
+        self.metrics.sender_to_address_size.set(self.sender_to_address.len() as f64);
+    }
+
     /// Returns the `SenderId` that belongs to the given address, if it exists
     pub(crate) fn sender_id(&self, addr: &Address) -> Option<SenderId> {
         self.address_to_id.get(addr).copied()
@@ -30,12 +40,14 @@ impl SenderIdentifiers {
 
     /// Returns the existing `SendId` or assigns a new one if it's missing
     pub(crate) fn sender_id_or_create(&mut self, addr: Address) -> SenderId {
-        self.sender_id(&addr).unwrap_or_else(|| {
+        let id = self.sender_id(&addr).unwrap_or_else(|| {
             let id = self.next_id();
             self.address_to_id.insert(addr, id);
             self.sender_to_address.insert(id, addr);
             id
-        })
+        });
+        self.update_metrics();
+        id
     }
 
     /// Returns a new address

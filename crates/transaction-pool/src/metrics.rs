@@ -57,6 +57,16 @@ pub struct BlobStoreMetrics {
     pub(crate) blobstore_entries: Gauge,
 }
 
+/// Sender ID metrics
+#[derive(Metrics)]
+#[metrics(scope = "transaction_pool")]
+pub struct SenderIdMetrics {
+    /// address_to_id size
+    pub(crate) address_to_id_size: Gauge,
+    /// sender_to_address size
+    pub(crate) sender_to_address_size: Gauge,
+}
+
 /// Pool events broadcaster metrics
 #[derive(Metrics)]
 #[metrics(scope = "transaction_pool")]
