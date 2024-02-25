@@ -1,14 +1,20 @@
 use reth_interfaces::provider::ProviderResult;
-use reth_node_api::ConfigureEvmEnv;
+use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     keccak256, revm::config::revm_spec, trie::AccountProof, Account, Address, BlockNumber,
     Bytecode, Bytes, ChainSpec, Head, Header, StorageKey, Transaction, B256, U256,
 };
 
-#[cfg(feature = "optimism")]
-use reth_primitives::revm::env::fill_op_tx_env;
 #[cfg(not(feature = "optimism"))]
 use reth_primitives::revm::env::fill_tx_env;
+#[cfg(feature = "optimism")]
+use {
+    reth_primitives::revm::env::fill_op_tx_env,
+    revm::{
+        primitives::{HandlerCfg, SpecId},
+        Database, Evm, EvmBuilder,
+    },
+};
 
 use reth_provider::{
     AccountReader, BlockHashReader, BundleStateWithReceipts, StateProvider, StateRootProvider,
@@ -145,5 +151,23 @@ impl ConfigureEvmEnv for TestEvmConfig {
         {
             cfg_env.handler_cfg.is_optimism = chain_spec.is_optimism();
         }
+    }
+}
+
+impl ConfigureEvm for TestEvmConfig {
+    #[cfg(feature = "optimism")]
+    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, (), DB> {
+        let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
+        EvmBuilder::default().with_db(db).with_handler_cfg(handler_cfg).build()
+    }
+
+    #[cfg(feature = "optimism")]
+    fn evm_with_inspector<'a, DB: Database + 'a, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB> {
+        let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
+        EvmBuilder::default()
+            .with_db(db)
+            .with_external_context(inspector)
+            .with_handler_cfg(handler_cfg)
+            .build()
     }
 }
