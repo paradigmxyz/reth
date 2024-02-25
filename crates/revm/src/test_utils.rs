@@ -1,12 +1,20 @@
 use reth_interfaces::provider::ProviderResult;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
-    keccak256, trie::AccountProof, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey,
-    B256, U256,
+    keccak256, revm::config::revm_spec, trie::AccountProof, Account, Address, BlockNumber,
+    Bytecode, Bytes, ChainSpec, Head, Header, StorageKey, Transaction, B256, U256,
 };
+
+#[cfg(feature = "optimism")]
+use reth_primitives::revm::env::fill_op_tx_env;
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::revm::env::fill_tx_env;
+
 use reth_provider::{
     AccountReader, BlockHashReader, BundleStateWithReceipts, StateProvider, StateRootProvider,
 };
 use reth_trie::updates::TrieUpdates;
+use revm::primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv};
 use std::collections::HashMap;
 
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -87,5 +95,55 @@ impl StateProvider for StateProviderTest {
 
     fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
         unimplemented!("proof generation is not supported")
+    }
+}
+
+/// Test EVM configuration.
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct TestEvmConfig;
+
+impl ConfigureEvmEnv for TestEvmConfig {
+    #[cfg(not(feature = "optimism"))]
+    type TxMeta = ();
+    #[cfg(feature = "optimism")]
+    type TxMeta = Bytes;
+
+    #[allow(unused_variables)]
+    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, meta: Self::TxMeta)
+    where
+        T: AsRef<Transaction>,
+    {
+        #[cfg(not(feature = "optimism"))]
+        fill_tx_env(tx_env, transaction, sender);
+        #[cfg(feature = "optimism")]
+        fill_op_tx_env(tx_env, transaction, sender, meta);
+    }
+
+    fn fill_cfg_env(
+        cfg_env: &mut CfgEnvWithHandlerCfg,
+        chain_spec: &ChainSpec,
+        header: &Header,
+        total_difficulty: U256,
+    ) {
+        let spec_id = revm_spec(
+            chain_spec,
+            Head {
+                number: header.number,
+                timestamp: header.timestamp,
+                difficulty: header.difficulty,
+                total_difficulty,
+                hash: Default::default(),
+            },
+        );
+
+        cfg_env.chain_id = chain_spec.chain().id();
+        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
+
+        cfg_env.handler_cfg.spec_id = spec_id;
+        #[cfg(feature = "optimism")]
+        {
+            cfg_env.handler_cfg.is_optimism = chain_spec.is_optimism();
+        }
     }
 }

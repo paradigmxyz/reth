@@ -209,8 +209,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{database::StateProviderDatabase, test_utils::StateProviderTest};
-    use reth_node_optimism::OptimismEvmConfig;
+    use crate::{
+        database::StateProviderDatabase,
+        test_utils::{StateProviderTest, TestEvmConfig},
+    };
     use reth_primitives::{
         Account, Address, Block, ChainSpecBuilder, Header, Signature, StorageKey, StorageValue,
         Transaction, TransactionKind, TransactionSigned, TxEip1559, BASE_MAINNET,
@@ -248,11 +250,11 @@ mod tests {
     fn create_op_evm_processor<'a>(
         chain_spec: Arc<ChainSpec>,
         db: StateProviderTest,
-    ) -> EVMProcessor<'a, OptimismEvmConfig> {
+    ) -> EVMProcessor<'a, TestEvmConfig> {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            OptimismEvmConfig::default(),
+            TestEvmConfig::default(),
         );
         executor.evm.context.evm.db.load_cache_account(L1_BLOCK_CONTRACT).unwrap();
         executor
@@ -315,8 +317,6 @@ mod tests {
                 U256::ZERO,
             )
             .expect("Executing a block while canyon is not active should not fail");
-
-        dbg!(&executor.receipts);
 
         // non-deposit tx
         assert_eq!(executor.receipts[0][0].as_ref().unwrap().deposit_receipt_version, None);

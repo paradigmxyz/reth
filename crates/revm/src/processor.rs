@@ -587,8 +587,7 @@ pub fn compare_receipts_root_and_logs_bloom(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::StateProviderTest;
-    use reth_node_ethereum::EthEvmConfig;
+    use crate::test_utils::{StateProviderTest, TestEvmConfig};
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS},
@@ -637,7 +636,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
 
         // attempt to execute a block without parent beacon block root, expect err
@@ -729,7 +728,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
         executor.init_env(&header, U256::ZERO);
 
@@ -778,7 +777,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
 
         // construct the header for block one
@@ -832,7 +831,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
         executor.init_env(&header, U256::ZERO);
 
@@ -913,7 +912,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
         executor.init_env(&header, U256::ZERO);
 
@@ -975,7 +974,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
 
         // Create a test transaction that gonna fail
