@@ -188,15 +188,9 @@ where
                         (start_block, best_number)
                     }
                 };
-
                 let logs = self
                     .inner
-                    .get_logs_in_block_range(
-                        &filter,
-                        from_block_number,
-                        to_block_number,
-                        self.inner.provider.chain_info()?,
-                    )
+                    .get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
                     .await?;
                 Ok(FilterChanges::Logs(logs))
             }
@@ -388,13 +382,8 @@ where
                     .flatten();
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
-                self.get_logs_in_block_range(
-                    &filter,
-                    from_block_number,
-                    to_block_number,
-                    self.provider.chain_info()?,
-                )
-                .await
+                self.get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
+                    .await
             }
         }
     }
@@ -437,31 +426,26 @@ where
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
-        // derive bloom filters from filter input
-        let address_filter = FilteredParams::address_filter(&filter.address);
-        let topics_filter = FilteredParams::topics_filter(&filter.topics);
-
         if (to_block == best_number) && (from_block == best_number) {
-            let mut all_logs = Vec::new();
-            let block_hash = chain_info.best_hash;
-            if let Some((_block, receipts)) =
-                self.eth_cache.get_block_and_receipts(block_hash).await?
-            {
-                let b: BlockNumHash = <BlockNumHash as From<(
-                    u64,
-                    revm_primitives::FixedBytes<32>,
-                )>>::from((to_block, block_hash));
+            // only one block to check and it's the current best block which we can fetch directly
+            // Note: In case of a reorg, the best block's hash might have changed, hence we only
+            // return early of we were able to fetch the best block's receipts
+            if let Some(receipts) = self.eth_cache.get_receipts(chain_info.best_hash).await? {
                 logs_utils::append_matching_block_logs(
                     &mut all_logs,
                     &self.provider,
                     &filter_params,
-                    b,
+                    chain_info.into(),
                     &receipts,
                     false,
                 )?;
             }
             return Ok(all_logs);
         }
+
+        // derive bloom filters from filter input, so we can check headers for matching logs
+        let address_filter = FilteredParams::address_filter(&filter.address);
+        let topics_filter = FilteredParams::topics_filter(&filter.topics);
 
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         // filter
