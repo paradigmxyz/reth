@@ -321,8 +321,8 @@ where
             !self
                 .prune_modes
                 .account_history
-                .map_or(false, |mode| mode.should_prune(block.number, tip))
-                && !self
+                .map_or(false, |mode| mode.should_prune(block.number, tip)) &&
+                !self
                     .prune_modes
                     .storage_history
                     .map_or(false, |mode| mode.should_prune(block.number, tip))
