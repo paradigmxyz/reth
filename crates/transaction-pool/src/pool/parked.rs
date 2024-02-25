@@ -28,19 +28,19 @@ pub struct ParkedPool<T: ParkedOrd> {
     /// This way we can determine when transactions were submitted to the pool.
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
-    by_id: BTreeMap<TransactionId, ParkedPoolTransaction<T>>,
+    pub(crate) by_id: BTreeMap<TransactionId, ParkedPoolTransaction<T>>,
     /// All transactions sorted by their order function.
     ///
     /// The higher, the better.
-    best: BTreeSet<ParkedPoolTransaction<T>>,
+    pub(crate) best: BTreeSet<ParkedPoolTransaction<T>>,
     /// Keeps track of last submission id for each sender.
     ///
     /// This are sorted in Reverse order, so the last (highest) submission id is first, and the
     /// lowest(oldest) is the last.
-    last_sender_submission: BTreeSet<SubmissionSenderId>,
+    pub(crate) last_sender_submission: BTreeSet<SubmissionSenderId>,
     /// Keeps track of the number of transactions in the pool by the sender and the last submission
     /// id.
-    sender_transaction_count: FnvHashMap<SenderId, SenderTransactionCount>,
+    pub(crate) sender_transaction_count: FnvHashMap<SenderId, SenderTransactionCount>,
     /// Keeps track of the size of this pool.
     ///
     /// See also [`PoolTransaction::size`].

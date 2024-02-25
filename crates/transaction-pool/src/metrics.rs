@@ -41,6 +41,9 @@ pub struct TxPoolMetrics {
 
     /// How often the pool was updated after the canonical state changed
     pub(crate) performed_state_updates: Counter,
+
+    /// Known senders with sender info
+    pub(crate) known_senders: Gauge,
 }
 
 /// Transaction pool blobstore metrics

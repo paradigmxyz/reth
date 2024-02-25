@@ -425,6 +425,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ) -> UpdateOutcome<T::Transaction> {
         // track changed accounts
         self.sender_info.extend(changed_senders.clone());
+        self.metrics.known_senders.set(self.sender_info.len() as f64);
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
         let updates = self.all_transactions.update(changed_senders);
         // Process the sub-pool updates
@@ -517,6 +518,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             .entry(tx.sender_id())
             .or_default()
             .update(on_chain_nonce, on_chain_balance);
+        self.metrics.known_senders.set(self.sender_info.len() as f64);
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
