@@ -1,0 +1,168 @@
+name: "Validator Slashing Test"
+timeout: 1h
+config:
+  #walletPrivkey: ""
+  validatorMnemonic: "giant issue aisle success illegal bike spike question tent bar rely arctic volcano long crawl hungry vocal artwork sniff fantasy very lucky have athlete"
+  #validatorPairNames: []
+tasks:
+- name: check_clients_are_healthy
+  title: "Check if at least one client is ready"
+  timeout: 5m
+  config:
+    minClientCount: 1
+
+# check if all validators propose blocks with attestation slashings
+- name: run_task_background
+  title: "Check if all clients propose blocks with attestation slashings"
+  config:
+    onBackgroundComplete: "fail"
+    backgroundTask:
+      name: generate_slashings
+      title: "Generate 1 attester slashing per slot"
+      config:
+        slashingType: "attester"
+        startIndex: 250
+        limitTotal: 50
+        limitPerSlot: 1
+        indexCount: 50
+      configVars:
+        mnemonic: "validatorMnemonic"
+
+    foregroundTask:
+      name: run_task_matrix
+      title: "Check slashing inclusion with all client pairs"
+      timeout: 30m
+      configVars:
+        matrixValues: "validatorPairNames"
+      config:
+        runConcurrent: true
+        matrixVar: "validatorPairName"
+        task:
+          name: check_consensus_block_proposals
+          title: "Wait for block proposal with attestation slashings from ${validatorPairName}"
+          configVars:
+            validatorNamePattern: "validatorPairName"
+          config:
+            minAttesterSlashingCount: 1
+
+- name: "sleep"
+  title: "Wait 30sec to clear up pending attestation slashings"
+  config:
+    duration: 30s
+
+# check if attestation slashings can be sent via each client pair
+- name: run_task_matrix
+  title: "Check if attestation slashings can be sent via each client pair"
+  configVars:
+    matrixValues: "clientPairNames"
+  config:
+    runConcurrent: false
+    matrixVar: "clientPairName"
+    task:
+      name: run_tasks
+      title: "Check if attestation slashings can be sent via ${clientPairName}"
+      config:
+        tasks:
+        - name: run_task_background
+          title: "Check if attestation slashings can be sent via ${clientPairName}"
+          config:
+            onBackgroundComplete: "fail"
+            backgroundTask:
+              name: generate_slashings
+              title: "Generate 1 attester slashing per slot"
+              config:
+                slashingType: "attester"
+                startIndex: 300
+                limitTotal: 50
+                limitPerSlot: 1
+                indexCount: 100
+              configVars:
+                mnemonic: "validatorMnemonic"
+            foregroundTask:
+              name: check_consensus_block_proposals
+              title: "Wait for block proposal with attestation slashings"
+              config:
+                minAttesterSlashingCount: 1
+        - name: "sleep"
+          title: "Wait 30sec to clear up pending attestation slashings"
+          config:
+            duration: 30s
+
+# repeat tests with proposer slashings
+
+# check if all validators propose blocks with proposer slashings
+- name: run_task_background
+  title: "Check if all clients propose blocks with proposer slashings"
+  config:
+    onBackgroundComplete: "fail"
+    backgroundTask:
+      name: generate_slashings
+      title: "Generate 1 proposer slashing per slot"
+      config:
+        slashingType: "proposer"
+        startIndex: 500
+        limitTotal: 50
+        limitPerSlot: 1
+        indexCount: 50
+      configVars:
+        mnemonic: "validatorMnemonic"
+
+    foregroundTask:
+      name: run_task_matrix
+      title: "Check proposer slashing inclusion with all client pairs"
+      timeout: 30m
+      configVars:
+        matrixValues: "validatorPairNames"
+      config:
+        runConcurrent: true
+        matrixVar: "validatorPairName"
+        task:
+          name: check_consensus_block_proposals
+          title: "Wait for block proposal with proposer slashings from ${validatorPairName}"
+          configVars:
+            validatorNamePattern: "validatorPairName"
+          config:
+            minProposerSlashingCount: 1
+
+- name: "sleep"
+  title: "Wait 30sec to clear up pending proposer slashings"
+  config:
+    duration: 30s
+
+# check if proposer slashings can be sent via each client pair
+- name: run_task_matrix
+  title: "Check if proposer slashings can be sent via each client pair"
+  configVars:
+    matrixValues: "clientPairNames"
+  config:
+    runConcurrent: false
+    matrixVar: "clientPairName"
+    task:
+      name: run_tasks
+      title: "Check if proposer slashings can be sent via ${clientPairName}"
+      config:
+        tasks:
+        - name: run_task_background
+          title: "Check if proposer slashings can be sent via ${clientPairName}"
+          config:
+            onBackgroundComplete: "fail"
+            backgroundTask:
+              name: generate_slashings
+              title: "Generate 1 proposer slashing per slot"
+              config:
+                slashingType: "proposer"
+                startIndex: 550
+                limitTotal: 50
+                limitPerSlot: 1
+                indexCount: 100
+              configVars:
+                mnemonic: "validatorMnemonic"
+            foregroundTask:
+              name: check_consensus_block_proposals
+              title: "Wait for block proposal with proposer slashings"
+              config:
+                minProposerSlashingCount: 1
+        - name: "sleep"
+          title: "Wait 30sec to clear up pending proposer slashings"
+          config:
+            duration: 30s

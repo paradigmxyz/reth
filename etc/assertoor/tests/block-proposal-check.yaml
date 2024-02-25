@@ -1,0 +1,24 @@
+name: "Every client pair proposed a block"
+timeout: 2h
+disable: false
+config:
+  #validatorPairNames: []
+tasks:
+- name: check_clients_are_healthy
+  title: "Check if at least one client is ready"
+  timeout: 5m
+  config:
+    minClientCount: 1
+
+- name: run_task_matrix
+  title: "Check block proposals from all client pairs"
+  configVars:
+    matrixValues: "validatorPairNames"
+  config:
+    runConcurrent: true
+    matrixVar: "validatorPairName"
+    task:
+      name: check_consensus_block_proposals
+      title: "Wait for block proposal from ${validatorPairName}"
+      configVars:
+        validatorNamePattern: "validatorPairName"

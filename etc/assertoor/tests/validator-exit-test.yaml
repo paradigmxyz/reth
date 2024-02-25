@@ -1,0 +1,98 @@
+name: "Validator Voluntary Exit Test"
+timeout: 1h
+config:
+  #walletPrivkey: ""
+  validatorMnemonic: "giant issue aisle success illegal bike spike question tent bar rely arctic volcano long crawl hungry vocal artwork sniff fantasy very lucky have athlete"
+  #validatorPairNames: []
+tasks:
+- name: check_clients_are_healthy
+  title: "Check if at least one client is ready"
+  timeout: 5m
+  config:
+    minClientCount: 1
+
+- name: run_task_background
+  title: "Check if all clients propose blocks with voluntary exits"
+  config:
+    onBackgroundComplete: "fail"
+    backgroundTask:
+      name: run_tasks
+      title: "Generate voluntary exits"
+      config:
+        stopChildOnResult: true
+        tasks:
+        - name: generate_exits
+          title: "Generate 1 Exit with epoch 0"
+          config:
+            limitTotal: 1
+            indexCount: 100
+            exitEpoch: 0
+          configVars:
+            mnemonic: "validatorMnemonic"
+        - name: generate_exits
+          title: "Generate 50 Exits (1 exit per slot)"
+          config:
+            limitTotal: 50
+            limitPerSlot: 1
+            indexCount: 100
+          configVars:
+            mnemonic: "validatorMnemonic"
+
+    foregroundTask:
+      name: run_task_matrix
+      title: "Check exit inclusion with all client pairs"
+      timeout: 30m
+      configVars:
+        matrixValues: "validatorPairNames"
+      config:
+        runConcurrent: true
+        matrixVar: "validatorPairName"
+        task:
+          name: check_consensus_block_proposals
+          title: "Wait for block proposal with exits from ${validatorPairName}"
+          configVars:
+            validatorNamePattern: "validatorPairName"
+          config:
+            minExitCount: 1
+
+- name: "sleep"
+  title: "Wait 30sec to clear up pending exits"
+  config:
+    duration: 30s
+
+# check if exits can be sent via each client pair
+- name: run_task_matrix
+  title: "Check if exits can be sent via each client pair"
+  configVars:
+    matrixValues: "clientPairNames"
+  config:
+    runConcurrent: false
+    matrixVar: "clientPairName"
+    task:
+      name: run_tasks
+      title: "Check if exits can be sent via ${clientPairName}"
+      config:
+        tasks:
+        - name: run_task_background
+          title: "Check if exits can be sent via ${clientPairName}"
+          config:
+            onBackgroundComplete: "fail"
+            backgroundTask:
+              name: generate_exits
+              title: "Generate 50 exits (1 exit per slot)"
+              config:
+                limitTotal: 50
+                startIndex: 50
+                limitPerSlot: 1
+                indexCount: 200
+              configVars:
+                mnemonic: "validatorMnemonic"
+            foregroundTask:
+              name: check_consensus_block_proposals
+              title: "Wait for block proposal with exits"
+              config:
+                minExitCount: 1
+        - name: "sleep"
+          title: "Wait 30sec to clear up pending exits"
+          config:
+            duration: 30s

@@ -1,0 +1,42 @@
+
+name: "Check chain stability"
+timeout: 2h
+tasks:
+- name: check_clients_are_healthy
+  title: "Check if at least one client is ready"
+  timeout: 5m
+  config:
+    minClientCount: 1
+
+- name: run_tasks_concurrent
+  title: "Check if all EL & CL clients are synced"
+  timeout: 30m
+  config:
+    tasks:
+    - name: check_consensus_sync_status
+      title: "Check if CL clients are synced"
+    - name: check_execution_sync_status
+      title: "Check if EL clients are synced"
+
+- name: run_tasks_concurrent
+  title: "Check chain stability"
+  timeout: 1h
+  config:
+    tasks:
+    - name: check_consensus_finality
+      title: "Check consensus chain finality"
+      config:
+        minFinalizedEpochs: 2
+        maxUnfinalizedEpochs: 3
+    - name: check_consensus_attestation_stats
+      title: "Check consensus attestation stats"
+      config:
+        minTargetPercent: 98
+        minHeadPercent: 80
+    - name: check_consensus_reorgs
+      title: "Check consensus reorgs"
+      config:
+        maxReorgsPerEpoch: 2
+        minCheckEpochCount: 1
+    - name: check_consensus_forks
+      title: "Check consensus forks"

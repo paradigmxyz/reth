@@ -1,0 +1,49 @@
+participants:
+- el_client_type: reth
+  el_client_image: ghcr.io/paradigmxyz/reth
+  cl_client_type: lighthouse
+  cl_client_image: sigp/lighthouse:latest
+  count: 1
+- el_client_type: reth
+  el_client_image: ghcr.io/paradigmxyz/reth
+  cl_client_type: teku
+  cl_client_image: consensys/teku:latest
+  count: 1
+- el_client_type: reth
+  el_client_image: ghcr.io/paradigmxyz/reth
+  cl_client_type: prysm
+  cl_client_image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
+  count: 1
+- el_client_type: reth
+  el_client_image: ghcr.io/paradigmxyz/reth
+  cl_client_type: nimbus
+  cl_client_image: statusim/nimbus-eth2:amd64-latest
+  count: 1
+- el_client_type: reth
+  el_client_image: ghcr.io/paradigmxyz/reth
+  cl_client_type: lodestar
+  cl_client_image: chainsafe/lodestar:latest
+  count: 1
+network_params:
+  genesis_delay: 120
+  min_validator_withdrawability_delay: 1
+  shard_committee_period: 1
+  num_validator_keys_per_node: 250
+launch_additional_services: true
+additional_services:
+- assertoor
+snooper_enabled: true
+disable_peer_scoring: true
+assertoor_params:
+  image: "ethpandaops/assertoor:master"
+  run_stability_check: false
+  run_block_proposal_check: false
+  tests:
+  - https://raw.githubusercontent.com/${github_repository}/${github_sha}/etc/assertoor/tests/stability-check.yaml
+  - https://raw.githubusercontent.com/${github_repository}/${github_sha}/etc/assertoor/tests/block-proposal-check.yaml
+  - https://raw.githubusercontent.com/${github_repository}/${github_sha}/etc/assertoor/tests/eoa-transactions-test.yaml
+  - https://raw.githubusercontent.com/${github_repository}/${github_sha}/etc/assertoor/tests/all-opcodes-test.yaml
+  - https://raw.githubusercontent.com/${github_repository}/${github_sha}/etc/assertoor/tests/validator-withdrawal-test.yaml
+  - https://raw.githubusercontent.com/${github_repository}/${github_sha}/etc/assertoor/tests/validator-exit-test.yaml
+  - https://raw.githubusercontent.com/${github_repository}/${github_sha}/etc/assertoor/tests/validator-slashing-test.yaml
+

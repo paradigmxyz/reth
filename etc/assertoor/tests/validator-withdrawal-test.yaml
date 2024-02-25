@@ -1,0 +1,115 @@
+name: "Validator BLS Change & Withdrawal Test"
+timeout: 1h
+config:
+  #walletPrivkey: ""
+  validatorMnemonic: "giant issue aisle success illegal bike spike question tent bar rely arctic volcano long crawl hungry vocal artwork sniff fantasy very lucky have athlete"
+  #validatorPairNames: []
+tasks:
+- name: check_clients_are_healthy
+  title: "Check if at least one client is ready"
+  timeout: 5m
+  config:
+    minClientCount: 1
+
+- name: run_task_background
+  title: "Check if all clients propose blocks with BLS changes"
+  config:
+    onBackgroundComplete: "fail"
+    backgroundTask:
+      name: generate_bls_changes
+      title: "Generate 50 BLS changes (1 bls change per slot)"
+      config:
+        limitTotal: 50
+        limitPerSlot: 1
+        indexCount: 100
+        targetAddress: 0x65D08a056c17Ae13370565B04cF77D2AfA1cB9FA
+      configVars:
+        mnemonic: "validatorMnemonic"
+
+    foregroundTask:
+      name: run_task_matrix
+      title: "Check bls change inclusion with all client pairs"
+      timeout: 1h
+      configVars:
+        matrixValues: "validatorPairNames"
+      config:
+        runConcurrent: true
+        matrixVar: "validatorPairName"
+        task:
+          name: check_consensus_block_proposals
+          title: "Wait for block proposal with BLS changes from ${validatorPairName}"
+          configVars:
+            validatorNamePattern: "validatorPairName"
+          config:
+            minBlsChangeCount: 1
+
+# ensure first 50 indexes have withdrawal address set
+- name: generate_bls_changes
+  title: "Generate 50 BLS changes"
+  config:
+    limitTotal: 50
+    indexCount: 50
+    targetAddress: 0x65D08a056c17Ae13370565B04cF77D2AfA1cB9FA
+  configVars:
+    mnemonic: "validatorMnemonic"
+
+- name: "sleep"
+  title: "Wait 30sec to clear up pending bls changes"
+  config:
+    duration: 30s
+
+# check if bls changes can be sent via each client pair
+- name: run_task_matrix
+  title: "Check if BLS changes can be sent via each client pair"
+  configVars:
+    matrixValues: "clientPairNames"
+  config:
+    runConcurrent: false
+    matrixVar: "clientPairName"
+    task:
+      name: run_tasks
+      title: "Check if BLS changes can be sent via ${clientPairName}"
+      config:
+        tasks:
+        - name: run_task_background
+          title: "Check if BLS changes can be sent via ${clientPairName}"
+          config:
+            onBackgroundComplete: "fail"
+            backgroundTask:
+              name: generate_bls_changes
+              title: "Generate 50 BLS changes (1 bls change per slot)"
+              config:
+                limitTotal: 50
+                startIndex: 50
+                limitPerSlot: 1
+                indexCount: 200
+                targetAddress: 0x65D08a056c17Ae13370565B04cF77D2AfA1cB9FA
+              configVars:
+                mnemonic: "validatorMnemonic"
+            foregroundTask:
+              name: check_consensus_block_proposals
+              title: "Wait for block proposal with BLS changes"
+              config:
+                minBlsChangeCount: 1
+        - name: "sleep"
+          title: "Wait 30sec to clear up pending bls changes"
+          config:
+            duration: 30s
+
+
+# check if all client pairs propose blocks with withdrawals
+- name: run_task_matrix
+  title: "Check if all clients propose blocks with withdrawals"
+  timeout: 1h
+  configVars:
+    matrixValues: "validatorPairNames"
+  config:
+    runConcurrent: true
+    matrixVar: "validatorPairName"
+    task:
+      name: check_consensus_block_proposals
+      title: "Wait for block proposal with withdrawals from ${validatorPairName}"
+      configVars:
+        validatorNamePattern: "validatorPairName"
+      config:
+        minWithdrawalCount: 1
