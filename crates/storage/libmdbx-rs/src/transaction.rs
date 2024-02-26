@@ -359,12 +359,16 @@ where
             if !self.has_committed() {
                 if K::IS_READ_ONLY {
                     #[cfg(feature = "read-tx-timeouts")]
-                    self.env.txn_manager().remove_active_read_transaction(txn);
+                    {
+                        self.env.txn_manager().remove_active_read_transaction(txn);
 
-                    let new_aborted_ro = self.env.txn_manager().add_aborted_read_transaction(txn);
-                    if let Some(false) = new_aborted_ro {
-                        return
+                        let new_aborted_ro =
+                            self.env.txn_manager().add_aborted_read_transaction(txn);
+                        if let Some(false) = new_aborted_ro {
+                            return
+                        }
                     }
+
                     unsafe {
                         ffi::mdbx_txn_abort(txn);
                     }
@@ -374,7 +378,7 @@ where
                         .txn_manager()
                         .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
                     let res = rx.recv().unwrap();
-                    assert!(res == Err(Error::WriteTransactionAborted) || res.is_ok())
+                    assert!(res == Err(Error::RWTransactionAborted) || res.is_ok())
                 }
             }
         })

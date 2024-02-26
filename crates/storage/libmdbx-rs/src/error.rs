@@ -121,7 +121,7 @@ pub enum Error {
     #[error("read transaction has been aborted by the transaction manager")]
     ReadTransactionAborted,
     #[error("write transaction has been aborted by the transaction manager")]
-    WriteTransactionAborted,
+    RWTransactionAborted,
     /// Unknown error code.
     #[error("unknown error code")]
     Other(i32),
@@ -195,9 +195,9 @@ impl Error {
             Error::DecodeErrorLenDiff | Error::DecodeError => ffi::MDBX_EINVAL,
             Error::Access => ffi::MDBX_EACCESS,
             Error::TooLarge => ffi::MDBX_TOO_LARGE,
-            Error::BadSignature |
-            Error::ReadTransactionAborted |
-            Error::WriteTransactionAborted => ffi::MDBX_EBADSIGN,
+            Error::BadSignature | Error::ReadTransactionAborted | Error::RWTransactionAborted => {
+                ffi::MDBX_EBADSIGN
+            }
             Error::WriteTransactionUnsupportedInReadOnlyMode => ffi::MDBX_EACCESS,
             Error::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
             Error::Other(err_code) => *err_code,

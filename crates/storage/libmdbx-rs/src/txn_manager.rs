@@ -31,7 +31,7 @@ pub(crate) struct TxnManager {
     #[cfg(feature = "read-tx-timeouts")]
     read_transactions: Option<std::sync::Arc<read_transactions::ReadTransactions>>,
     /// List of rw transactions aborted by [TxnManagerMessage::Abort] or drop.
-    /// We keep them so we're able to report a nice [Error::ReadTransactionAborted] error if the
+    /// We keep them so we're able to report a nice [Error::RWTransactionAborted] error if the
     /// user attempts to abort the same transaction again.
     ///
     /// We store `usize` instead of a raw pointer, because pointers are not comparable.
@@ -104,9 +104,9 @@ impl TxnManager {
                                 if let Some(read_transactions) = &read_transactions {
                                     read_transactions.remove_active(tx.0);
 
-                                    let new_aborted = read_transactions.add_aborted(tx.0);
+                                    let new_aborted_ro = read_transactions.add_aborted(tx.0);
 
-                                    let result = if let Some(true) = new_aborted {
+                                    let result = if let Some(true) = new_aborted_ro {
                                         mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })
                                     } else {
                                         Err(Error::ReadTransactionAborted)
@@ -122,7 +122,7 @@ impl TxnManager {
                             let result = if new_aborted_rw {
                                 mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })
                             } else {
-                                Err(Error::WriteTransactionAborted)
+                                Err(Error::RWTransactionAborted)
                             };
 
                             sender.send(result).unwrap();
@@ -157,10 +157,10 @@ impl TxnManager {
 
 #[cfg(feature = "read-tx-timeouts")]
 mod read_transactions {
-    use crate::{error::mdbx_result, txn_manager::TxnManager, Error};
+    use crate::{environment::EnvPtr, error::mdbx_result, txn_manager::TxnManager, Error};
     use dashmap::{DashMap, DashSet};
     use std::{
-        sync::Arc,
+        sync::{mpsc::sync_channel, Arc},
         time::{Duration, Instant},
     };
     use tracing::{error, trace, warn};
@@ -169,15 +169,24 @@ mod read_transactions {
 
     impl TxnManager {
         /// Sets the maximum duration that a read transaction can be open.
-        pub(crate) fn with_max_read_transaction_duration(
-            mut self,
+        pub(crate) fn new_with_max_read_transaction_duration(
+            env: EnvPtr,
             duration: Duration,
-        ) -> TxnManager {
+        ) -> Self {
             let read_transactions = Arc::new(ReadTransactions::new(duration));
             read_transactions.clone().start_monitor();
-            self.read_transactions = Some(read_transactions);
 
-            self
+            let (tx, rx) = sync_channel(0);
+
+            let txn_manager = Self {
+                sender: tx,
+                read_transactions: Some(read_transactions),
+                aborted_rw: Default::default(),
+            };
+
+            txn_manager.start_message_listener(env, rx);
+
+            txn_manager
         }
 
         /// Adds a new transaction to the list of active read transactions.
@@ -445,7 +454,7 @@ mod read_transactions {
             // Attempt to abort again throws error.
             let (sender, rx) = sync_channel(0);
             env.txn_manager().send_message(TxnManagerMessage::Abort { tx: TxnPtr(tx_ptr), sender });
-            assert_eq!(Err(Error::WriteTransactionAborted), rx.recv().unwrap());
+            assert_eq!(Err(Error::RWTransactionAborted), rx.recv().unwrap());
         }
 
         #[test]
@@ -462,7 +471,57 @@ mod read_transactions {
             // Attempt to abort again throws error.
             let (sender, rx) = sync_channel(0);
             env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
-            assert_eq!(Err(Error::WriteTransactionAborted), rx.recv().unwrap());
+            assert_eq!(Err(Error::RWTransactionAborted), rx.recv().unwrap());
+        }
+
+        #[test]
+        fn txn_manager_abort_ro_transaction_twice() {
+            const MAX_DURATION: Duration = Duration::from_secs(1);
+
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
+                .open(dir.path())
+                .unwrap();
+
+            assert!(env.txn_manager().read_transactions.is_some());
+
+            // Create a ro transaction abort it by message to tx manager.
+            let tx = env.begin_ro_txn().unwrap();
+            let tx_ptr = TxnPtr(tx.txn());
+
+            let (sender, rx) = sync_channel(0);
+            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+            assert!(rx.recv().unwrap().is_ok());
+
+            // Attempt to abort again throws error.
+            let (sender, rx) = sync_channel(0);
+            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+            assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
+        }
+
+        #[test]
+        fn txn_manager_abort_dropped_ro_transaction() {
+            const MAX_DURATION: Duration = Duration::from_secs(1);
+
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
+                .open(dir.path())
+                .unwrap();
+
+            assert!(env.txn_manager().read_transactions.is_some());
+
+            // Create a ro transaction abort it by dropping.
+            let tx = env.begin_ro_txn().unwrap();
+            let tx_ptr = TxnPtr(tx.txn());
+
+            drop(tx);
+
+            // Attempt to abort again throws error.
+            let (sender, rx) = sync_channel(0);
+            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+            assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
         }
     }
 }
