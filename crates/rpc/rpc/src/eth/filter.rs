@@ -11,13 +11,14 @@ use core::fmt;
 
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{IntoRecoveredTransaction, TxHash};
+use reth_primitives::{ChainInfo, IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
 };
+
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
@@ -141,7 +142,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty)
+                return Ok(FilterChanges::Empty);
             }
 
             // update filter
@@ -187,10 +188,9 @@ where
                         (start_block, best_number)
                     }
                 };
-
                 let logs = self
                     .inner
-                    .get_logs_in_block_range(&filter, from_block_number, to_block_number)
+                    .get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
                     .await?;
                 Ok(FilterChanges::Logs(logs))
             }
@@ -211,7 +211,7 @@ where
                 *filter.clone()
             } else {
                 // Not a log filter
-                return Err(FilterError::FilterNotFound(id))
+                return Err(FilterError::FilterNotFound(id));
             }
         };
 
@@ -382,7 +382,8 @@ where
                     .flatten();
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
-                self.get_logs_in_block_range(&filter, from_block_number, to_block_number).await
+                self.get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
+                    .await
             }
         }
     }
@@ -413,17 +414,36 @@ where
         filter: &Filter,
         from_block: u64,
         to_block: u64,
+        chain_info: ChainInfo,
     ) -> Result<Vec<Log>, FilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
+        let best_number = chain_info.best_number;
 
         if to_block - from_block > self.max_blocks_per_filter {
-            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
+            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter));
         }
 
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
-        // derive bloom filters from filter input
+        if (to_block == best_number) && (from_block == best_number) {
+            // only one block to check and it's the current best block which we can fetch directly
+            // Note: In case of a reorg, the best block's hash might have changed, hence we only
+            // return early of we were able to fetch the best block's receipts
+            if let Some(receipts) = self.eth_cache.get_receipts(chain_info.best_hash).await? {
+                logs_utils::append_matching_block_logs(
+                    &mut all_logs,
+                    &self.provider,
+                    &filter_params,
+                    chain_info.into(),
+                    &receipts,
+                    false,
+                )?;
+            }
+            return Ok(all_logs);
+        }
+
+        // derive bloom filters from filter input, so we can check headers for matching logs
         let address_filter = FilteredParams::address_filter(&filter.address);
         let topics_filter = FilteredParams::topics_filter(&filter.topics);
 
@@ -465,7 +485,7 @@ where
                         if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
                             return Err(FilterError::QueryExceedsMaxResults(
                                 self.max_logs_per_response,
-                            ))
+                            ));
                         }
                     }
                 }
@@ -639,6 +659,7 @@ enum FilterKind {
     Block,
     PendingTransaction(PendingTransactionKind),
 }
+
 /// Errors that can occur in the handler implementation
 #[derive(Debug, thiserror::Error)]
 pub enum FilterError {
@@ -704,7 +725,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None
+            return None;
         }
         Some((start, end))
     }

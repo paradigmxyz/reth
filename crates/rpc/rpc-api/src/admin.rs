@@ -5,7 +5,6 @@ use reth_rpc_types::{NodeInfo, PeerInfo};
 /// Admin namespace rpc interface that gives access to several non-standard RPC methods.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "admin"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "admin"))]
-#[async_trait::async_trait]
 pub trait AdminApi {
     /// Adds the given node record to the peerset.
     #[method(name = "addPeer")]

@@ -176,14 +176,14 @@ mod tests {
     #[test]
     fn test_contains_with_multiple_inserts_and_duplicates() {
         let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"123"));
-        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"124"));
-        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"456"));
-        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"123")); // Duplicate
+        prefix_set.insert(Nibbles::from_nibbles([1, 2, 3]));
+        prefix_set.insert(Nibbles::from_nibbles([1, 2, 4]));
+        prefix_set.insert(Nibbles::from_nibbles([4, 5, 6]));
+        prefix_set.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
-        assert!(prefix_set.contains(b"12"));
-        assert!(prefix_set.contains(b"45"));
-        assert!(!prefix_set.contains(b"78"));
+        assert!(prefix_set.contains(&[1, 2]));
+        assert!(prefix_set.contains(&[4, 5]));
+        assert!(!prefix_set.contains(&[7, 8]));
         assert_eq!(prefix_set.len(), 3); // Length should be 3 (excluding duplicate)
     }
 }

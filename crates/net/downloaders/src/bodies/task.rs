@@ -117,7 +117,7 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
             while let Poll::Ready(update) = this.updates.poll_next_unpin(cx) {
                 if let Some(range) = update {
                     if let Err(err) = this.downloader.set_download_range(range) {
-                        tracing::error!(target: "downloaders::bodies", ?err, "Failed to set bodies download range");
+                        tracing::error!(target: "downloaders::bodies", %err, "Failed to set bodies download range");
 
                         // Clone the sender ensure its availability. See [PollSender::clone].
                         let mut bodies_tx = this.bodies_tx.clone();

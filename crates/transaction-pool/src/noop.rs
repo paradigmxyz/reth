@@ -29,7 +29,6 @@ use tokio::sync::{mpsc, mpsc::Receiver};
 #[non_exhaustive]
 pub struct NoopTransactionPool;
 
-#[async_trait::async_trait]
 impl TransactionPool for NoopTransactionPool {
     type Transaction = EthPooledTransaction;
 
@@ -133,6 +132,13 @@ impl TransactionPool for NoopTransactionPool {
         _limit: GetPooledTransactionLimit,
     ) -> Vec<PooledTransactionsElement> {
         vec![]
+    }
+
+    fn get_pooled_transaction_element(
+        &self,
+        _tx_hash: TxHash,
+    ) -> Option<PooledTransactionsElement> {
+        None
     }
 
     fn best_transactions(
@@ -247,7 +253,6 @@ pub struct MockTransactionValidator<T> {
     _marker: PhantomData<T>,
 }
 
-#[async_trait::async_trait]
 impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
 

@@ -33,7 +33,6 @@ revm.workspace = true
 # async
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
-async-trait.workspace = true
 futures-util.workspace = true
 pin-project.workspace = true
 
