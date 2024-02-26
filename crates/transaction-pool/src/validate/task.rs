@@ -153,7 +153,6 @@ impl<V> TransactionValidationTaskExecutor<V> {
     }
 }
 
-#[async_trait::async_trait]
 impl<V> TransactionValidator for TransactionValidationTaskExecutor<V>
 where
     V: TransactionValidator + Clone + 'static,
