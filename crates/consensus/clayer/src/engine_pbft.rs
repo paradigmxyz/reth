@@ -47,10 +47,6 @@ where
     CDB: ConsensusNumberReader + ConsensusNumberWriter + 'static,
 {
     match incoming_event {
-        // ConsensusEvent::BlockNew(block) => consensus.on_block_new(block, state)?,
-        // ConsensusEvent::BlockValid(block_id) => consensus.on_block_valid(block_id, state)?,
-        // ConsensusEvent::BlockInvalid(block_id) => consensus.on_block_invalid(block_id)?,
-        // ConsensusEvent::BlockCommit(block_id) => consensus.on_block_commit(block_id, state)?,
         ConsensusEvent::PeerMessage(_, message) => {
             let header: ClayerConsensusMessageHeader =
                 parse_consensus_message_header(&message.header_bytes)?;

@@ -252,16 +252,10 @@ where
         //  if the node is a member of the PBFT network or not；
         if !state.is_validator() {
             match msg_type {
-                // PbftMessageType::PrePrepare => self.handle_pre_prepare(msg, state)?,
-                // PbftMessageType::Prepare => self.handle_prepare(msg, state)?,
-                // PbftMessageType::Commit => self.handle_commit(msg, state)?,
-                // PbftMessageType::ViewChange => self.handle_view_change(&msg, state)?,
-                // PbftMessageType::NewView => self.handle_new_view(&msg, state)?,
-                // PbftMessageType::SealRequest => self.handle_seal_request(msg, state)?,
-                // PbftMessageType::Seal => self.handle_seal_response(&msg, state)?,
-                // PbftMessageType::BlockNew => self.handle_block_new(msg, state)?,
                 PbftMessageType::AnnounceBlock => self.handle_announceblock_response(&msg)?,
-                _ => warn!("Received message with validiator type: {:?}", msg_type),
+                _ => {
+                    warn!(target: "consensus::cl","Received message with validiator type: {:?}", msg_type)
+                }
             }
             return Ok(());
         }
@@ -286,7 +280,9 @@ where
             PbftMessageType::Seal => self.handle_seal_response(&msg, state)?,
             PbftMessageType::BlockNew => self.handle_block_new(msg, state)?,
             PbftMessageType::AnnounceBlock => self.handle_announceblock_response(&msg)?,
-            _ => warn!("Received message with unknown type: {:?}", msg_type),
+            _ => {
+                warn!(target: "consensus::cl","Received message with unknown type: {:?}", msg_type)
+            }
         }
 
         Ok(())
