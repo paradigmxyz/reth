@@ -94,7 +94,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tracing::{debug, trace, warn, info};
+use tracing::{debug, info, trace, warn};
 mod events;
 use crate::{
     blobstore::BlobStore,
@@ -506,8 +506,13 @@ where
             transactions.into_iter().map(|tx| self.add_transaction(origin, tx)).collect::<Vec<_>>();
 
         // If at least one transaction was added successfully, then we enforce the pool size limits.
-        let discarded =
-            if added.iter().any(Result::is_ok) { self.discard_worst() } else { Default::default() };
+        let discarded = if added.iter().any(Result::is_ok) {
+            let res = self.discard_worst();
+            self.cleanup_senders();
+            res
+        } else {
+            Default::default()
+        };
 
         if discarded.is_empty() {
             return added
@@ -807,7 +812,7 @@ where
         let mut pool = self.pool.write();
         let mut identifiers = self.identifiers.write();
         pool.cleanup_senders();
-        identifiers.retain(|id, _addr| pool.all().contains_sender(id));
+        identifiers.retain(|id, _addr| pool.contains_sender(id));
     }
 
     /// Cleans up the blob store

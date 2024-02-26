@@ -123,6 +123,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.known_senders.set(self.sender_info.len() as f64);
     }
 
+    /// Returns whether or not the pool contains the given sender.
+    pub(crate) fn contains_sender(&self, sender: &SenderId) -> bool {
+        self.sender_info.contains_key(sender)
+    }
+
     /// Returns stats about the size of pool.
     pub fn size(&self) -> PoolSize {
         PoolSize {
@@ -851,8 +856,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                 queued_limit  => queued_pool,
             ]
         );
-
-        self.cleanup_senders();
 
         removed
     }
