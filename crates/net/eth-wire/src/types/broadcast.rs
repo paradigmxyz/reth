@@ -539,9 +539,8 @@ pub trait HandleMempoolData {
     /// Returns the number of entries.
     fn len(&self) -> usize;
 
-    /// Retain only entries for which the hash in the entry satisfies a given predicate, return
-    /// the rest.
-    fn retain_by_hash(&mut self, f: impl FnMut(&TxHash) -> bool) -> Self;
+    /// Retain only entries for which the hash in the entry satisfies a given predicate.
+    fn retain_by_hash(&mut self, f: impl FnMut(&TxHash) -> bool);
 }
 
 /// Extension of [`HandleMempoolData`] interface, for mempool messages that are versioned.
@@ -560,22 +559,8 @@ impl HandleMempoolData for Vec<PooledTransactionsElement> {
         self.len()
     }
 
-    fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
-        let mut indices_to_remove = vec![];
-        for (i, tx) in self.iter().enumerate() {
-            if !f(tx.hash()) {
-                indices_to_remove.push(i);
-            }
-        }
-
-        let mut removed_txns = Vec::with_capacity(indices_to_remove.len());
-
-        for index in indices_to_remove.into_iter().rev() {
-            let hash = self.remove(index);
-            removed_txns.push(hash);
-        }
-
-        removed_txns
+    fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
+        self.retain(|tx| f(tx.hash()))
     }
 }
 
@@ -590,14 +575,8 @@ macro_rules! handle_mempool_data_map_impl {
                 self.data.len()
             }
 
-            fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
-                let data = std::mem::take(&mut self.data);
-
-                let (keep, rest) = data.into_iter().partition(|(hash, _)| f(hash));
-
-                self.data = keep;
-
-                Self { data: rest, version: self.version }
+            fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
+                self.data.retain(|hash, _| f(hash));
             }
         }
     };

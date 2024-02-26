@@ -636,14 +636,19 @@ where
 
         // 2. filter out known hashes
         //
-        // known txns have already been successfully fetched.
+        // known txns have already been successfully fetched or received over gossip.
         //
         // most hashes will be filtered out here since this the mempool protocol is a gossip
         // protocol, healthy peers will send many of the same hashes.
         //
-        let already_known_by_pool = self.pool.retain_unknown(&mut partially_valid_msg);
-        if let Some(intersection) = already_known_by_pool {
-            self.metrics.occurrences_hashes_already_in_pool.increment(intersection.len() as u64);
+        let hashes_count_pre_pool_filter = partially_valid_msg.len();
+        self.pool.retain_unknown(&mut partially_valid_msg);
+        if hashes_count_pre_pool_filter > partially_valid_msg.len() {
+            let already_known_hashes_count =
+                hashes_count_pre_pool_filter - partially_valid_msg.len();
+            self.metrics
+                .occurrences_hashes_already_in_pool
+                .increment(already_known_hashes_count as u64);
         }
 
         if partially_valid_msg.is_empty() {
@@ -935,12 +940,14 @@ where
             }
         }
 
-        // 1. filter out already imported txns
-        let already_known_by_pool = self.pool.retain_unknown(&mut transactions);
-        if let Some(intersection) = already_known_by_pool {
+        // 1. filter out txns already inserted into pool
+        let txns_count_pre_pool_filter = transactions.len();
+        self.pool.retain_unknown(&mut transactions);
+        if txns_count_pre_pool_filter > transactions.len() {
+            let already_known_txns_count = txns_count_pre_pool_filter - transactions.len();
             self.metrics
                 .occurrences_transactions_already_in_pool
-                .increment(intersection.len() as u64);
+                .increment(already_known_txns_count as u64);
         }
 
         // tracks the quality of the given transactions

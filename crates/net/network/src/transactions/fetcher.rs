@@ -1249,22 +1249,8 @@ mod test {
             self.0.len()
         }
 
-        fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
-            let mut indices_to_remove = vec![];
-            for (i, (hash, _)) in self.0.iter().enumerate() {
-                if !f(hash) {
-                    indices_to_remove.push(i);
-                }
-            }
-
-            let mut removed_hashes = Vec::with_capacity(indices_to_remove.len());
-
-            for index in indices_to_remove.into_iter().rev() {
-                let entry = self.0.remove(index);
-                removed_hashes.push(entry);
-            }
-
-            TestValidAnnouncementData(removed_hashes)
+        fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
+            self.0.retain(|(hash, _)| f(hash))
         }
     }
 
