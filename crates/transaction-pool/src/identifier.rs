@@ -58,13 +58,19 @@ impl SenderIdentifiers {
     }
 
     /// Keep only the addresses that satisfy the given predicate
-    pub fn retain<F>(&mut self, f: F)
+    pub(crate) fn retain<F>(&mut self, mut f: F)
     where
-        F: FnMut(&Address, &mut SenderId) -> bool,
+        F: FnMut(&SenderId, &mut Address) -> bool,
     {
         // remove from both maps if the predicate is not satisfied
-        self.address_to_id.retain(f);
-        self.sender_to_address.retain(|_, addr| self.address_to_id.contains_key(addr));
+        self.sender_to_address.retain(|id, addr| {
+            if !f(id, addr) {
+                self.address_to_id.remove(addr);
+                false
+            } else {
+                true
+            }
+        });
 
         self.update_metrics();
     }

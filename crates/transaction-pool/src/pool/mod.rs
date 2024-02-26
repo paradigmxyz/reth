@@ -808,7 +808,7 @@ where
         let mut pool = self.pool.write();
         let mut identifiers = self.identifiers.write();
         pool.cleanup_senders();
-        identifiers.retain(|_, id| pool.all().contains_sender(id))
+        identifiers.retain(|id, _addr| pool.all().contains_sender(id))
     }
 
     /// Cleans up the blob store

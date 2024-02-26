@@ -120,6 +120,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Removes senders which do not have an associated transaction in the pool.
     pub(crate) fn cleanup_senders(&mut self) {
         self.sender_info.retain(|id, _| self.all_transactions.contains_sender(id));
+        self.metrics.known_senders.set(self.sender_info.len() as f64);
     }
 
     /// Returns stats about the size of pool.
