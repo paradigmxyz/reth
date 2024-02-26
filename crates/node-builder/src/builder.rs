@@ -11,6 +11,7 @@ use crate::{
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     NodeHandle,
 };
+use alloy_primitives::utils::format_ether;
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
@@ -444,6 +445,10 @@ where
         // Configure the pipeline
         let (mut pipeline, client) = if config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
+            for (address, alloc) in config.chain.genesis.alloc.iter() {
+                info!(target: "reth::cli", "Allocated Genesis Account: {} ({} ETH)", address.to_string(), format_ether(alloc.balance));
+            }
+
             let mining_mode = config.mining_mode(transaction_pool.pending_transactions_listener());
 
             let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(

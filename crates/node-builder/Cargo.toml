@@ -48,3 +48,4 @@ tokio = { workspace = true, features = [
 eyre.workspace = true
 fdlimit = "0.3.0"
 confy.workspace = true
+alloy-primitives.workspace = true
