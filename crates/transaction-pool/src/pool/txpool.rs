@@ -117,6 +117,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.txs.values().map(|tx| tx.transaction.sender()).collect()
     }
 
+    /// Removes senders which do not have an associated transaction in the pool.
+    pub(crate) fn cleanup_senders(&mut self) {
+        self.sender_info.retain(|id, _| self.all_transactions.contains_sender(id));
+    }
+
     /// Returns stats about the size of pool.
     pub fn size(&self) -> PoolSize {
         PoolSize {
@@ -1014,6 +1019,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
         if let Some(pending_blob_fee) = pending_blob_fee {
             self.pending_fees.blob_fee = pending_blob_fee;
         }
+    }
+
+    /// Returns whether or not a sender has transactions in the pool
+    pub(crate) fn contains_sender(&self, sender: &SenderId) -> bool {
+        self.tx_counter.contains_key(sender)
     }
 
     /// Rechecks all transactions in the pool against the changes.

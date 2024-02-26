@@ -56,6 +56,18 @@ impl SenderIdentifiers {
         self.id = self.id.wrapping_add(1);
         SenderId(id)
     }
+
+    /// Keep only the addresses that satisfy the given predicate
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(&Address, &mut SenderId) -> bool,
+    {
+        // remove from both maps if the predicate is not satisfied
+        self.address_to_id.retain(f);
+        self.sender_to_address.retain(|_, addr| self.address_to_id.contains_key(addr));
+
+        self.update_metrics();
+    }
 }
 
 /// A _unique_ identifier for a sender of an address.

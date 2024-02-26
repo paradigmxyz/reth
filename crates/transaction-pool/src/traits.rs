@@ -418,6 +418,9 @@ pub trait TransactionPoolExt: TransactionPool {
 
     /// Maintenance function to cleanup blobs that are no longer needed.
     fn cleanup_blobs(&self);
+
+    /// Maintenance function to clean up senders that are no longer needed.
+    fn cleanup_senders(&self);
 }
 
 /// Determines what kind of new transactions should be emitted by a stream of transactions.

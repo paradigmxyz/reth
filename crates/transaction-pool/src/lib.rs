@@ -554,6 +554,10 @@ where
     fn cleanup_blobs(&self) {
         self.pool.cleanup_blobs()
     }
+
+    fn cleanup_senders(&self) {
+        self.pool.cleanup_senders()
+    }
 }
 
 impl<V, T: TransactionOrdering, S> Clone for Pool<V, T, S> {

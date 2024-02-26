@@ -801,6 +801,14 @@ where
         self.update_blob_store_metrics();
     }
 
+    /// Cleans up senders
+    pub(crate) fn cleanup_senders(&self) {
+        let mut pool = self.pool.write();
+        let mut identifiers = self.identifiers.write();
+        pool.cleanup_senders();
+        identifiers.retain(|_, id| pool.all().contains_sender(id))
+    }
+
     /// Cleans up the blob store
     pub(crate) fn cleanup_blobs(&self) {
         self.blob_store.cleanup();
