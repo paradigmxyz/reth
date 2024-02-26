@@ -19,7 +19,7 @@ use tracing::*;
 ///
 /// This stage walks over inserted headers and computes total difficulty
 /// at each block. The entries are inserted into
-/// [`HeaderTerminalDifficulties`][reth_db::tables::HeaderTD] table.
+/// [`HeaderTerminalDifficulties`][reth_db::tables::HeaderTerminalDifficulties] table.
 #[derive(Debug, Clone)]
 pub struct TotalDifficultyStage {
     /// Consensus client implementation

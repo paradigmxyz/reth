@@ -22,7 +22,7 @@ use tracing::*;
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
-/// in [`TransactionSenders`][reth_db::tables::TxSenders] table.
+/// in [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
 #[derive(Clone, Debug)]
 pub struct SenderRecoveryStage {
     /// The size of inserted items after which the control
@@ -53,7 +53,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
     /// collect transactions within that range,
     /// recover signer for each transaction and store entries in
-    /// the [`TransactionSenders`][reth_db::tables::TxSenders] table.
+    /// the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
     fn execute(
         &mut self,
         provider: &DatabaseProviderRW<DB>,

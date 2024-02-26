@@ -35,7 +35,7 @@ use tracing::*;
 /// - [`BlockOmmers`][reth_db::tables::BlockOmmers]
 /// - [`BlockBodies`][reth_db::tables::BlockBodyIndices]
 /// - [`Transactions`][reth_db::tables::Transactions]
-/// - [`TransactionBlocks`][reth_db::tables::TransactionBlock]
+/// - [`TransactionBlocks`][reth_db::tables::TransactionBlocks]
 ///
 /// # Genesis
 ///
