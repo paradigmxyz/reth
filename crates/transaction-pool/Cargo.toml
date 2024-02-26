@@ -29,7 +29,6 @@ alloy-rlp.workspace = true
 reth-revm = { workspace = true, optional = true }
 
 # async/futures
-async-trait.workspace = true
 futures-util.workspace = true
 parking_lot.workspace = true
 tokio = { workspace = true, default-features = false, features = ["sync"] }

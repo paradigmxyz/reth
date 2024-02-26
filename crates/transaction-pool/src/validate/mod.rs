@@ -9,7 +9,7 @@ use reth_primitives::{
     Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock,
     TransactionSignedEcRecovered, TxHash, B256, U256,
 };
-use std::{fmt, time::Instant};
+use std::{fmt, future::Future, time::Instant};
 
 mod constants;
 mod eth;
@@ -142,7 +142,6 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 }
 
 /// Provides support for validating transaction at any given state of the chain
-#[async_trait::async_trait]
 pub trait TransactionValidator: Send + Sync {
     /// The transaction type to validate.
     type Transaction: PoolTransaction;
@@ -172,25 +171,27 @@ pub trait TransactionValidator: Send + Sync {
     /// function.
     ///
     /// See [TransactionValidationTaskExecutor] for a reference implementation.
-    async fn validate_transaction(
+    fn validate_transaction(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction>;
+    ) -> impl Future<Output = TransactionValidationOutcome<Self::Transaction>> + Send;
 
     /// Validates a batch of transactions.
     ///
     /// Must return all outcomes for the given transactions in the same order.
     ///
     /// See also [Self::validate_transaction].
-    async fn validate_transactions(
+    fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        futures_util::future::join_all(
-            transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
-        )
-        .await
+    ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
+        async {
+            futures_util::future::join_all(
+                transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
+            )
+            .await
+        }
     }
 
     /// Invoked when the head block changes.

@@ -67,7 +67,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
