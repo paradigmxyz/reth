@@ -356,18 +356,18 @@ where
         }
 
         if let Some(hook) = self.hooks.active_db_write_hook() {
-            // We can only process new forkchoice updates if no hook with db write is running,
-            // since it requires exclusive access to the database
+            // We can only process new forkchoice updates immediately if no hook with db write is
+            // running, since it requires exclusive access to the database. If a hook is
+            // running, this function will block until a write transaction can be acquired.
             warn!(
                 target: "consensus::engine",
                 hook = %hook.name(),
                 head_block_hash = ?state.head_block_hash,
                 safe_block_hash = ?state.safe_block_hash,
                 finalized_block_hash = ?state.finalized_block_hash,
-                "Hook is in progress, skipping forkchoice update. \
+                "Hook is in progress, forkchoice update is delayed. \
                 This may affect the performance of your node as a validator."
             );
-            return Ok(OnForkChoiceUpdated::syncing())
         }
 
         let start = Instant::now();
