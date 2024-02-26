@@ -224,7 +224,6 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
     impl ExecuteStageTestRunner for TotalDifficultyTestRunner {
         type Seed = Vec<SealedHeader>;
 

@@ -477,7 +477,6 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
     impl ExecuteStageTestRunner for StorageHashingTestRunner {
         type Seed = Vec<SealedBlock>;
 
