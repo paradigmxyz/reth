@@ -45,7 +45,6 @@ jobs:
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
-      NEXTEST_TEST_THREADS: 1
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
