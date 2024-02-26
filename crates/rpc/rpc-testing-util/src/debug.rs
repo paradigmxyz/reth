@@ -12,9 +12,11 @@ use reth_rpc_types::{
     TransactionRequest,
 };
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
+
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
 const JS_TRACER_TEMPLATE: &str = include_str!("../assets/tracer-template.js");
 
@@ -26,24 +28,23 @@ pub type DebugTraceBlockResult =
     Result<(Vec<TraceResult<GethTrace, String>>, BlockId), (RpcError, BlockId)>;
 
 /// An extension trait for the Trace API.
-#[async_trait::async_trait]
 pub trait DebugApiExt {
     /// The provider type that is used to make the requests.
     type Provider;
 
     /// Same as [DebugApiClient::debug_trace_transaction] but returns the result as json.
-    async fn debug_trace_transaction_json(
+    fn debug_trace_transaction_json(
         &self,
         hash: B256,
         opts: GethDebugTracingOptions,
-    ) -> Result<serde_json::Value, jsonrpsee::core::Error>;
+    ) -> impl Future<Output = Result<serde_json::Value, jsonrpsee::core::Error>> + Send;
 
     /// Trace all transactions in a block individually with the given tracing opts.
-    async fn debug_trace_transactions_in_block<B>(
+    fn debug_trace_transactions_in_block<B>(
         &self,
         block: B,
         opts: GethDebugTracingOptions,
-    ) -> Result<DebugTraceTransactionsStream<'_>, jsonrpsee::core::Error>
+    ) -> impl Future<Output = Result<DebugTraceTransactionsStream<'_>, jsonrpsee::core::Error>> + Send
     where
         B: Into<BlockId> + Send;
 
@@ -59,21 +60,20 @@ pub trait DebugApiExt {
         B: Into<BlockId> + Send;
 
     ///  method  for debug_traceCall
-    async fn debug_trace_call_json(
+    fn debug_trace_call_json(
         &self,
         request: TransactionRequest,
         opts: GethDebugTracingOptions,
-    ) -> Result<serde_json::Value, jsonrpsee::core::Error>;
+    ) -> impl Future<Output = Result<serde_json::Value, jsonrpsee::core::Error>> + Send;
 
     ///  method for debug_traceCall using raw JSON strings for the request and options.
-    async fn debug_trace_call_raw_json(
+    fn debug_trace_call_raw_json(
         &self,
         request_json: String,
         opts_json: String,
-    ) -> Result<serde_json::Value, RpcError>;
+    ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send;
 }
 
-#[async_trait::async_trait]
 impl<T: DebugApiClient + Sync> DebugApiExt for T
 where
     T: EthApiClient,

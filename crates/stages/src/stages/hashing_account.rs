@@ -520,7 +520,6 @@ mod tests {
             }
         }
 
-        #[async_trait::async_trait]
         impl ExecuteStageTestRunner for AccountHashingTestRunner {
             type Seed = Vec<(Address, Account)>;
 

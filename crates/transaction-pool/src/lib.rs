@@ -318,7 +318,6 @@ where
 }
 
 /// implements the `TransactionPool` interface for various transaction pool API consumers.
-#[async_trait::async_trait]
 impl<V, T, S> TransactionPool for Pool<V, T, S>
 where
     V: TransactionValidator,
@@ -415,6 +414,10 @@ where
         limit: GetPooledTransactionLimit,
     ) -> Vec<PooledTransactionsElement> {
         self.pool.get_pooled_transaction_elements(tx_hashes, limit)
+    }
+
+    fn get_pooled_transaction_element(&self, tx_hash: TxHash) -> Option<PooledTransactionsElement> {
+        self.pool.get_pooled_transaction_element(tx_hash)
     }
 
     fn best_transactions(

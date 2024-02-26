@@ -2,7 +2,6 @@ use crate::{
     config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
     peers::PeersHandle, protocol::RlpxSubProtocol, swarm::NetworkConnectionState, FetchClient,
 };
-use async_trait::async_trait;
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
@@ -226,7 +225,6 @@ impl PeersInfo for NetworkHandle {
     }
 }
 
-#[async_trait]
 impl Peers for NetworkHandle {
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
     /// set, with the given kind.
@@ -288,7 +286,6 @@ impl Peers for NetworkHandle {
     }
 }
 
-#[async_trait]
 impl NetworkInfo for NetworkHandle {
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()

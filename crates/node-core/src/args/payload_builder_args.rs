@@ -16,7 +16,7 @@ use std::{borrow::Cow, ffi::OsStr, time::Duration};
 #[clap(next_help_heading = "Builder")]
 pub struct PayloadBuilderArgs {
     /// Block extra data set by the payload builder.
-    #[arg(long = "builder.extradata", value_parser=ExtradataValueParser::default(),  default_value_t = default_extradata())]
+    #[arg(long = "builder.extradata", value_parser = ExtradataValueParser::default(), default_value_t = default_extradata())]
     pub extradata: String,
 
     /// Target gas ceiling for built blocks.
