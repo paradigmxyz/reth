@@ -2469,7 +2469,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         durations_recorder
             .record_duration(metrics::Action::InsertTransactions, transactions_elapsed);
         durations_recorder.record_duration(
-            metrics::Action::InsertTransactionHashNumberss,
+            metrics::Action::InsertTransactionHashNumbers,
             tx_hash_numbers_elapsed,
         );
 
