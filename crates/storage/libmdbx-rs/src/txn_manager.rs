@@ -127,10 +127,10 @@ impl TxnManager {
 
 #[cfg(feature = "read-tx-timeouts")]
 mod read_transactions {
-    use crate::{error::mdbx_result, txn_manager::TxnManager, Error};
+    use crate::{environment::EnvPtr, error::mdbx_result, txn_manager::TxnManager, Error};
     use dashmap::{DashMap, DashSet};
     use std::{
-        sync::Arc,
+        sync::{mpsc::sync_channel, Arc},
         time::{Duration, Instant},
     };
     use tracing::{error, trace, warn};
@@ -139,15 +139,20 @@ mod read_transactions {
 
     impl TxnManager {
         /// Sets the maximum duration that a read transaction can be open.
-        pub(crate) fn with_max_read_transaction_duration(
-            mut self,
+        pub(crate) fn new_with_max_read_transaction_duration(
+            env: EnvPtr,
             duration: Duration,
-        ) -> TxnManager {
+        ) -> Self {
             let read_transactions = Arc::new(ReadTransactions::new(duration));
             read_transactions.clone().start_monitor();
-            self.read_transactions = Some(read_transactions);
 
-            self
+            let (tx, rx) = sync_channel(0);
+
+            let txn_manager = Self { sender: tx, read_transactions: Some(read_transactions) };
+
+            txn_manager.start_message_listener(env, rx);
+
+            txn_manager
         }
 
         /// Adds a new transaction to the list of active read transactions.
