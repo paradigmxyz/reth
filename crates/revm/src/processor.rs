@@ -591,9 +591,9 @@ mod tests {
         Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, Signature, StorageKey,
         Transaction, TransactionKind, TxEip1559, MAINNET,
     };
-    use reth_provider::{
-        AccountReader, BlockHashReader, BundleStateWithReceipts, StateRootProvider,
-    };
+    #[cfg(feature = "optimism")]
+    use reth_provider::BundleStateWithReceipts;
+    use reth_provider::{AccountReader, BlockHashReader, StateRootProvider};
     use reth_trie::updates::TrieUpdates;
     use revm::{Database, TransitionState};
     use std::collections::HashMap;

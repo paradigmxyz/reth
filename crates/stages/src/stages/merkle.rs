@@ -457,7 +457,6 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
     impl ExecuteStageTestRunner for MerkleTestRunner {
         type Seed = Vec<SealedBlock>;
 

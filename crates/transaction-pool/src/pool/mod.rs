@@ -341,6 +341,21 @@ where
         elements
     }
 
+    /// Returns converted [PooledTransactionsElement] for the given transaction hash.
+    pub(crate) fn get_pooled_transaction_element(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<PooledTransactionsElement> {
+        self.get(&tx_hash).and_then(|transaction| {
+            let tx = transaction.to_recovered_transaction().into_signed();
+            if tx.is_eip4844() {
+                self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
+            } else {
+                Some(PooledTransactionsElement::from(tx))
+            }
+        })
+    }
+
     /// Updates the entire pool after a new block was executed.
     pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
         trace!(target: "txpool", ?update, "updating pool on canonical state change");
