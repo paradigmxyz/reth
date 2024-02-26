@@ -1,11 +1,10 @@
 //! Command that dumps genesis block JSON configuration to stdout
-
-use crate::args::utils;
+use crate::args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS};
 use clap::Parser;
 use reth_primitives::ChainSpec;
 use std::sync::Arc;
 
-/// Dumps genesis block JSON configuration to stdout, test(todo!(abner))
+/// Dumps genesis block JSON configuration to stdout
 #[derive(Debug, Parser)]
 pub struct DumpGenesisCommand {
     /// Görli network: pre-configured proof-of-authority test network
@@ -28,11 +27,11 @@ pub struct DumpGenesisCommand {
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
     #[arg(
-    long,
-    value_name = "CHAIN_OR_PATH",
-    long_help = chain_help(),
-    default_value = SUPPORTED_CHAINS[0],
-    value_parser = genesis_value_parser
+        long,
+        value_name = "CHAIN_OR_PATH",
+        long_help = chain_help(),
+        default_value = SUPPORTED_CHAINS[0],
+        value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
 }
