@@ -1,6 +1,8 @@
 use crate::providers::static_file::metrics::StaticFileProviderOperation;
 
-use super::{metrics::StaticFileProviderMetrics, StaticFileProvider};
+use super::{
+    manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
+};
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_db::codecs::CompactU256;
@@ -14,7 +16,7 @@ use reth_primitives::{
 use std::{
     ops::Deref,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Weak},
     time::Instant,
 };
 use tracing::debug;
@@ -25,7 +27,7 @@ pub type StaticFileProviderRWRefMut<'a> = RefMut<'a, StaticFileSegment, StaticFi
 #[derive(Debug)]
 /// Extends `StaticFileProvider` with writing capabilities
 pub struct StaticFileProviderRW {
-    reader: StaticFileProvider,
+    pub reader: Weak<StaticFileProviderInner>,
     writer: NippyJarWriter<SegmentHeader>,
     data_path: PathBuf,
     buf: Vec<u8>,
@@ -37,7 +39,7 @@ impl StaticFileProviderRW {
     pub fn new(
         segment: StaticFileSegment,
         block: BlockNumber,
-        reader: StaticFileProvider,
+        reader: Weak<StaticFileProviderInner>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<Self> {
         let (writer, data_path) = Self::open(segment, block, reader.clone(), metrics.clone())?;
@@ -47,23 +49,24 @@ impl StaticFileProviderRW {
     fn open(
         segment: StaticFileSegment,
         block: u64,
-        reader: StaticFileProvider,
+        reader: Weak<StaticFileProviderInner>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<(NippyJarWriter<SegmentHeader>, PathBuf)> {
         let start = Instant::now();
 
         let block_range = find_fixed_range(block);
-        let (jar, path) =
-            match reader.get_segment_provider_from_block(segment, block_range.start(), None) {
-                Ok(provider) => {
-                    (NippyJar::load(provider.data_path())?, provider.data_path().into())
-                }
-                Err(ProviderError::MissingStaticFileBlock(_, _)) => {
-                    let path = reader.directory().join(segment.filename(&block_range));
-                    (create_jar(segment, &path, block_range), path)
-                }
-                Err(err) => return Err(err),
-            };
+        let (jar, path) = match StaticFileProvider(reader.upgrade().unwrap())
+            .get_segment_provider_from_block(segment, block_range.start(), None)
+        {
+            Ok(provider) => (NippyJar::load(provider.data_path())?, provider.data_path().into()),
+            Err(ProviderError::MissingStaticFileBlock(_, _)) => {
+                let path = StaticFileProvider(reader.upgrade().unwrap())
+                    .directory()
+                    .join(segment.filename(&block_range));
+                (create_jar(segment, &path, block_range), path)
+            }
+            Err(err) => return Err(err),
+        };
 
         let result = match NippyJarWriter::new(jar) {
             Ok(writer) => Ok((writer, path)),
@@ -134,7 +137,8 @@ impl StaticFileProviderRW {
             }
         };
 
-        self.reader.update_index(self.writer.user_header().segment(), segment_max_block)
+        StaticFileProvider(self.reader.upgrade().unwrap())
+            .update_index(self.writer.user_header().segment(), segment_max_block)
     }
 
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current static file,
@@ -439,13 +443,6 @@ impl StaticFileProviderRW {
     /// Helper function to override block range for testing.
     pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
         self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
-    }
-}
-
-impl Deref for StaticFileProviderRW {
-    type Target = StaticFileProvider;
-    fn deref(&self) -> &Self::Target {
-        &self.reader
     }
 }
 

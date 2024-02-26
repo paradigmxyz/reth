@@ -78,7 +78,6 @@ impl<DB> ProviderFactory<DB> {
 
     /// Enables metrics on the static file provider.
     pub fn with_static_files_metrics(mut self) -> Self {
-        self.static_file_provider = self.static_file_provider.with_metrics();
         self
     }
 

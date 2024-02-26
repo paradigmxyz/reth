@@ -145,7 +145,7 @@ mod tests {
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager = StaticFileProvider::new(static_files_path.path()).unwrap().with_filters();
+            let manager = StaticFileProvider::new(static_files_path.path()).unwrap();
             let jar_provider = manager
                 .get_segment_provider_from_block(StaticFileSegment::Headers, 0, Some(&static_file))
                 .unwrap();

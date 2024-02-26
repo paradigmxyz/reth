@@ -30,6 +30,7 @@ use reth_primitives::{
     U256,
 };
 use std::{
+    backtrace::Backtrace,
     collections::{hash_map::Entry, BTreeMap, HashMap},
     ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
@@ -43,8 +44,8 @@ use tracing::warn;
 type SegmentRanges = HashMap<StaticFileSegment, BTreeMap<TxNumber, SegmentRangeInclusive>>;
 
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
-#[derive(Debug, Default, Clone)]
-pub struct StaticFileProvider(Arc<StaticFileProviderInner>);
+#[derive(Debug, Default)]
+pub struct StaticFileProvider(pub Arc<StaticFileProviderInner>);
 
 impl StaticFileProvider {
     /// Creates a new [`StaticFileProvider`].
@@ -60,6 +61,21 @@ impl Deref for StaticFileProvider {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl Drop for StaticFileProvider {
+    fn drop(&mut self) {
+        println!("Dropping StaticFileProvider: {:?}", self.path);
+        println!("Backtrace: {}", Backtrace::force_capture());
+    }
+}
+
+impl Clone for StaticFileProvider {
+    fn clone(&self) -> Self {
+        println!("Cloning StaticFileProvider: {:?}", self.path);
+        println!("Backtrace: {}", Backtrace::force_capture());
+        Self(self.0.clone())
     }
 }
 
@@ -107,21 +123,21 @@ impl Drop for StaticFileProviderInner {
 }
 
 impl StaticFileProvider {
-    /// Loads filters into memory when creating a [`StaticFileJarProvider`].
-    pub fn with_filters(self) -> Self {
-        let mut provider =
-            Arc::try_unwrap(self.0).expect("should be called when initializing only");
-        provider.load_filters = true;
-        Self(Arc::new(provider))
-    }
-
-    /// Enables metrics on the [`StaticFileProvider`].
-    pub fn with_metrics(self) -> Self {
-        let mut provider =
-            Arc::try_unwrap(self.0).expect("should be called when initializing only");
-        provider.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
-        Self(Arc::new(provider))
-    }
+    // /// Loads filters into memory when creating a [`StaticFileJarProvider`].
+    // pub fn with_filters(self) -> Self {
+    //     let mut provider =
+    //         Arc::try_unwrap(self.0).expect("should be called when initializing only");
+    //     provider.load_filters = true;
+    //     Self(Arc::new(provider))
+    // }
+    //
+    // /// Enables metrics on the [`StaticFileProvider`].
+    // pub fn with_metrics(self) -> Self {
+    //     let mut provider =
+    //         Arc::try_unwrap(self.0).expect("should be called when initializing only");
+    //     provider.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
+    //     Self(Arc::new(provider))
+    // }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and block.
     pub fn get_segment_provider_from_block(
@@ -693,8 +709,12 @@ impl StaticFileWriter for StaticFileProvider {
         Ok(match self.writers.entry(segment) {
             DashMapEntry::Occupied(entry) => entry.into_ref(),
             DashMapEntry::Vacant(entry) => {
-                let writer =
-                    StaticFileProviderRW::new(segment, block, self.clone(), self.metrics.clone())?;
+                let writer = StaticFileProviderRW::new(
+                    segment,
+                    block,
+                    Arc::downgrade(&self.0),
+                    self.metrics.clone(),
+                )?;
                 entry.insert(writer)
             }
         })

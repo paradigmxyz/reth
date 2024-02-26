@@ -17,7 +17,7 @@ use reth_libmdbx::{
     PageSize, SyncMode, RO, RW,
 };
 use reth_tracing::tracing::error;
-use std::{ops::Deref, path::Path, sync::Arc};
+use std::{backtrace::Backtrace, ops::Deref, path::Path, sync::Arc};
 use tx::Tx;
 
 pub mod cursor;

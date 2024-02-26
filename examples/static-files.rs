@@ -4,11 +4,8 @@ use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
 use reth_primitives::{SealedBlockWithSenders, MAINNET};
 use reth_provider::ProviderFactory;
 
-#[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
-
 fn main() -> eyre::Result<()> {
-    for _ in 0..100 {
+    for _ in 0..1 {
         let db = create_test_rw_db();
         let static_files_dir = create_test_static_files_dir();
         let provider_factory =
@@ -20,7 +17,7 @@ fn main() -> eyre::Result<()> {
         drop(provider_factory);
     }
 
-    // std::thread::sleep(Duration::from_secs(10 * 60));
+    std::thread::sleep(Duration::from_secs(10 * 60));
 
     Ok(())
 }
