@@ -83,6 +83,7 @@ op-reth node \
 Then, once `op-reth` has been started, start up the `op-node`:
 ```sh
 op-node \
+    --network="base-mainnet" \
     --l1=<your-L1-rpc> \
     --l2=http://localhost:9551 \
     --l2.jwt-secret=/path/to/jwt.hex \
