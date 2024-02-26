@@ -991,10 +991,9 @@ where
                 results.push(f(tx_info, inspector, result, &state, &db)?);
 
                 // need to apply the state changes of this transaction before executing the
-                // next transaction
+                // next transaction, but only if there's a next transaction
                 if transactions.peek().is_some() {
-                    // need to apply the state changes of this transaction before executing
-                    // the next transaction
+                    // commit the state changes to the DB
                     db.commit(state)
                 }
             }
@@ -1089,7 +1088,7 @@ where
     pub(crate) async fn eip4844_blob_fee(&self, blob_fee: Option<U256>) -> EthResult<U256> {
         match blob_fee {
             Some(blob_fee) => Ok(blob_fee),
-            None => self.blob_gas_price().await,
+            None => self.blob_base_fee().await,
         }
     }
 }

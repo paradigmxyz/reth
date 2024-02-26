@@ -16,27 +16,27 @@ use std::{collections::BTreeMap, sync::Arc};
 /// - The executor factory to execute blocks with
 /// - The chain spec
 #[derive(Debug)]
-pub struct TreeExternals<DB, EF> {
+pub struct TreeExternals<DB, EVM> {
     /// The provider factory, used to commit the canonical chain, or unwind it.
     pub(crate) provider_factory: ProviderFactory<DB>,
     /// The consensus engine.
     pub(crate) consensus: Arc<dyn Consensus>,
     /// The executor factory to execute blocks with.
-    pub(crate) executor_factory: EF,
+    pub(crate) executor_factory: EVM,
 }
 
-impl<DB, EF> TreeExternals<DB, EF> {
+impl<DB, EVM> TreeExternals<DB, EVM> {
     /// Create new tree externals.
     pub fn new(
         provider_factory: ProviderFactory<DB>,
         consensus: Arc<dyn Consensus>,
-        executor_factory: EF,
+        executor_factory: EVM,
     ) -> Self {
         Self { provider_factory, consensus, executor_factory }
     }
 }
 
-impl<DB: Database, EF> TreeExternals<DB, EF> {
+impl<DB: Database, EVM> TreeExternals<DB, EVM> {
     /// Fetches the latest canonical block hashes by walking backwards from the head.
     ///
     /// Returns the hashes sorted by increasing block numbers

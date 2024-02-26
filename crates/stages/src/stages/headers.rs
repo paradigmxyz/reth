@@ -164,7 +164,7 @@ where
                 Ok(())
             }
             Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
-                error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
+                error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
                 Err(StageError::DetachedHead { local_head, header, error })
             }
             None => Err(StageError::ChannelClosed),
@@ -512,7 +512,7 @@ mod tests {
         runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        assert_matches!( result, Ok(ExecOutput { checkpoint: StageCheckpoint {
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint {
             block_number,
             stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
                 block_range: CheckpointBlockRange {

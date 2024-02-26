@@ -656,10 +656,7 @@ mod tests {
         let manager = TaskManager::new(handle);
         let executor = manager.executor();
 
-        executor.spawn_critical(
-            "this is a critical task",
-            Box::pin(async { panic!("intentionally panic") }),
-        );
+        executor.spawn_critical("this is a critical task", async { panic!("intentionally panic") });
 
         runtime.block_on(async move {
             let err = manager.await;
@@ -678,13 +675,10 @@ mod tests {
 
         let (signal, shutdown) = signal();
 
-        executor.spawn_critical(
-            "this is a critical task",
-            Box::pin(async move {
-                tokio::time::sleep(Duration::from_millis(200)).await;
-                drop(signal);
-            }),
-        );
+        executor.spawn_critical("this is a critical task", async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            drop(signal);
+        });
 
         drop(manager);
 

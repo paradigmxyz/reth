@@ -365,7 +365,7 @@ impl Cache {
 
         // Create ForkId using the last past fork's hash and the next epoch start.
         let fork_id = ForkId {
-            hash: past.last().expect("there is always at least one - genesis - fork hash; qed").1,
+            hash: past.last().expect("there is always at least one - genesis - fork hash").1,
             next: epoch_end.unwrap_or(ForkFilterKey::Block(0)).into(),
         };
 

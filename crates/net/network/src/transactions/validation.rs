@@ -269,19 +269,19 @@ impl FilterAnnouncement for EthAnnouncementFilter {
         //
         // 3. checks if announcement is spam packed with duplicate hashes
         //
-        let mut deduped_data = HashMap::with_capacity(hashes.len());
-
         let original_len = hashes.len();
 
+        let mut deduped_data = HashMap::with_capacity(hashes.len());
         for hash in hashes.into_iter().rev() {
             if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
                 deduped_data.insert(hash, Some((ty, size)));
             }
         }
+        deduped_data.shrink_to_fit();
+
         if deduped_data.len() != original_len {
             should_report_peer = true
         }
-
         (
             if should_report_peer { FilterOutcome::ReportPeer } else { FilterOutcome::Ok },
             ValidAnnouncementData::new_eth68(deduped_data),
@@ -300,7 +300,9 @@ impl FilterAnnouncement for EthAnnouncementFilter {
 
         let NewPooledTransactionHashes66(hashes) = msg;
 
+        //
         // 1. checks if the announcement is empty
+        //
         if hashes.is_empty() {
             debug!(target: "net::tx",
                 network=%Self,
@@ -309,14 +311,16 @@ impl FilterAnnouncement for EthAnnouncementFilter {
             return (FilterOutcome::ReportPeer, ValidAnnouncementData::empty_eth66())
         }
 
+        //
         // 2. checks if announcement is spam packed with duplicate hashes
-        let mut deduped_data = HashMap::with_capacity(hashes.len());
-
+        //
         let original_len = hashes.len();
 
+        let mut deduped_data = HashMap::with_capacity(hashes.len());
         for hash in hashes.into_iter().rev() {
             deduped_data.insert(hash, None);
         }
+        deduped_data.shrink_to_fit();
 
         (
             if deduped_data.len() != original_len {
