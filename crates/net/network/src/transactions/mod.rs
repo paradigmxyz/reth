@@ -32,7 +32,7 @@ use crate::{
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    EthNetwork, NetworkEvents, NetworkHandle,
+    NetworkEvents, NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
