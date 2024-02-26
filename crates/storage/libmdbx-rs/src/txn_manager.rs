@@ -317,10 +317,13 @@ mod read_transactions {
     #[cfg(test)]
     mod tests {
         use crate::{
-            txn_manager::read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, Environment, Error,
-            MaxReadTransactionDuration,
+            txn_manager::{
+                self, read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, TxnManagerMessage,
+                TxnPtr,
+            },
+            Environment, Error, MaxReadTransactionDuration, TransactionKind, RO,
         };
-        use std::{thread::sleep, time::Duration};
+        use std::{ptr, sync::mpsc::sync_channel, thread::sleep, time::Duration};
         use tempfile::tempdir;
 
         #[test]
@@ -392,6 +395,31 @@ mod read_transactions {
             let tx = env.begin_ro_txn().unwrap();
             sleep(READ_TRANSACTIONS_CHECK_INTERVAL);
             assert!(tx.commit().is_ok())
+        }
+
+        #[test]
+        fn txn_manager_begin_read_transaction_via_message_listener() {
+            const MAX_DURATION: Duration = Duration::from_secs(1);
+
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
+                .open(dir.path())
+                .unwrap();
+
+            let read_transactions = env.txn_manager().read_transactions.as_ref().unwrap();
+
+            // Create a read-only transaction via the message listener.
+            let (tx, rx) = sync_channel(0);
+            env.txn_manager().send_message(TxnManagerMessage::Begin {
+                parent: TxnPtr(ptr::null_mut()),
+                flags: RO::OPEN_FLAGS,
+                sender: tx,
+            });
+
+            let txn_ptr = rx.recv().unwrap().unwrap();
+
+            assert!(read_transactions.active.contains_key(&(txn_ptr.0 as usize)));
         }
     }
 }
