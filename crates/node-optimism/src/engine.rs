@@ -4,10 +4,13 @@ use reth_node_api::{
 };
 use reth_payload_builder::{EthBuiltPayload, OptimismPayloadBuilderAttributes};
 use reth_primitives::{ChainSpec, Hardfork};
-use reth_rpc_types::engine::OptimismPayloadAttributes;
+use reth_rpc_types::{
+    engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, OptimismPayloadAttributes},
+    ExecutionPayloadV1,
+};
 
 /// The types used in the optimism beacon consensus engine.
-#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
 pub struct OptimismEngineTypes;
 
@@ -15,6 +18,9 @@ impl EngineTypes for OptimismEngineTypes {
     type PayloadAttributes = OptimismPayloadAttributes;
     type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
+    type ExecutionPayloadV1 = ExecutionPayloadV1;
+    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
+    type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
 
     fn validate_version_specific_fields(
         chain_spec: &ChainSpec,

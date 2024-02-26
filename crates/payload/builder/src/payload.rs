@@ -62,21 +62,6 @@ impl EthBuiltPayload {
     pub fn extend_sidecars(&mut self, sidecars: Vec<BlobTransactionSidecar>) {
         self.sidecars.extend(sidecars)
     }
-
-    /// Converts the type into the response expected by `engine_getPayloadV1`
-    pub fn into_v1_payload(self) -> ExecutionPayloadV1 {
-        self.into()
-    }
-
-    /// Converts the type into the response expected by `engine_getPayloadV2`
-    pub fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2 {
-        self.into()
-    }
-
-    /// Converts the type into the response expected by `engine_getPayloadV3`
-    pub fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
-        self.into()
-    }
 }
 
 impl BuiltPayload for EthBuiltPayload {
@@ -86,18 +71,6 @@ impl BuiltPayload for EthBuiltPayload {
 
     fn fees(&self) -> U256 {
         self.fees
-    }
-
-    fn into_v1_payload(self) -> ExecutionPayloadV1 {
-        self.into()
-    }
-
-    fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2 {
-        self.into()
-    }
-
-    fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
-        self.into()
     }
 }
 
