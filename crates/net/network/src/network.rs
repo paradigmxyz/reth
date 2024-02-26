@@ -64,7 +64,6 @@ impl NetworkHandle {
             initial_sync_done: Arc::new(AtomicBool::new(false)),
             chain_id,
             tx_gossip_disabled,
-            tx_handle: Mutex::new(None),
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
         };
@@ -118,6 +117,24 @@ impl NetworkHandle {
     /// Broadcasting new blocks is considered a protocol violation.
     pub fn announce_block(&self, block: NewBlock, hash: B256) {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
+    }
+
+    /// Sends a [`PeerRequest`] to the given peer's session.
+    pub fn send_request(&self, peer_id: PeerId, request: PeerRequest) {
+        self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
+    }
+
+    /// Send transactions hashes to the peer.
+    pub fn send_transactions_hashes(&self, peer_id: PeerId, msg: NewPooledTransactionHashes) {
+        self.send_message(NetworkHandleMessage::SendPooledTransactionHashes { peer_id, msg })
+    }
+
+    /// Send full transactions to the peer
+    pub fn send_transactions(&self, peer_id: PeerId, msg: Vec<Arc<TransactionSigned>>) {
+        self.send_message(NetworkHandleMessage::SendTransaction {
+            peer_id,
+            msg: SharedTransactions(msg),
+        })
     }
 
     /// Provides a shareable reference to the [`BandwidthMeter`] stored on the `NetworkInner`.
@@ -328,32 +345,6 @@ impl NetworkSyncUpdater for NetworkHandle {
     }
 }
 
-impl EthNetwork for NetworkHandle {
-    fn set_tx_handle(&self, handle: TransactionsHandle) {
-        let mut tx_handle = self.inner.tx_handle.lock();
-        *tx_handle = Some(handle);
-    }
-
-    fn tx_handle(&self) -> Option<TransactionsHandle> {
-        self.inner.tx_handle.lock().clone()
-    }
-
-    fn send_request(&self, peer_id: PeerId, request: PeerRequest) {
-        self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
-    }
-
-    fn send_transactions_hashes(&self, peer_id: PeerId, msg: NewPooledTransactionHashes) {
-        self.send_message(NetworkHandleMessage::SendPooledTransactionHashes { peer_id, msg })
-    }
-
-    fn send_transactions(&self, peer_id: PeerId, msg: Vec<Arc<TransactionSigned>>) {
-        self.send_message(NetworkHandleMessage::SendTransaction {
-            peer_id,
-            msg: SharedTransactions(msg),
-        })
-    }
-}
-
 #[derive(Debug)]
 struct NetworkInner {
     /// Number of active peer sessions the node's currently handling.
@@ -380,8 +371,6 @@ struct NetworkInner {
     chain_id: Arc<AtomicU64>,
     /// Whether to disable transaction gossip
     tx_gossip_disabled: bool,
-    /// Access to the [`TransactionsHandle`].
-    tx_handle: Mutex<Option<TransactionsHandle>>,
     /// The sequencer HTTP Endpoint
     #[cfg(feature = "optimism")]
     sequencer_endpoint: Option<String>,
@@ -401,27 +390,6 @@ pub trait NetworkEvents: Send + Sync {
 pub trait NetworkProtocols: Send + Sync {
     /// Adds an additional protocol handler to the RLPx sub-protocol list.
     fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol);
-}
-
-/// Provides access to interact with the network's transactions.
-pub trait EthNetwork: Send + Sync {
-    /// Sets the [`TransactionsHandle`] for the network.
-    fn set_tx_handle(&self, handle: TransactionsHandle);
-
-    /// Returns the [`TransactionsHandle`] of this network.
-    ///
-    /// Only call this after [`TransactionsManager`](crate::transactions::TransactionsManager)
-    /// is created.
-    fn tx_handle(&self) -> Option<TransactionsHandle>;
-
-    /// Sends a [`PeerRequest`] to the given peer's session.
-    fn send_request(&self, peer_id: PeerId, request: PeerRequest);
-
-    /// Send transactions hashes to the peer.
-    fn send_transactions_hashes(&self, peer_id: PeerId, msg: NewPooledTransactionHashes);
-
-    /// Send full transactions to the peer
-    fn send_transactions(&self, peer_id: PeerId, msg: Vec<Arc<TransactionSigned>>);
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
