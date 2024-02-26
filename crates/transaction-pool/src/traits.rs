@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -35,7 +36,6 @@ use tokio::sync::mpsc::Receiver;
 ///
 /// Note: This requires `Clone` for convenience, since it is assumed that this will be implemented
 /// for a wrapped `Arc` type, see also [`Pool`](crate::Pool).
-#[async_trait::async_trait]
 #[auto_impl::auto_impl(Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
@@ -55,19 +55,22 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// p2p network.
     ///
     /// Consumer: P2P
-    async fn add_external_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash> {
-        self.add_transaction(TransactionOrigin::External, transaction).await
+    fn add_external_transaction(
+        &self,
+        transaction: Self::Transaction,
+    ) -> impl Future<Output = PoolResult<TxHash>> + Send {
+        self.add_transaction(TransactionOrigin::External, transaction)
     }
 
     /// Imports all _external_ transactions
     ///
     ///
     /// Consumer: Utility
-    async fn add_external_transactions(
+    fn add_external_transactions(
         &self,
         transactions: Vec<Self::Transaction>,
-    ) -> Vec<PoolResult<TxHash>> {
-        self.add_transactions(TransactionOrigin::External, transactions).await
+    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send {
+        self.add_transactions(TransactionOrigin::External, transactions)
     }
 
     /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
@@ -76,31 +79,31 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// given transaction.
     ///
     /// Consumer: Custom
-    async fn add_transaction_and_subscribe(
+    fn add_transaction_and_subscribe(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TransactionEvents>;
+    ) -> impl Future<Output = PoolResult<TransactionEvents>> + Send;
 
     /// Adds an _unvalidated_ transaction into the pool.
     ///
     /// Consumer: RPC
-    async fn add_transaction(
+    fn add_transaction(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TxHash>;
+    ) -> impl Future<Output = PoolResult<TxHash>> + Send;
 
     /// Adds the given _unvalidated_ transaction into the pool.
     ///
     /// Returns a list of results.
     ///
     /// Consumer: RPC
-    async fn add_transactions(
+    fn add_transactions(
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> Vec<PoolResult<TxHash>>;
+    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send;
 
     /// Returns a new transaction change event stream for the given transaction.
     ///

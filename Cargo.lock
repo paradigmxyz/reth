@@ -6948,7 +6948,6 @@ dependencies = [
  "alloy-rlp",
  "aquamarine",
  "assert_matches",
- "async-trait",
  "auto_impl",
  "bitflags 2.4.2",
  "criterion",
