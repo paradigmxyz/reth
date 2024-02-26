@@ -72,7 +72,6 @@ async fn main() -> eyre::Result<()> {
 #[non_exhaustive]
 struct OkValidator;
 
-#[async_trait::async_trait]
 impl TransactionValidator for OkValidator {
     type Transaction = EthPooledTransaction;
 

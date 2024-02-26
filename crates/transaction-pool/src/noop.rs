@@ -247,7 +247,6 @@ pub struct MockTransactionValidator<T> {
     _marker: PhantomData<T>,
 }
 
-#[async_trait::async_trait]
 impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
 
