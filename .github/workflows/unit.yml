@@ -1,17 +1,21 @@
 # Runs unit tests.
 
 name: unit
+
 on:
   pull_request:
   merge_group:
   push:
     branches: [main]
+
 env:
   CARGO_TERM_COLOR: always
   SEED: rustethereumethereumrust
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
+
 jobs:
   test:
     name: test / ${{ matrix.network }} (${{ matrix.partition }}/2)
@@ -38,6 +42,7 @@ jobs:
             --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/2 \
             -E "kind(lib) | kind(bin) | kind(proc-macro)"
+
   state:
     name: Ethereum state tests
     runs-on:
@@ -60,9 +65,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Config
-        run: cat .config/nextest.toml
       - run: cargo nextest run --release -p ef-tests --features ef-tests
+
   doc:
     name: doc tests (${{ matrix.network }})
     runs-on:
@@ -81,6 +85,7 @@ jobs:
           cache-on-failure: true
       - name: Run doctests
         run: cargo test --doc --workspace --features "${{ matrix.network }}"
+
   unit-success:
     name: unit success
     runs-on: ubuntu-latest
