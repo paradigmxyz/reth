@@ -119,9 +119,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Removes senders which do not have an associated transaction in the pool.
     pub(crate) fn cleanup_senders(&mut self) {
-        info!(target: "reth::cli", prev_len=self.sender_info.len(), "cleaning up senders");
         self.sender_info.retain(|id, _| self.all_transactions.contains_sender(id));
-        info!(target: "reth::cli", new=self.sender_info.len(), "cleaned up senders");
         self.metrics.known_senders.set(self.sender_info.len() as f64);
     }
 
