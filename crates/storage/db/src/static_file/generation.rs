@@ -90,7 +90,7 @@ macro_rules! generate_static_file_func {
 
                     nippy_jar.freeze(col_iterators.into_iter().chain(additional).collect(), row_count as u64)?;
 
-                    debug!(target: "reth::static_file", jar=?nippy_jar, "StaticFile file generated.");
+                    debug!(target: "reth::static_file", jar=?nippy_jar, "Static file generated.");
 
                     Ok(())
                 }

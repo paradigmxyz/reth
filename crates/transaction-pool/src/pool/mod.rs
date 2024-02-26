@@ -341,9 +341,24 @@ where
         elements
     }
 
+    /// Returns converted [PooledTransactionsElement] for the given transaction hash.
+    pub(crate) fn get_pooled_transaction_element(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<PooledTransactionsElement> {
+        self.get(&tx_hash).and_then(|transaction| {
+            let tx = transaction.to_recovered_transaction().into_signed();
+            if tx.is_eip4844() {
+                self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
+            } else {
+                Some(PooledTransactionsElement::from(tx))
+            }
+        })
+    }
+
     /// Updates the entire pool after a new block was executed.
     pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
-        trace!(target: "txpool", %update, "updating pool on canonical state change");
+        trace!(target: "txpool", ?update, "updating pool on canonical state change");
 
         let block_info = update.block_info();
         let CanonicalStateUpdate { new_tip, changed_accounts, mined_transactions, .. } = update;
@@ -761,7 +776,7 @@ where
     /// Inserts a blob transaction into the blob store
     fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecar) {
         if let Err(err) = self.blob_store.insert(hash, blob) {
-            warn!(target: "txpool", ?err, "[{:?}] failed to insert blob", hash);
+            warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
             self.blob_store_metrics.blobstore_failed_inserts.increment(1);
         }
         self.update_blob_store_metrics();
@@ -770,7 +785,7 @@ where
     /// Delete a blob from the blob store
     pub(crate) fn delete_blob(&self, blob: TxHash) {
         if let Err(err) = self.blob_store.delete(blob) {
-            warn!(target: "txpool", ?err, "[{:?}] failed to delete blobs", blob);
+            warn!(target: "txpool", %err, "[{:?}] failed to delete blobs", blob);
             self.blob_store_metrics.blobstore_failed_deletes.increment(1);
         }
         self.update_blob_store_metrics();
@@ -780,7 +795,7 @@ where
     pub(crate) fn delete_blobs(&self, txs: Vec<TxHash>) {
         let num = txs.len();
         if let Err(err) = self.blob_store.delete_all(txs) {
-            warn!(target: "txpool", ?err,?num, "failed to delete blobs");
+            warn!(target: "txpool", %err,?num, "failed to delete blobs");
             self.blob_store_metrics.blobstore_failed_deletes.increment(num as u64);
         }
         self.update_blob_store_metrics();

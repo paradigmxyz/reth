@@ -256,7 +256,7 @@ where
                     }
                 }
                 Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
-                    error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
+                    error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
                     return Poll::Ready(Err(StageError::DetachedHead { local_head, header, error }))
                 }
                 None => return Poll::Ready(Err(StageError::ChannelClosed)),
@@ -425,7 +425,6 @@ mod tests {
             }
         }
 
-        #[async_trait::async_trait]
         impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
             type Seed = Vec<SealedHeader>;
 
@@ -566,7 +565,7 @@ mod tests {
 
         let result = rx.await.unwrap();
         runner.db().factory.static_file_provider().commit().unwrap();
-        assert_matches!( result, Ok(ExecOutput { checkpoint: StageCheckpoint {
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint {
             block_number,
             stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
                 block_range: CheckpointBlockRange {

@@ -158,10 +158,10 @@ where
 
         tokio::select! {
             _ = ctrl_c => {
-                trace!(target: "reth::cli",  "Received ctrl-c");
+                trace!(target: "reth::cli", "Received ctrl-c");
             },
             _ = sigterm => {
-                trace!(target: "reth::cli",  "Received SIGTERM");
+                trace!(target: "reth::cli", "Received SIGTERM");
             },
             res = fut => res?,
         }
@@ -173,7 +173,7 @@ where
 
         tokio::select! {
             _ = ctrl_c => {
-                trace!(target: "reth::cli",  "Received ctrl-c");
+                trace!(target: "reth::cli", "Received ctrl-c");
             },
             res = fut => res?,
         }

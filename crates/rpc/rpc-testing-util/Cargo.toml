@@ -18,7 +18,6 @@ reth-rpc-types.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 
 # async
-async-trait.workspace = true
 futures.workspace = true
 
 # misc
