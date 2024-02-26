@@ -201,6 +201,22 @@ impl<H: NippyJarHeader> NippyJar<H> {
         self
     }
 
+    /// Adds a different header type.
+    pub fn with_new_header<T: NippyJarHeader>(self, header: T, path: Option<PathBuf>) -> NippyJar<T> {
+        NippyJar {
+            version: self.version,
+            user_header: header,
+            columns: self.columns,
+            rows: self.rows,
+            compressor: self.compressor,
+            filter: self.filter,
+            phf: self.phf,
+            offsets_index: self.offsets_index,
+            max_row_size: self.max_row_size,
+            path: path.unwrap_or(self.path),
+        }
+    }
+
     /// Gets a reference to the user header.
     pub fn user_header(&self) -> &H {
         &self.user_header
