@@ -199,7 +199,6 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             task_spawner.spawn_blocking(Box::pin(async move {
                 debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
                 pool.cleanup_blobs();
-                pool.cleanup_senders();
             }));
         }
 

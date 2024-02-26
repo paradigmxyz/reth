@@ -764,7 +764,9 @@ where
     /// If some of the transactions are blob transactions, they are also removed from the blob
     /// store.
     pub(crate) fn discard_worst(&self) -> HashSet<TxHash> {
-        let discarded = self.pool.write().discard_worst();
+        let mut pool = self.pool.write();
+        let discarded = pool.discard_worst();
+        pool.cleanup_senders();
 
         // delete any blobs associated with discarded blob transactions
         self.delete_discarded_blobs(discarded.iter());
