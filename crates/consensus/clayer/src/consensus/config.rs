@@ -1,4 +1,4 @@
-use config::{Config, File, FileFormat};
+use config::{Config, File};
 use reth_rpc_types::PeerId;
 use serde::Deserialize;
 use std::{path::PathBuf, str::FromStr, time::Duration};
