@@ -11,6 +11,8 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
+#![allow(unknown_lints, non_local_definitions)]
 
 pub mod builder;
 pub mod capability;
