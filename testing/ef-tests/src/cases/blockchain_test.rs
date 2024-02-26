@@ -78,10 +78,11 @@ impl Case for BlockchainTestCase {
         }) {
             // Create a new test database and initialize a provider for the test case.
             let db = create_test_rw_db();
+            let static_files_dir = create_test_static_files_dir();
             let provider = ProviderFactory::new(
                 db.as_ref(),
                 Arc::new(case.network.clone().into()),
-                create_test_static_files_dir(),
+                static_files_dir.clone(),
             )?
             .provider_rw()
             .unwrap();
@@ -150,6 +151,10 @@ impl Case for BlockchainTestCase {
 
             // Drop the provider without committing to the database.
             drop(provider);
+            // TODO: replace with `tempdir` usage, so the temp directory is removed automatically
+            // when the variable goes out of scope
+            reth_primitives::fs::remove_dir_all(static_files_dir)
+                .expect("Failed to remove static files directory");
         }
 
         Ok(())
