@@ -75,11 +75,8 @@ impl proptest::arbitrary::Arbitrary for Block {
         }
 
         let header_strategy = valid_header_strategy();
-
         let body_strategy = vec(any::<TransactionSigned>(), 0..25);
-
         let ommers_strategy = vec(valid_header_strategy(), 0..=2);
-
         let withdrawals_strategy = any::<Option<Withdrawals>>();
 
         (header_strategy, body_strategy, ommers_strategy, withdrawals_strategy)
