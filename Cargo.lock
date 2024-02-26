@@ -6872,7 +6872,6 @@ dependencies = [
  "alloy-rlp",
  "aquamarine",
  "assert_matches",
- "async-trait",
  "auto_impl",
  "criterion",
  "futures-util",
