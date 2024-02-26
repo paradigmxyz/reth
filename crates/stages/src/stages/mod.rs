@@ -155,7 +155,7 @@ mod tests {
             );
 
             // Check AccountHistory
-            let mut acc_indexing_stage = IndexAccountHistoryStage {
+            let mut acc_indexing_stage = IndexAccountsHistoryStage {
                 prune_mode: prune_modes.account_history,
                 ..Default::default()
             };
@@ -171,7 +171,7 @@ mod tests {
             }
 
             // Check StorageHistory
-            let mut storage_indexing_stage = IndexStorageHistoryStage {
+            let mut storage_indexing_stage = IndexStoragesHistoryStage {
                 prune_mode: prune_modes.storage_history,
                 ..Default::default()
             };

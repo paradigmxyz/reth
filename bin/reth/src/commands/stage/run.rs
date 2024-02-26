@@ -23,7 +23,7 @@ use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWrite
 use reth_stages::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
+        IndexAccountsHistoryStage, IndexStoragesHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
     ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
@@ -234,8 +234,8 @@ impl Command {
                     Box::new(MerkleStage::default_execution()),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
-                StageEnum::AccountHistory => (Box::<IndexAccountHistoryStage>::default(), None),
-                StageEnum::StorageHistory => (Box::<IndexStorageHistoryStage>::default(), None),
+                StageEnum::AccountHistory => (Box::<IndexAccountsHistoryStage>::default(), None),
+                StageEnum::StorageHistory => (Box::<IndexStoragesHistoryStage>::default(), None),
                 _ => return Ok(()),
             };
         if let Some(unwind_stage) = &unwind_stage {

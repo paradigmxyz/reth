@@ -14,7 +14,7 @@ use std::fmt::Debug;
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
 /// on index sharding take a look at [`reth_db::tables::AccountsHistory`]
 #[derive(Debug)]
-pub struct IndexAccountHistoryStage {
+pub struct IndexAccountsHistoryStage {
     /// Number of blocks after which the control
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
@@ -22,23 +22,23 @@ pub struct IndexAccountHistoryStage {
     pub prune_mode: Option<PruneMode>,
 }
 
-impl IndexAccountHistoryStage {
-    /// Create new instance of [IndexAccountHistoryStage].
+impl IndexAccountsHistoryStage {
+    /// Create new instance of [IndexAccountsHistoryStage].
     pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>) -> Self {
         Self { commit_threshold, prune_mode }
     }
 }
 
-impl Default for IndexAccountHistoryStage {
+impl Default for IndexAccountsHistoryStage {
     fn default() -> Self {
         Self { commit_threshold: 100_000, prune_mode: None }
     }
 }
 
-impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
+impl<DB: Database> Stage<DB> for IndexAccountsHistoryStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        StageId::IndexAccountHistory
+        StageId::IndexAccountsHistory
     }
 
     /// Execute the stage.
@@ -177,7 +177,7 @@ mod tests {
             checkpoint: input_checkpoint
                 .map(|block_number| StageCheckpoint { block_number, stage_checkpoint: None }),
         };
-        let mut stage = IndexAccountHistoryStage::default();
+        let mut stage = IndexAccountsHistoryStage::default();
         let provider = db.factory.provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(run_to), done: true });
@@ -190,7 +190,7 @@ mod tests {
             unwind_to,
             ..Default::default()
         };
-        let mut stage = IndexAccountHistoryStage::default();
+        let mut stage = IndexAccountsHistoryStage::default();
         let provider = db.factory.provider_rw().unwrap();
         let out = stage.unwind(&provider, input).unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
@@ -434,7 +434,7 @@ mod tests {
 
         // run
         let input = ExecInput { target: Some(20000), ..Default::default() };
-        let mut stage = IndexAccountHistoryStage {
+        let mut stage = IndexAccountsHistoryStage {
             prune_mode: Some(PruneMode::Before(36)),
             ..Default::default()
         };
@@ -455,22 +455,22 @@ mod tests {
         assert!(table.is_empty());
     }
 
-    stage_test_suite_ext!(IndexAccountHistoryTestRunner, index_account_history);
+    stage_test_suite_ext!(IndexAccountsHistoryTestRunner, index_account_history);
 
-    struct IndexAccountHistoryTestRunner {
+    struct IndexAccountsHistoryTestRunner {
         pub(crate) db: TestStageDB,
         commit_threshold: u64,
         prune_mode: Option<PruneMode>,
     }
 
-    impl Default for IndexAccountHistoryTestRunner {
+    impl Default for IndexAccountsHistoryTestRunner {
         fn default() -> Self {
             Self { db: TestStageDB::default(), commit_threshold: 1000, prune_mode: None }
         }
     }
 
-    impl StageTestRunner for IndexAccountHistoryTestRunner {
-        type S = IndexAccountHistoryStage;
+    impl StageTestRunner for IndexAccountsHistoryTestRunner {
+        type S = IndexAccountsHistoryStage;
 
         fn db(&self) -> &TestStageDB {
             &self.db
@@ -481,7 +481,7 @@ mod tests {
         }
     }
 
-    impl ExecuteStageTestRunner for IndexAccountHistoryTestRunner {
+    impl ExecuteStageTestRunner for IndexAccountsHistoryTestRunner {
         type Seed = ();
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
@@ -578,7 +578,7 @@ mod tests {
         }
     }
 
-    impl UnwindStageTestRunner for IndexAccountHistoryTestRunner {
+    impl UnwindStageTestRunner for IndexAccountsHistoryTestRunner {
         fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
             let table = self.db.table::<tables::AccountsHistory>().unwrap();
             assert!(table.is_empty());

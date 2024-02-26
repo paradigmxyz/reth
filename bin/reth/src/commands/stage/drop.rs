@@ -144,11 +144,11 @@ impl Command {
                     tx.clear::<tables::AccountsHistory>()?;
                     tx.clear::<tables::StoragesHistory>()?;
                     tx.put::<tables::StageCheckpoints>(
-                        StageId::IndexAccountHistory.to_string(),
+                        StageId::IndexAccountsHistory.to_string(),
                         Default::default(),
                     )?;
                     tx.put::<tables::StageCheckpoints>(
-                        StageId::IndexStorageHistory.to_string(),
+                        StageId::IndexStoragesHistory.to_string(),
                         Default::default(),
                     )?;
                 }
