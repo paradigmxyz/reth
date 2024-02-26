@@ -605,7 +605,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         )?;
 
         // Recover senders manually if not found in db
-        // SAFETY: Transactions are always guaranteed to be in the database whereas
+        // NOTE: Transactions are always guaranteed to be in the database whereas
         // senders might be pruned.
         if senders.len() != transactions.len() {
             senders.reserve(transactions.len() - senders.len());
@@ -1556,7 +1556,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                         if let Some(block_body) = self.block_body_indices(block_number)? {
                             // the index of the tx in the block is the offset:
                             // len([start..tx_id])
-                            // SAFETY: `transaction_id` is always `>=` the block's first
+                            // NOTE: `transaction_id` is always `>=` the block's first
                             // index
                             let index = transaction_id - block_body.first_tx_num();
 

@@ -298,10 +298,10 @@ where
         return Ok(EthApi::gas_price(self).await?)
     }
 
-    /// Handler for: `eth_blobGasPrice`
-    async fn blob_gas_price(&self) -> Result<U256> {
-        trace!(target: "rpc::eth", "Serving eth_blobGasPrice");
-        return Ok(EthApi::blob_gas_price(self).await?)
+    /// Handler for: `eth_blobBaseFee`
+    async fn blob_base_fee(&self) -> Result<U256> {
+        trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
+        return Ok(EthApi::blob_base_fee(self).await?)
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`

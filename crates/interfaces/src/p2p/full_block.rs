@@ -150,7 +150,7 @@ where
             BodyResponse::PendingValidation(resp) => {
                 // ensure the block is valid, else retry
                 if let Err(err) = ensure_valid_body_response(&header, resp.data()) {
-                    debug!(target: "downloaders", ?err,  hash=?header.hash(), "Received wrong body");
+                    debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
                     self.client.report_bad_message(resp.peer_id());
                     self.header = Some(header);
                     self.request.body = Some(self.client.get_block_body(self.hash));
@@ -164,7 +164,7 @@ where
     fn on_block_response(&mut self, resp: WithPeerId<BlockBody>) {
         if let Some(ref header) = self.header {
             if let Err(err) = ensure_valid_body_response(header, resp.data()) {
-                debug!(target: "downloaders", ?err,  hash=?header.hash(), "Received wrong body");
+                debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
                 self.client.report_bad_message(resp.peer_id());
                 return
             }
@@ -428,7 +428,7 @@ where
 
         let headers = self.headers.take()?;
         let mut needs_retry = false;
-        let mut response = Vec::new();
+        let mut valid_responses = Vec::new();
 
         for header in &headers {
             if let Some(body_resp) = self.bodies.remove(header) {
@@ -438,26 +438,27 @@ where
                     BodyResponse::PendingValidation(resp) => {
                         // ensure the block is valid, else retry
                         if let Err(err) = ensure_valid_body_response(header, resp.data()) {
-                            debug!(target: "downloaders", ?err,  hash=?header.hash(), "Received wrong body in range response");
+                            debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body in range response");
                             self.client.report_bad_message(resp.peer_id());
 
-                            // get body that doesn't match, put back into vecdeque, and just retry
+                            // get body that doesn't match, put back into vecdeque, and retry it
                             self.pending_headers.push_back(header.clone());
                             needs_retry = true;
+                            continue
                         }
 
                         resp.into_data()
                     }
                 };
 
-                response.push(SealedBlock::new(header.clone(), body));
+                valid_responses.push(SealedBlock::new(header.clone(), body));
             }
         }
 
         if needs_retry {
             // put response hashes back into bodies map since we aren't returning them as a
             // response
-            for block in response {
+            for block in valid_responses {
                 let (header, body) = block.split_header_body();
                 self.bodies.insert(header, BodyResponse::Validated(body));
             }
@@ -471,7 +472,7 @@ where
             return None
         }
 
-        Some(response)
+        Some(valid_responses)
     }
 
     fn on_headers_response(&mut self, headers: WithPeerId<Vec<Header>>) {

@@ -2,12 +2,12 @@ use crate::processor::{compare_receipts_root_and_logs_bloom, EVMProcessor};
 use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
-use reth_node_api::ConfigureEvmEnv;
+use reth_node_api::ConfigureEvm;
 use reth_primitives::{
     proofs::calculate_receipt_root_optimism, revm_primitives::ResultAndState, BlockWithSenders,
     Bloom, ChainSpec, Hardfork, Receipt, ReceiptWithBloom, TxType, B256, U256,
 };
-use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
+use reth_provider::{BlockExecutor, BundleStateWithReceipts};
 use revm::DatabaseCommit;
 use std::time::Instant;
 use tracing::{debug, trace};
@@ -40,8 +40,10 @@ pub fn verify_receipt_optimism<'a>(
 
 impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: ConfigureEvm,
 {
+    type Error = BlockExecutionError;
+
     fn execute(
         &mut self,
         block: &BlockWithSenders,
@@ -72,7 +74,7 @@ where
                 self.chain_spec.as_ref(),
                 block.timestamp,
             ) {
-                debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
+                debug!(target: "evm", %error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
             self.stats.receipt_root_duration += time.elapsed();
@@ -194,10 +196,6 @@ where
             receipts,
             self.first_block.unwrap_or_default(),
         )
-    }
-
-    fn stats(&self) -> BlockExecutorStats {
-        self.stats.clone()
     }
 
     fn size_hint(&self) -> Option<usize> {

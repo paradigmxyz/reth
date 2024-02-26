@@ -1,6 +1,7 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use derive_more::Deref;
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{PooledTransactionsElement, TransactionSigned, B256};
 
@@ -33,7 +34,7 @@ where
 /// corresponds to a requested hash. Hashes may need to be re-requested if the bodies are not
 /// included in the response.
 // #[derive_arbitrary(rlp, 10)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default, Deref)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PooledTransactions(
     /// The transaction bodies, each of which should correspond to a requested hash.

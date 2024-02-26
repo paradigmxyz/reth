@@ -39,7 +39,7 @@ use reth_network::{
     transactions::{TransactionFetcherConfig, TransactionsManagerConfig},
     NetworkBuilder, NetworkConfig, NetworkHandle, NetworkManager,
 };
-use reth_node_api::ConfigureEvmEnv;
+use reth_node_api::ConfigureEvm;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     kzg::KzgSettings,
@@ -63,8 +63,8 @@ use reth_stages::{
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
-    TransactionValidationTaskExecutor,
+    blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
+    EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
 use revm_inspectors::stack::Hook;
 use secp256k1::SecretKey;
@@ -433,7 +433,7 @@ impl NodeConfig {
     ) -> eyre::Result<BlockchainTree<DB, EvmProcessorFactory<EvmConfig>>>
     where
         DB: Database + Unpin + Clone + 'static,
-        EvmConfig: ConfigureEvmEnv + Clone + 'static,
+        EvmConfig: ConfigureEvm + Clone + 'static,
     {
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
@@ -467,7 +467,11 @@ impl NodeConfig {
             + Clone
             + 'static,
     {
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
+        let blob_store = DiskFileBlobStore::open(
+            data_dir.blobstore_path(),
+            DiskFileBlobStoreConfig::default()
+                .with_max_cached_entries(self.txpool.max_cached_entries),
+        )?;
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
             .with_head_timestamp(head.timestamp)
             .kzg_settings(self.kzg_settings()?)
@@ -547,7 +551,7 @@ impl NodeConfig {
     where
         DB: Database + Unpin + Clone + 'static,
         Client: HeadersClient + BodiesClient + Clone + 'static,
-        EvmConfig: ConfigureEvmEnv + Clone + 'static,
+        EvmConfig: ConfigureEvm + Clone + 'static,
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -796,7 +800,7 @@ impl NodeConfig {
         DB: Database + Clone + 'static,
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
-        EvmConfig: ConfigureEvmEnv + Clone + 'static,
+        EvmConfig: ConfigureEvm + Clone + 'static,
     {
         let mut builder = Pipeline::builder();
 

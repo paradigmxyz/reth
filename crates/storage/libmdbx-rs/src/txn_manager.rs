@@ -271,7 +271,7 @@ mod read_transactions {
                             if was_in_active && err != Error::BadSignature {
                                 // If the transaction was in the list of active transactions and the
                                 // error code is not `EBADSIGN`, then user didn't abort it.
-                                error!(target: "libmdbx", ?err, ?open_duration, "Failed to abort the long-lived read transactions");
+                                error!(target: "libmdbx", %err, ?open_duration, "Failed to abort the long-lived read transactions");
                             }
                         } else {
                             // Happy path, the transaction has been aborted by us with no errors.

@@ -9,7 +9,7 @@ use crate::{
     commands::{
         config_cmd, db, debug_cmd, import, init_cmd, node, p2p, recover, stage, test_vectors,
     },
-    runner::CliRunner,
+    core::cli::runner::CliRunner,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
@@ -76,7 +76,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
 
         let _guard = self.init_tracing()?;
 
-        let runner = CliRunner;
+        let runner = CliRunner::default();
         match self.command {
             Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),

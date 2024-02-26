@@ -42,7 +42,7 @@ use reth_eth_wire::{
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{ForkId, NodeRecord, PeerId, B256};
+use reth_primitives::{ForkId, NodeRecord, PeerId};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use reth_tasks::shutdown::GracefulShutdown;
@@ -217,13 +217,8 @@ where
             bandwidth_meter.clone(),
         );
 
-        let state = NetworkState::new(
-            client,
-            discovery,
-            peers_manager,
-            chain_spec.genesis_hash(),
-            Arc::clone(&num_active_peers),
-        );
+        let state =
+            NetworkState::new(client, discovery, peers_manager, Arc::clone(&num_active_peers));
 
         let swarm = Swarm::new(incoming, sessions, state);
 
@@ -303,11 +298,6 @@ where
         self.swarm.listener().local_address()
     }
 
-    /// Returns the configured genesis hash
-    pub fn genesis_hash(&self) -> B256 {
-        self.swarm.state().genesis_hash()
-    }
-
     /// How many peers we're currently connected to.
     pub fn num_connected_peers(&self) -> usize {
         self.swarm.state().num_active_peers()
@@ -362,7 +352,7 @@ where
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
-        trace!(target: "net", ?peer_id,  "received unexpected message");
+        trace!(target: "net", ?peer_id, "received unexpected message");
         self.swarm
             .state_mut()
             .peers_mut()
@@ -700,7 +690,7 @@ where
                             trace!(target: "net", ?remote_addr, "TCP listener closed.");
                         }
                         SwarmEvent::TcpListenerError(err) => {
-                            trace!(target: "net", ?err, "TCP connection error.");
+                            trace!(target: "net", %err, "TCP connection error.");
                         }
                         SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
                             trace!(target: "net", ?session_id, ?remote_addr, "Incoming connection");
@@ -893,7 +883,7 @@ where
                                 target: "net",
                                 ?remote_addr,
                                 ?peer_id,
-                                ?error,
+                                %error,
                                 "Outgoing connection error"
                             );
 
