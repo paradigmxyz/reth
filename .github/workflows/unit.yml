@@ -61,7 +61,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo nextest run --release -p ef-tests --features ef-tests
+      - run: cargo nextest run --release -p ef-tests --features ef-tests --nocapture
   doc:
     name: doc tests (${{ matrix.network }})
     runs-on:

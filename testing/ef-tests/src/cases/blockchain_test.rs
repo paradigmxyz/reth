@@ -64,18 +64,23 @@ impl Case for BlockchainTestCase {
         }
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
-        for case in self.tests.values().filter(|case| {
-            !matches!(
-                case.network,
-                ForkSpec::ByzantiumToConstantinopleAt5 |
-                    ForkSpec::Constantinople |
-                    ForkSpec::ConstantinopleFix |
-                    ForkSpec::MergeEOF |
-                    ForkSpec::MergeMeterInitCode |
-                    ForkSpec::MergePush0 |
-                    ForkSpec::Unknown
-            )
-        }) {
+        for (i, case) in self
+            .tests
+            .values()
+            .filter(|case| {
+                !matches!(
+                    case.network,
+                    ForkSpec::ByzantiumToConstantinopleAt5 |
+                        ForkSpec::Constantinople |
+                        ForkSpec::ConstantinopleFix |
+                        ForkSpec::MergeEOF |
+                        ForkSpec::MergeMeterInitCode |
+                        ForkSpec::MergePush0 |
+                        ForkSpec::Unknown
+                )
+            })
+            .enumerate()
+        {
             // Create a new test database and initialize a provider for the test case.
             let db = create_test_rw_db();
             let static_files_dir = create_test_static_files_dir();
@@ -155,6 +160,11 @@ impl Case for BlockchainTestCase {
             // when the variable goes out of scope
             reth_primitives::fs::remove_dir_all(static_files_dir)
                 .expect("Failed to remove static files directory");
+
+            if i % 100 == 0 {
+                println!("Processed {} tests", i);
+                println!("{:?}", memory_stats::memory_stats());
+            }
         }
 
         Ok(())
