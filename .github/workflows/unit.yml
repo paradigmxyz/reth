@@ -60,10 +60,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Set Swap Space
-        uses: pierotofy/set-swap-space@master
+      - uses: actionhippie/swap-space@v1
         with:
-          swap-size-gb: 20
+          size: 20G
       - run: cargo nextest run --release -p ef-tests --features ef-tests --nocapture
   doc:
     name: doc tests (${{ matrix.network }})
