@@ -119,5 +119,3 @@ op-node \
 [op-node]: https://github.com/ethereum-optimism/optimism/tree/develop/op-node
 [magi]: https://github.com/a16z/magi
 [hildr]: https://github.com/optimism-java/hildr
-
-[base-node]: https://github.com/base-org/node/tree/main
