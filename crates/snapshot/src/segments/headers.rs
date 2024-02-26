@@ -54,7 +54,7 @@ impl Segment for Headers {
                     self.dataset_for_compression::<DB, tables::Headers>(
                         provider, &range, range_len,
                     )?,
-                    self.dataset_for_compression::<DB, tables::HeaderTD>(
+                    self.dataset_for_compression::<DB, tables::HeaderTerminalDifficulties>(
                         provider, &range, range_len,
                     )?,
                     self.dataset_for_compression::<DB, tables::CanonicalHeaders>(
@@ -78,7 +78,7 @@ impl Segment for Headers {
 
         create_snapshot_T1_T2_T3::<
             tables::Headers,
-            tables::HeaderTD,
+            tables::HeaderTerminalDifficulties,
             tables::CanonicalHeaders,
             BlockNumber,
             SegmentHeader,

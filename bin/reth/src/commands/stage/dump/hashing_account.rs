@@ -19,7 +19,11 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
 
     // Import relevant AccountChangeSets
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::AccountChangeSet, _>(&db_tool.db.tx()?, Some(from), to)
+        tx.import_table_with_range::<tables::AccountChangeSets, _>(
+            &db_tool.db.tx()?,
+            Some(from),
+            to,
+        )
     })??;
 
     unwind_and_copy(db_tool, from, tip_block_number, &output_db)?;

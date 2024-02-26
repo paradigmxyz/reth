@@ -85,7 +85,7 @@ pub fn init_genesis<DB: Database>(
 
     // insert sync stage
     for stage in StageId::ALL.iter() {
-        tx.put::<tables::SyncStage>(stage.to_string(), Default::default())?;
+        tx.put::<tables::StageCheckpoints>(stage.to_string(), Default::default())?;
     }
 
     tx.commit()?;
@@ -215,7 +215,7 @@ pub fn insert_genesis_header<DB: Database>(
     tx.put::<tables::CanonicalHeaders>(0, block_hash)?;
     tx.put::<tables::HeaderNumbers>(block_hash, 0)?;
     tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
-    tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
+    tx.put::<tables::HeaderTerminalDifficulties>(0, header.difficulty.into())?;
     tx.put::<tables::Headers>(0, header)?;
 
     Ok(())
@@ -327,7 +327,7 @@ mod tests {
         let tx = db.tx().expect("failed to init tx");
 
         assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::AccountHistory>(&tx)
+            collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(&tx)
                 .expect("failed to collect"),
             vec![
                 (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
@@ -336,7 +336,7 @@ mod tests {
         );
 
         assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::StorageHistory>(&tx)
+            collect_table_entries::<Arc<DatabaseEnv>, tables::StoragesHistory>(&tx)
                 .expect("failed to collect"),
             vec![(
                 StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),

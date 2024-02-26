@@ -50,7 +50,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
 
         let mut last_changeset_pruned_block = None;
         let (pruned_changesets, done) = provider
-            .prune_table_with_range::<tables::StorageChangeSet>(
+            .prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
                 input.delete_limit / 2,
                 |_| false,
@@ -64,7 +64,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
             .unwrap_or(range_end);
 
-        let (processed, pruned_indices) = prune_history_indices::<DB, tables::StorageHistory, _>(
+        let (processed, pruned_indices) = prune_history_indices::<DB, tables::StoragesHistory, _>(
             provider,
             last_changeset_pruned_block,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
@@ -117,7 +117,7 @@ mod tests {
         db.insert_changesets(changesets.clone(), None).expect("insert changesets");
         db.insert_history(changesets.clone(), None).expect("insert history");
 
-        let storage_occurrences = db.table::<tables::StorageHistory>().unwrap().into_iter().fold(
+        let storage_occurrences = db.table::<tables::StoragesHistory>().unwrap().into_iter().fold(
             BTreeMap::<_, usize>::new(),
             |mut map, (key, _)| {
                 map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
@@ -127,11 +127,11 @@ mod tests {
         assert!(storage_occurrences.into_iter().any(|(_, occurrences)| occurrences > 1));
 
         assert_eq!(
-            db.table::<tables::StorageChangeSet>().unwrap().len(),
+            db.table::<tables::StorageChangeSets>().unwrap().len(),
             changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
         );
 
-        let original_shards = db.table::<tables::StorageHistory>().unwrap();
+        let original_shards = db.table::<tables::StoragesHistory>().unwrap();
 
         let test_prune = |to_block: BlockNumber, run: usize, expected_result: (bool, usize)| {
             let prune_mode = PruneMode::Before(to_block);
@@ -207,11 +207,11 @@ mod tests {
             );
 
             assert_eq!(
-                db.table::<tables::StorageChangeSet>().unwrap().len(),
+                db.table::<tables::StorageChangeSets>().unwrap().len(),
                 pruned_changesets.values().flatten().count()
             );
 
-            let actual_shards = db.table::<tables::StorageHistory>().unwrap();
+            let actual_shards = db.table::<tables::StoragesHistory>().unwrap();
 
             let expected_shards = original_shards
                 .iter()

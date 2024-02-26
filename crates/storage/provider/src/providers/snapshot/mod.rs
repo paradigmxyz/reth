@@ -47,7 +47,7 @@ mod tests {
         cursor::DbCursorRO,
         snapshot::create_snapshot_T1_T2_T3,
         transaction::{DbTx, DbTxMut},
-        CanonicalHeaders, HeaderNumbers, HeaderTD, Headers, RawTable,
+        CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers, RawTable,
     };
     use reth_interfaces::test_utils::generators::{self, random_header_range};
     use reth_primitives::{BlockNumber, B256, U256};
@@ -81,7 +81,7 @@ mod tests {
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();
             tx.put::<Headers>(header.number, header.clone().unseal()).unwrap();
-            tx.put::<HeaderTD>(header.number, td.into()).unwrap();
+            tx.put::<HeaderTerminalDifficulties>(header.number, td.into()).unwrap();
             tx.put::<HeaderNumbers>(hash, header.number).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -117,7 +117,7 @@ mod tests {
 
             create_snapshot_T1_T2_T3::<
                 Headers,
-                HeaderTD,
+                HeaderTerminalDifficulties,
                 CanonicalHeaders,
                 BlockNumber,
                 SegmentHeader,
@@ -148,7 +148,7 @@ mod tests {
                 assert_eq!(header, db_provider.header(&header_hash).unwrap().unwrap());
                 assert_eq!(header, jar_provider.header(&header_hash).unwrap().unwrap());
 
-                // Compare HeaderTD
+                // Compare HeaderTerminalDifficulties
                 assert_eq!(
                     db_provider.header_td(&header_hash).unwrap().unwrap(),
                     jar_provider.header_td(&header_hash).unwrap().unwrap()

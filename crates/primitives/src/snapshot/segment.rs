@@ -27,7 +27,8 @@ use strum::{AsRefStr, EnumIter, EnumString};
 /// Segment of the data that can be snapshotted.
 pub enum SnapshotSegment {
     #[strum(serialize = "headers")]
-    /// Snapshot segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables.
+    /// Snapshot segment responsible for the `CanonicalHeaders`, `Headers`,
+    /// `HeaderTerminalDifficulties` tables.
     Headers,
     #[strum(serialize = "transactions")]
     /// Snapshot segment responsible for the `Transactions` table.

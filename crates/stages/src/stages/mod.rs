@@ -47,7 +47,7 @@ mod tests {
         tables,
         test_utils::TempDatabase,
         transaction::{DbTx, DbTxMut},
-        AccountHistory, DatabaseEnv,
+        AccountsHistory, DatabaseEnv,
     };
     use reth_interfaces::test_utils::generators::{self, random_block};
     use reth_node_ethereum::EthEvmConfig;
@@ -165,8 +165,8 @@ mod tests {
                 assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {
                 acc_indexing_stage.execute(&provider, input).unwrap();
-                let mut account_history: Cursor<RW, AccountHistory> =
-                    provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
+                let mut account_history: Cursor<RW, AccountsHistory> =
+                    provider.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap();
                 assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
             }
 
@@ -183,7 +183,7 @@ mod tests {
                 storage_indexing_stage.execute(&provider, input).unwrap();
 
                 let mut storage_history =
-                    provider.tx_ref().cursor_read::<tables::StorageHistory>().unwrap();
+                    provider.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap();
                 assert_eq!(
                     storage_history.walk(None).unwrap().count(),
                     expect_num_storage_changesets
