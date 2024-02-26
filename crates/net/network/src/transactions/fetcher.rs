@@ -55,9 +55,9 @@ pub struct TransactionFetcher {
     /// which a [`GetPooledTransactions`] request is inflight.
     pub(super) hashes_pending_fetch: schnellru::LruMap<TxHash, ()>,
     /// Tracks all hashes in the transaction fetcher.
-    pub(super) hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, Unlimited>,
-    /// Filter for valid announcement and response data.
-    pub(super) filter_valid_message: MessageFilter,
+    pub(super) hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, ByLength>,
+    /// Filter for valid eth68 announcements.
+    pub(super) filter_valid_hashes: MessageFilter,
     /// Info on capacity of the transaction fetcher.
     pub info: TransactionFetcherInfo,
     /// [`FetchEvent`]s as a result of advancing inflight requests. This is an intermediary ¨
@@ -953,8 +953,12 @@ impl Default for TransactionFetcher {
                     .try_into()
                     .expect("todo: better message, 32 bit limit"),
             )),
-            hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
-            filter_valid_message: Default::default(),
+            hashes_fetch_inflight_and_pending_fetch: LruMap::new(
+                DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH
+                    .try_into()
+                    .expect("buffered cache limit should be u32"),
+            ),
+            filter_valid_hashes: Default::default(),
             info: TransactionFetcherInfo::default(),
             fetch_events_head,
             fetch_events_tail,

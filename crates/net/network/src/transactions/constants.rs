@@ -127,6 +127,12 @@ pub mod tx_fetcher {
 
     /// Default limit for number of transactions waiting for an idle peer to be fetched from.
     ///
+    /// This is twice the [`DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH`] limit.
+    pub const DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH: usize =
+        DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH * 2;
+
+    /// Default limit for number of transactions waiting for an idle peer to be fetched from.
+    ///
     /// Default is 100 times the [`SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST`],
     /// which defaults to 256 hashes, so 25 600 hashes.
     pub const DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH: usize =
