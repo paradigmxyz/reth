@@ -700,12 +700,13 @@ impl EnvironmentBuilder {
             }
         }
 
+        let env_ptr = EnvPtr(env);
+
         #[cfg(not(feature = "read-tx-timeouts"))]
-        let txn_manager = TxnManager::new(EnvPtr(env));
+        let txn_manager = TxnManager::new(env_ptr);
 
         #[cfg(feature = "read-tx-timeouts")]
         let txn_manager = {
-            let env_ptr = EnvPtr(env);
             if let crate::MaxReadTransactionDuration::Set(duration) = self
                 .max_read_transaction_duration
                 .unwrap_or(read_transactions::MaxReadTransactionDuration::Set(
