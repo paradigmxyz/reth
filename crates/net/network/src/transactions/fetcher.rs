@@ -3,6 +3,7 @@ use crate::{
     message::PeerRequest,
 };
 
+use crate::metrics::AnnouncedTxSizeMetrics;
 use derive_more::Constructor;
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
@@ -56,6 +57,7 @@ pub(crate) struct TransactionFetcher {
     pub(super) filter_valid_hashes: AnnouncementFilter,
     /// Info on capacity of the transaction fetcher.
     pub(super) info: TransactionFetcherInfo,
+    pub(super) announced_tx_metrics: AnnouncedTxSizeMetrics,
 }
 
 // === impl TransactionFetcher ===
@@ -896,6 +898,7 @@ impl Default for TransactionFetcher {
             hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
             filter_valid_hashes: Default::default(),
             info: TransactionFetcherInfo::default(),
+            announced_tx_metrics: AnnouncedTxSizeMetrics::default(),
         }
     }
 }

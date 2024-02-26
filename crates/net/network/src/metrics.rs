@@ -1,8 +1,10 @@
-use reth_eth_wire::DisconnectReason;
+use metrics::Histogram;
+use reth_eth_wire::{DisconnectReason, ValidAnnouncementData};
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
+use reth_primitives::TxType;
 
 /// Scope for monitoring transactions sent from the manager to the tx manager
 pub(crate) const NETWORK_POOL_TRANSACTIONS_SCOPE: &str = "network.pool.transactions";
@@ -243,4 +245,46 @@ pub struct EthRequestHandlerMetrics {
 
     /// Number of received bodies requests
     pub(crate) received_bodies_requests: Counter,
+}
+
+/// Eth67 announcement metrics, track entries by TxType
+#[derive(Metrics)]
+#[metrics(scope = "network.transaction_fetcher")]
+pub struct AnnouncedTxSizeMetrics {
+    /// Histogram for tracking legacy transaction sizes
+    pub(crate) legacy: Histogram,
+
+    /// Histogram for tracking EIP-2930 transaction sizes
+    pub(crate) eip2930: Histogram,
+
+    /// Histogram for tracking EIP-1559 transaction sizes
+    pub(crate) eip1559: Histogram,
+
+    /// Histogram for tracking EIP-4844 transaction sizes
+    pub(crate) eip4844: Histogram,
+}
+
+impl AnnouncedTxSizeMetrics {
+    /// Update metrics during announcement validation, by examining each announcement entry based on
+    /// TxType
+    pub(crate) fn update_on_valid_announcement(&self, announcement: &ValidAnnouncementData) {
+        let mut aggragate = [0; 4];
+        for item in announcement.iter() {
+            if let (_, Some((ty, _))) = item {
+                if let Ok(ty) = TxType::try_from(*ty) {
+                    match ty {
+                        TxType::Legacy => aggragate[0] += 1,
+                        TxType::EIP2930 => aggragate[1] += 1,
+                        TxType::EIP1559 => aggragate[2] += 1,
+                        TxType::EIP4844 => aggragate[3] += 1,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        self.legacy.record(aggragate[0] as f64);
+        self.eip2930.record(aggragate[1] as f64);
+        self.eip1559.record(aggragate[2] as f64);
+        self.eip4844.record(aggragate[3] as f64);
+    }
 }

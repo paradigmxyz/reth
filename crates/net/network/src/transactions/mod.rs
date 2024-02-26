@@ -709,6 +709,9 @@ where
                 if let FilterOutcome::ReportPeer = outcome {
                     self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
                 }
+                self.transaction_fetcher
+                    .announced_tx_metrics
+                    .update_on_valid_announcement(&valid_data);
 
                 valid_data
             }
