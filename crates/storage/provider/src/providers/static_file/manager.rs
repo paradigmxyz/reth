@@ -100,6 +100,12 @@ impl StaticFileProviderInner {
     }
 }
 
+impl Drop for StaticFileProviderInner {
+    fn drop(&mut self) {
+        println!("Dropping StaticFileProviderInner: {:?}", self.path);
+    }
+}
+
 impl StaticFileProvider {
     /// Loads filters into memory when creating a [`StaticFileJarProvider`].
     pub fn with_filters(self) -> Self {

@@ -2717,6 +2717,7 @@ dependencies = [
  "async-trait",
  "eyre",
  "futures",
+ "jemallocator",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-db",

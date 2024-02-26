@@ -14,6 +14,7 @@ use std::{
     error::Error as StdError,
     fs::File,
     ops::Range,
+    os::fd::AsRawFd,
     path::{Path, PathBuf},
 };
 use sucds::{int_vectors::PrefixSummedEliasFano, Serializable};
@@ -472,6 +473,16 @@ pub struct DataReader {
     offset_mmap: Mmap,
     /// Number of bytes that represent one offset.
     offset_size: u64,
+}
+
+impl Drop for DataReader {
+    fn drop(&mut self) {
+        println!(
+            "Dropping DataReader: data = {}, offset = {}",
+            self.data_file.as_raw_fd(),
+            self.offset_file.as_raw_fd()
+        );
+    }
 }
 
 impl DataReader {
