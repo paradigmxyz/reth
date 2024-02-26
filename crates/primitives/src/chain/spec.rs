@@ -340,6 +340,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1704992401)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
             (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
@@ -2215,7 +2216,15 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 0, timestamp: 1704992401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x3c, 0x28, 0x3c, 0xb3]), next: 0 },
+                    ForkId { hash: ForkHash([0x3c, 0x28, 0x3c, 0xb3]), next: 1710374401 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1710374400, ..Default::default() },
+                    ForkId { hash: ForkHash([0x3c, 0x28, 0x3c, 0xb3]), next: 1710374401 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1710374401, ..Default::default() },
+                    ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 0 },
                 ),
             ],
         );
