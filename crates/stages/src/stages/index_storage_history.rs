@@ -13,7 +13,7 @@ use std::fmt::Debug;
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
 /// on index sharding take a look at [`reth_db::tables::StorageHistory`].
 #[derive(Debug)]
-pub struct IndexStoragesHistoryStage {
+pub struct IndexStorageHistoryStage {
     /// Number of blocks after which the control
     /// flow will be returned to the pipeline for commit.
     pub commit_threshold: u64,
@@ -21,23 +21,23 @@ pub struct IndexStoragesHistoryStage {
     pub prune_mode: Option<PruneMode>,
 }
 
-impl IndexStoragesHistoryStage {
-    /// Create new instance of [IndexStoragesHistoryStage].
+impl IndexStorageHistoryStage {
+    /// Create new instance of [IndexStorageHistoryStage].
     pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>) -> Self {
         Self { commit_threshold, prune_mode }
     }
 }
 
-impl Default for IndexStoragesHistoryStage {
+impl Default for IndexStorageHistoryStage {
     fn default() -> Self {
         Self { commit_threshold: 100_000, prune_mode: None }
     }
 }
 
-impl<DB: Database> Stage<DB> for IndexStoragesHistoryStage {
+impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        StageId::IndexStoragesHistory
+        StageId::IndexStorageHistory
     }
 
     /// Execute the stage.
@@ -188,7 +188,7 @@ mod tests {
             checkpoint: input_checkpoint
                 .map(|block_number| StageCheckpoint { block_number, stage_checkpoint: None }),
         };
-        let mut stage = IndexStoragesHistoryStage::default();
+        let mut stage = IndexStorageHistoryStage::default();
         let provider = db.factory.provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(run_to), done: true });
@@ -201,7 +201,7 @@ mod tests {
             unwind_to,
             ..Default::default()
         };
-        let mut stage = IndexStoragesHistoryStage::default();
+        let mut stage = IndexStorageHistoryStage::default();
         let provider = db.factory.provider_rw().unwrap();
         let out = stage.unwind(&provider, input).unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
@@ -448,7 +448,7 @@ mod tests {
 
         // run
         let input = ExecInput { target: Some(20000), ..Default::default() };
-        let mut stage = IndexStoragesHistoryStage {
+        let mut stage = IndexStorageHistoryStage {
             prune_mode: Some(PruneMode::Before(36)),
             ..Default::default()
         };
@@ -469,22 +469,22 @@ mod tests {
         assert!(table.is_empty());
     }
 
-    stage_test_suite_ext!(IndexStoragesHistoryTestRunner, index_storage_history);
+    stage_test_suite_ext!(IndexStorageHistoryTestRunner, index_storage_history);
 
-    struct IndexStoragesHistoryTestRunner {
+    struct IndexStorageHistoryTestRunner {
         pub(crate) db: TestStageDB,
         commit_threshold: u64,
         prune_mode: Option<PruneMode>,
     }
 
-    impl Default for IndexStoragesHistoryTestRunner {
+    impl Default for IndexStorageHistoryTestRunner {
         fn default() -> Self {
             Self { db: TestStageDB::default(), commit_threshold: 1000, prune_mode: None }
         }
     }
 
-    impl StageTestRunner for IndexStoragesHistoryTestRunner {
-        type S = IndexStoragesHistoryStage;
+    impl StageTestRunner for IndexStorageHistoryTestRunner {
+        type S = IndexStorageHistoryStage;
 
         fn db(&self) -> &TestStageDB {
             &self.db
@@ -495,7 +495,7 @@ mod tests {
         }
     }
 
-    impl ExecuteStageTestRunner for IndexStoragesHistoryTestRunner {
+    impl ExecuteStageTestRunner for IndexStorageHistoryTestRunner {
         type Seed = ();
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
@@ -600,7 +600,7 @@ mod tests {
         }
     }
 
-    impl UnwindStageTestRunner for IndexStoragesHistoryTestRunner {
+    impl UnwindStageTestRunner for IndexStorageHistoryTestRunner {
         fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
             let table = self.db.table::<tables::StoragesHistory>().unwrap();
             assert!(table.is_empty());

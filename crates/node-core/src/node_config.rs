@@ -55,8 +55,8 @@ use reth_revm::EvmProcessorFactory;
 use reth_stages::{
     prelude::*,
     stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountsHistoryStage,
-        IndexStoragesHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
+        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
         TotalDifficultyStage, TransactionLookupStage,
     },
     MetricEvent,
@@ -882,11 +882,11 @@ impl NodeConfig {
                     stage_config.transaction_lookup.commit_threshold,
                     prune_modes.transaction_lookup,
                 ))
-                .set(IndexAccountsHistoryStage::new(
+                .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
                     prune_modes.account_history,
                 ))
-                .set(IndexStoragesHistoryStage::new(
+                .set(IndexStorageHistoryStage::new(
                     stage_config.index_storage_history.commit_threshold,
                     prune_modes.storage_history,
                 )),
