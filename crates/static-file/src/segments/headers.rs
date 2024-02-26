@@ -65,7 +65,7 @@ impl<DB: Database> Segment<DB> for Headers {
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
         let range_len = block_range.clone().count();
-        let mut jar = prepare_jar::<DB, 3>(
+        let jar = prepare_jar::<DB, 3>(
             provider,
             directory,
             StaticFileSegment::Headers,
@@ -119,7 +119,7 @@ impl<DB: Database> Segment<DB> for Headers {
             None::<Vec<std::vec::IntoIter<Vec<u8>>>>,
             hashes,
             range_len,
-            &mut jar,
+            jar,
         )?;
 
         Ok(())

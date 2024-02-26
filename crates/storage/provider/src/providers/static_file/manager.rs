@@ -79,7 +79,7 @@ pub struct StaticFileProviderInner {
     /// won't be able to be queried directly.
     load_filters: bool,
     /// Maintains a map of StaticFile writers for each [`StaticFileSegment`]
-    writers: DashMap<StaticFileSegment, StaticFileProviderRW<'static>>,
+    writers: DashMap<StaticFileSegment, StaticFileProviderRW>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
 }
 

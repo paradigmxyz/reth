@@ -20,20 +20,19 @@ use std::{
 use tracing::debug;
 
 /// Mutable reference to a dashmap element of [`StaticFileProviderRW`].
-pub type StaticFileProviderRWRefMut<'a> =
-    RefMut<'a, StaticFileSegment, StaticFileProviderRW<'static>>;
+pub type StaticFileProviderRWRefMut<'a> = RefMut<'a, StaticFileSegment, StaticFileProviderRW>;
 
 #[derive(Debug)]
 /// Extends `StaticFileProvider` with writing capabilities
-pub struct StaticFileProviderRW<'a> {
+pub struct StaticFileProviderRW {
     reader: StaticFileProvider,
-    writer: NippyJarWriter<'a, SegmentHeader>,
+    writer: NippyJarWriter<SegmentHeader>,
     data_path: PathBuf,
     buf: Vec<u8>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
 }
 
-impl<'a> StaticFileProviderRW<'a> {
+impl StaticFileProviderRW {
     /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
     pub fn new(
         segment: StaticFileSegment,
@@ -50,7 +49,7 @@ impl<'a> StaticFileProviderRW<'a> {
         block: u64,
         reader: StaticFileProvider,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
-    ) -> ProviderResult<(NippyJarWriter<'a, SegmentHeader>, PathBuf)> {
+    ) -> ProviderResult<(NippyJarWriter<SegmentHeader>, PathBuf)> {
         let start = Instant::now();
 
         let block_range = find_fixed_range(block);
@@ -66,7 +65,7 @@ impl<'a> StaticFileProviderRW<'a> {
                 Err(err) => return Err(err),
             };
 
-        let result = match NippyJarWriter::from_owned(jar) {
+        let result = match NippyJarWriter::new(jar) {
             Ok(writer) => Ok((writer, path)),
             Err(NippyJarError::FrozenJar) => {
                 // This static file has been frozen, so we should
@@ -443,7 +442,7 @@ impl<'a> StaticFileProviderRW<'a> {
     }
 }
 
-impl<'a> Deref for StaticFileProviderRW<'a> {
+impl Deref for StaticFileProviderRW {
     type Target = StaticFileProvider;
     fn deref(&self) -> &Self::Target {
         &self.reader

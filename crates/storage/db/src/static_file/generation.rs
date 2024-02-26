@@ -43,7 +43,7 @@ macro_rules! generate_static_file_func {
                     dict_compression_set: Option<Vec<impl Iterator<Item = Vec<u8>>>>,
                     keys: Option<impl Iterator<Item = ColumnResult<impl PHFKey>>>,
                     row_count: usize,
-                    nippy_jar: &mut NippyJar<H>
+                    mut nippy_jar: NippyJar<H>
                 ) -> ProviderResult<()>
                     where K: Key + Copy
                 {
@@ -88,7 +88,7 @@ macro_rules! generate_static_file_func {
 
                     debug!(target: "reth::static_file", jar=?nippy_jar, "Generating static file.");
 
-                    nippy_jar.freeze(col_iterators.into_iter().chain(additional).collect(), row_count as u64)?;
+                    let nippy_jar = nippy_jar.freeze(col_iterators.into_iter().chain(additional).collect(), row_count as u64)?;
 
                     debug!(target: "reth::static_file", jar=?nippy_jar, "Static file generated.");
 

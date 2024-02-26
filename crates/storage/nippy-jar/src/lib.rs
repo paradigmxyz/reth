@@ -365,16 +365,19 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Writes all data and configuration to a file and the offset index to another.
     pub fn freeze(
-        &mut self,
+        mut self,
         columns: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
         total_rows: u64,
-    ) -> Result<(), NippyJarError> {
+    ) -> Result<Self, NippyJarError> {
         self.check_before_freeze(&columns)?;
 
         debug!(target: "nippy-jar", path=?self.data_path(), "Opening data file.");
 
+        // Write phf, filter and offset index to file
+        self.freeze_filters()?;
+
         // Creates the writer, data and offsets file
-        let mut writer = NippyJarWriter::from_mut(self)?;
+        let mut writer = NippyJarWriter::new(self)?;
 
         // Append rows to file while holding offsets in memory
         writer.append_rows(columns, total_rows)?;
@@ -382,12 +385,9 @@ impl<H: NippyJarHeader> NippyJar<H> {
         // Flushes configuration and offsets to disk
         writer.commit()?;
 
-        // Write phf, filter and offset index to file
-        self.freeze_filters()?;
+        debug!(target: "nippy-jar", ?writer, "Finished writing data.");
 
-        debug!(target: "nippy-jar", jar=?self, "Finished writing data.");
-
-        Ok(())
+        Ok(writer.into_jar())
     }
 
     /// Freezes [`PerfectHashingFunction`], [`InclusionFilter`] and the offset index to file.
@@ -585,15 +585,21 @@ mod tests {
         let num_rows = col1.len() as u64;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let mut nippy = NippyJar::new_without_header(num_columns, file_path.path());
-        assert!(matches!(NippyJar::set_keys(&mut nippy, &col1), Err(NippyJarError::PHFMissing)));
-
-        let check_phf = |nippy: &mut NippyJar<_>| {
+        let create_nippy = || -> NippyJar<()> {
+            let mut nippy = NippyJar::new_without_header(num_columns, file_path.path());
             assert!(matches!(
-                NippyJar::get_index(nippy, &col1[0]),
+                NippyJar::set_keys(&mut nippy, &col1),
+                Err(NippyJarError::PHFMissing)
+            ));
+            nippy
+        };
+
+        let check_phf = |mut nippy: NippyJar<_>| {
+            assert!(matches!(
+                NippyJar::get_index(&nippy, &col1[0]),
                 Err(NippyJarError::PHFMissingKeys)
             ));
-            assert!(NippyJar::set_keys(nippy, &col1).is_ok());
+            assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
 
             let collect_indexes = |nippy: &NippyJar<_>| -> Vec<u64> {
                 col1.iter()
@@ -602,12 +608,12 @@ mod tests {
             };
 
             // Ensure all indexes are unique
-            let indexes = collect_indexes(nippy);
+            let indexes = collect_indexes(&nippy);
             assert_eq!(indexes.iter().collect::<HashSet<_>>().len(), indexes.len());
 
             // Ensure reproducibility
-            assert!(NippyJar::set_keys(nippy, &col1).is_ok());
-            assert_eq!(indexes, collect_indexes(nippy));
+            assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
+            assert_eq!(indexes, collect_indexes(&nippy));
 
             // Ensure that loaded phf provides the same function outputs
             nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
@@ -620,12 +626,10 @@ mod tests {
         };
 
         // fmph bytes size for 100 values of 32 bytes: 54
-        nippy = nippy.with_fmph();
-        check_phf(&mut nippy);
+        check_phf(create_nippy().with_fmph());
 
         // fmph bytes size for 100 values of 32 bytes: 46
-        nippy = nippy.with_gofmph();
-        check_phf(&mut nippy);
+        check_phf(create_nippy().with_gofmph());
     }
 
     #[test]
@@ -658,7 +662,9 @@ mod tests {
         assert!(InclusionFilter::add(&mut nippy, &col1[2]).is_ok());
         assert!(InclusionFilter::add(&mut nippy, &col1[3]).is_ok());
 
-        nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
+        let nippy = nippy
+            .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+            .unwrap();
         let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         loaded_nippy.load_filters().unwrap();
 
@@ -702,6 +708,10 @@ mod tests {
             Err(NippyJarError::CompressorNotReady)
         ));
 
+        let mut nippy =
+            NippyJar::new_without_header(num_columns, file_path.path()).with_zstd(true, 5000);
+        assert!(nippy.compressor().is_some());
+
         nippy.prepare_compression(vec![col1.clone(), col2.clone()]).unwrap();
 
         if let Some(Compressors::Zstd(zstd)) = &nippy.compressor() {
@@ -711,7 +721,9 @@ mod tests {
             ));
         }
 
-        nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
+        let nippy = nippy
+            .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+            .unwrap();
 
         let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         loaded_nippy.load_filters().unwrap();
@@ -751,10 +763,12 @@ mod tests {
         let nippy = NippyJar::new_without_header(num_columns, file_path.path());
         assert!(nippy.compressor().is_none());
 
-        let mut nippy = NippyJar::new_without_header(num_columns, file_path.path()).with_lz4();
+        let nippy = NippyJar::new_without_header(num_columns, file_path.path()).with_lz4();
         assert!(nippy.compressor().is_some());
 
-        nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
+        let nippy = nippy
+            .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+            .unwrap();
 
         let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         loaded_nippy.load_filters().unwrap();
@@ -787,11 +801,13 @@ mod tests {
         let nippy = NippyJar::new_without_header(num_columns, file_path.path());
         assert!(nippy.compressor().is_none());
 
-        let mut nippy =
+        let nippy =
             NippyJar::new_without_header(num_columns, file_path.path()).with_zstd(false, 5000);
         assert!(nippy.compressor().is_some());
 
-        nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
+        let nippy = nippy
+            .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+            .unwrap();
 
         let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         loaded_nippy.load_filters().unwrap();
@@ -1074,7 +1090,7 @@ mod tests {
         col1: &[Vec<u8>],
         col2: &[Vec<u8>],
     ) {
-        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+        let nippy = NippyJar::load_without_header(file_path).unwrap();
 
         // Set the baseline that should be unwinded to
         let initial_rows = nippy.rows;
@@ -1086,7 +1102,7 @@ mod tests {
         assert!(initial_offset_size > 0);
 
         // Appends a third row
-        let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
+        let mut writer = NippyJarWriter::new(nippy).unwrap();
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
         writer.append_column(Some(Ok(&col2[2]))).unwrap();
 
@@ -1100,7 +1116,7 @@ mod tests {
         // Simulate an unexpected shutdown of the writer, before it can finish commit()
         drop(writer);
 
-        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+        let nippy = NippyJar::load_without_header(file_path).unwrap();
         assert_eq!(initial_rows, nippy.rows);
 
         // Data was written successfuly
@@ -1117,21 +1133,20 @@ mod tests {
         // Writer will execute a consistency check and verify first that the offset list on disk
         // doesn't match the nippy.rows, and prune it. Then, it will prune the data file
         // accordingly as well.
-        let _writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
-        assert_eq!(initial_rows, nippy.rows);
+        let writer = NippyJarWriter::new(nippy).unwrap();
+        assert_eq!(initial_rows, writer.rows());
         assert_eq!(
             initial_offset_size,
-            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize
+            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len() as usize
         );
         assert_eq!(
             initial_data_size,
-            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize
+            File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize
         );
-        assert_eq!(initial_rows, nippy.rows);
     }
 
     fn test_append_consistency_no_commit(file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
-        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+        let nippy = NippyJar::load_without_header(file_path).unwrap();
 
         // Set the baseline that should be unwinded to
         let initial_rows = nippy.rows;
@@ -1144,14 +1159,14 @@ mod tests {
 
         // Appends a third row, so we have an offset list in memory, which is not flushed to disk,
         // while the data has been.
-        let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
+        let mut writer = NippyJarWriter::new(nippy).unwrap();
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
         writer.append_column(Some(Ok(&col2[2]))).unwrap();
 
         // Simulate an unexpected shutdown of the writer, before it can call commit()
         drop(writer);
 
-        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+        let nippy = NippyJar::load_without_header(file_path).unwrap();
         assert_eq!(initial_rows, nippy.rows);
 
         // Data was written successfuly
@@ -1167,13 +1182,12 @@ mod tests {
 
         // Writer will execute a consistency check and verify that the data file has more data than
         // it should, and resets it to the last offset of the list (on disk here)
-        let _writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
-        assert_eq!(initial_rows, nippy.rows);
+        let writer = NippyJarWriter::new(nippy).unwrap();
+        assert_eq!(initial_rows, writer.rows());
         assert_eq!(
             initial_data_size,
-            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize
+            File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize
         );
-        assert_eq!(initial_rows, nippy.rows);
     }
 
     fn append_two_rows(num_columns: usize, file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
@@ -1184,7 +1198,7 @@ mod tests {
             assert_eq!(nippy.max_row_size, 0);
             assert_eq!(nippy.rows, 0);
 
-            let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
+            let mut writer = NippyJarWriter::new(nippy).unwrap();
             assert_eq!(writer.column(), 0);
 
             writer.append_column(Some(Ok(&col1[0]))).unwrap();
@@ -1200,26 +1214,26 @@ mod tests {
             let expected_data_file_size = *writer.offsets().last().unwrap();
             writer.commit().unwrap();
 
-            assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
-            assert_eq!(nippy.rows, 1);
+            assert_eq!(writer.max_row_size(), col1[0].len() + col2[0].len());
+            assert_eq!(writer.rows(), 1);
             assert_eq!(
-                File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len(),
+                File::open(writer.offsets_path()).unwrap().metadata().unwrap().len(),
                 1 + num_columns as u64 * 8 + 8
             );
             assert_eq!(
-                File::open(nippy.data_path()).unwrap().metadata().unwrap().len(),
+                File::open(writer.data_path()).unwrap().metadata().unwrap().len(),
                 expected_data_file_size
             );
         }
 
         // Load and add 1 row
         {
-            let mut nippy = NippyJar::load_without_header(file_path).unwrap();
+            let nippy = NippyJar::load_without_header(file_path).unwrap();
             // Check if it was committed successfuly
             assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
             assert_eq!(nippy.rows, 1);
 
-            let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
+            let mut writer = NippyJarWriter::new(nippy).unwrap();
             assert_eq!(writer.column(), 0);
 
             writer.append_column(Some(Ok(&col1[1]))).unwrap();
@@ -1235,22 +1249,22 @@ mod tests {
             let expected_data_file_size = *writer.offsets().last().unwrap();
             writer.commit().unwrap();
 
-            assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
-            assert_eq!(nippy.rows, 2);
+            assert_eq!(writer.max_row_size(), col1[0].len() + col2[0].len());
+            assert_eq!(writer.rows(), 2);
             assert_eq!(
-                File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len(),
-                1 + nippy.rows as u64 * num_columns as u64 * 8 + 8
+                File::open(writer.offsets_path()).unwrap().metadata().unwrap().len(),
+                1 + writer.rows() as u64 * num_columns as u64 * 8 + 8
             );
             assert_eq!(
-                File::open(nippy.data_path()).unwrap().metadata().unwrap().len(),
+                File::open(writer.data_path()).unwrap().metadata().unwrap().len(),
                 expected_data_file_size
             );
         }
     }
 
     fn prune_rows(num_columns: usize, file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
-        let mut nippy = NippyJar::load_without_header(file_path).unwrap();
-        let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
+        let nippy = NippyJar::load_without_header(file_path).unwrap();
+        let mut writer = NippyJarWriter::new(nippy).unwrap();
 
         // Appends a third row, so we have an offset list in memory, which is not flushed to disk
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
@@ -1258,32 +1272,38 @@ mod tests {
 
         // This should prune from the on-memory offset list and ondisk offset list
         writer.prune_rows(2).unwrap();
-        assert_eq!(nippy.rows, 1);
+        assert_eq!(writer.rows(), 1);
 
         assert_eq!(
-            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len(),
-            1 + nippy.rows as u64 * num_columns as u64 * 8 + 8
+            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len(),
+            1 + writer.rows() as u64 * num_columns as u64 * 8 + 8
         );
 
         let expected_data_size = col1[0].len() + col2[0].len();
         assert_eq!(
-            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize,
+            File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize,
             expected_data_size
         );
 
-        let data_reader = nippy.open_data_reader().unwrap();
-        // there are only two valid offsets. so index 2 actually represents the expected file
-        // data size.
-        assert_eq!(data_reader.offset(2), expected_data_size as u64);
+        let nippy = NippyJar::load_without_header(file_path).unwrap();
+        {
+            let data_reader = nippy.open_data_reader().unwrap();
+            // there are only two valid offsets. so index 2 actually represents the expected file
+            // data size.
+            assert_eq!(data_reader.offset(2), expected_data_size as u64);
+        }
 
         // This should prune from the ondisk offset list and clear the jar.
-        let mut writer = NippyJarWriter::from_mut(&mut nippy).unwrap();
+        let mut writer = NippyJarWriter::new(nippy).unwrap();
         writer.prune_rows(1).unwrap();
-        assert_eq!(nippy.rows, 0);
-        assert_eq!(nippy.max_row_size, 0);
-        assert_eq!(File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize, 0);
+        assert_eq!(writer.rows(), 0);
+        assert_eq!(writer.max_row_size(), 0);
+        assert_eq!(File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize, 0);
         // Only the byte that indicates how many bytes per offset should be left
-        assert_eq!(File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize, 1);
+        assert_eq!(
+            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len() as usize,
+            1
+        );
     }
 
     fn simulate_interrupted_prune(
@@ -1311,6 +1331,6 @@ mod tests {
         data_file.set_len(data_len - 32 * missing_offsets).unwrap();
 
         // runs the consistency check.
-        let _ = NippyJarWriter::from_owned(nippy).unwrap();
+        let _ = NippyJarWriter::new(nippy).unwrap();
     }
 }

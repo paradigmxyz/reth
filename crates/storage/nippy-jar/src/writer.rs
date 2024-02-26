@@ -3,39 +3,11 @@ use std::{
     cmp::Ordering,
     fs::{File, OpenOptions},
     io::{BufWriter, Read, Seek, SeekFrom, Write},
-    ops::{Deref, DerefMut},
     path::Path,
 };
 
 /// Size of one offset in bytes.
 const OFFSET_SIZE_BYTES: u64 = 8;
-
-/// Holds a reference or an owned [`NippyJar`].
-#[derive(Debug)]
-enum CowJar<'a, H: NippyJarHeader = ()> {
-    MutRef(&'a mut NippyJar<H>),
-    Owned(Box<NippyJar<H>>),
-}
-
-impl<'a, H: NippyJarHeader> Deref for CowJar<'a, H> {
-    type Target = NippyJar<H>;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            CowJar::MutRef(jar) => jar,
-            CowJar::Owned(jar) => jar,
-        }
-    }
-}
-
-impl<'a, H: NippyJarHeader> DerefMut for CowJar<'a, H> {
-    fn deref_mut(&mut self) -> &mut NippyJar<H> {
-        match self {
-            CowJar::MutRef(jar) => jar,
-            CowJar::Owned(jar) => jar,
-        }
-    }
-}
 
 /// Writer of [`NippyJar`]. Handles table data and offsets only.
 ///
@@ -51,10 +23,10 @@ impl<'a, H: NippyJarHeader> DerefMut for CowJar<'a, H> {
 /// ## Data file layout
 /// The data file is represented just as a sequence of bytes of data without any delimiters
 #[derive(Debug)]
-pub struct NippyJarWriter<'a, H: NippyJarHeader = ()> {
-    /// Reference to the associated [`NippyJar`], containing all necessary configurations for data
+pub struct NippyJarWriter<H: NippyJarHeader = ()> {
+    /// Associated [`NippyJar`], containing all necessary configurations for data
     /// handling.
-    jar: CowJar<'a, H>,
+    jar: NippyJar<H>,
     /// File handle to where the data is stored.
     data_file: BufWriter<File>,
     /// File handle to where the offsets are stored.
@@ -69,36 +41,9 @@ pub struct NippyJarWriter<'a, H: NippyJarHeader = ()> {
     column: usize,
 }
 
-impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
-    /// Creates a [`NippyJarWriter`] from mutable refence of [`NippyJar`]. It also does consistency
-    /// checks and self heals.
-    pub fn from_mut(jar: &'a mut NippyJar<H>) -> Result<Self, NippyJarError> {
-        Self::new(CowJar::MutRef(jar))
-    }
-
-    /// Creates a [`NippyJarWriter`] from an owned [`NippyJar`]. It also does consistency checks and
-    /// self heals.
-    pub fn from_owned(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
-        Self::new(CowJar::Owned(Box::new(jar)))
-    }
-
-    /// Returns a reference to `H` of [`NippyJar`]
-    pub fn user_header(&self) -> &H {
-        &self.jar.user_header
-    }
-
-    /// Returns a mutable reference to `H` of [`NippyJar`]
-    pub fn user_header_mut(&mut self) -> &mut H {
-        &mut self.jar.user_header
-    }
-
-    /// Gets total writter rows in jar.
-    pub fn rows(&self) -> usize {
-        self.jar.rows()
-    }
-
-    /// Creates a [`NippyJarWriter`] from [`CowJar`].
-    fn new(mut jar: CowJar<'a, H>) -> Result<Self, NippyJarError> {
+impl<H: NippyJarHeader> NippyJarWriter<H> {
+    /// Creates a [`NippyJarWriter`] from [`NippyJar`].
+    pub fn new(mut jar: NippyJar<H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
 
@@ -123,6 +68,26 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
         }
 
         Ok(writer)
+    }
+
+    /// Returns a reference to `H` of [`NippyJar`]
+    pub fn user_header(&self) -> &H {
+        &self.jar.user_header
+    }
+
+    /// Returns a mutable reference to `H` of [`NippyJar`]
+    pub fn user_header_mut(&mut self) -> &mut H {
+        &mut self.jar.user_header
+    }
+
+    /// Gets total writter rows in jar.
+    pub fn rows(&self) -> usize {
+        self.jar.rows()
+    }
+
+    /// Consumes the writer and returns the associated [`NippyJar`].
+    pub fn into_jar(self) -> NippyJar<H> {
+        self.jar
     }
 
     fn create_or_open_files(
@@ -461,6 +426,11 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
     }
 
     #[cfg(test)]
+    pub fn max_row_size(&self) -> usize {
+        self.jar.max_row_size
+    }
+
+    #[cfg(test)]
     pub fn column(&self) -> usize {
         self.column
     }
@@ -473,5 +443,15 @@ impl<'a, H: NippyJarHeader> NippyJarWriter<'a, H> {
     #[cfg(test)]
     pub fn offsets_mut(&mut self) -> &mut Vec<u64> {
         &mut self.offsets
+    }
+
+    #[cfg(test)]
+    pub fn offsets_path(&self) -> std::path::PathBuf {
+        self.jar.offsets_path()
+    }
+
+    #[cfg(test)]
+    pub fn data_path(&self) -> &Path {
+        self.jar.data_path()
     }
 }
