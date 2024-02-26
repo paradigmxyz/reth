@@ -138,7 +138,8 @@ mod read_transactions {
     const READ_TRANSACTIONS_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
     impl TxnManager {
-        /// Sets the maximum duration that a read transaction can be open.
+        /// Returns a new instance for which the maximum duration that a read transaction can be
+        /// open is set.
         pub(crate) fn new_with_max_read_transaction_duration(
             env: EnvPtr,
             duration: Duration,
