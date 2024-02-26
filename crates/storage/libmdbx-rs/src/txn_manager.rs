@@ -311,19 +311,24 @@ mod read_transactions {
                     for (ptr, open_duration, err) in aborted_active.iter().copied() {
                         // Try deleting the transaction from the list of active transactions.
                         let was_in_active = self.remove_active(ptr).is_some();
-                        if let Some(err) = err {
-                            // If there was an error when aborting the transaction, we need to
-                            // remove it from the list of aborted transactions, because otherwise it
-                            // will stay there forever.
-                            self.remove_aborted(ptr);
-                            if was_in_active && err != Error::BadSignature {
-                                // If the transaction was in the list of active transactions and the
-                                // error code is not `EBADSIGN`, then user didn't abort it.
-                                error!(target: "libmdbx", ?err, ?open_duration, "Failed to abort the long-lived read transactions");
+                        match err {
+                            Some(err) if err != Error::ReadTransactionAborted => {
+                                // If there was an error when aborting the transaction, we need to
+                                // remove it from the list of aborted transactions, because
+                                // otherwise it will stay there forever.
+                                self.remove_aborted(ptr);
+                                if was_in_active && err != Error::BadSignature {
+                                    // If the transaction was in the list of active transactions
+                                    // and the error code is not `EBADSIGN`, then user didn't
+                                    // abort it.
+                                    error!(target: "libmdbx", ?err, ?open_duration, "Failed to abort the long-lived read transactions");
+                                }
                             }
-                        } else {
-                            // Happy path, the transaction has been aborted by us with no errors.
-                            warn!(target: "libmdbx", ?open_duration, "Long-lived read transactions has been aborted");
+                            _ => {
+                                // Happy path, the transaction has been aborted by us with no
+                                // errors.
+                                warn!(target: "libmdbx", ?open_duration, "Long-lived read transactions has been aborted");
+                            }
                         }
                     }
 
