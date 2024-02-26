@@ -451,7 +451,7 @@ where
             return propagated
         }
 
-        // send full transactions to a fraction fo the connected peers (square root of the total
+        // send full transactions to a fraction of the connected peers (square root of the total
         // number of connected peers)
         let max_num_full = (self.peers.len() as f64).sqrt() as usize + 1;
 
