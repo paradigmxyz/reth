@@ -766,7 +766,6 @@ where
     pub(crate) fn discard_worst(&self) -> HashSet<TxHash> {
         let mut pool = self.pool.write();
         let discarded = pool.discard_worst();
-        pool.cleanup_senders();
 
         // delete any blobs associated with discarded blob transactions
         self.delete_discarded_blobs(discarded.iter());

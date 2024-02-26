@@ -854,6 +854,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             ]
         );
 
+        self.cleanup_senders();
+
         removed
     }
 
