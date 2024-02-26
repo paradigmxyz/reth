@@ -171,7 +171,7 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
-        if subnode.nibble() >= 15 || (subnode.nibble() < 0 && !allow_root_to_child_nibble) {
+        if subnode.nibble() >= 0xf || (subnode.nibble() < 0 && !allow_root_to_child_nibble) {
             self.stack.pop();
             self.move_to_next_sibling(false)?;
             return Ok(())
@@ -184,9 +184,12 @@ impl<C: TrieCursor> TrieWalker<C> {
         }
 
         // Find the next sibling with state.
-        while subnode.nibble() < 16 {
+        loop {
             if subnode.state_flag() {
                 return Ok(())
+            }
+            if subnode.nibble() == 0xf {
+                break;
             }
             subnode.inc_nibble();
         }
