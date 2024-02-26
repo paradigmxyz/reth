@@ -439,42 +439,7 @@ mod read_transactions {
         }
 
         #[test]
-        fn txn_manager_abort_rw_transaction_twice() {
-            let dir = tempdir().unwrap();
-            let env = Environment::builder().open(dir.path()).unwrap();
-
-            // Create a rw transaction abort it by message to tx manager.
-            let tx = env.begin_rw_txn().unwrap();
-            let tx_ptr = tx.txn();
-
-            let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: TxnPtr(tx_ptr), sender });
-            assert!(rx.recv().unwrap().is_ok());
-
-            // Attempt to abort again throws error.
-            let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: TxnPtr(tx_ptr), sender });
-            assert_eq!(Err(Error::RWTransactionAborted), rx.recv().unwrap());
-        }
-
-        #[test]
-        fn txn_manager_abort_dropped_rw_transaction() {
-            let dir = tempdir().unwrap();
-            let env = Environment::builder().open(dir.path()).unwrap();
-
-            // Create a rw transaction abort it by dropping.
-            let tx = env.begin_rw_txn().unwrap();
-            let tx_ptr = TxnPtr(tx.txn());
-
-            drop(tx);
-
-            // Attempt to abort again throws error.
-            let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
-            assert_eq!(Err(Error::RWTransactionAborted), rx.recv().unwrap());
-        }
-
-        #[test]
+        #[cfg(feature = "read-tx-timeouts")]
         fn txn_manager_abort_ro_transaction_twice() {
             const MAX_DURATION: Duration = Duration::from_secs(1);
 
@@ -501,6 +466,7 @@ mod read_transactions {
         }
 
         #[test]
+        #[cfg(feature = "read-tx-timeouts")]
         fn txn_manager_abort_dropped_ro_transaction() {
             const MAX_DURATION: Duration = Duration::from_secs(1);
 
@@ -523,5 +489,53 @@ mod read_transactions {
             env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
             assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::mpsc::sync_channel;
+
+    use tempfile::tempdir;
+
+    use crate::{
+        txn_manager::{TxnManagerMessage, TxnPtr},
+        Environment, Error,
+    };
+
+    #[test]
+    fn txn_manager_abort_rw_transaction_twice() {
+        let dir = tempdir().unwrap();
+        let env = Environment::builder().open(dir.path()).unwrap();
+
+        // Create a rw transaction abort it by message to tx manager.
+        let tx = env.begin_rw_txn().unwrap();
+        let tx_ptr = tx.txn();
+
+        let (sender, rx) = sync_channel(0);
+        env.txn_manager().send_message(TxnManagerMessage::Abort { tx: TxnPtr(tx_ptr), sender });
+        assert!(rx.recv().unwrap().is_ok());
+
+        // Attempt to abort again throws error.
+        let (sender, rx) = sync_channel(0);
+        env.txn_manager().send_message(TxnManagerMessage::Abort { tx: TxnPtr(tx_ptr), sender });
+        assert_eq!(Err(Error::RWTransactionAborted), rx.recv().unwrap());
+    }
+
+    #[test]
+    fn txn_manager_abort_dropped_rw_transaction() {
+        let dir = tempdir().unwrap();
+        let env = Environment::builder().open(dir.path()).unwrap();
+
+        // Create a rw transaction abort it by dropping.
+        let tx = env.begin_rw_txn().unwrap();
+        let tx_ptr = TxnPtr(tx.txn());
+
+        drop(tx);
+
+        // Attempt to abort again throws error.
+        let (sender, rx) = sync_channel(0);
+        env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+        assert_eq!(Err(Error::RWTransactionAborted), rx.recv().unwrap());
     }
 }
