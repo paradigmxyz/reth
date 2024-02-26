@@ -39,12 +39,20 @@ pub(crate) trait EthSigner: Send + Sync {
 }
 
 /// Holds developer keys
+#[derive(Clone)]
 pub(crate) struct DevSigner {
     addresses: Vec<Address>,
     accounts: HashMap<Address, SecretKey>,
 }
 
 impl DevSigner {
+    pub fn new() -> DevSigner {
+        let secret = SecretKey::new(&mut rand::thread_rng());
+        let addresses = vec![];
+        let accounts = HashMap::from([(Address::default(), secret)]);
+        DevSigner { addresses, accounts }
+    }
+
     fn get_key(&self, account: Address) -> Result<&SecretKey> {
         self.accounts.get(&account).ok_or(SignError::NoAccount)
     }
@@ -55,6 +63,7 @@ impl DevSigner {
         signature.map_err(|_| SignError::CouldNotSign)
     }
 }
+
 
 #[async_trait::async_trait]
 impl EthSigner for DevSigner {

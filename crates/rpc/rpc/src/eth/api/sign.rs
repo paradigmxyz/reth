@@ -3,14 +3,15 @@
 use crate::{
     eth::{
         error::{EthResult, SignError},
-        signer::EthSigner,
+        signer::{DevSigner, EthSigner},
     },
     EthApi,
 };
 use alloy_dyn_abi::TypedData;
+use futures::FutureExt;
 use reth_primitives::{Address, Bytes};
 use serde_json::Value;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
     pub(crate) async fn sign(&self, account: Address, message: Bytes) -> EthResult<Bytes> {
@@ -38,5 +39,11 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
             .find(|signer| signer.is_signer_for(account))
             .map(|signer| signer.deref())
             .ok_or(SignError::NoAccount)
+    }
+
+    pub(crate) fn add_signer(&self) ->EthResult<()> {
+        let dev_signer = DevSigner::new(); 
+        self.inner.signers.deref_mut().push(std::boxed::Box::new(dev_signer));
+        Ok(())
     }
 }

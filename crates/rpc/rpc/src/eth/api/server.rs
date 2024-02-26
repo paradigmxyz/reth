@@ -70,6 +70,7 @@ where
         Ok(EthApiSpec::accounts(self))
     }
 
+
     /// Handler for: `eth_blockNumber`
     fn block_number(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_blockNumber");

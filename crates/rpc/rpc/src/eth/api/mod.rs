@@ -406,7 +406,7 @@ where
         Ok(self.provider().chain_info()?)
     }
 
-    fn accounts(&self) -> Vec<Address> {
+      fn accounts(&self) -> Vec<Address> {
         self.inner.signers.iter().flat_map(|s| s.accounts()).collect()
     }
 
