@@ -439,7 +439,6 @@ mod read_transactions {
         }
 
         #[test]
-        #[cfg(feature = "read-tx-timeouts")]
         fn txn_manager_abort_ro_transaction_twice() {
             const MAX_DURATION: Duration = Duration::from_secs(1);
 
@@ -466,7 +465,6 @@ mod read_transactions {
         }
 
         #[test]
-        #[cfg(feature = "read-tx-timeouts")]
         fn txn_manager_abort_dropped_ro_transaction() {
             const MAX_DURATION: Duration = Duration::from_secs(1);
 
