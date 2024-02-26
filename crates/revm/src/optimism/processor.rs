@@ -258,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn canyon_deposit_receipt_version_pre_canyon() {
+    fn op_deposit_fields_pre_canyon() {
         let header = Header {
             timestamp: 1,
             number: 1,
@@ -268,9 +268,9 @@ mod tests {
         };
 
         let mut db = create_op_state_provider();
+
         let addr = Address::ZERO;
         let account = Account { balance: U256::MAX, ..Account::default() };
-
         db.insert_account(addr, account, None, HashMap::new());
 
         let chain_spec =
@@ -299,7 +299,7 @@ mod tests {
 
         let mut executor = create_op_evm_processor(chain_spec, db);
 
-        // attempt to execute an empty block with parent beacon block root, this should not fail
+        // Attempt to execute a block with one deposit and one non-deposit transaction
         executor
             .execute(
                 &BlockWithSenders {
@@ -313,17 +313,23 @@ mod tests {
                 },
                 U256::ZERO,
             )
-            .expect("Executing a block while canyon is not active should not fail");
+            .unwrap();
 
-        // non-deposit tx
-        assert_eq!(executor.receipts[0][0].as_ref().unwrap().deposit_receipt_version, None);
-        // deposit tx
-        assert_eq!(executor.receipts[0][1].as_ref().unwrap().deposit_receipt_version, None);
+        let tx_receipt = executor.receipts[0][0].as_ref().unwrap();
+        let deposit_receipt = executor.receipts[0][1].as_ref().unwrap();
+
+        // deposit_receipt_version is not present in pre canyon transactions
+        assert!(deposit_receipt.deposit_receipt_version.is_none());
+        assert!(tx_receipt.deposit_receipt_version.is_none());
+
+        // deposit_nonce is present only in deposit transactions
+        assert!(deposit_receipt.deposit_nonce.is_some());
+        assert!(tx_receipt.deposit_nonce.is_none());
     }
 
     #[test]
-    fn canyon_deposit_receipt_version_post_canyon() {
-        // set timestamp >= 2 ensure_create2_deployer
+    fn op_deposit_fields_post_canyon() {
+        // ensure_create2_deployer will fail if timestamp is set to less then 2
         let header = Header {
             timestamp: 2,
             number: 1,
@@ -380,9 +386,15 @@ mod tests {
             )
             .expect("Executing a block while canyon is active should not fail");
 
-        // non-deposit tx
-        assert_eq!(executor.receipts[0][0].as_ref().unwrap().deposit_receipt_version, None);
-        // deposit tx
-        assert_eq!(executor.receipts[0][1].as_ref().unwrap().deposit_receipt_version, Some(1));
+        let tx_receipt = executor.receipts[0][0].as_ref().unwrap();
+        let deposit_receipt = executor.receipts[0][1].as_ref().unwrap();
+
+        // deposit_receipt_version is set to 1 for post canyon deposit transations
+        assert_eq!(deposit_receipt.deposit_receipt_version, Some(1));
+        assert!(tx_receipt.deposit_receipt_version.is_none());
+
+        // deposit_nonce is present only in deposit transactions
+        assert!(deposit_receipt.deposit_nonce.is_some());
+        assert!(tx_receipt.deposit_nonce.is_none());
     }
 }
