@@ -3,7 +3,6 @@ use crate::{
     error::{mdbx_result, Result},
     CommitLatency, Error,
 };
-#[cfg(not(feature = "read-tx-timeouts"))]
 use dashmap::DashSet;
 use std::{
     ptr,
@@ -31,13 +30,12 @@ pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
     #[cfg(feature = "read-tx-timeouts")]
     read_transactions: Option<std::sync::Arc<read_transactions::ReadTransactions>>,
-    /// List of transactions aborted by [TxnManagerMessage::Abort].
-    /// We keep them until user tries to abort the transaction, so we're able to report a nice
-    /// [Error::ReadTransactionAborted] error.
+    /// List of rw transactions aborted by [TxnManagerMessage::Abort] or drop.
+    /// We keep them so we're able to report a nice [Error::ReadTransactionAborted] error if the
+    /// user attempts to abort the same transaction again.
     ///
     /// We store `usize` instead of a raw pointer, because pointers are not comparable.
-    #[cfg(not(feature = "read-tx-timeouts"))]
-    aborted: std::sync::Arc<DashSet<usize>>,
+    aborted_rw: std::sync::Arc<DashSet<usize>>,
 }
 
 impl TxnManager {
@@ -47,8 +45,7 @@ impl TxnManager {
             sender: tx,
             #[cfg(feature = "read-tx-timeouts")]
             read_transactions: None,
-            #[cfg(not(feature = "read-tx-timeouts"))]
-            aborted: Default::default(),
+            aborted_rw: Default::default(),
         };
 
         txn_manager.start_message_listener(env, rx);
@@ -65,8 +62,7 @@ impl TxnManager {
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
         #[cfg(feature = "read-tx-timeouts")]
         let read_transactions = self.read_transactions.clone();
-        #[cfg(not(feature = "read-tx-timeouts"))]
-        let aborted = self.aborted.clone();
+        let aborted_rw = self.aborted_rw.clone();
 
         std::thread::spawn(move || {
             #[allow(clippy::redundant_locals)]
@@ -117,21 +113,19 @@ impl TxnManager {
                                     };
 
                                     sender.send(result).unwrap();
+                                    continue
                                 }
                             }
 
-                            #[cfg(not(feature = "read-tx-timeouts"))]
-                            {
-                                let new_aborted = aborted.insert(tx.0 as usize);
+                            let new_aborted_rw = aborted_rw.insert(tx.0 as usize);
 
-                                let result = if new_aborted {
-                                    mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })
-                                } else {
-                                    Err(Error::ReadTransactionAborted)
-                                };
+                            let result = if new_aborted_rw {
+                                mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })
+                            } else {
+                                Err(Error::WriteTransactionAborted)
+                            };
 
-                                sender.send(result).unwrap();
-                            }
+                            sender.send(result).unwrap();
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
                             #[cfg(feature = "read-tx-timeouts")]
@@ -436,28 +430,39 @@ mod read_transactions {
         }
 
         #[test]
-        #[cfg(feature = "read-tx-timeouts")]
-        fn txn_manager_abort_read_transaction_twice() {
-            const MAX_DURATION: Duration = Duration::from_secs(1);
-
+        fn txn_manager_abort_rw_transaction_twice() {
             let dir = tempdir().unwrap();
-            let env = Environment::builder()
-                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
-                .open(dir.path())
-                .unwrap();
+            let env = Environment::builder().open(dir.path()).unwrap();
 
-            // Create a read-only transaction, successfully use it, close it by message to tx
-            // manager.
-            {
-                let tx = env.begin_ro_txn().unwrap();
-                let tx_ptr = TxnPtr(tx.txn());
-                let (sender, rx) = sync_channel(0);
-                env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
-                assert!(rx.recv().unwrap().is_ok());
-                let (sender, rx) = sync_channel(0);
-                env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
-                assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
-            }
+            // Create a rw transaction abort it by message to tx manager.
+            let tx = env.begin_rw_txn().unwrap();
+            let tx_ptr = tx.txn();
+
+            let (sender, rx) = sync_channel(0);
+            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: TxnPtr(tx_ptr), sender });
+            assert!(rx.recv().unwrap().is_ok());
+
+            // Attempt to abort again throws error.
+            let (sender, rx) = sync_channel(0);
+            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: TxnPtr(tx_ptr), sender });
+            assert_eq!(Err(Error::WriteTransactionAborted), rx.recv().unwrap());
+        }
+
+        #[test]
+        fn txn_manager_abort_dropped_rw_transaction() {
+            let dir = tempdir().unwrap();
+            let env = Environment::builder().open(dir.path()).unwrap();
+
+            // Create a rw transaction abort it by dropping.
+            let tx = env.begin_rw_txn().unwrap();
+            let tx_ptr = TxnPtr(tx.txn());
+
+            drop(tx);
+
+            // Attempt to abort again throws error.
+            let (sender, rx) = sync_channel(0);
+            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+            assert_eq!(Err(Error::WriteTransactionAborted), rx.recv().unwrap());
         }
     }
 }
