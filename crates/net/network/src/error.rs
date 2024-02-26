@@ -77,7 +77,7 @@ impl NetworkError {
 
 /// Abstraction over errors that can lead to a failed session
 #[auto_impl::auto_impl(&)]
-pub(crate) trait SessionError: fmt::Debug {
+pub(crate) trait SessionError: fmt::Debug + fmt::Display {
     /// Returns true if the error indicates that the corresponding peer should be removed from peer
     /// discovery, for example if it's using a different genesis hash.
     fn merits_discovery_ban(&self) -> bool;

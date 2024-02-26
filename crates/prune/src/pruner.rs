@@ -76,8 +76,10 @@ impl<DB: Database> Pruner<DB> {
             self.previous_tip_block_number = Some(tip_block_number);
 
             debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PruneProgress::Finished);
+            return Ok(PruneProgress::Finished)
         }
+
+        self.listeners.notify(PrunerEvent::Started { tip_block_number });
 
         debug!(target: "pruner", %tip_block_number, "Pruner started");
         let start = Instant::now();
@@ -146,7 +148,7 @@ impl<DB: Database> Pruner<DB> {
 
         for (segment, purpose) in segments {
             if delete_limit == 0 {
-                break;
+                break
             }
 
             if let Some((to_block, prune_mode)) = segment
@@ -161,7 +163,7 @@ impl<DB: Database> Pruner<DB> {
                     ?purpose,
                     %to_block,
                     ?prune_mode,
-                    "Got target block to prune"
+                    "Segment pruning started"
                 );
 
                 let segment_start = Instant::now();
@@ -184,12 +186,25 @@ impl<DB: Database> Pruner<DB> {
 
                 done = done && output.done;
                 delete_limit = delete_limit.saturating_sub(output.pruned);
-                stats.insert(
-                    segment.segment(),
-                    (PruneProgress::from_done(output.done), output.pruned),
+
+                debug!(
+                    target: "pruner",
+                    segment = ?segment.segment(),
+                    ?purpose,
+                    %to_block,
+                    ?prune_mode,
+                    %output.pruned,
+                    "Segment pruning finished"
                 );
+
+                if output.pruned > 0 {
+                    stats.insert(
+                        segment.segment(),
+                        (PruneProgress::from_done(output.done), output.pruned),
+                    );
+                }
             } else {
-                debug!(target: "pruner", segment = ?segment.segment(), "No target block to prune");
+                debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
             }
         }
 

@@ -666,7 +666,6 @@ mod tests {
             }
         }
 
-        #[async_trait::async_trait]
         impl ExecuteStageTestRunner for BodyTestRunner {
             type Seed = Vec<SealedBlock>;
 

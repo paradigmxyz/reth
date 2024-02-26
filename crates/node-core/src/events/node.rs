@@ -234,6 +234,9 @@ impl<DB> NodeState<DB> {
 
     fn handle_pruner_event(&self, event: PrunerEvent) {
         match event {
+            PrunerEvent::Started { tip_block_number } => {
+                info!(tip_block_number, "Pruner started");
+            }
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
                 info!(tip_block_number, ?elapsed, ?stats, "Pruner finished");
             }
@@ -242,8 +245,11 @@ impl<DB> NodeState<DB> {
 
     fn handle_static_file_producer_event(&self, event: StaticFileProducerEvent) {
         match event {
+            StaticFileProducerEvent::Started { targets } => {
+                info!(?targets, "Static File Producer started");
+            }
             StaticFileProducerEvent::Finished { targets, elapsed } => {
-                info!(?targets, ?elapsed, "StaticFileProducer finished");
+                info!(?targets, ?elapsed, "Static File Producer finished");
             }
         }
     }
@@ -522,7 +528,7 @@ impl Display for Eta {
                     f,
                     "{}",
                     humantime::format_duration(Duration::from_secs(remaining.as_secs()))
-                );
+                )
             }
         }
 

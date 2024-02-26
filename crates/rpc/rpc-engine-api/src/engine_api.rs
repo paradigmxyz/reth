@@ -265,13 +265,25 @@ where
         )?;
 
         // Now resolve the payload
-        Ok(self
+        let mut resolved_payload = self
             .inner
             .payload_store
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| payload.into_v3_payload())?)
+            .map(|payload| payload.into_v3_payload())?;
+
+        // After `Cancun` is enabled on optimism, an extra field `parent_beacon_block_root` is
+        // included in the enveloped V3 payload. On ethereum, this field is not included.
+        if self.inner.chain_spec.is_optimism() &&
+            self.inner
+                .chain_spec
+                .is_fork_active_at_timestamp(Hardfork::Cancun, attributes.timestamp())
+        {
+            resolved_payload.parent_beacon_block_root = attributes.parent_beacon_block_root();
+        }
+
+        Ok(resolved_payload)
     }
 
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`

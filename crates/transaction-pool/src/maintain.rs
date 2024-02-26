@@ -233,7 +233,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             Some(Ok(Err(res))) => {
                 // Failed to load accounts from state
                 let (accs, err) = *res;
-                debug!(target: "txpool", ?err, "failed to load accounts");
+                debug!(target: "txpool", %err, "failed to load accounts");
                 dirty_addresses.extend(accs);
             }
             Some(Err(_)) => {
@@ -292,7 +292,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                             let (addresses, err) = *err;
                             debug!(
                                 target: "txpool",
-                                ?err,
+                                %err,
                                 "failed to load missing changed accounts at new tip: {:?}",
                                 new_tip.hash()
                             );

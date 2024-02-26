@@ -135,6 +135,13 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn get_pooled_transaction_element(
+        &self,
+        _tx_hash: TxHash,
+    ) -> Option<PooledTransactionsElement> {
+        None
+    }
+
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
