@@ -189,7 +189,7 @@ impl<C: TrieCursor> TrieWalker<C> {
                 return Ok(())
             }
             if subnode.nibble() == 0xf {
-                break;
+                break
             }
             subnode.inc_nibble();
         }
