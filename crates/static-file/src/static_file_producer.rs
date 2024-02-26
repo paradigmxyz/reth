@@ -96,6 +96,8 @@ impl<DB: Database> StaticFileProducer<DB> {
             self.static_file_provider.get_highest_static_files()
         ));
 
+        self.listeners.notify(StaticFileProducerEvent::Started { targets: targets.clone() });
+
         debug!(target: "static_file", ?targets, "StaticFileProducer started");
         let start = Instant::now();
 

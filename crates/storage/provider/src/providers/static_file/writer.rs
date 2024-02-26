@@ -217,7 +217,7 @@ impl<'a> StaticFileProviderRW<'a> {
                     // Update `SegmentHeader`
                     self.writer.user_header_mut().prune(len);
                     self.writer.prune_rows(len as usize)?;
-                    break;
+                    break
                 }
 
                 num_rows -= len;
