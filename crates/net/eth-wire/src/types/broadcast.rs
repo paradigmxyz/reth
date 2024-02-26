@@ -650,8 +650,7 @@ handle_mempool_data_map_impl!(ValidAnnouncementData,);
 
 impl ValidAnnouncementData {
     /// Destructs returning only the valid hashes and the announcement message version. Caution! If
-    /// this is [`Eth68`](EthVersion::Eth68)announcement data, the metadata must be cached
-    /// before call to this method.
+    /// this is [`Eth68`](EthVersion::Eth68) announcement data, this drops the metadata.
     pub fn into_request_hashes(self) -> (RequestTxHashes, EthVersion) {
         let hashes = self.data.into_keys().collect::<Vec<_>>();
 
