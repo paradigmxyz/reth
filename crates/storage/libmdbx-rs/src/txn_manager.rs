@@ -16,7 +16,7 @@ unsafe impl Sync for TxnPtr {}
 
 pub(crate) enum TxnManagerMessage {
     Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
-    Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
+    Abort { tx: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<bool>> },
     Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
 }
 
@@ -98,22 +98,26 @@ impl TxnManager {
                                 }
                             }
                         }
-                        TxnManagerMessage::Abort { tx, sender } => {
-                            #[cfg(feature = "read-tx-timeouts")]
-                            {
-                                if let Some(read_transactions) = &read_transactions {
-                                    read_transactions.remove_active(tx.0);
+                        TxnManagerMessage::Abort { tx, flags, sender } => {
+                            use crate::transaction::TransactionKind;
 
-                                    let new_aborted_ro = read_transactions.add_aborted(tx.0);
+                            if flags == crate::transaction::RO::OPEN_FLAGS {
+                                #[cfg(feature = "read-tx-timeouts")]
+                                {
+                                    if let Some(read_transactions) = &read_transactions {
+                                        read_transactions.remove_active(tx.0);
 
-                                    let result = if let Some(true) = new_aborted_ro {
-                                        mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })
-                                    } else {
-                                        Err(Error::ReadTransactionAborted)
-                                    };
+                                        let new_aborted_ro = read_transactions.add_aborted(tx.0);
 
-                                    sender.send(result).unwrap();
-                                    continue
+                                        let result = if let Some(true) = new_aborted_ro {
+                                            mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })
+                                        } else {
+                                            Err(Error::ReadTransactionAborted)
+                                        };
+
+                                        sender.send(result).unwrap();
+                                        continue
+                                    }
                                 }
                             }
 
@@ -367,7 +371,7 @@ mod read_transactions {
             txn_manager::{
                 read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, TxnManagerMessage, TxnPtr,
             },
-            Environment, Error, MaxReadTransactionDuration,
+            Environment, Error, MaxReadTransactionDuration, TransactionKind, RO,
         };
         use std::{sync::mpsc::sync_channel, thread::sleep, time::Duration};
         use tempfile::tempdir;
@@ -460,12 +464,20 @@ mod read_transactions {
             let tx_ptr = TxnPtr(tx.txn());
 
             let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+            env.txn_manager().send_message(TxnManagerMessage::Abort {
+                tx: tx_ptr,
+                flags: RO::OPEN_FLAGS,
+                sender,
+            });
             assert!(rx.recv().unwrap().is_ok());
 
             // Attempt to abort again throws error.
             let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+            env.txn_manager().send_message(TxnManagerMessage::Abort {
+                tx: tx_ptr,
+                flags: RO::OPEN_FLAGS,
+                sender,
+            });
             assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
         }
 
@@ -489,7 +501,11 @@ mod read_transactions {
 
             // Attempt to abort again throws error.
             let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+            env.txn_manager().send_message(TxnManagerMessage::Abort {
+                tx: tx_ptr,
+                flags: RO::OPEN_FLAGS,
+                sender,
+            });
             assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
         }
     }
@@ -503,7 +519,7 @@ mod test {
 
     use crate::{
         txn_manager::{TxnManagerMessage, TxnPtr},
-        Environment, Error,
+        Environment, Error, TransactionKind, RW,
     };
 
     #[test]
@@ -516,12 +532,20 @@ mod test {
         let tx_ptr = tx.txn();
 
         let (sender, rx) = sync_channel(0);
-        env.txn_manager().send_message(TxnManagerMessage::Abort { tx: TxnPtr(tx_ptr), sender });
+        env.txn_manager().send_message(TxnManagerMessage::Abort {
+            tx: TxnPtr(tx_ptr),
+            flags: RW::OPEN_FLAGS,
+            sender,
+        });
         assert!(rx.recv().unwrap().is_ok());
 
         // Attempt to abort again throws error.
         let (sender, rx) = sync_channel(0);
-        env.txn_manager().send_message(TxnManagerMessage::Abort { tx: TxnPtr(tx_ptr), sender });
+        env.txn_manager().send_message(TxnManagerMessage::Abort {
+            tx: TxnPtr(tx_ptr),
+            flags: RW::OPEN_FLAGS,
+            sender,
+        });
         assert_eq!(Err(Error::RWTransactionAborted), rx.recv().unwrap());
     }
 
@@ -538,7 +562,11 @@ mod test {
 
         // Attempt to abort again throws error.
         let (sender, rx) = sync_channel(0);
-        env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+        env.txn_manager().send_message(TxnManagerMessage::Abort {
+            tx: tx_ptr,
+            flags: RW::OPEN_FLAGS,
+            sender,
+        });
         assert_eq!(Err(Error::RWTransactionAborted), rx.recv().unwrap());
     }
 }

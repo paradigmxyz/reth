@@ -374,9 +374,11 @@ where
                     }
                 } else {
                     let (sender, rx) = sync_channel(0);
-                    self.env
-                        .txn_manager()
-                        .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
+                    self.env.txn_manager().send_message(TxnManagerMessage::Abort {
+                        tx: TxnPtr(txn),
+                        flags: K::OPEN_FLAGS,
+                        sender,
+                    });
                     let res = rx.recv().unwrap();
                     assert!(res == Err(Error::RWTransactionAborted) || res.is_ok())
                 }
