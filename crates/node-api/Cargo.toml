@@ -16,6 +16,7 @@ reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 revm-primitives.workspace = true
 thiserror.workspace = true
+revm.workspace = true
 
 # io
 serde.workspace = true

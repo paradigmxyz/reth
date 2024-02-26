@@ -86,7 +86,7 @@ impl BlobStore for DiskFileBlobStore {
             });
             let _ = fs::remove_file(&path).map_err(|e| {
                 let err = DiskFileBlobStoreError::DeleteFile(tx, path, e);
-                debug!(target:"txpool::blob", ?err);
+                debug!(target:"txpool::blob", %err);
             });
         }
         self.inner.size_tracker.sub_size(subsize as usize);
@@ -197,7 +197,7 @@ impl DiskFileBlobStoreInner {
             let _lock = self.file_lock.write();
             for (path, data) in raw {
                 if let Err(err) = fs::write(&path, &data) {
-                    debug!( target:"txpool::blob", ?err, ?path, "Failed to write blob file");
+                    debug!(target:"txpool::blob", %err, ?path, "Failed to write blob file");
                 } else {
                     add += data.len();
                     num += 1;
@@ -284,7 +284,7 @@ impl DiskFileBlobStoreInner {
                     res.push((tx, data));
                 }
                 Err(err) => {
-                    debug!( target:"txpool::blob", ?err, ?tx, "Failed to read blob file");
+                    debug!(target:"txpool::blob", %err, ?tx, "Failed to read blob file");
                 }
             };
         }
@@ -294,7 +294,7 @@ impl DiskFileBlobStoreInner {
     /// Retries the blob data for the given transaction hash.
     #[inline]
     fn write_one_encoded(&self, tx: B256, data: &[u8]) -> Result<usize, DiskFileBlobStoreError> {
-        trace!( target:"txpool::blob", "[{:?}] writing blob file", tx);
+        trace!(target:"txpool::blob", "[{:?}] writing blob file", tx);
         let path = self.blob_disk_file(tx);
         {
             let _lock = self.file_lock.write();
@@ -397,6 +397,14 @@ pub struct DiskFileBlobStoreConfig {
 impl Default for DiskFileBlobStoreConfig {
     fn default() -> Self {
         Self { max_cached_entries: DEFAULT_MAX_CACHED_BLOBS, open: Default::default() }
+    }
+}
+
+impl DiskFileBlobStoreConfig {
+    /// Set maximum number of blobs to keep in the in memory blob cache.
+    pub const fn with_max_cached_entries(mut self, max_cached_entries: u32) -> Self {
+        self.max_cached_entries = max_cached_entries;
+        self
     }
 }
 

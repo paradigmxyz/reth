@@ -430,7 +430,7 @@ where
             Err(error) => {
                 if let RethError::Canonical(ref err) = error {
                     if err.is_fatal() {
-                        tracing::error!(target: "consensus::engine", ?err, "Encountered fatal error");
+                        tracing::error!(target: "consensus::engine", %err, "Encountered fatal error");
                         return Err(error)
                     }
                 }
@@ -661,7 +661,7 @@ where
                 // skip the pipeline run
                 match self.blockchain.header_by_hash_or_number(state.finalized_block_hash.into()) {
                     Err(err) => {
-                        warn!(target: "consensus::engine", ?err, "Failed to get finalized block header");
+                        warn!(target: "consensus::engine", %err, "Failed to get finalized block header");
                     }
                     Ok(None) => {
                         // we don't have the block yet and the distance exceeds the allowed
@@ -987,8 +987,8 @@ where
         // check if the new head was previously invalidated, if so then we deem this FCU
         // as invalid
         if let Some(invalid_ancestor) = self.check_invalid_ancestor(state.head_block_hash) {
-            warn!(target: "consensus::engine", ?error, ?state, ?invalid_ancestor, head=?state.head_block_hash, "Failed to canonicalize the head hash, head is also considered invalid");
-            debug!(target: "consensus::engine", head=?state.head_block_hash, current_error=?error, "Head was previously marked as invalid");
+            warn!(target: "consensus::engine", %error, ?state, ?invalid_ancestor, head=?state.head_block_hash, "Failed to canonicalize the head hash, head is also considered invalid");
+            debug!(target: "consensus::engine", head=?state.head_block_hash, current_error=%error, "Head was previously marked as invalid");
             return invalid_ancestor
         }
 
@@ -996,7 +996,7 @@ where
             RethError::Canonical(
                 error @ CanonicalError::Validation(BlockValidationError::BlockPreMerge { .. }),
             ) => {
-                warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
+                warn!(target: "consensus::engine", %error, ?state, "Failed to canonicalize the head hash");
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
@@ -1010,7 +1010,7 @@ where
                 // to a new target and is considered normal operation during sync
             }
             _ => {
-                warn!(target: "consensus::engine", ?error, ?state, "Failed to canonicalize the head hash");
+                warn!(target: "consensus::engine", %error, ?state, "Failed to canonicalize the head hash");
                 // TODO(mattsse) better error handling before attempting to sync (FCU could be
                 // invalid): only trigger sync if we can't determine whether the FCU is invalid
             }
@@ -1130,7 +1130,7 @@ where
                 Ok(status)
             }
             Err(error) => {
-                warn!(target: "consensus::engine", ?error, "Error while processing payload");
+                warn!(target: "consensus::engine", %error, "Error while processing payload");
                 self.map_insert_error(error)
             }
         };
@@ -1173,7 +1173,7 @@ where
         match self.payload_validator.ensure_well_formed_payload(payload, cancun_fields.into()) {
             Ok(block) => Ok(block),
             Err(error) => {
-                error!(target: "consensus::engine", ?error, "Invalid payload");
+                error!(target: "consensus::engine", %error, "Invalid payload");
                 // we need to convert the error to a payload status (response to the CL)
 
                 let latest_valid_hash =
@@ -1325,7 +1325,7 @@ where
         let (block, error) = err.split();
 
         if error.is_invalid_block() {
-            warn!(target: "consensus::engine", invalid_hash=?block.hash(), invalid_number=?block.number, ?error, "Invalid block error on new payload");
+            warn!(target: "consensus::engine", invalid_hash=?block.hash(), invalid_number=?block.number, %error, "Invalid block error on new payload");
 
             // all of these occurred if the payload is invalid
             let parent_hash = block.parent_hash;
@@ -1415,10 +1415,10 @@ where
                 }
             }
             Err(err) => {
-                warn!(target: "consensus::engine", ?err, "Failed to insert downloaded block");
+                warn!(target: "consensus::engine", %err, "Failed to insert downloaded block");
                 if err.kind().is_invalid_block() {
                     let (block, err) = err.split();
-                    warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash(), ?err, "Marking block as invalid");
+                    warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash(), %err, "Marking block as invalid");
 
                     self.invalid_headers.insert(block.header);
                 }
@@ -1613,7 +1613,7 @@ where
                             }
                         },
                         Err(error) => {
-                            error!(target: "consensus::engine", ?error, "Error getting canonical header for continuous sync");
+                            error!(target: "consensus::engine", %error, "Error getting canonical header for continuous sync");
                             return Some(Err(RethError::Provider(error).into()))
                         }
                     };
@@ -1695,7 +1695,7 @@ where
                                 }
                             }
                             Err(error) => {
-                                error!(target: "consensus::engine", ?error, "Error restoring blockchain tree state");
+                                error!(target: "consensus::engine", %error, "Error restoring blockchain tree state");
                                 return Some(Err(error.into()))
                             }
                         };
@@ -1738,11 +1738,7 @@ where
                     if let Err(error) =
                         self.blockchain.connect_buffered_blocks_to_canonical_hashes()
                     {
-                        error!(
-                            target: "consensus::engine",
-                            ?error,
-                            "Error connecting buffered blocks to canonical hashes on hook result"
-                        );
+                        error!(target: "consensus::engine", %error, "Error connecting buffered blocks to canonical hashes on hook result");
                         return Err(error.into())
                     }
                 }

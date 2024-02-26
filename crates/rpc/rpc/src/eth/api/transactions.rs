@@ -1088,7 +1088,7 @@ where
     pub(crate) async fn eip4844_blob_fee(&self, blob_fee: Option<U256>) -> EthResult<U256> {
         match blob_fee {
             Some(blob_fee) => Ok(blob_fee),
-            None => self.blob_gas_price().await,
+            None => self.blob_base_fee().await,
         }
     }
 }

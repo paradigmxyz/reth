@@ -354,7 +354,6 @@ impl Sink<Bytes> for ProtocolProxy {
     }
 }
 
-#[async_trait::async_trait]
 impl CanDisconnect<Bytes> for ProtocolProxy {
     async fn disconnect(
         &mut self,
