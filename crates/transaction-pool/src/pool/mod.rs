@@ -94,7 +94,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace, warn, info};
 mod events;
 use crate::{
     blobstore::BlobStore,
@@ -808,7 +808,9 @@ where
         let mut pool = self.pool.write();
         let mut identifiers = self.identifiers.write();
         pool.cleanup_senders();
-        identifiers.retain(|id, _addr| pool.all().contains_sender(id))
+        info!(target: "reth::cli", prev_len=identifiers.len(), "cleaning up identifiers");
+        identifiers.retain(|id, _addr| pool.all().contains_sender(id));
+        info!(target: "reth::cli", new=identifiers.len(), "cleaned up identifiers");
     }
 
     /// Cleans up the blob store

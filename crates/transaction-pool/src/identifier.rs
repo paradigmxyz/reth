@@ -27,6 +27,11 @@ impl SenderIdentifiers {
         self.sender_to_address.get(id)
     }
 
+    /// Returns how many addressesee are in the address_to_id map
+    pub(crate) fn len(&self) -> usize {
+        self.address_to_id.len()
+    }
+
     /// Updates the metrics for the sender identifiers
     pub(crate) fn update_metrics(&self) {
         self.metrics.address_to_id_size.set(self.address_to_id.len() as f64);
