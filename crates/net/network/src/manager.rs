@@ -593,6 +593,9 @@ where
                 let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peers));
             }
             NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
+            NetworkHandleMessage::GetTransactionsHandle(tx) => {
+                self.notify_tx_manager(NetworkTransactionEvent::GetTransactionsHandle(tx))
+            }
         }
     }
 }

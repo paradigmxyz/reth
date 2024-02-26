@@ -245,8 +245,6 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         let network_events = network.event_listener();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-        network.set_tx_handle(TransactionsHandle { manager_tx: command_tx.clone() });
-
         let transaction_fetcher = TransactionFetcher::default().with_transaction_fetcher_config(
             &transactions_manager_config.transaction_fetcher_config,
         );
@@ -837,6 +835,9 @@ where
             }
             NetworkTransactionEvent::GetPooledTransactions { peer_id, request, response } => {
                 self.on_get_pooled_transactions(peer_id, request, response)
+            }
+            NetworkTransactionEvent::GetTransactionsHandle(response) => {
+                let _ = response.send(self.handle());
             }
         }
     }
@@ -1528,6 +1529,8 @@ pub enum NetworkTransactionEvent {
         /// The sender for responding to the request with a result of `PooledTransactions`.
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
+    /// Represents the event of receiving a `GetTransactionsHandle` request.
+    GetTransactionsHandle(oneshot::Sender<TransactionsHandle>),
 }
 
 /// Tracks stats about the [`TransactionsManager`].
