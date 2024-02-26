@@ -354,26 +354,26 @@ mod tests {
 
         // No changes
         let mut cursor = TrieWalker::new(&mut trie, Default::default());
-        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles_unchecked([]))); // root
+        assert_eq!(cursor.key().cloned(), Some(Nibbles::new())); // root
         assert!(cursor.can_skip_current_node); // due to root_hash
         cursor.advance().unwrap(); // skips to the end of trie
         assert_eq!(cursor.key().cloned(), None);
 
         // We insert something that's not part of the existing trie/prefix.
         let mut changed = PrefixSetMut::default();
-        changed.insert(Nibbles::from_nibbles_unchecked([0xF, 0x1]));
+        changed.insert(Nibbles::from_nibbles([0xF, 0x1]));
         let mut cursor = TrieWalker::new(&mut trie, changed.freeze());
 
         // Root node
-        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles_unchecked([])));
+        assert_eq!(cursor.key().cloned(), Some(Nibbles::new()));
         // Should not be able to skip state due to the changed values
         assert!(!cursor.can_skip_current_node);
         cursor.advance().unwrap();
-        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles_unchecked([0x2])));
+        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles([0x2])));
         cursor.advance().unwrap();
-        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles_unchecked([0x2, 0x1])));
+        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles([0x2, 0x1])));
         cursor.advance().unwrap();
-        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles_unchecked([0x4])));
+        assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles([0x4])));
 
         cursor.advance().unwrap();
         assert_eq!(cursor.key().cloned(), None); // the end of trie
