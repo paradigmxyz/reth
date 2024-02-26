@@ -58,6 +58,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2024-02-22
       - name: Install mdbook
         run: |
           mkdir mdbook
@@ -78,7 +80,7 @@ jobs:
         run: mdbook build
 
       - name: Build docs
-        run: cargo docs
+        run: cargo +nightly-2024-02-22 docs
         env:
           # Keep in sync with ./ci.yml:jobs.docs
           RUSTDOCFLAGS:

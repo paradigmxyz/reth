@@ -10,6 +10,8 @@ FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 
 BUILD_PATH = "target"
 
+NIGTHLY_VERSION="2024-02-01"
+
 # List of features to use when building. Can be overriden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
@@ -255,10 +257,10 @@ maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus t
 
 
 fmt:
-	cargo +nightly fmt
+	cargo +nightly-$(NIGTHLY_VERSION) fmt
 
 lint-reth:
-	cargo +nightly clippy \
+	cargo +nightly-$(NIGTHLY_VERSION) clippy \
 	--workspace \
 	--bin "reth" \
 	--lib \
@@ -269,7 +271,7 @@ lint-reth:
 	-- -D warnings
 
 lint-op-reth:
-	cargo +nightly clippy \
+	cargo +nightly-$(NIGTHLY_VERSION) clippy \
 	--workspace \
 	--bin "op-reth" \
 	--lib \
@@ -280,7 +282,7 @@ lint-op-reth:
 	-- -D warnings
 
 lint-other-targets:
-	cargo +nightly clippy \
+	cargo +nightly-$(NIGTHLY_VERSION) clippy \
 	--workspace \
 	--lib \
 	--examples \
@@ -301,7 +303,7 @@ rustdocs:
 	--show-type-layout \
 	--generate-link-to-definition \
 	--enable-index-page -Zunstable-options -D warnings" \
-	cargo +nightly docs \
+	cargo +nightly-$(NIGTHLY_VERSION) docs \
 	--document-private-items
 
 test-reth:

@@ -88,10 +88,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2024-02-22
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo docs --document-private-items
+      - run: cargo +nightly-2024-02-22 docs --document-private-items
         env:
           # Keep in sync with ./book.yml:jobs.build
           # This should only add `-D warnings`
@@ -108,7 +110,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - run: cargo fmt --all --check
+          toolchain: nightly-2024-02-01
+      - run: cargo +nightly-2024-02-01 fmt --all --check
 
   grafana:
     runs-on: ubuntu-latest
