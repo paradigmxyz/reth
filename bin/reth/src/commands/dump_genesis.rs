@@ -1,9 +1,6 @@
 //! Command that dumps genesis block JSON configuration to stdout
 
-use crate::{
-    args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    dirs::{DataDirPath, MaybePlatformPath},
-};
+use crate::args::utils;
 use clap::Parser;
 use reth_primitives::ChainSpec;
 use std::sync::Arc;
@@ -11,28 +8,6 @@ use std::sync::Arc;
 /// Dumps genesis block JSON configuration to stdout, test(todo!(abner))
 #[derive(Debug, Parser)]
 pub struct DumpGenesisCommand {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
-
     /// Görli network: pre-configured proof-of-authority test network
     #[arg(long, verbatim_doc_comment)]
     goerli: bool,
@@ -48,6 +23,18 @@ pub struct DumpGenesisCommand {
     /// Sepolia network: pre-configured proof-of-work test network
     #[arg(long, verbatim_doc_comment)]
     sepolia: bool,
+
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    #[arg(
+    long,
+    value_name = "CHAIN_OR_PATH",
+    long_help = chain_help(),
+    default_value = SUPPORTED_CHAINS[0],
+    value_parser = genesis_value_parser
+    )]
+    chain: Arc<ChainSpec>,
 }
 
 impl DumpGenesisCommand {
