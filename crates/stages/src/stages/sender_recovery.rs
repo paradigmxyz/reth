@@ -51,9 +51,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
     /// Retrieve the range of transactions to iterate over by querying
     /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
-    /// collect transactions within that range,
-    /// recover signer for each transaction and store entries in
-    /// the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
+    /// collect transactions within that range, recover signer for each transaction and store
+    /// entries in the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
     fn execute(
         &mut self,
         provider: &DatabaseProviderRW<DB>,
@@ -461,7 +460,7 @@ mod tests {
         /// block number.
         ///
         /// 2. If the is no requested block entry in the bodies table, but
-        /// [tables::TransactionSenders] is    not empty.
+        /// [tables::TransactionSenders] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .db
