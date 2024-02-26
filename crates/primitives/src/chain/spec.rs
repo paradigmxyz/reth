@@ -776,11 +776,7 @@ impl ChainSpec {
     #[inline]
     pub fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
         self.paris_block_and_final_difficulty.and_then(|(activated_at, final_difficulty)| {
-            if block_number >= activated_at {
-                Some(final_difficulty)
-            } else {
-                None
-            }
+            (block_number >= activated_at).then_some(final_difficulty)
         })
     }
 
