@@ -318,8 +318,7 @@ mod read_transactions {
     mod tests {
         use crate::{
             txn_manager::{
-                self, read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, TxnManagerMessage,
-                TxnPtr,
+                read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, TxnManagerMessage, TxnPtr,
             },
             Environment, Error, MaxReadTransactionDuration, TransactionKind, RO,
         };
