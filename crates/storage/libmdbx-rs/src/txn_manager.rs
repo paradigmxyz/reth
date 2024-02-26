@@ -3,6 +3,8 @@ use crate::{
     error::{mdbx_result, Result},
     CommitLatency, Error,
 };
+#[cfg(not(feature = "read-tx-timeouts"))]
+use dashmap::DashSet;
 use std::{
     ptr,
     sync::mpsc::{sync_channel, Receiver, SyncSender},
@@ -35,7 +37,7 @@ pub(crate) struct TxnManager {
     ///
     /// We store `usize` instead of a raw pointer, because pointers are not comparable.
     #[cfg(not(feature = "read-tx-timeouts"))]
-    aborted: std::sync::Arc<dashmap::DashSet<usize>>,
+    aborted: std::sync::Arc<DashSet<usize>>,
 }
 
 impl TxnManager {
