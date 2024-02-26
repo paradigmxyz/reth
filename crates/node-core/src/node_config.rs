@@ -847,7 +847,6 @@ impl NodeConfig {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                    static_file_producer,
                 )?
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
@@ -892,7 +891,7 @@ impl NodeConfig {
                     prune_modes.storage_history,
                 )),
             )
-            .build(provider_factory);
+            .build(provider_factory, static_file_producer);
 
         Ok(pipeline)
     }

@@ -18,8 +18,6 @@ mod index_storage_history;
 mod merkle;
 /// The sender recovery stage.
 mod sender_recovery;
-/// The static file stage.
-mod static_file;
 /// The transaction lookup stage
 mod tx_lookup;
 
@@ -33,7 +31,6 @@ pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
 pub use sender_recovery::*;
-pub use static_file::*;
 pub use tx_lookup::*;
 
 #[cfg(test)]

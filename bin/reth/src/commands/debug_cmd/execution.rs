@@ -127,7 +127,6 @@ impl Command {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                    static_file_producer,
                 )?
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
@@ -148,7 +147,7 @@ impl Command {
                     config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
                 )),
             )
-            .build(provider_factory);
+            .build(provider_factory, static_file_producer);
 
         Ok(pipeline)
     }

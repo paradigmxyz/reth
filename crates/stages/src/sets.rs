@@ -13,14 +13,22 @@
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::EvmProcessorFactory;
-//! # use reth_primitives::MAINNET;
+//! # use reth_primitives::{PruneModes, MAINNET};
 //! # use reth_node_ethereum::EthEvmConfig;
 //! # use reth_provider::test_utils::create_test_provider_factory;
+//! # use reth_static_file::StaticFileProducer;
 //!
 //! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone(), EthEvmConfig::default());
 //! # let provider_factory = create_test_provider_factory();
+//! # let static_file_producer =  StaticFileProducer::new(
+//!     provider_factory.clone(),
+//!     provider_factory.static_file_provider(),
+//!     PruneModes::default(),
+//! );
 //! // Build a pipeline with all offline stages.
-//! # let pipeline = Pipeline::builder().add_stages(OfflineStages::new(executor_factory)).build(provider_factory);
+//! # let pipeline = Pipeline::builder()
+//!     .add_stages(OfflineStages::new(executor_factory))
+//!     .build(provider_factory, static_file_producer);
 //! ```
 //!
 //! ```ignore
@@ -42,7 +50,7 @@ use crate::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StaticFileStage, StorageHashingStage, TransactionLookupStage,
+        StorageHashingStage, TransactionLookupStage,
     },
     StageError, StageSet, StageSetBuilder,
 };
@@ -52,7 +60,6 @@ use reth_interfaces::{
     p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
 };
 use reth_provider::{ExecutorFactory, HeaderSyncGapProvider, HeaderSyncMode};
-use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -60,13 +67,11 @@ use tempfile::TempDir;
 ///
 /// A combination of (in order)
 ///
-/// - [`StaticFileStage`]
 /// - [`OnlineStages`]
 /// - [`OfflineStages`]
 /// - [`FinishStage`]
 ///
 /// This expands to the following series of stages:
-/// - [`StaticFileStage`]
 /// - [`HeaderStage`]
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
@@ -80,15 +85,14 @@ use tempfile::TempDir;
 /// - [`IndexAccountHistoryStage`]
 /// - [`FinishStage`]
 #[derive(Debug)]
-pub struct DefaultStages<Provider, H, B, EF, DB> {
+pub struct DefaultStages<Provider, H, B, EF> {
     /// Configuration for the online stages
     online: OnlineStages<Provider, H, B>,
     /// Executor factory needs for execution stage
     executor_factory: EF,
-    static_file_producer: StaticFileProducer<DB>,
 }
 
-impl<Provider, H, B, EF, DB> DefaultStages<Provider, H, B, EF, DB> {
+impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
     /// Create a new set of default stages with default values.
     pub fn new(
         provider: Provider,
@@ -97,7 +101,6 @@ impl<Provider, H, B, EF, DB> DefaultStages<Provider, H, B, EF, DB> {
         header_downloader: H,
         body_downloader: B,
         executor_factory: EF,
-        static_file_producer: StaticFileProducer<DB>,
     ) -> Result<Self, StageError>
     where
         EF: ExecutorFactory,
@@ -112,31 +115,27 @@ impl<Provider, H, B, EF, DB> DefaultStages<Provider, H, B, EF, DB> {
                 Arc::new(TempDir::new()?),
             ),
             executor_factory,
-            static_file_producer,
         })
     }
 }
 
-impl<Provider, H, B, EF, DB> DefaultStages<Provider, H, B, EF, DB>
+impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF>
 where
     EF: ExecutorFactory,
-    DB: Database + 'static,
 {
     /// Appends the default offline stages and default finish stage to the given builder.
-    pub fn add_offline_stages(
+    pub fn add_offline_stages<DB: Database>(
         default_offline: StageSetBuilder<DB>,
         executor_factory: EF,
-        static_file_producer: StaticFileProducer<DB>,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(StaticFileStage::new(static_file_producer))
             .add_set(default_offline)
             .add_set(OfflineStages::new(executor_factory))
             .add_stage(FinishStage)
     }
 }
 
-impl<Provider, H, B, EF, DB> StageSet<DB> for DefaultStages<Provider, H, B, EF, DB>
+impl<Provider, H, B, EF, DB> StageSet<DB> for DefaultStages<Provider, H, B, EF>
 where
     Provider: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
@@ -145,11 +144,7 @@ where
     DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
-        Self::add_offline_stages(
-            self.online.builder(),
-            self.executor_factory,
-            self.static_file_producer,
-        )
+        Self::add_offline_stages(self.online.builder(), self.executor_factory)
     }
 }
 

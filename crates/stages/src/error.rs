@@ -163,7 +163,7 @@ pub enum PipelineError {
     /// The pipeline encountered an error while trying to send an event.
     #[error("pipeline encountered an error while trying to send an event")]
     Channel(#[from] Box<SendError<PipelineEvent>>),
-    /// The stage encountered an internal error.
+    /// Internal error
     #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] RethError),
 }
