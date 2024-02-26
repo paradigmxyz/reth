@@ -6248,7 +6248,6 @@ dependencies = [
  "alloy-node-bindings",
  "alloy-rlp",
  "aquamarine",
- "async-trait",
  "auto_impl",
  "criterion",
  "derive_more",
