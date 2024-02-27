@@ -182,8 +182,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v4
         with:
-          repository: ethereum/hive
-          ref: master
+          repository: joshiedo/hive
+          ref: reth/disable-pruner
           path: hivetests
 
       - name: Run ${{ matrix.sim }} simulator
