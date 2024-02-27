@@ -3,6 +3,7 @@
 
 use std::{collections::HashMap, mem};
 
+use crate::metrics::TxTypesCounter;
 use derive_more::{Deref, DerefMut, Display};
 use itertools::izip;
 use reth_eth_wire::{
@@ -18,9 +19,14 @@ pub const SIGNATURE_DECODED_SIZE_BYTES: usize = mem::size_of::<Signature>();
 /// Interface for validating a `(ty, size, hash)` tuple from a [`NewPooledTransactionHashes68`].
 pub trait ValidateTx68 {
     /// Validates a [`NewPooledTransactionHashes68`] entry. Returns [`ValidationOutcome`] which
-    /// signals to the caller wether to fetch the transaction or wether to drop it, and wether the
-    /// sender of the announcement should be penalized.
-    fn should_fetch(&self, ty: u8, hash: TxHash, size: usize) -> ValidationOutcome;
+    /// signals to the caller whether to fetch the transaction or whether to drop it, and weather
+    /// the sender of the announcement should be penalized.
+    fn should_fetch(
+        &self,
+        ty: u8,
+        hash: TxHash,
+        size: usize,
+    ) -> (ValidationOutcome, Option<TxType>);
 
     /// Returns the reasonable maximum encoded transaction length configured for this network, if
     /// any. This property is not spec'ed out but can be inferred by looking how much data can be
@@ -65,7 +71,7 @@ pub trait FilterAnnouncement {
     fn filter_valid_entries_68(
         &self,
         msg: NewPooledTransactionHashes68,
-    ) -> (FilterOutcome, ValidAnnouncementData)
+    ) -> (FilterOutcome, ValidAnnouncementData, TxTypesCounter)
     where
         Self: ValidateTx68;
 
@@ -101,7 +107,12 @@ pub struct AnnouncementFilter<N = EthAnnouncementFilter>(N);
 pub struct EthAnnouncementFilter;
 
 impl ValidateTx68 for EthAnnouncementFilter {
-    fn should_fetch(&self, ty: u8, hash: TxHash, size: usize) -> ValidationOutcome {
+    fn should_fetch(
+        &self,
+        ty: u8,
+        hash: TxHash,
+        size: usize,
+    ) -> (ValidationOutcome, Option<TxType>) {
         //
         // 1. checks if tx type is valid value for this network
         //
@@ -116,7 +127,7 @@ impl ValidateTx68 for EthAnnouncementFilter {
                     "invalid tx type in eth68 announcement"
                 );
 
-                return ValidationOutcome::ReportPeer
+                return (ValidationOutcome::ReportPeer, None)
             }
         };
 
@@ -137,7 +148,7 @@ impl ValidateTx68 for EthAnnouncementFilter {
                     "invalid tx size in eth68 announcement"
                 );
 
-                return ValidationOutcome::Ignore
+                return (ValidationOutcome::Ignore, Some(tx_type))
             }
         }
         if let Some(reasonable_min_encoded_tx_length) = self.min_encoded_tx_length(tx_type) {
@@ -174,7 +185,7 @@ impl ValidateTx68 for EthAnnouncementFilter {
             }
         }
 
-        ValidationOutcome::Fetch
+        (ValidationOutcome::Fetch, Some(tx_type))
     }
 
     fn max_encoded_tx_length(&self, ty: TxType) -> Option<usize> {
@@ -208,7 +219,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
     fn filter_valid_entries_68(
         &self,
         msg: NewPooledTransactionHashes68,
-    ) -> (FilterOutcome, ValidAnnouncementData)
+    ) -> (FilterOutcome, ValidAnnouncementData, TxTypesCounter)
     where
         Self: ValidateTx68,
     {
@@ -229,6 +240,8 @@ impl FilterAnnouncement for EthAnnouncementFilter {
 `%sizes: {sizes:?}`"
         );
 
+        let mut tx_types_counter = TxTypesCounter::default();
+
         //
         // 1. checks if the announcement is empty
         //
@@ -237,7 +250,11 @@ impl FilterAnnouncement for EthAnnouncementFilter {
                 network=%Self,
                 "empty eth68 announcement"
             );
-            return (FilterOutcome::ReportPeer, ValidAnnouncementData::empty_eth68())
+            return (
+                FilterOutcome::ReportPeer,
+                ValidAnnouncementData::empty_eth68(),
+                tx_types_counter,
+            )
         }
 
         let mut should_report_peer = false;
@@ -251,9 +268,14 @@ impl FilterAnnouncement for EthAnnouncementFilter {
         //
         for (i, (&ty, &hash, &size)) in izip!(&types, &hashes, &sizes).enumerate() {
             match self.should_fetch(ty, hash, size) {
-                ValidationOutcome::Fetch => (),
-                ValidationOutcome::Ignore => indices_to_remove.push(i),
-                ValidationOutcome::ReportPeer => {
+                (ValidationOutcome::Fetch, tx_type) => {
+                    tx_types_counter.increase_by_tx_type(tx_type);
+                }
+                (ValidationOutcome::Ignore, tx_type) => {
+                    indices_to_remove.push(i);
+                    tx_types_counter.increase_by_tx_type(tx_type);
+                }
+                (ValidationOutcome::ReportPeer, _) => {
                     indices_to_remove.push(i);
                     should_report_peer = true;
                 }
@@ -285,6 +307,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
         (
             if should_report_peer { FilterOutcome::ReportPeer } else { FilterOutcome::Ok },
             ValidAnnouncementData::new_eth68(deduped_data),
+            tx_types_counter,
         )
     }
 
@@ -349,7 +372,7 @@ mod test {
 
         let filter = EthAnnouncementFilter;
 
-        let (outcome, _data) = filter.filter_valid_entries_68(announcement);
+        let (outcome, _data, _tx_types_counter) = filter.filter_valid_entries_68(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
     }

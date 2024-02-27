@@ -703,15 +703,15 @@ where
         let mut valid_announcement_data = match msg {
             NewPooledTransactionHashes::Eth68(eth68_msg) => {
                 // validate eth68 announcement data
-                let (outcome, valid_data) =
+                let (outcome, valid_data, tx_types_counter) =
                     self.transaction_fetcher.filter_valid_hashes.filter_valid_entries_68(eth68_msg);
 
                 if let FilterOutcome::ReportPeer = outcome {
                     self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
                 }
                 self.transaction_fetcher
-                    .announced_tx_metrics
-                    .update_on_valid_announcement(&valid_data);
+                    .announced_tx_types_metrics
+                    .update_eth68_announcement_metrics(tx_types_counter);
 
                 valid_data
             }
