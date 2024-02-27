@@ -56,7 +56,8 @@ impl StaticFileProviderRW {
     ) -> ProviderResult<(NippyJarWriter<SegmentHeader>, PathBuf)> {
         let start = Instant::now();
 
-        let static_file_provider = StaticFileProvider(reader.upgrade().unwrap());
+        let static_file_provider =
+            StaticFileProvider(reader.upgrade().expect("parent StaticFileProvider is dropped"));
 
         let block_range = find_fixed_range(block);
         let (jar, path) = match static_file_provider.get_segment_provider_from_block(
