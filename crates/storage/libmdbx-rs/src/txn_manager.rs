@@ -1,7 +1,7 @@
 use crate::{
     environment::EnvPtr,
     error::{mdbx_result, Result},
-    CommitLatency, Error,
+    CommitLatency,
 };
 use std::{
     ptr,
@@ -423,7 +423,7 @@ mod read_transactions {
         }
 
         #[test]
-        fn txn_manager_abort_ro_transaction_twice() {
+        fn txn_manager_abort_transaction_twice() {
             const MAX_DURATION: Duration = Duration::from_secs(1);
 
             let dir = tempdir().unwrap();
@@ -434,30 +434,22 @@ mod read_transactions {
 
             assert!(env.txn_manager().read_transactions.is_some());
 
-            // Create a ro transaction abort it by message to tx manager.
+            // Create a ro transaction. Abort it by message to tx manager.
             let tx = env.begin_ro_txn().unwrap();
             let tx_ptr = TxnPtr(tx.txn());
 
             let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort {
-                tx: tx_ptr,
-                flags: RO::OPEN_FLAGS,
-                sender,
-            });
+            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
             assert!(rx.recv().unwrap().is_ok());
 
             // Attempt to abort again throws error.
             let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort {
-                tx: tx_ptr,
-                flags: RO::OPEN_FLAGS,
-                sender,
-            });
+            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
             assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
         }
 
         #[test]
-        fn txn_manager_abort_dropped_ro_transaction() {
+        fn txn_manager_abort_timed_out_transaction() {
             const MAX_DURATION: Duration = Duration::from_secs(1);
 
             let dir = tempdir().unwrap();
@@ -468,7 +460,31 @@ mod read_transactions {
 
             assert!(env.txn_manager().read_transactions.is_some());
 
-            // Create a ro transaction abort it by dropping.
+            // Create a ro transaction. Abort it by letting it time out.
+            let tx = env.begin_ro_txn().unwrap();
+            let tx_ptr = TxnPtr(tx.txn());
+
+            std::thread::sleep(MAX_DURATION);
+
+            // Attempt to abort again throws error.
+            let (sender, rx) = sync_channel(0);
+            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
+            assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
+        }
+
+        #[test]
+        fn txn_manager_abort_dropped_transaction() {
+            const MAX_DURATION: Duration = Duration::from_secs(1);
+
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
+                .open(dir.path())
+                .unwrap();
+
+            assert!(env.txn_manager().read_transactions.is_some());
+
+            // Create a ro transaction. Abort it by dropping.
             let tx = env.begin_ro_txn().unwrap();
             let tx_ptr = TxnPtr(tx.txn());
 
@@ -476,11 +492,7 @@ mod read_transactions {
 
             // Attempt to abort again throws error.
             let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort {
-                tx: tx_ptr,
-                flags: RO::OPEN_FLAGS,
-                sender,
-            });
+            env.txn_manager().send_message(TxnManagerMessage::Abort { tx: tx_ptr, sender });
             assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
         }
     }
