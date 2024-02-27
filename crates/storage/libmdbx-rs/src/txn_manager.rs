@@ -277,7 +277,9 @@ mod read_transactions {
 
                             // Add the transaction to the list of aborted transactions, so further
                             // usages report the correct error when the transaction is closed.
-                            let result = self.add_aborted(ptr);
+                            let result = self
+                                .add_aborted(ptr)
+                                .and_then(|| mdbx_result(unsafe { ffi::mdbx_txn_abort(ptr) }));
 
                             // Add the transaction to `aborted_active`. We can't remove it
                             // instantly from the list of active transactions, because we iterate
