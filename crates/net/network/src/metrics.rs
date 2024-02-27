@@ -250,7 +250,7 @@ pub struct EthRequestHandlerMetrics {
 /// Eth67 announcement metrics, track entries by TxType
 #[derive(Metrics)]
 #[metrics(scope = "network.transaction_fetcher")]
-pub struct AnnouncedTxSizeMetrics {
+pub struct AnnouncedTxTypesMetrics {
     /// Histogram for tracking legacy transaction sizes
     pub(crate) legacy: Histogram,
 
@@ -267,7 +267,7 @@ pub struct AnnouncedTxSizeMetrics {
 impl AnnouncedTxSizeMetrics {
     /// Update metrics during announcement validation, by examining each announcement entry based on
     /// TxType
-    pub(crate) fn update_on_valid_announcement(&self, announcement: &ValidAnnouncementData) {
+    pub(crate) fn update_eth68_announcement_metrics(&self, announcement: &ValidAnnouncementData) {
         let mut aggragate = [0; 4];
         for item in announcement.iter() {
             if let (_, Some((ty, _))) = item {
