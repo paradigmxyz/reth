@@ -251,7 +251,7 @@ pub struct EthRequestHandlerMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "network.transaction_fetcher")]
 pub struct AnnouncedTxTypesMetrics {
-    /// Histogram for tracking legacy transaction sizes
+    /// Histogram for tracking frequency of legacy transaction type
     pub(crate) legacy: Histogram,
 
     /// Histogram for tracking EIP-2930 transaction sizes
