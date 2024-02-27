@@ -142,7 +142,7 @@ pub struct BlockWithSenders {
 impl BlockWithSenders {
     /// New block with senders. Return none if len of tx and senders does not match
     pub fn new(block: Block, senders: Vec<Address>) -> Option<Self> {
-        (!block.body.len() != senders.len()).then_some(Self { block, senders })
+        (block.body.len() == senders.len()).then_some(Self { block, senders })
     }
 
     /// Seal the block with a known hash.
@@ -387,7 +387,7 @@ pub struct SealedBlockWithSenders {
 impl SealedBlockWithSenders {
     /// New sealed block with sender. Return none if len of tx and senders does not match
     pub fn new(block: SealedBlock, senders: Vec<Address>) -> Option<Self> {
-        (!block.body.len() != senders.len()).then_some(Self { block, senders })
+        (block.body.len() == senders.len()).then_some(Self { block, senders })
     }
 
     /// Split Structure to its components
@@ -677,5 +677,23 @@ mod tests {
         let s = "\"2\"";
         let err = serde_json::from_str::<BlockNumberOrTag>(s).unwrap_err();
         assert_eq!(err.to_string(), HexStringMissingPrefixError::default().to_string());
+    }
+
+    #[test]
+    fn block_with_senders() {
+        let mut block = Block::default();
+        let sender = Address::random();
+        block.body.push(TransactionSigned::default());
+        assert_eq!(BlockWithSenders::new(block.clone(), vec![]), None);
+        assert_eq!(
+            BlockWithSenders::new(block.clone(), vec![sender]),
+            Some(BlockWithSenders { block: block.clone(), senders: vec![sender] })
+        );
+        let sealed = block.seal_slow();
+        assert_eq!(SealedBlockWithSenders::new(sealed.clone(), vec![]), None);
+        assert_eq!(
+            SealedBlockWithSenders::new(sealed.clone(), vec![sender]),
+            Some(SealedBlockWithSenders { block: sealed, senders: vec![sender] })
+        );
     }
 }
