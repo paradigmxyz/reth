@@ -16,7 +16,7 @@ unsafe impl Sync for TxnPtr {}
 
 pub(crate) enum TxnManagerMessage {
     Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
-    Abort { tx: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<bool>> },
+    Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
     Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
 }
 
@@ -30,12 +30,6 @@ pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
     #[cfg(feature = "read-tx-timeouts")]
     read_transactions: Option<std::sync::Arc<read_transactions::ReadTransactions>>,
-    /// List of rw transactions aborted by [TxnManagerMessage::Abort] or drop.
-    /// We keep them so we're able to report a nice [Error::RWTransactionAborted] error if the
-    /// user attempts to abort the same transaction again.
-    ///
-    /// We store `usize` instead of a raw pointer, because pointers are not comparable.
-    aborted_rw: std::sync::Arc<DashSet<usize>>,
 }
 
 impl TxnManager {
@@ -45,7 +39,6 @@ impl TxnManager {
             sender: tx,
             #[cfg(feature = "read-tx-timeouts")]
             read_transactions: None,
-            aborted_rw: Default::default(),
         };
 
         txn_manager.start_message_listener(env, rx);
@@ -62,7 +55,6 @@ impl TxnManager {
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
         #[cfg(feature = "read-tx-timeouts")]
         let read_transactions = self.read_transactions.clone();
-        let aborted_rw = self.aborted_rw.clone();
 
         std::thread::spawn(move || {
             #[allow(clippy::redundant_locals)]
@@ -121,14 +113,6 @@ impl TxnManager {
                                 }
                             }
 
-                            let new_aborted_rw = aborted_rw.insert(tx.0 as usize);
-
-                            let result = if new_aborted_rw {
-                                mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })
-                            } else {
-                                Err(Error::RWTransactionAborted)
-                            };
-
                             sender.send(result).unwrap();
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
@@ -185,7 +169,6 @@ mod read_transactions {
             let txn_manager = Self {
                 sender: tx,
                 read_transactions: Some(read_transactions),
-                aborted_rw: Default::default(),
             };
 
             txn_manager.start_message_listener(env, rx);
