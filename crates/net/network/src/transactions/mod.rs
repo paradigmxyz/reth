@@ -1069,6 +1069,9 @@ where
                         }
                     }
                 }
+
+                self.metrics.transactions_by_peers_length.set(self.transactions_by_peers.len() as f64);
+                self.metrics.transactions_by_peers_total_count.set(self.transactions_by_peers.values().map(Vec::len).sum::<usize>() as f64);
             }
             new_txs.shrink_to_fit();
 
@@ -1154,6 +1157,8 @@ where
     /// Clear the transaction
     fn on_good_import(&mut self, hash: TxHash) {
         self.transactions_by_peers.remove(&hash);
+        self.metrics.transactions_by_peers_length.set(self.transactions_by_peers.len() as f64);
+        self.metrics.transactions_by_peers_total_count.set(self.transactions_by_peers.values().map(Vec::len).sum::<usize>() as f64);
     }
 
     /// Penalize the peers that sent the bad transaction and cache it to avoid fetching or
@@ -1164,6 +1169,9 @@ where
                 self.report_peer_bad_transactions(peer_id);
             }
         }
+
+        self.metrics.transactions_by_peers_length.set(self.transactions_by_peers.len() as f64);
+        self.metrics.transactions_by_peers_total_count.set(self.transactions_by_peers.values().map(Vec::len).sum::<usize>() as f64);
         self.transaction_fetcher.remove_hashes_from_transaction_fetcher([hash]);
         self.bad_imports.insert(hash);
     }
