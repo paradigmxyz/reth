@@ -593,6 +593,13 @@ where
                 let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peers));
             }
             NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
+            NetworkHandleMessage::GetTransactionsHandle(tx) => {
+                if let Some(ref tx_inner) = self.to_transactions_manager {
+                    let _ = tx_inner.send(NetworkTransactionEvent::GetTransactionsHandle(tx));
+                } else {
+                    let _ = tx.send(None);
+                }
+            }
         }
     }
 }
