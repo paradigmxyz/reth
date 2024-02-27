@@ -56,8 +56,7 @@ impl StaticFileProviderRW {
     ) -> ProviderResult<(NippyJarWriter<SegmentHeader>, PathBuf)> {
         let start = Instant::now();
 
-        let static_file_provider =
-            StaticFileProvider(reader.upgrade().expect("parent StaticFileProvider is dropped"));
+        let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
         let block_range = find_fixed_range(block);
         let (jar, path) = match static_file_provider.get_segment_provider_from_block(
@@ -443,14 +442,22 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
-    /// Returns a reference to the parent [`StaticFileProvider`].
+    fn reader(&self) -> StaticFileProvider {
+        Self::upgrade_provider_to_strong_reference(&self.reader)
+    }
+
+    /// Upgrades a weak reference of [`StaticFileProviderInner`] to a strong reference
+    /// [`StaticFileProvider`].
     ///
     /// # Panics
     ///
     /// Panics if the parent [`StaticFileProvider`] is fully dropped while the child writer is still
-    /// active.
-    fn reader(&self) -> StaticFileProvider {
-        self.reader.upgrade().map(StaticFileProvider).expect("parent StaticFileProvider is dropped")
+    /// active. In reality, it's impossible to detach the [`StaticFileProviderRW`] from the
+    /// [`StaticFileProvider`].
+    fn upgrade_provider_to_strong_reference(
+        provider: &Weak<StaticFileProviderInner>,
+    ) -> StaticFileProvider {
+        provider.upgrade().map(StaticFileProvider).expect("StaticFileProvider is dropped")
     }
 
     #[cfg(any(test, feature = "test-utils"))]
