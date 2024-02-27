@@ -7,10 +7,7 @@ use crate::{
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
-use reth_db::{
-    models::{AccountBeforeTx, StoredBlockBodyIndices},
-    RawValue,
-};
+use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
@@ -302,27 +299,6 @@ impl TransactionsProvider for MockEthProvider {
             .filter_map(|(tx_number, tx)| {
                 if range.contains(&(tx_number as TxNumber)) {
                     Some(tx.clone().into())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        Ok(transactions)
-    }
-
-    fn raw_transactions_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
-        let lock = self.blocks.lock();
-        let transactions = lock
-            .values()
-            .flat_map(|block| &block.body)
-            .enumerate()
-            .filter_map(|(tx_number, tx)| {
-                if range.contains(&(tx_number as TxNumber)) {
-                    Some(RawValue::new(tx.clone().into()))
                 } else {
                     None
                 }

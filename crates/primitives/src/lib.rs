@@ -133,7 +133,7 @@ pub use c_kzg as kzg;
 #[cfg(feature = "optimism")]
 mod optimism {
     pub use crate::{
-        chain::{BASE_GOERLI, BASE_MAINNET, BASE_SEPOLIA, OP_GOERLI},
+        chain::{BASE_MAINNET, BASE_SEPOLIA},
         transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
     };
 }

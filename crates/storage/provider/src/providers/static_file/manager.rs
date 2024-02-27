@@ -12,12 +12,9 @@ use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
     models::StoredBlockBodyIndices,
-    static_file::{
-        iter_static_files, ColumnSelectorOne, HeaderMask, ReceiptMask, StaticFileCursor,
-        TransactionMask,
-    },
+    static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
     table::Table,
-    tables, RawValue,
+    tables,
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
@@ -980,26 +977,6 @@ impl TransactionsProvider for StaticFileProvider {
             to_range(range),
             |cursor, number| {
                 cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())
-            },
-            |_| true,
-        )
-    }
-
-    fn raw_transactions_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>> {
-        self.fetch_range_with_predicate(
-            StaticFileSegment::Transactions,
-            to_range(range),
-            |cursor, number| {
-                cursor.get(number.into(), <TransactionMask<TransactionSignedNoHash>>::MASK).map(
-                    |result| {
-                        result.map(|row| {
-                            RawValue::<TransactionSignedNoHash>::from_vec(row[0].to_vec())
-                        })
-                    },
-                )
             },
             |_| true,
         )

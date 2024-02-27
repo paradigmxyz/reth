@@ -1,5 +1,4 @@
 use crate::{BlockNumReader, BlockReader};
-use reth_db::RawValue;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     Address, BlockHashOrNumber, BlockNumber, TransactionMeta, TransactionSigned,
@@ -55,12 +54,6 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>>;
-
-    /// Get raw transactions by tx range.
-    fn raw_transactions_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<RawValue<TransactionSignedNoHash>>>;
 
     /// Get Senders from a tx range.
     fn senders_by_tx_range(

@@ -50,8 +50,6 @@ use tracing::{debug, trace};
 ///
 /// InspectorStack are used for optional inspecting execution. And it contains
 /// various duration of parts of execution.
-// TODO: https://github.com/bluealloy/revm/pull/745
-// #[derive(Debug)]
 #[allow(missing_debug_implementations)]
 pub struct EVMProcessor<'a, EvmConfig> {
     /// The configured chain-spec
@@ -502,7 +500,7 @@ where
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
-        self.stats.log_info();
+        self.stats.log_debug();
         let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
             self.evm.context.evm.db.take_bundle(),
