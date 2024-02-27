@@ -92,9 +92,6 @@ ethers-middleware = { workspace = true, default-features = false }
 
 enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 
-# async
-futures-test = "0.3.30"
-
 # misc
 serial_test.workspace = true
 tempfile.workspace = true

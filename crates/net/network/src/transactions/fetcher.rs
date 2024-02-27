@@ -22,10 +22,10 @@ use std::{
     collections::HashMap,
     num::NonZeroUsize,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
-use tracing::{debug, error, trace};
+use tracing::{debug, trace};
 use validation::FilterOutcome;
 
 use super::{
@@ -80,37 +80,6 @@ impl TransactionFetcher {
         self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request =
             config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
         self
-    }
-
-    /// Drains any resolved [`GetPooledTransactions`] requests and queues them as [`FetchEvent`]s
-    /// in the [`TransactionFetcher`]. This should be called every time before assembling more
-    /// [`GetPooledTransactions`] requests.
-    pub fn try_drain_inflight_requests(&mut self, cx: &mut Context<'_>) {
-        self.advance_inflight_requests(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, cx)
-    }
-
-    /// Advances inflight requests by at most the given number of [`GetPooledTransactions`]
-    /// requests. The [`PooledTransactions`] responses are queued as [`FetchEvent`]s in the
-    /// [`TransactionFetcher`].
-    pub fn advance_inflight_requests(&mut self, steps: u32, cx: &mut Context<'_>) {
-        // `FuturesUnordered` doesn't close when `None` is returned. so just return if empty.
-        // <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=815be2b6c8003303757c3ced135f363e>
-        if self.inflight_requests.is_empty() {
-            return
-        }
-
-        let mut budget = steps;
-
-        // noop context is used since we don't need the inflight requests futures unordered to
-        // schedule for wake up here when it's pending
-        while let Poll::Ready(Some(resp)) = self.inflight_requests.poll_next_unpin(cx) {
-            self.on_resolved_get_pooled_transactions_request_fut(resp);
-
-            budget = budget.saturating_sub(1);
-            if budget == 0 {
-                break
-            }
-        }
     }
 
     /// Removes the specified hashes from inflight tracking.
@@ -397,11 +366,7 @@ impl TransactionFetcher {
         peers: &HashMap<PeerId, PeerMetadata>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
-        cx: &mut Context<'_>,
     ) {
-        // try free active peers
-        self.try_drain_inflight_requests(cx);
-
         let init_capacity_req = approx_capacity_get_pooled_transactions_req_eth68(&self.info);
         let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
@@ -869,7 +834,7 @@ impl TransactionFetcher {
     pub fn on_resolved_get_pooled_transactions_request_fut(
         &mut self,
         response: GetPooledTxResponse,
-    ) {
+    ) -> FetchEvent {
         // update peer activity, requests for buffered hashes can only be made to idle
         // fallback peers
         let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
@@ -884,7 +849,7 @@ impl TransactionFetcher {
 
         self.decrement_inflight_request_count_for(&peer_id);
 
-        let event = match result {
+        match result {
             Ok(Ok(transactions)) => {
                 let payload = UnverifiedPooledTransactions::new(transactions);
 
@@ -947,10 +912,6 @@ impl TransactionFetcher {
                 // request channel closed/dropped
                 FetchEvent::FetchError { peer_id, error: RequestError::ChannelClosed }
             }
-        };
-
-        if let Err(err) = self.fetch_events_tail.send(event) {
-            error!(target: "net::tx", err=%err, "failed to queue fetch event")
         }
     }
 }
@@ -960,11 +921,17 @@ impl Stream for TransactionFetcher {
 
     /// Advances all inflight requests and returns the next event.
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // try enqueue next fetch event
-        self.advance_inflight_requests(1, cx);
+        // `FuturesUnordered` doesn't close when `None` is returned. so just return pending.
+        // <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=815be2b6c8003303757c3ced135f363e>
+        if self.inflight_requests.is_empty() {
+            return Poll::Pending
+        }
 
-        // dequeue next fetch event
-        self.as_mut().project().fetch_events_head.poll_next_unpin(cx)
+        if let Some(resp) = ready!(self.inflight_requests.poll_next_unpin(cx)) {
+            return Poll::Ready(Some(self.on_resolved_get_pooled_transactions_request_fut(resp)))
+        }
+
+        Poll::Pending
     }
 }
 
@@ -1230,7 +1197,6 @@ mod test {
     use std::collections::HashSet;
 
     use derive_more::IntoIterator;
-    use futures_test::task::noop_context;
     use reth_primitives::B256;
 
     use crate::transactions::tests::{default_cache, new_mock_session};
@@ -1389,7 +1355,7 @@ mod test {
 
         // TEST
 
-        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true, || (), &mut noop_context());
+        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true, || ());
 
         // mock session of peer_1 receives request
         let req = peer_1_mock_session_rx
