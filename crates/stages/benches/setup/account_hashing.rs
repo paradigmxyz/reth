@@ -52,7 +52,7 @@ fn find_stage_range(db: &Path) -> RangeInclusive<BlockNumber> {
 }
 
 fn generate_testdata_db(num_blocks: u64) -> (TestStageDB, RangeInclusive<BlockNumber>) {
-    let opts = SeedOpts { blocks: 0..=num_blocks, accounts: 0..100_000, txs: 100..150 };
+    let opts = SeedOpts { blocks: 0..=num_blocks, accounts: 100_000, txs: 100..150 };
 
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("account-hashing-bench");
     let exists = path.exists();
