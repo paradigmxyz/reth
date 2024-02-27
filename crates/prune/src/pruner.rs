@@ -244,7 +244,9 @@ impl<DB: Database> Pruner<DB> {
     /// Returns `true` if the pruning is needed at the provided tip block number.
     /// This determined by the check against minimum pruning interval and last pruned block number.
     pub fn is_pruning_needed(&self, tip_block_number: BlockNumber) -> bool {
-        if self.previous_tip_block_number.map_or(true, |previous_tip_block_number| {
+        if tip_block_number < self.min_block_interval as u64 {
+            false
+        } else if self.previous_tip_block_number.map_or(true, |previous_tip_block_number| {
             // Saturating subtraction is needed for the case when the chain was reverted, meaning
             // current block number might be less than the previous tip block number.
             // If that's the case, no pruning is needed as outdated data is also reverted.
