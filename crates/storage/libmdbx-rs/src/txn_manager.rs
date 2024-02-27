@@ -193,7 +193,7 @@ mod read_transactions {
         pub(crate) fn add_aborted_read_transaction(
             &self,
             ptr: *mut ffi::MDBX_txn,
-        ) -> Option<Result<(), Error>> {
+        ) -> Option<Result<()>> {
             Some(self.read_transactions.as_ref()?.add_aborted(ptr))
         }
     }
@@ -235,7 +235,7 @@ mod read_transactions {
 
         /// Adds a new transaction to the list of aborted read transactions. Returns `Ok(())`
         /// if the transaction hasn't already been aborted.
-        pub(super) fn add_aborted(&self, ptr: *mut ffi::MDBX_txn) -> Result<(), Error> {
+        pub(super) fn add_aborted(&self, ptr: *mut ffi::MDBX_txn) -> Result<()> {
             if self.aborted.insert(ptr as usize) {
                 return Ok(())
             }
