@@ -81,12 +81,6 @@ where
         count: u64,
     ) -> FetchFullBlockRangeFuture<Client> {
         let client = self.client.clone();
-
-        // Optimization: if we only want one block, we don't need to wait for the headers request
-        // to complete, and can send the block bodies request right away.
-        let bodies_request =
-            if count == 1 { None } else { Some(client.get_block_bodies(vec![hash])) };
-
         FetchFullBlockRangeFuture {
             start_hash: hash,
             count,
@@ -96,7 +90,7 @@ where
                     limit: count,
                     direction: HeadersDirection::Falling,
                 })),
-                bodies: bodies_request,
+                bodies: None,
             },
             client,
             headers: None,
@@ -410,7 +404,7 @@ where
     /// Returns the remaining hashes for the bodies request, based on the headers that still exist
     /// in the `root_map`.
     fn remaining_bodies_hashes(&self) -> Vec<B256> {
-        self.pending_headers.iter().map(|h| h.hash()).collect::<Vec<_>>()
+        self.pending_headers.iter().map(|h| h.hash()).collect()
     }
 
     /// Returns the [SealedBlock]s if the request is complete and valid.
