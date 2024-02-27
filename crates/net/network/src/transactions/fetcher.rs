@@ -20,9 +20,9 @@ use reth_metrics::common::mpsc::{
     metered_unbounded_channel, UnboundedMeteredReceiver, UnboundedMeteredSender,
 };
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
-use schnellru::{ByLength, Unlimited};
 #[cfg(debug_assertions)]
 use smallvec::{smallvec, SmallVec};
+use schnellru::{ByLength, ByMemoryUsage, Unlimited};
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -667,7 +667,7 @@ impl TransactionFetcher {
     pub fn fill_request_from_hashes_pending_fetch(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        seen_hashes: &schnellru::LruMap<TxHash, ()>,
+        seen_hashes: &schnellru::LruMap<TxHash, (), ByMemoryUsage>,
         mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
     ) {
         let Some(hash) = hashes_to_request.first() else { return };
