@@ -11,7 +11,7 @@ use std::fmt::Debug;
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
-/// on index sharding take a look at [`reth_db::tables::StorageHistory`].
+/// on index sharding take a look at [`reth_db::tables::StoragesHistory`].
 #[derive(Debug)]
 pub struct IndexStorageHistoryStage {
     /// Number of blocks after which the control
@@ -172,7 +172,7 @@ mod tests {
                     StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
                 )?;
                 // setup changeset that is going to be applied to history index
-                tx.put::<tables::StorageChangeSet>(
+                tx.put::<tables::StorageChangeSets>(
                     block_number_address(block),
                     storage(STORAGE_KEY),
                 )?;
@@ -220,14 +220,14 @@ mod tests {
         run(&db, 3, None);
 
         // verify
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3])]));
 
         // unwind
         unwind(&db, 5, 0);
 
         // verify initial state
-        let table = db.table::<tables::StorageHistory>().unwrap();
+        let table = db.table::<tables::StoragesHistory>().unwrap();
         assert!(table.is_empty());
     }
 
@@ -239,7 +239,7 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::StorageHistory>(shard(u64::MAX), list(&[1, 2, 3])).unwrap();
+            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&[1, 2, 3])).unwrap();
             Ok(())
         })
         .unwrap();
@@ -248,14 +248,14 @@ mod tests {
         run(&db, 5, Some(3));
 
         // verify
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5])]));
 
         // unwind
         unwind(&db, 5, 3);
 
         // verify initial state
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3])]));
     }
 
@@ -269,7 +269,7 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::StorageHistory>(shard(u64::MAX), list(&full_list)).unwrap();
+            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&full_list)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -278,7 +278,7 @@ mod tests {
         run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD));
 
         // verify
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([
@@ -291,7 +291,7 @@ mod tests {
         unwind(&db, LAST_BLOCK_IN_FULL_SHARD + 2, LAST_BLOCK_IN_FULL_SHARD);
 
         // verify initial state
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), full_list)]));
     }
 
@@ -304,7 +304,7 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::StorageHistory>(shard(u64::MAX), list(&almost_full_list)).unwrap();
+            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&almost_full_list)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -315,7 +315,7 @@ mod tests {
         // verify
         almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD - 1);
         almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), almost_full_list.clone())]));
 
         // unwind
@@ -324,7 +324,7 @@ mod tests {
         // verify initial state
         almost_full_list.pop();
         almost_full_list.pop();
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), almost_full_list)]));
 
         // verify initial state
@@ -339,7 +339,7 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::StorageHistory>(shard(u64::MAX), list(&close_full_list)).unwrap();
+            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&close_full_list)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -349,7 +349,7 @@ mod tests {
 
         // verify
         close_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([
@@ -363,7 +363,7 @@ mod tests {
 
         // verify initial state
         close_full_list.pop();
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list)]));
     }
 
@@ -376,9 +376,9 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::StorageHistory>(shard(1), list(&full_list)).unwrap();
-            tx.put::<tables::StorageHistory>(shard(2), list(&full_list)).unwrap();
-            tx.put::<tables::StorageHistory>(
+            tx.put::<tables::StoragesHistory>(shard(1), list(&full_list)).unwrap();
+            tx.put::<tables::StoragesHistory>(shard(2), list(&full_list)).unwrap();
+            tx.put::<tables::StoragesHistory>(
                 shard(u64::MAX),
                 list(&[LAST_BLOCK_IN_FULL_SHARD + 1]),
             )
@@ -390,7 +390,7 @@ mod tests {
         run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD + 1));
 
         // verify
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([
@@ -404,7 +404,7 @@ mod tests {
         unwind(&db, LAST_BLOCK_IN_FULL_SHARD + 2, LAST_BLOCK_IN_FULL_SHARD + 1);
 
         // verify initial state
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(
             table,
             BTreeMap::from([
@@ -436,11 +436,11 @@ mod tests {
             .unwrap();
 
             // setup changeset that are going to be applied to history index
-            tx.put::<tables::StorageChangeSet>(block_number_address(20), storage(STORAGE_KEY))
+            tx.put::<tables::StorageChangeSets>(block_number_address(20), storage(STORAGE_KEY))
                 .unwrap();
-            tx.put::<tables::StorageChangeSet>(block_number_address(36), storage(STORAGE_KEY))
+            tx.put::<tables::StorageChangeSets>(block_number_address(36), storage(STORAGE_KEY))
                 .unwrap();
-            tx.put::<tables::StorageChangeSet>(block_number_address(100), storage(STORAGE_KEY))
+            tx.put::<tables::StorageChangeSets>(block_number_address(100), storage(STORAGE_KEY))
                 .unwrap();
             Ok(())
         })
@@ -458,14 +458,14 @@ mod tests {
         provider.commit().unwrap();
 
         // verify
-        let table = cast(db.table::<tables::StorageHistory>().unwrap());
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![36, 100])]));
 
         // unwind
         unwind(&db, 20000, 0);
 
         // verify initial state
-        let table = db.table::<tables::StorageHistory>().unwrap();
+        let table = db.table::<tables::StoragesHistory>().unwrap();
         assert!(table.is_empty());
     }
 
@@ -544,7 +544,7 @@ mod tests {
 
                 let provider = self.db.factory.provider()?;
                 let mut changeset_cursor =
-                    provider.tx_ref().cursor_read::<tables::StorageChangeSet>()?;
+                    provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
 
                 let storage_transitions = changeset_cursor
                     .walk_range(BlockNumberAddress::range(start_block..=end_block))?
@@ -593,7 +593,7 @@ mod tests {
                     };
                 }
 
-                let table = cast(self.db.table::<tables::StorageHistory>().unwrap());
+                let table = cast(self.db.table::<tables::StoragesHistory>().unwrap());
                 assert_eq!(table, result);
             }
             Ok(())
@@ -602,7 +602,7 @@ mod tests {
 
     impl UnwindStageTestRunner for IndexStorageHistoryTestRunner {
         fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
-            let table = self.db.table::<tables::StorageHistory>().unwrap();
+            let table = self.db.table::<tables::StoragesHistory>().unwrap();
             assert!(table.is_empty());
             Ok(())
         }

@@ -43,7 +43,7 @@ impl<DB: Database> Segment<DB> for SenderRecovery {
         let tx_range_end = *tx_range.end();
 
         let mut last_pruned_transaction = tx_range_end;
-        let (pruned, done) = provider.prune_table_with_range::<tables::TxSenders>(
+        let (pruned, done) = provider.prune_table_with_range::<tables::TransactionSenders>(
             tx_range,
             input.delete_limit,
             |_| false,
@@ -110,7 +110,7 @@ mod tests {
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            db.table::<tables::TxSenders>().unwrap().len()
+            db.table::<tables::TransactionSenders>().unwrap().len()
         );
 
         let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
@@ -178,7 +178,7 @@ mod tests {
                 last_pruned_block_number.checked_sub(if result.done { 0 } else { 1 });
 
             assert_eq!(
-                db.table::<tables::TxSenders>().unwrap().len(),
+                db.table::<tables::TransactionSenders>().unwrap().len(),
                 transaction_senders.len() - (last_pruned_tx_number + 1)
             );
             assert_eq!(

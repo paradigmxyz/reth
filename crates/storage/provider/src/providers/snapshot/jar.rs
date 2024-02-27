@@ -205,12 +205,12 @@ impl<'a> TransactionsProvider for SnapshotJarProvider<'a> {
         &self,
         _hash: TxHash,
     ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
-        // Information required on indexing table [`tables::TransactionBlock`]
+        // Information required on indexing table [`tables::TransactionBlocks`]
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        // Information on indexing table [`tables::TransactionBlock`]
+        // Information on indexing table [`tables::TransactionBlocks`]
         Err(ProviderError::UnsupportedProvider)
     }
 

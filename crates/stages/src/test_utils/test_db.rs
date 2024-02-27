@@ -142,7 +142,7 @@ impl TestStageDB {
             headers.into_iter().try_for_each(|header| {
                 Self::insert_header(tx, header)?;
                 td += header.difficulty;
-                Ok(tx.put::<tables::HeaderTD>(header.number, td.into())?)
+                Ok(tx.put::<tables::HeaderTerminalDifficulties>(header.number, td.into())?)
             })
         })
     }
@@ -167,7 +167,7 @@ impl TestStageDB {
                 };
 
                 if !block.body.is_empty() {
-                    tx.put::<tables::TransactionBlock>(
+                    tx.put::<tables::TransactionBlocks>(
                         block_body_indices.last_tx_num(),
                         block.number,
                     )?;
@@ -190,7 +190,7 @@ impl TestStageDB {
         self.commit(|tx| {
             tx_hash_numbers.into_iter().try_for_each(|(tx_hash, tx_num)| {
                 // Insert into tx hash numbers table.
-                Ok(tx.put::<tables::TxHashNumber>(tx_hash, tx_num)?)
+                Ok(tx.put::<tables::TransactionHashNumbers>(tx_hash, tx_num)?)
             })
         })
     }
@@ -215,7 +215,7 @@ impl TestStageDB {
         self.commit(|tx| {
             transaction_senders.into_iter().try_for_each(|(tx_num, sender)| {
                 // Insert into receipts table.
-                Ok(tx.put::<tables::TxSenders>(tx_num, sender)?)
+                Ok(tx.put::<tables::TransactionSenders>(tx_num, sender)?)
             })
         })
     }
@@ -232,7 +232,7 @@ impl TestStageDB {
 
                 // Insert into account tables.
                 tx.put::<tables::PlainAccountState>(address, account)?;
-                tx.put::<tables::HashedAccount>(hashed_address, account)?;
+                tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
                 // Insert into storage tables.
                 storage.into_iter().filter(|e| e.value != U256::ZERO).try_for_each(|entry| {
@@ -248,7 +248,7 @@ impl TestStageDB {
                     }
                     cursor.upsert(address, entry)?;
 
-                    let mut cursor = tx.cursor_dup_write::<tables::HashedStorage>()?;
+                    let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
                     if cursor
                         .seek_by_key_subkey(hashed_address, hashed_entry.key)?
                         .filter(|e| e.key == hashed_entry.key)
@@ -279,7 +279,7 @@ impl TestStageDB {
                 changeset.into_iter().try_for_each(|(address, old_account, old_storage)| {
                     let block = offset + block as u64;
                     // Insert into account changeset.
-                    tx.put::<tables::AccountChangeSet>(
+                    tx.put::<tables::AccountChangeSets>(
                         block,
                         AccountBeforeTx { address, info: Some(old_account) },
                     )?;
@@ -288,7 +288,7 @@ impl TestStageDB {
 
                     // Insert into storage changeset.
                     old_storage.into_iter().try_for_each(|entry| {
-                        Ok(tx.put::<tables::StorageChangeSet>(block_address, entry)?)
+                        Ok(tx.put::<tables::StorageChangeSets>(block_address, entry)?)
                     })
                 })
             })

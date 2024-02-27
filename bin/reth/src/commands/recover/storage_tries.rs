@@ -62,7 +62,7 @@ impl Command {
 
         let mut deleted_tries = 0;
         let tx_mut = provider.tx_mut();
-        let mut hashed_account_cursor = tx_mut.cursor_read::<tables::HashedAccount>()?;
+        let mut hashed_account_cursor = tx_mut.cursor_read::<tables::HashedAccounts>()?;
         let mut storage_trie_cursor = tx_mut.cursor_dup_read::<tables::StoragesTrie>()?;
         let mut entry = storage_trie_cursor.first()?;
 
