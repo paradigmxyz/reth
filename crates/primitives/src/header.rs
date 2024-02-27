@@ -10,6 +10,7 @@ use alloy_rlp::{
     EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
 use bytes::{Buf, BufMut, BytesMut};
+use derive_more::{Deref, DerefMut, From, Into, IntoIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -579,7 +580,20 @@ impl Decodable for Header {
 
 /// A list of [`Header`]s.
 #[main_codec]
-#[derive(Debug, Default, PartialEq, Eq, Clone, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Clone,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Deref,
+    DerefMut,
+    From,
+    Into,
+    IntoIterator,
+)]
 pub struct Headers(pub Vec<Header>);
 
 impl Headers {
@@ -599,38 +613,9 @@ impl Headers {
     }
 }
 
-impl IntoIterator for Headers {
-    type Item = Header;
-    type IntoIter = std::vec::IntoIter<Header>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-impl From<Vec<Header>> for Headers {
-    fn from(headers: Vec<Header>) -> Self {
-        Headers(headers)
-    }
-}
-
 impl FromIterator<Header> for Headers {
     fn from_iter<T: IntoIterator<Item = Header>>(iter: T) -> Self {
         Headers(iter.into_iter().collect())
-    }
-}
-
-impl Deref for Headers {
-    type Target = Vec<Header>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Headers {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
