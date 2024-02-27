@@ -1,6 +1,8 @@
 use crate::tree::{LinkEntry, TreeRootEntry};
 use enr::EnrKeyUnambiguous;
 use linked_hash_set::LinkedHashSet;
+use metrics::Gauge;
+use reth_metrics::Metrics;
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
@@ -23,6 +25,8 @@ pub(crate) struct SyncTree<K: EnrKeyUnambiguous = SecretKey> {
     unresolved_links: LinkedHashSet<String>,
     /// Unresolved nodes of the tree
     unresolved_nodes: LinkedHashSet<String>,
+    /// metrics
+    metrics: SyncTreeMetrics,
 }
 
 // === impl SyncTree ===
@@ -37,6 +41,7 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
             resolved_links: Default::default(),
             unresolved_links: Default::default(),
             unresolved_nodes: Default::default(),
+            metrics: Default::default(),
         }
     }
 
@@ -66,10 +71,12 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
                 self.unresolved_links.extend(children);
             }
         }
+        self.update_metrics();
     }
 
     /// Advances the state of the tree by returning actions to perform
     pub(crate) fn poll(&mut self, now: Instant, update_timeout: Duration) -> Option<SyncAction> {
+        self.update_metrics();
         match self.sync_state {
             SyncState::Pending => {
                 self.sync_state = SyncState::Enr;
@@ -128,7 +135,27 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
             }
         };
         self.sync_state = state;
+        self.update_metrics();
     }
+
+    /// Updates metrics
+    pub(crate) fn update_metrics(&self) {
+        self.metrics.unresolved_nodes.set(self.unresolved_nodes.len() as f64);
+        self.metrics.unresolved_links.set(self.unresolved_links.len() as f64);
+        self.metrics.resolved_links.set(self.resolved_links.len() as f64);
+    }
+}
+
+/// Represents synctree metrics
+#[derive(Clone, Metrics)]
+#[metrics(scope = "dns_disc")]
+pub(crate) struct SyncTreeMetrics {
+    /// The number of unresolved nodes
+    pub(crate) unresolved_nodes: Gauge,
+    /// The number of unresolved links
+    pub(crate) unresolved_links: Gauge,
+    /// The number of resolved links
+    pub(crate) resolved_links: Gauge,
 }
 
 /// The action to perform by the service

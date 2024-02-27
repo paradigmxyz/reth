@@ -21,6 +21,8 @@ use crate::{
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
+use metrics::Gauge;
+use reth_metrics::Metrics;
 use reth_primitives::{ForkId, NodeRecord, PeerId};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
@@ -108,6 +110,8 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     recheck_interval: Duration,
     /// Links to the DNS networks to bootstrap.
     bootstrap_dns_networks: HashSet<LinkEntry>,
+    /// Metrics
+    metrics: DnsDiscoveryMetrics,
 }
 
 // === impl DnsDiscoveryService ===
@@ -145,6 +149,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             queued_events: Default::default(),
             recheck_interval,
             bootstrap_dns_networks: bootstrap_dns_networks.unwrap_or_default(),
+            metrics: Default::default(),
         }
     }
 
@@ -157,6 +162,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
             while let Some(event) = self.next().await {
                 trace!(target: "disc::dns", ?event, "processed");
+                self.update_metrics();
             }
         })
     }
@@ -166,6 +172,14 @@ impl<R: Resolver> DnsDiscoveryService<R> {
         for link in self.bootstrap_dns_networks.clone() {
             self.sync_tree_with_link(link);
         }
+        self.update_metrics();
+    }
+
+    /// Updates the dns discovery metrics
+    fn update_metrics(&mut self) {
+        self.metrics.syncing_trees.set(self.trees.len() as f64);
+        self.metrics.dns_record_cache.set(self.dns_record_cache.len() as f64);
+        self.metrics.queued_events.set(self.queued_events.len() as f64);
     }
 
     /// Same as [DnsDiscoveryService::new] but also returns a new handle that's connected to the
@@ -268,6 +282,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                         if kind.is_link() {
                             if let Some(tree) = self.trees.get_mut(&link) {
                                 tree.resolved_links_mut().insert(hash, link_entry.clone());
+                                tree.update_metrics();
                             }
                             self.sync_tree_with_link(link_entry)
                         } else {
@@ -293,7 +308,9 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
     /// Advances the state of the DNS discovery service by polling,triggering lookups
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<DnsDiscoveryEvent> {
+        self.update_metrics();
         loop {
+
             // drain buffered events first
             if let Some(event) = self.queued_events.pop_front() {
                 return Poll::Ready(event)
@@ -353,6 +370,18 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             }
         }
     }
+}
+
+/// Metrics for the dns discovery service
+#[derive(Clone, Metrics)]
+#[metrics(scope = "dns_disc")]
+pub struct DnsDiscoveryMetrics {
+    /// Trees that are currently syncing
+    pub(crate) syncing_trees: Gauge,
+    /// Cached dns records
+    pub(crate) dns_record_cache: Gauge,
+    /// queued events
+    pub(crate) queued_events: Gauge,
 }
 
 /// A Stream events, mainly used for debugging
