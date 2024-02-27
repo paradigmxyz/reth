@@ -857,6 +857,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             ]
         );
 
+        // update the metrics after the update
+        self.update_size_metrics();
         removed
     }
 

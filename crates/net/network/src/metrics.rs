@@ -189,6 +189,9 @@ pub struct TransactionsManagerMetrics {
     ///
     /// Duration in seconds.
     pub(crate) acc_duration_poll_commands: Gauge,
+
+    /// total pool imports
+    pub(crate) total_pool_imports: Gauge,
 }
 
 /// Measures the duration of executing the given code block. The duration is added to the given

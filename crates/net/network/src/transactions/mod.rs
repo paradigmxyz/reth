@@ -1088,6 +1088,7 @@ where
 
                 // update metrics
                 self.metrics.pending_pool_imports.decrement(added as f64);
+                self.metrics.total_pool_imports.increment(added as f64);
 
                 let import = Box::pin(async move {
                     let added = new_txs.len();
@@ -1306,6 +1307,7 @@ where
                     if let Poll::Ready(Some(batch_import_res)) =
                         this.pool_imports.poll_next_unpin(cx)
                     {
+                        this.metrics.total_pool_imports.decrement(batch_import_res.len() as f64);
                         for res in batch_import_res {
                             match res {
                                 Ok(hash) => {
