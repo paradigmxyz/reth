@@ -41,7 +41,3 @@ path = "network.rs"
 name = "network-txpool"
 path = "network-txpool.rs"
 
-[[example]]
-name = "static-files"
-path = "static-files.rs"
-
