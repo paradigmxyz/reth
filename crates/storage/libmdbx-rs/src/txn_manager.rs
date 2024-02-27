@@ -433,18 +433,18 @@ mod read_transactions {
             sleep(READ_TRANSACTIONS_CHECK_INTERVAL);
             assert!(tx.commit().is_ok())
         }
-      
-      #[test]
-       fn txn_manager_begin_read_transaction_via_message_listener() {
-const MAX_DURATION: Duration = Duration::from_secs(1);
+
+        #[test]
+        fn txn_manager_begin_read_transaction_via_message_listener() {
+            const MAX_DURATION: Duration = Duration::from_secs(1);
 
             let dir = tempdir().unwrap();
             let env = Environment::builder()
                 .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
                 .open(dir.path())
                 .unwrap();
-         
-         let read_transactions = env.txn_manager().read_transactions.as_ref().unwrap();
+
+            let read_transactions = env.txn_manager().read_transactions.as_ref().unwrap();
 
             // Create a read-only transaction via the message listener.
             let (tx, rx) = sync_channel(0);
@@ -457,10 +457,18 @@ const MAX_DURATION: Duration = Duration::from_secs(1);
             let txn_ptr = rx.recv().unwrap().unwrap();
 
             assert!(read_transactions.active.contains_key(&(txn_ptr.0 as usize)));
-      }
-      
+        }
+
         #[test]
         fn txn_manager_abort_transaction_twice() {
+            const MAX_DURATION: Duration = Duration::from_secs(1);
+
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
+                .open(dir.path())
+                .unwrap();
+
             assert!(env.txn_manager().read_transactions.is_some());
 
             // Create a ro transaction. Abort it by message to tx manager.
