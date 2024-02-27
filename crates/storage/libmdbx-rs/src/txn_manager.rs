@@ -20,10 +20,14 @@ pub(crate) enum TxnManagerMessage {
 }
 
 /// Manages transactions by doing two things:
-/// - Opening, aborting, and committing transactions using [TxnManager::send_message] with the
-///   corresponding [TxnManagerMessage]
-/// - Aborting long-lived read transactions (if the `read-tx-timeouts` feature is enabled and
-///   `TxnManager::with_max_read_transaction_duration` is called)
+/// - Opening, aborting, and committing transactions using [`TxnManager::send_message`] with the
+///   corresponding [TxnManagerMessage]. This is mainly since MDBX requires that write transactions
+///   are opened from the same thread.
+/// - API for tracking active and aborted long-lived read transactions (if the `read-tx-timeouts`
+///   feature is enabled and [`TxnManager::new_with_max_read_transaction_duration`] constructor is
+///   used).
+/// - Aborting long-lived read transactions in the background (if the `read-tx-timeouts` feature is
+///   enabled and [`TxnManager::new_with_max_read_transaction_duration`] constructor is used).
 #[derive(Debug)]
 pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
@@ -137,7 +141,7 @@ impl TxnManager {
 
 #[cfg(feature = "read-tx-timeouts")]
 mod read_transactions {
-    use crate::{environment::EnvPtr, txn_manager::TxnManager, Error};
+    use crate::{environment::EnvPtr, txn_manager::TxnManager, Error, Result};
     use dashmap::{DashMap, DashSet};
     use std::{
         sync::{mpsc::sync_channel, Arc},
