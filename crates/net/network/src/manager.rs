@@ -157,7 +157,7 @@ impl<C> NetworkManager<C> {
         let NetworkManagerPollDurations { acc_network_handle, acc_swarm } = poll_durations;
 
         // update metrics for whole poll function
-        metrics.duration_poll_network_manager.set(start.elapsed());
+        metrics.duration_poll_network_manager.set(start.elapsed().as_secs_f64());
         // update poll metrics for nested items
         metrics.duration_poll_network_handle.set(acc_network_handle.as_secs_f64());
         metrics.duration_poll_swarm.set(acc_swarm.as_secs_f64());
