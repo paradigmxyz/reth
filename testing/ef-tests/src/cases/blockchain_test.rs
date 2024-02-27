@@ -160,11 +160,6 @@ impl Case for BlockchainTestCase {
             // when the variable goes out of scope
             reth_primitives::fs::remove_dir_all(static_files_dir)
                 .expect("Failed to remove static files directory");
-
-            if i % 100 == 0 {
-                println!("Processed {} tests", i);
-                println!("{:?}", memory_stats::memory_stats());
-            }
         }
 
         Ok(())

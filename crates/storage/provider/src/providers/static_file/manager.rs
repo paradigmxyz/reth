@@ -44,7 +44,7 @@ use tracing::warn;
 type SegmentRanges = HashMap<StaticFileSegment, BTreeMap<TxNumber, SegmentRangeInclusive>>;
 
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct StaticFileProvider(pub Arc<StaticFileProviderInner>);
 
 impl StaticFileProvider {
@@ -61,21 +61,6 @@ impl Deref for StaticFileProvider {
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl Drop for StaticFileProvider {
-    fn drop(&mut self) {
-        println!("Dropping StaticFileProvider: {:?}", self.path);
-        println!("Backtrace: {}", Backtrace::force_capture());
-    }
-}
-
-impl Clone for StaticFileProvider {
-    fn clone(&self) -> Self {
-        println!("Cloning StaticFileProvider: {:?}", self.path);
-        println!("Backtrace: {}", Backtrace::force_capture());
-        Self(self.0.clone())
     }
 }
 
