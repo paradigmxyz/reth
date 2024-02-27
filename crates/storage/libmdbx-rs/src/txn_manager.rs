@@ -15,7 +15,7 @@ unsafe impl Sync for TxnPtr {}
 
 pub(crate) enum TxnManagerMessage {
     Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
-    Abort { tx: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<bool>> },
+    Abort { tx: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<Result<bool>>> },
     Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
 }
 
@@ -96,9 +96,8 @@ impl TxnManager {
                                     if let Some(read_transactions) = &read_transactions {
                                         read_transactions.remove_active(tx.0);
 
-                                        let res = read_transactions.add_aborted(tx.0);
-                                        if res.is_err() {
-                                            sender.send(res).unwrap();
+                                        if let Err(err) = read_transactions.add_aborted(tx.0) {
+                                            sender.send(Err(err)).unwrap();
                                             continue
                                         }
                                     }
@@ -106,7 +105,7 @@ impl TxnManager {
                             }
 
                             let res = mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) });
-                            sender.send(res).unwrap();
+                            sender.send(Ok(res)).unwrap();
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
                             #[cfg(feature = "read-tx-timeouts")]
@@ -138,7 +137,7 @@ impl TxnManager {
 
 #[cfg(feature = "read-tx-timeouts")]
 mod read_transactions {
-    use crate::{environment::EnvPtr, error::mdbx_result, txn_manager::TxnManager, Error};
+    use crate::{environment::EnvPtr, txn_manager::TxnManager, Error};
     use dashmap::{DashMap, DashSet};
     use std::{
         sync::{mpsc::sync_channel, Arc},

@@ -374,10 +374,12 @@ where
                     }
                 } else {
                     let (sender, rx) = sync_channel(0);
-                    self.env
-                        .txn_manager()
-                        .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
-                    rx.recv().unwrap().unwrap();
+                    self.env.txn_manager().send_message(TxnManagerMessage::Abort {
+                        tx: TxnPtr(txn),
+                        flags: K::OPEN_FLAGS,
+                        sender,
+                    });
+                    rx.recv().unwrap().unwrap().unwrap();
                 }
             }
         })
