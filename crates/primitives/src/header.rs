@@ -663,13 +663,14 @@ pub enum HeaderValidationError {
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
-#[add_arbitrary_tests(rlp)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[main_codec(no_arbitrary)]
+#[add_arbitrary_tests(rlp, compact)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SealedHeader {
-    /// Locked Header fields.
-    header: Header,
     /// Locked Header hash.
     hash: BlockHash,
+    /// Locked Header fields.
+    header: Header,
 }
 
 impl SealedHeader {

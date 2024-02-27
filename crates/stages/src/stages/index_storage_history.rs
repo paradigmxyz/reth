@@ -2,7 +2,7 @@ use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput}
 use reth_db::{database::Database, models::BlockNumberAddress};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    PruneCheckpoint, PruneMode, PruneSegment,
+    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
 };
 use reth_provider::{
     DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter, StorageReader,
@@ -48,7 +48,13 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     ) -> Result<ExecOutput, StageError> {
         if let Some((target_prunable_block, prune_mode)) = self
             .prune_mode
-            .map(|mode| mode.prune_target_block(input.target(), PruneSegment::StorageHistory))
+            .map(|mode| {
+                mode.prune_target_block(
+                    input.target(),
+                    PruneSegment::StorageHistory,
+                    PrunePurpose::User,
+                )
+            })
             .transpose()?
             .flatten()
         {
@@ -121,6 +127,7 @@ mod tests {
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
     use reth_primitives::{address, b256, Address, BlockNumber, StorageEntry, B256, U256};
+    use reth_provider::providers::StaticFileWriter;
     use std::collections::BTreeMap;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");

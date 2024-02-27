@@ -28,7 +28,7 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
 use tracing::*;
 
 /// `reth stage` command
@@ -131,7 +131,11 @@ impl Command {
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         info!(target: "reth::cli", "Database opened");
 
-        let factory = ProviderFactory::new(Arc::clone(&db), self.chain.clone());
+        let factory = ProviderFactory::new(
+            Arc::clone(&db),
+            self.chain.clone(),
+            data_dir.static_files_path(),
+        )?;
         let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
@@ -169,8 +173,11 @@ impl Command {
 
                     let default_peers_path = data_dir.known_peers_path();
 
-                    let provider_factory =
-                        Arc::new(ProviderFactory::new(db.clone(), self.chain.clone()));
+                    let provider_factory = Arc::new(ProviderFactory::new(
+                        db.clone(),
+                        self.chain.clone(),
+                        data_dir.static_files_path(),
+                    )?);
 
                     let network = self
                         .network
@@ -273,6 +280,8 @@ impl Command {
             checkpoint: Some(checkpoint.with_block_number(self.from)),
         };
 
+        let start = Instant::now();
+        info!(target: "reth::cli", stage = %self.stage, "Executing stage");
         loop {
             exec_stage.execute_ready(input).await?;
             let ExecOutput { checkpoint, done } = exec_stage.execute(&provider_rw, input)?;
@@ -291,6 +300,7 @@ impl Command {
                 break
             }
         }
+        info!(target: "reth::cli", stage = %self.stage, time = ?start.elapsed(), "Finished stage");
 
         Ok(())
     }

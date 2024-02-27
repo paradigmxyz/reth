@@ -12,7 +12,8 @@ use reth_primitives::{
     BlockNumber, GotExpected, SealedHeader, B256,
 };
 use reth_provider::{
-    DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
+    DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader,
+    StageCheckpointWriter, StatsReader,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::fmt::Debug;
@@ -184,8 +185,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             }
             .unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (provider.tx_ref().entries::<tables::HashedAccounts>()? +
-                    provider.tx_ref().entries::<tables::HashedStorages>()?)
+                total: (provider.count_entries::<tables::HashedAccounts>()? +
+                    provider.count_entries::<tables::HashedStorages>()?)
                     as u64,
             });
 
@@ -230,8 +231,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     .map_err(|e| StageError::Fatal(Box::new(e)))?;
             updates.flush(provider.tx_ref())?;
 
-            let total_hashed_entries = (provider.tx_ref().entries::<tables::HashedAccounts>()? +
-                provider.tx_ref().entries::<tables::HashedStorages>()?)
+            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
+                provider.count_entries::<tables::HashedStorages>()?)
                 as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {
@@ -336,8 +337,8 @@ fn validate_state_root(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestStageDB, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
+        TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_db::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
@@ -347,7 +348,10 @@ mod tests {
             random_block, random_block_range, random_changeset_range, random_contract_account_range,
         },
     };
-    use reth_primitives::{keccak256, stage::StageUnitCheckpoint, SealedBlock, StorageEntry, U256};
+    use reth_primitives::{
+        keccak256, stage::StageUnitCheckpoint, SealedBlock, StaticFileSegment, StorageEntry, U256,
+    };
+    use reth_provider::providers::StaticFileWriter;
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
 
@@ -466,6 +470,17 @@ mod tests {
             let end = input.target();
             let mut rng = generators::rng();
 
+            let mut preblocks = vec![];
+            if stage_progress > 0 {
+                preblocks.append(&mut random_block_range(
+                    &mut rng,
+                    0..=stage_progress - 1,
+                    B256::ZERO,
+                    0..1,
+                ));
+                self.db.insert_blocks(preblocks.iter(), StorageKind::Static)?;
+            }
+
             let num_of_accounts = 31;
             let accounts = random_contract_account_range(&mut rng, &mut (0..num_of_accounts))
                 .into_iter()
@@ -475,8 +490,13 @@ mod tests {
                 accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
             )?;
 
-            let SealedBlock { header, body, ommers, withdrawals } =
-                random_block(&mut rng, stage_progress, None, Some(0), None);
+            let SealedBlock { header, body, ommers, withdrawals } = random_block(
+                &mut rng,
+                stage_progress,
+                preblocks.last().map(|b| b.hash()),
+                Some(0),
+                None,
+            );
             let mut header = header.unseal();
 
             header.state_root = state_root(
@@ -490,7 +510,8 @@ mod tests {
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
             blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3));
-            self.db.insert_blocks(blocks.iter(), None)?;
+            let last_block = blocks.last().cloned().unwrap();
+            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
             let (transitions, final_state) = random_changeset_range(
                 &mut rng,
@@ -527,13 +548,16 @@ mod tests {
                 Ok(state_root_prehashed(accounts.into_iter()))
             })?;
 
-            let last_block_number = end;
-            self.db.commit(|tx| {
-                let mut last_header = tx.get::<tables::Headers>(last_block_number)?.unwrap();
-                last_header.state_root = root;
-                tx.put::<tables::Headers>(last_block_number, last_header)?;
-                Ok(())
-            })?;
+            let static_file_provider = self.db.factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            let mut last_header = last_block.header().clone();
+            last_header.state_root = root;
+
+            let hash = last_header.hash_slow();
+            writer.prune_headers(1).unwrap();
+            writer.append_header(last_header, U256::ZERO, hash).unwrap();
+            writer.commit().unwrap();
 
             Ok(blocks)
         }

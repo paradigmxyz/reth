@@ -28,15 +28,38 @@ pub enum PruneSegment {
 
 impl PruneSegment {
     /// Returns minimum number of blocks to left in the database for this segment.
-    pub fn min_blocks(&self) -> u64 {
+    pub fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
         match self {
             Self::SenderRecovery | Self::TransactionLookup | Self::Headers | Self::Transactions => {
                 0
             }
-            Self::Receipts | Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
+            Self::Receipts if purpose.is_static_file() => 0,
+            Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
                 MINIMUM_PRUNING_DISTANCE
             }
+            Self::Receipts => MINIMUM_PRUNING_DISTANCE,
         }
+    }
+}
+
+/// Prune purpose.
+#[derive(Debug, Clone, Copy)]
+pub enum PrunePurpose {
+    /// Prune data according to user configuration.
+    User,
+    /// Prune data according to highest static_files to delete the data from database.
+    StaticFile,
+}
+
+impl PrunePurpose {
+    /// Returns true if the purpose is [`PrunePurpose::User`].
+    pub fn is_user(self) -> bool {
+        matches!(self, Self::User)
+    }
+
+    /// Returns true if the purpose is [`PrunePurpose::StaticFile`].
+    pub fn is_static_file(self) -> bool {
+        matches!(self, Self::StaticFile)
     }
 }
 

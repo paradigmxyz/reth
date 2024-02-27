@@ -27,7 +27,7 @@ tracing.workspace = true
 
 # misc
 thiserror.workspace = true
-derive_more = "0.99"
+derive_more.workspace = true
 auto_impl = "1"
 
 # test-utils

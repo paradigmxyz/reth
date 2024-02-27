@@ -8,7 +8,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_interfaces::db::DatabaseError;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
     stage::{
@@ -16,7 +16,7 @@ use reth_primitives::{
         StageId,
     },
 };
-use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter};
+use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
 use std::{
     cmp::max,
     fmt::Debug,
@@ -88,15 +88,21 @@ impl AccountHashingStage {
             generators::{random_block_range, random_eoa_accounts},
         };
         use reth_primitives::{Account, B256, U256};
-        use reth_provider::BlockWriter;
+        use reth_provider::providers::StaticFileWriter;
 
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs);
 
         for block in blocks {
-            provider.insert_block(block.try_seal_with_senders().unwrap(), None).unwrap();
+            provider.insert_historical_block(block.try_seal_with_senders().unwrap(), None).unwrap();
         }
+        provider
+            .static_file_provider()
+            .latest_writer(reth_primitives::StaticFileSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
         let mut accounts = random_eoa_accounts(&mut rng, opts.accounts);
         {
             // Account State generator
@@ -289,10 +295,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
 fn stage_checkpoint_progress<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, DatabaseError> {
+) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::HashedAccounts>()? as u64,
-        total: provider.tx_ref().entries::<tables::PlainAccountState>()? as u64,
+        processed: provider.count_entries::<tables::HashedAccounts>()? as u64,
+        total: provider.count_entries::<tables::PlainAccountState>()? as u64,
     })
 }
 
@@ -300,10 +306,12 @@ fn stage_checkpoint_progress<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
+    use reth_provider::providers::StaticFileWriter;
     use test_utils::*;
 
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
@@ -435,7 +443,7 @@ mod tests {
 
     mod test_utils {
         use super::*;
-        use crate::test_utils::{StageTestRunner, TestStageDB};
+        use crate::test_utils::TestStageDB;
         use reth_primitives::Address;
 
         pub(crate) struct AccountHashingTestRunner {

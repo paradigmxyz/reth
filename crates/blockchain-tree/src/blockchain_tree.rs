@@ -1294,7 +1294,7 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
 
         provider
-            .insert_block(
+            .insert_historical_block(
                 genesis.try_seal_with_senders().expect("invalid tx signature in genesis"),
                 None,
             )
