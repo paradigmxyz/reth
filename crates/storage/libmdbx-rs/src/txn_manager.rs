@@ -212,6 +212,8 @@ mod read_transactions {
         /// List of read transactions aborted by the [ReadTransactions::start_monitor] or the user.
         /// We keep them until user tries to abort the transaction, so we're able to report a nice
         /// [Error::ReadTransactionAborted] error.
+        // todo: keep until evicted from an lru cache
+        // <https://github.com/paradigmxyz/reth/issues/6699>
         ///
         /// We store `usize` instead of a raw pointer, because pointers are not comparable.
         aborted: DashSet<usize>,
