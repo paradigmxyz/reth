@@ -11,7 +11,6 @@ use crate::{
     },
     EthApi, EthApiSpec,
 };
-use alloy_rlp::Encodable;
 use async_trait::async_trait;
 use reth_network_api::NetworkInfo;
 use reth_node_api::ConfigureEvmEnv;
@@ -440,12 +439,10 @@ where
 
     async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>> {
         // Note: this is mostly used to fetch pooled transactions so we check the pool first
-        if let Some(tx) = self.pool().get_pooled_transaction_element(hash).map(|tx| {
-            let mut buf = Vec::new();
-            tx.encode(&mut buf);
-            buf
-        }) {
-            return Ok(Some(tx.into()));
+        if let Some(tx) =
+            self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
+        {
+            return Ok(Some(tx));
         }
 
         self.on_blocking_task(|this| async move {
