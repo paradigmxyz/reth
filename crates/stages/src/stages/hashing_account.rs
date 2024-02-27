@@ -103,7 +103,7 @@ impl AccountHashingStage {
             .unwrap()
             .commit()
             .unwrap();
-        let mut accounts = random_eoa_account_range(&mut rng, opts.accounts);
+        let mut accounts = random_eoa_accounts(&mut rng, opts.accounts);
         {
             // Account State generator
             let mut account_cursor =
