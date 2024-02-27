@@ -895,7 +895,7 @@ where
 
         let this = self.get_mut();
 
-        // poll new block imports (dummy)
+        // poll new block imports (expected to be a noop for POS)
         while let Poll::Ready(outcome) = this.block_import.poll(cx) {
             this.on_block_import_result(outcome);
         }
