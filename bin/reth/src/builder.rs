@@ -1,6 +1,7 @@
 //! Contains types and methods that can be used to launch a node based off of a [NodeConfig].
 
 use crate::commands::debug_cmd::engine_api_store::EngineApiStore;
+use alloy_primitives::utils::format_ether;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
@@ -272,6 +273,9 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         // Configure the pipeline
         let (mut pipeline, client) = if self.config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
+            for (idx, (address, alloc)) in self.config.chain.genesis.alloc.iter().enumerate() {
+                info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
+            }
             let mining_mode =
                 self.config.mining_mode(transaction_pool.pending_transactions_listener());
 

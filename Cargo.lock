@@ -5675,6 +5675,7 @@ name = "reth"
 version = "0.1.0-alpha.19"
 dependencies = [
  "alloy-chains",
+ "alloy-primitives",
  "alloy-rlp",
  "aquamarine",
  "assert_matches",
