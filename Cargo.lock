@@ -2291,6 +2291,7 @@ version = "0.1.0-alpha.19"
 dependencies = [
  "alloy-rlp",
  "memory-stats",
+ "rayon",
  "reth-db",
  "reth-interfaces",
  "reth-node-ethereum",

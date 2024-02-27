@@ -557,13 +557,13 @@ where
 
     // Get next expected receipt number in static files
     let static_file_provider = provider.static_file_provider();
+    let next_static_file_receipt_num = static_file_provider
+        .get_highest_static_file_tx(StaticFileSegment::Receipts)
+        .map(|num| num + 1)
+        .unwrap_or(0);
+
     let mut static_file_producer =
         static_file_provider.get_writer(start_block, StaticFileSegment::Receipts)?;
-    let next_static_file_receipt_num =
-        StaticFileProvider(static_file_producer.reader.upgrade().unwrap())
-            .get_highest_static_file_tx(StaticFileSegment::Receipts)
-            .map(|num| num + 1)
-            .unwrap_or(0);
 
     // Check if we had any unexpected shutdown after committing to static files, but
     // NOT committing to database.
@@ -588,6 +588,7 @@ where
         }
         Ordering::Equal => {}
     }
+
     Ok(static_file_producer)
 }
 

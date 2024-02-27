@@ -30,7 +30,6 @@ use reth_primitives::{
     U256,
 };
 use std::{
-    backtrace::Backtrace,
     collections::{hash_map::Entry, BTreeMap, HashMap},
     ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
@@ -101,28 +100,22 @@ impl StaticFileProviderInner {
     }
 }
 
-impl Drop for StaticFileProviderInner {
-    fn drop(&mut self) {
-        println!("Dropping StaticFileProviderInner: {:?}", self.path);
-    }
-}
-
 impl StaticFileProvider {
-    // /// Loads filters into memory when creating a [`StaticFileJarProvider`].
-    // pub fn with_filters(self) -> Self {
-    //     let mut provider =
-    //         Arc::try_unwrap(self.0).expect("should be called when initializing only");
-    //     provider.load_filters = true;
-    //     Self(Arc::new(provider))
-    // }
-    //
-    // /// Enables metrics on the [`StaticFileProvider`].
-    // pub fn with_metrics(self) -> Self {
-    //     let mut provider =
-    //         Arc::try_unwrap(self.0).expect("should be called when initializing only");
-    //     provider.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
-    //     Self(Arc::new(provider))
-    // }
+    /// Loads filters into memory when creating a [`StaticFileJarProvider`].
+    pub fn with_filters(self) -> Self {
+        let mut provider =
+            Arc::try_unwrap(self.0).expect("should be called when initializing only");
+        provider.load_filters = true;
+        Self(Arc::new(provider))
+    }
+
+    /// Enables metrics on the [`StaticFileProvider`].
+    pub fn with_metrics(self) -> Self {
+        let mut provider =
+            Arc::try_unwrap(self.0).expect("should be called when initializing only");
+        provider.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
+        Self(Arc::new(provider))
+    }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and block.
     pub fn get_segment_provider_from_block(

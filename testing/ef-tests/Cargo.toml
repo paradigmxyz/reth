@@ -30,3 +30,4 @@ serde = "1.0.163"
 serde_json.workspace = true
 thiserror.workspace = true
 memory-stats = "1.1.0"
+rayon.workspace = true

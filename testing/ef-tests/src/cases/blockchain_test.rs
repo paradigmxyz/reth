@@ -5,6 +5,7 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_rlp::Decodable;
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
@@ -64,8 +65,7 @@ impl Case for BlockchainTestCase {
         }
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
-        for (i, case) in self
-            .tests
+        self.tests
             .values()
             .filter(|case| {
                 !matches!(
@@ -79,88 +79,93 @@ impl Case for BlockchainTestCase {
                         ForkSpec::Unknown
                 )
             })
-            .enumerate()
-        {
-            // Create a new test database and initialize a provider for the test case.
-            let db = create_test_rw_db();
-            let static_files_dir = create_test_static_files_dir();
-            let provider = ProviderFactory::new(
-                db.as_ref(),
-                Arc::new(case.network.clone().into()),
-                static_files_dir.clone(),
-            )?
-            .provider_rw()
-            .unwrap();
-
-            // Insert initial test state into the provider.
-            provider
-                .insert_historical_block(
-                    SealedBlock::new(
-                        case.genesis_block_header.clone().into(),
-                        BlockBody::default(),
-                    )
-                    .try_seal_with_senders()
-                    .unwrap(),
-                    None,
-                )
-                .map_err(|err| Error::RethError(err.into()))?;
-            case.pre.write_to_db(provider.tx_ref())?;
-
-            // Decode and insert blocks, creating a chain of blocks for the test case.
-            let last_block = case.blocks.iter().try_fold(None, |_, block| {
-                let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-                provider
-                    .insert_historical_block(decoded.clone().try_seal_with_senders().unwrap(), None)
-                    .map_err(|err| Error::RethError(err.into()))?;
-                Ok::<Option<SealedBlock>, Error>(Some(decoded))
-            })?;
-            provider
-                .static_file_provider()
-                .latest_writer(StaticFileSegment::Headers)
-                .unwrap()
-                .commit()
+            .par_bridge()
+            .try_for_each(|case| {
+                // Create a new test database and initialize a provider for the test case.
+                let db = create_test_rw_db();
+                let static_files_dir = create_test_static_files_dir();
+                let provider = ProviderFactory::new(
+                    db.as_ref(),
+                    Arc::new(case.network.clone().into()),
+                    static_files_dir.clone(),
+                )?
+                .provider_rw()
                 .unwrap();
 
-            // Execute the execution stage using the EVM processor factory for the test case
-            // network.
-            let _ = ExecutionStage::new_with_factory(reth_revm::EvmProcessorFactory::new(
-                Arc::new(case.network.clone().into()),
-                EthEvmConfig::default(),
-            ))
-            .execute(
-                &provider,
-                ExecInput { target: last_block.as_ref().map(|b| b.number), checkpoint: None },
-            );
+                // Insert initial test state into the provider.
+                provider
+                    .insert_historical_block(
+                        SealedBlock::new(
+                            case.genesis_block_header.clone().into(),
+                            BlockBody::default(),
+                        )
+                        .try_seal_with_senders()
+                        .unwrap(),
+                        None,
+                    )
+                    .map_err(|err| Error::RethError(err.into()))?;
+                case.pre.write_to_db(provider.tx_ref())?;
 
-            // Validate the post-state for the test case.
-            match (&case.post_state, &case.post_state_hash) {
-                (Some(state), None) => {
-                    // Validate accounts in the state against the provider's database.
-                    for (&address, account) in state.iter() {
-                        account.assert_db(address, provider.tx_ref())?;
-                    }
-                }
-                (None, Some(expected_state_root)) => {
-                    // Insert state hashes into the provider based on the expected state root.
-                    let last_block = last_block.unwrap_or_default();
+                // Decode and insert blocks, creating a chain of blocks for the test case.
+                let last_block = case.blocks.iter().try_fold(None, |_, block| {
+                    let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
                     provider
-                        .insert_hashes(
-                            0..=last_block.number,
-                            last_block.hash(),
-                            *expected_state_root,
+                        .insert_historical_block(
+                            decoded.clone().try_seal_with_senders().unwrap(),
+                            None,
                         )
                         .map_err(|err| Error::RethError(err.into()))?;
-                }
-                _ => return Err(Error::MissingPostState),
-            }
+                    Ok::<Option<SealedBlock>, Error>(Some(decoded))
+                })?;
+                provider
+                    .static_file_provider()
+                    .latest_writer(StaticFileSegment::Headers)
+                    .unwrap()
+                    .commit()
+                    .unwrap();
 
-            // Drop the provider without committing to the database.
-            drop(provider);
-            // TODO: replace with `tempdir` usage, so the temp directory is removed automatically
-            // when the variable goes out of scope
-            reth_primitives::fs::remove_dir_all(static_files_dir)
-                .expect("Failed to remove static files directory");
-        }
+                // Execute the execution stage using the EVM processor factory for the test case
+                // network.
+                let _ = ExecutionStage::new_with_factory(reth_revm::EvmProcessorFactory::new(
+                    Arc::new(case.network.clone().into()),
+                    EthEvmConfig::default(),
+                ))
+                .execute(
+                    &provider,
+                    ExecInput { target: last_block.as_ref().map(|b| b.number), checkpoint: None },
+                );
+
+                // Validate the post-state for the test case.
+                match (&case.post_state, &case.post_state_hash) {
+                    (Some(state), None) => {
+                        // Validate accounts in the state against the provider's database.
+                        for (&address, account) in state.iter() {
+                            account.assert_db(address, provider.tx_ref())?;
+                        }
+                    }
+                    (None, Some(expected_state_root)) => {
+                        // Insert state hashes into the provider based on the expected state root.
+                        let last_block = last_block.unwrap_or_default();
+                        provider
+                            .insert_hashes(
+                                0..=last_block.number,
+                                last_block.hash(),
+                                *expected_state_root,
+                            )
+                            .map_err(|err| Error::RethError(err.into()))?;
+                    }
+                    _ => return Err(Error::MissingPostState),
+                }
+
+                // Drop the provider without committing to the database.
+                drop(provider);
+                // TODO: replace with `tempdir` usage, so the temp directory is removed
+                // automatically when the variable goes out of scope
+                reth_primitives::fs::remove_dir_all(static_files_dir)
+                    .expect("Failed to remove static files directory");
+
+                Ok(())
+            })?;
 
         Ok(())
     }

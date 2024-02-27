@@ -14,7 +14,6 @@ use reth_primitives::{
     U256,
 };
 use std::{
-    ops::Deref,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
     time::Instant,
@@ -27,7 +26,7 @@ pub type StaticFileProviderRWRefMut<'a> = RefMut<'a, StaticFileSegment, StaticFi
 #[derive(Debug)]
 /// Extends `StaticFileProvider` with writing capabilities
 pub struct StaticFileProviderRW {
-    pub reader: Weak<StaticFileProviderInner>,
+    reader: Weak<StaticFileProviderInner>,
     writer: NippyJarWriter<SegmentHeader>,
     data_path: PathBuf,
     buf: Vec<u8>,
@@ -54,15 +53,17 @@ impl StaticFileProviderRW {
     ) -> ProviderResult<(NippyJarWriter<SegmentHeader>, PathBuf)> {
         let start = Instant::now();
 
+        let static_file_provider = StaticFileProvider(reader.upgrade().unwrap());
+
         let block_range = find_fixed_range(block);
-        let (jar, path) = match StaticFileProvider(reader.upgrade().unwrap())
-            .get_segment_provider_from_block(segment, block_range.start(), None)
-        {
+        let (jar, path) = match static_file_provider.get_segment_provider_from_block(
+            segment,
+            block_range.start(),
+            None,
+        ) {
             Ok(provider) => (NippyJar::load(provider.data_path())?, provider.data_path().into()),
             Err(ProviderError::MissingStaticFileBlock(_, _)) => {
-                let path = StaticFileProvider(reader.upgrade().unwrap())
-                    .directory()
-                    .join(segment.filename(&block_range));
+                let path = static_file_provider.directory().join(segment.filename(&block_range));
                 (create_jar(segment, &path, block_range), path)
             }
             Err(err) => return Err(err),
@@ -137,8 +138,7 @@ impl StaticFileProviderRW {
             }
         };
 
-        StaticFileProvider(self.reader.upgrade().unwrap())
-            .update_index(self.writer.user_header().segment(), segment_max_block)
+        self.reader().unwrap().update_index(self.writer.user_header().segment(), segment_max_block)
     }
 
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current static file,
@@ -437,6 +437,10 @@ impl StaticFileProviderRW {
         }
 
         Ok(())
+    }
+
+    fn reader(&self) -> Option<StaticFileProvider> {
+        self.reader.upgrade().map(StaticFileProvider)
     }
 
     #[cfg(any(test, feature = "test-utils"))]
