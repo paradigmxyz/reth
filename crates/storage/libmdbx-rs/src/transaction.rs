@@ -362,9 +362,9 @@ where
                     {
                         self.env.txn_manager().remove_active_read_transaction(txn);
 
-                        let new_aborted_ro =
-                            self.env.txn_manager().add_aborted_read_transaction(txn);
-                        if let Some(false) = new_aborted_ro {
+                        if let Some(Err(_)) =
+                            self.env.txn_manager().add_aborted_read_transaction(txn)
+                        {
                             return
                         }
                     }
@@ -374,7 +374,9 @@ where
                     }
                 } else {
                     let (sender, rx) = sync_channel(0);
-                    self.env.txn_manager().send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
+                    self.env
+                        .txn_manager()
+                        .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
                     rx.recv().unwrap().unwrap();
                 }
             }
