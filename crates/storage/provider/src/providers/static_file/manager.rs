@@ -44,7 +44,7 @@ type SegmentRanges = HashMap<StaticFileSegment, BTreeMap<TxNumber, SegmentRangeI
 
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
 #[derive(Debug, Default, Clone)]
-pub struct StaticFileProvider(pub Arc<StaticFileProviderInner>);
+pub struct StaticFileProvider(pub(crate) Arc<StaticFileProviderInner>);
 
 impl StaticFileProvider {
     /// Creates a new [`StaticFileProvider`].
