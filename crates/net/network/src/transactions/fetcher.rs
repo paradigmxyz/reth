@@ -446,7 +446,7 @@ impl TransactionFetcher {
                     if let Some(prev_size) = previously_seen_size {
                         // check if this peer is announcing a different size than a previous peer
                         if size != prev_size {
-                            debug!(target: "net::tx",
+                            trace!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
                                 hash=%hash,
                                 size=size,
