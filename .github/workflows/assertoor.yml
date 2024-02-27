@@ -7,8 +7,12 @@ on:
 
 jobs:
   get_tests:
-    name: "Load Tests"
+    name: "Run assertoor tests on reth pairs"
     runs-on: ubuntu-latest
+    outputs:
+      test_result: ${{ steps.test_result.outputs.test_result }}
+      test_status: ${{ steps.test_result.outputs.test_status }}
+      failed_test_status: ${{ steps.test_result.outputs.failed_test_status }}
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
@@ -223,3 +227,4 @@ jobs:
 
           exit 1 # fail action
         fi
+
