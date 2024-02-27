@@ -145,7 +145,7 @@ mod read_transactions {
         environment::EnvPtr, error::mdbx_result, metrics::TxnManagerMetrics,
         txn_manager::TxnManager, Error, Result,
     };
-    use dashmap::DashMap;
+    use dashmap::{DashMap, DashSet};
     use std::{
         sync::{mpsc::sync_channel, Arc},
         time::{Duration, Instant},
@@ -220,7 +220,7 @@ mod read_transactions {
         /// [Error::ReadTransactionAborted] error.
         ///
         /// We store `usize` instead of a raw pointer, because pointers are not comparable.
-        aborted: DashMap<usize, Instant>,
+        aborted: DashSet<usize>,
         #[doc(hidden)]
         metrics: TxnManagerMetrics,
     }
@@ -243,7 +243,7 @@ mod read_transactions {
         /// Adds a new transaction to the list of aborted read transactions. Returns `Ok(())`
         /// if the transaction hasn't already been aborted.
         pub(super) fn add_aborted(&self, ptr: *mut ffi::MDBX_txn) -> Result<()> {
-            if self.aborted.insert(ptr as usize, Instant::now()).is_none() {
+            if self.aborted.insert(ptr as usize) {
                 return Ok(())
             }
             Err(Error::ReadTransactionAborted)
@@ -251,7 +251,7 @@ mod read_transactions {
 
         /// Removes a transaction from the list of aborted read transactions.
         pub(super) fn remove_aborted(&self, ptr: *mut ffi::MDBX_txn) -> Option<usize> {
-            self.aborted.remove(&(ptr as usize)).map(|(ptr, _)| ptr)
+            self.aborted.remove(&(ptr as usize))
         }
 
         /// Spawns a new thread with [std::thread::spawn] that monitors the list of active read
@@ -384,7 +384,7 @@ mod read_transactions {
                 drop(tx);
 
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
-                assert!(read_transactions.aborted.contains_key(&tx_ptr));
+                assert!(read_transactions.aborted.contains(&tx_ptr));
             }
 
             // Create a read-only transaction, successfully use it, close it by committing.
@@ -397,7 +397,7 @@ mod read_transactions {
                 tx.commit().unwrap();
 
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
-                assert!(!read_transactions.aborted.contains_key(&tx_ptr));
+                assert!(!read_transactions.aborted.contains(&tx_ptr));
             }
 
             // Create a read-only transaction, wait until `MAX_DURATION` time is elapsed so the
@@ -410,11 +410,11 @@ mod read_transactions {
                 sleep(MAX_DURATION + READ_TRANSACTIONS_CHECK_INTERVAL);
 
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
-                assert!(read_transactions.aborted.contains_key(&tx_ptr));
+                assert!(read_transactions.aborted.contains(&tx_ptr));
 
                 assert_eq!(tx.open_db(None).err(), Some(Error::ReadTransactionAborted));
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
-                assert!(!read_transactions.aborted.contains_key(&tx_ptr));
+                assert!(!read_transactions.aborted.contains(&tx_ptr));
             }
         }
 
