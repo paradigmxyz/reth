@@ -26,6 +26,9 @@ pub type StaticFileProviderRWRefMut<'a> = RefMut<'a, StaticFileSegment, StaticFi
 #[derive(Debug)]
 /// Extends `StaticFileProvider` with writing capabilities
 pub struct StaticFileProviderRW {
+    /// Reference back to the provider. We need [Weak] here because [StaticFileProviderRW] is
+    /// stored in a [dashmap::DashMap] inside the parent [StaticFileProvider].which is an [Arc].
+    /// If we were to use an [Arc] here, we would create a reference cycle.
     reader: Weak<StaticFileProviderInner>,
     writer: NippyJarWriter<SegmentHeader>,
     data_path: PathBuf,
@@ -138,7 +141,7 @@ impl StaticFileProviderRW {
             }
         };
 
-        self.reader().unwrap().update_index(self.writer.user_header().segment(), segment_max_block)
+        self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
     }
 
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current static file,
@@ -439,8 +442,14 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
-    fn reader(&self) -> Option<StaticFileProvider> {
-        self.reader.upgrade().map(StaticFileProvider)
+    /// Returns a reference to the parent [`StaticFileProvider`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the parent [`StaticFileProvider`] is fully dropped while the child writer is still
+    /// active.
+    fn reader(&self) -> StaticFileProvider {
+        self.reader.upgrade().map(StaticFileProvider).expect("parent StaticFileProvider is dropped")
     }
 
     #[cfg(any(test, feature = "test-utils"))]
