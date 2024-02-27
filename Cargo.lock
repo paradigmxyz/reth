@@ -2291,6 +2291,7 @@ name = "ef-tests"
 version = "0.1.0-alpha.20"
 dependencies = [
  "alloy-rlp",
+ "rayon",
  "reth-db",
  "reth-interfaces",
  "reth-node-ethereum",
@@ -2717,6 +2718,7 @@ dependencies = [
  "async-trait",
  "eyre",
  "futures",
+ "jemallocator",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-db",

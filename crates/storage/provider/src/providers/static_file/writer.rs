@@ -1,6 +1,8 @@
 use crate::providers::static_file::metrics::StaticFileProviderOperation;
 
-use super::{metrics::StaticFileProviderMetrics, StaticFileProvider};
+use super::{
+    manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
+};
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_db::codecs::CompactU256;
@@ -12,33 +14,34 @@ use reth_primitives::{
     U256,
 };
 use std::{
-    ops::Deref,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Weak},
     time::Instant,
 };
 use tracing::debug;
 
 /// Mutable reference to a dashmap element of [`StaticFileProviderRW`].
-pub type StaticFileProviderRWRefMut<'a> =
-    RefMut<'a, StaticFileSegment, StaticFileProviderRW<'static>>;
+pub type StaticFileProviderRWRefMut<'a> = RefMut<'a, StaticFileSegment, StaticFileProviderRW>;
 
 #[derive(Debug)]
 /// Extends `StaticFileProvider` with writing capabilities
-pub struct StaticFileProviderRW<'a> {
-    reader: StaticFileProvider,
-    writer: NippyJarWriter<'a, SegmentHeader>,
+pub struct StaticFileProviderRW {
+    /// Reference back to the provider. We need [Weak] here because [StaticFileProviderRW] is
+    /// stored in a [dashmap::DashMap] inside the parent [StaticFileProvider].which is an [Arc].
+    /// If we were to use an [Arc] here, we would create a reference cycle.
+    reader: Weak<StaticFileProviderInner>,
+    writer: NippyJarWriter<SegmentHeader>,
     data_path: PathBuf,
     buf: Vec<u8>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
 }
 
-impl<'a> StaticFileProviderRW<'a> {
+impl StaticFileProviderRW {
     /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
     pub fn new(
         segment: StaticFileSegment,
         block: BlockNumber,
-        reader: StaticFileProvider,
+        reader: Weak<StaticFileProviderInner>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<Self> {
         let (writer, data_path) = Self::open(segment, block, reader.clone(), metrics.clone())?;
@@ -48,25 +51,28 @@ impl<'a> StaticFileProviderRW<'a> {
     fn open(
         segment: StaticFileSegment,
         block: u64,
-        reader: StaticFileProvider,
+        reader: Weak<StaticFileProviderInner>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
-    ) -> ProviderResult<(NippyJarWriter<'a, SegmentHeader>, PathBuf)> {
+    ) -> ProviderResult<(NippyJarWriter<SegmentHeader>, PathBuf)> {
         let start = Instant::now();
 
-        let block_range = find_fixed_range(block);
-        let (jar, path) =
-            match reader.get_segment_provider_from_block(segment, block_range.start(), None) {
-                Ok(provider) => {
-                    (NippyJar::load(provider.data_path())?, provider.data_path().into())
-                }
-                Err(ProviderError::MissingStaticFileBlock(_, _)) => {
-                    let path = reader.directory().join(segment.filename(&block_range));
-                    (create_jar(segment, &path, block_range), path)
-                }
-                Err(err) => return Err(err),
-            };
+        let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
-        let result = match NippyJarWriter::from_owned(jar) {
+        let block_range = find_fixed_range(block);
+        let (jar, path) = match static_file_provider.get_segment_provider_from_block(
+            segment,
+            block_range.start(),
+            None,
+        ) {
+            Ok(provider) => (NippyJar::load(provider.data_path())?, provider.data_path().into()),
+            Err(ProviderError::MissingStaticFileBlock(_, _)) => {
+                let path = static_file_provider.directory().join(segment.filename(&block_range));
+                (create_jar(segment, &path, block_range), path)
+            }
+            Err(err) => return Err(err),
+        };
+
+        let result = match NippyJarWriter::new(jar) {
             Ok(writer) => Ok((writer, path)),
             Err(NippyJarError::FrozenJar) => {
                 // This static file has been frozen, so we should
@@ -135,7 +141,7 @@ impl<'a> StaticFileProviderRW<'a> {
             }
         };
 
-        self.reader.update_index(self.writer.user_header().segment(), segment_max_block)
+        self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
     }
 
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current static file,
@@ -436,17 +442,28 @@ impl<'a> StaticFileProviderRW<'a> {
         Ok(())
     }
 
+    fn reader(&self) -> StaticFileProvider {
+        Self::upgrade_provider_to_strong_reference(&self.reader)
+    }
+
+    /// Upgrades a weak reference of [`StaticFileProviderInner`] to a strong reference
+    /// [`StaticFileProvider`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the parent [`StaticFileProvider`] is fully dropped while the child writer is still
+    /// active. In reality, it's impossible to detach the [`StaticFileProviderRW`] from the
+    /// [`StaticFileProvider`].
+    fn upgrade_provider_to_strong_reference(
+        provider: &Weak<StaticFileProviderInner>,
+    ) -> StaticFileProvider {
+        provider.upgrade().map(StaticFileProvider).expect("StaticFileProvider is dropped")
+    }
+
     #[cfg(any(test, feature = "test-utils"))]
     /// Helper function to override block range for testing.
     pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
         self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
-    }
-}
-
-impl<'a> Deref for StaticFileProviderRW<'a> {
-    type Target = StaticFileProvider;
-    fn deref(&self) -> &Self::Target {
-        &self.reader
     }
 }
 

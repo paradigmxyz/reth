@@ -138,9 +138,7 @@ mod tests {
                 CanonicalHeaders,
                 BlockNumber,
                 SegmentHeader,
-            >(
-                tx, range, None, none_vec, Some(hashes), row_count as usize, &mut nippy_jar
-            )
+            >(tx, range, None, none_vec, Some(hashes), row_count as usize, nippy_jar)
             .unwrap();
         }
 

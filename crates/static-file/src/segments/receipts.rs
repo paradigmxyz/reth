@@ -64,7 +64,7 @@ impl<DB: Database> Segment<DB> for Receipts {
         let tx_range = provider.transaction_range_by_block_range(block_range.clone())?;
         let tx_range_len = tx_range.clone().count();
 
-        let mut jar = prepare_jar::<DB, 1>(
+        let jar = prepare_jar::<DB, 1>(
             provider,
             directory,
             StaticFileSegment::Receipts,
@@ -99,7 +99,7 @@ impl<DB: Database> Segment<DB> for Receipts {
             None::<Vec<std::vec::IntoIter<Vec<u8>>>>,
             hashes,
             tx_range_len,
-            &mut jar,
+            jar,
         )?;
 
         Ok(())

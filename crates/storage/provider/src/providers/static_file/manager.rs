@@ -41,7 +41,7 @@ type SegmentRanges = HashMap<StaticFileSegment, BTreeMap<TxNumber, SegmentRangeI
 
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
 #[derive(Debug, Default, Clone)]
-pub struct StaticFileProvider(Arc<StaticFileProviderInner>);
+pub struct StaticFileProvider(pub(crate) Arc<StaticFileProviderInner>);
 
 impl StaticFileProvider {
     /// Creates a new [`StaticFileProvider`].
@@ -76,7 +76,7 @@ pub struct StaticFileProviderInner {
     /// won't be able to be queried directly.
     load_filters: bool,
     /// Maintains a map of StaticFile writers for each [`StaticFileSegment`]
-    writers: DashMap<StaticFileSegment, StaticFileProviderRW<'static>>,
+    writers: DashMap<StaticFileSegment, StaticFileProviderRW>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
 }
 
@@ -684,8 +684,12 @@ impl StaticFileWriter for StaticFileProvider {
         Ok(match self.writers.entry(segment) {
             DashMapEntry::Occupied(entry) => entry.into_ref(),
             DashMapEntry::Vacant(entry) => {
-                let writer =
-                    StaticFileProviderRW::new(segment, block, self.clone(), self.metrics.clone())?;
+                let writer = StaticFileProviderRW::new(
+                    segment,
+                    block,
+                    Arc::downgrade(&self.0),
+                    self.metrics.clone(),
+                )?;
                 entry.insert(writer)
             }
         })
