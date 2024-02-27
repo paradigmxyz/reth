@@ -203,9 +203,9 @@ impl ActiveSession {
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::GetBlockHeaders(req) => {
-                on_request!(req, BlockHeaders, GetBlockHeaders)
+                on_request!(req, Headers, GetBlockHeaders)
             }
-            EthMessage::BlockHeaders(resp) => {
+            EthMessage::Headers(resp) => {
                 on_response!(resp, GetBlockHeaders)
             }
             EthMessage::GetBlockBodies(req) => {

@@ -40,3 +40,5 @@ pub mod blockchain_tree;
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
 pub mod test_utils;
+
+use reth_eth_wire as _;

@@ -580,7 +580,7 @@ impl Decodable for Header {
 /// A list of [`Header`]s.
 #[main_codec]
 #[derive(Debug, Default, PartialEq, Eq, Clone, RlpEncodableWrapper, RlpDecodableWrapper)]
-pub struct Headers(Vec<Header>);
+pub struct Headers(pub Vec<Header>);
 
 impl Headers {
     /// Create a new Headers instance.

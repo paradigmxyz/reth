@@ -5,7 +5,7 @@
 
 use futures::FutureExt;
 use reth_eth_wire::{
-    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders, EthMessage,
+    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, EthMessage,
     GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NewBlock,
     NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
     SharedTransactions, Transactions,
@@ -83,7 +83,7 @@ pub enum PeerRequest {
         /// The request for block headers.
         request: GetBlockHeaders,
         /// The channel to send the response for block headers.
-        response: oneshot::Sender<RequestResult<BlockHeaders>>,
+        response: oneshot::Sender<RequestResult<Headers>>,
     },
     /// Requests block bodies from the peer.
     ///
@@ -179,9 +179,9 @@ impl PeerRequest {
 #[derive(Debug)]
 pub enum PeerResponse {
     /// Represents a response to a request for block headers.
-    BlockHeaders {
+    Headers {
         /// The receiver channel for the response to a block headers request.
-        response: oneshot::Receiver<RequestResult<BlockHeaders>>,
+        response: oneshot::Receiver<RequestResult<Headers>>,
     },
     /// Represents a response to a request for block bodies.
     BlockBodies {
@@ -213,15 +213,15 @@ impl PeerResponse {
         macro_rules! poll_request {
             ($response:ident, $item:ident, $cx:ident) => {
                 match ready!($response.poll_unpin($cx)) {
-                    Ok(res) => PeerResponseResult::$item(res.map(|item| item.0)),
+                    Ok(res) => PeerResponseResult::$item(res.map(|item| item.0.into())),
                     Err(err) => PeerResponseResult::$item(Err(err.into())),
                 }
             };
         }
 
         let res = match self {
-            PeerResponse::BlockHeaders { response } => {
-                poll_request!(response, BlockHeaders, cx)
+            PeerResponse::Headers { response } => {
+                poll_request!(response, Headers, cx)
             }
             PeerResponse::BlockBodies { response } => {
                 poll_request!(response, BlockBodies, cx)
@@ -244,7 +244,7 @@ impl PeerResponse {
 #[derive(Debug)]
 pub enum PeerResponseResult {
     /// Represents a result containing block headers or an error.
-    BlockHeaders(RequestResult<Headers>),
+    Headers(RequestResult<Headers>),
     /// Represents a result containing block bodies or an error.
     BlockBodies(RequestResult<Vec<BlockBody>>),
     /// Represents a result containing pooled transactions or an error.
@@ -264,7 +264,8 @@ impl PeerResponseResult {
             ($response:ident, $item:ident, $request_id:ident) => {
                 match $response {
                     Ok(res) => {
-                        let request = RequestPair { request_id: $request_id, message: $item(res) };
+                        let request =
+                            RequestPair { request_id: $request_id, message: $item(res.to_vec()) };
                         Ok(EthMessage::$item(request))
                     }
                     Err(err) => Err(err),
@@ -272,8 +273,8 @@ impl PeerResponseResult {
             };
         }
         match self {
-            PeerResponseResult::BlockHeaders(resp) => {
-                to_message!(resp, BlockHeaders, id)
+            PeerResponseResult::Headers(resp) => {
+                to_message!(resp, Headers, id)
             }
             PeerResponseResult::BlockBodies(resp) => {
                 to_message!(resp, BlockBodies, id)
@@ -293,7 +294,7 @@ impl PeerResponseResult {
     /// Returns the `Err` value if the result is an error.
     pub fn err(&self) -> Option<&RequestError> {
         match self {
-            PeerResponseResult::BlockHeaders(res) => res.as_ref().err(),
+            PeerResponseResult::Headers(res) => res.as_ref().err(),
             PeerResponseResult::BlockBodies(res) => res.as_ref().err(),
             PeerResponseResult::PooledTransactions(res) => res.as_ref().err(),
             PeerResponseResult::NodeData(res) => res.as_ref().err(),

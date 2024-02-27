@@ -7,13 +7,16 @@
 //! Reference: [Ethereum Wire Protocol](https://github.com/ethereum/wiki/wiki/Ethereum-Wire-Protocol).
 
 use super::{
-    broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-    GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
+    broadcast::NewBlockHashes, BlockBodies, GetBlockBodies, GetBlockHeaders, GetNodeData,
+    GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
 use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
-use reth_primitives::bytes::{Buf, BufMut};
+use reth_primitives::{
+    bytes::{Buf, BufMut},
+    Headers,
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, sync::Arc};
@@ -59,9 +62,9 @@ impl ProtocolMessage {
                 let request_pair = RequestPair::<GetBlockHeaders>::decode(buf)?;
                 EthMessage::GetBlockHeaders(request_pair)
             }
-            EthMessageID::BlockHeaders => {
-                let request_pair = RequestPair::<BlockHeaders>::decode(buf)?;
-                EthMessage::BlockHeaders(request_pair)
+            EthMessageID::Headers => {
+                let request_pair = RequestPair::<Headers>::decode(buf)?;
+                EthMessage::Headers(request_pair)
             }
             EthMessageID::GetBlockBodies => {
                 let request_pair = RequestPair::<GetBlockBodies>::decode(buf)?;
@@ -193,8 +196,8 @@ pub enum EthMessage {
     // The following messages are request-response message pairs
     /// Represents a GetBlockHeaders request-response pair.
     GetBlockHeaders(RequestPair<GetBlockHeaders>),
-    /// Represents a BlockHeaders request-response pair.
-    BlockHeaders(RequestPair<BlockHeaders>),
+    /// Represents a Headers request-response pair.
+    Headers(RequestPair<Headers>),
     /// Represents a GetBlockBodies request-response pair.
     GetBlockBodies(RequestPair<GetBlockBodies>),
     /// Represents a BlockBodies request-response pair.
@@ -224,7 +227,7 @@ impl EthMessage {
             EthMessage::NewPooledTransactionHashes66(_) |
             EthMessage::NewPooledTransactionHashes68(_) => EthMessageID::NewPooledTransactionHashes,
             EthMessage::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
-            EthMessage::BlockHeaders(_) => EthMessageID::BlockHeaders,
+            EthMessage::Headers(_) => EthMessageID::Headers,
             EthMessage::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
             EthMessage::BlockBodies(_) => EthMessageID::BlockBodies,
             EthMessage::GetPooledTransactions(_) => EthMessageID::GetPooledTransactions,
@@ -247,7 +250,7 @@ impl Encodable for EthMessage {
             EthMessage::NewPooledTransactionHashes66(hashes) => hashes.encode(out),
             EthMessage::NewPooledTransactionHashes68(hashes) => hashes.encode(out),
             EthMessage::GetBlockHeaders(request) => request.encode(out),
-            EthMessage::BlockHeaders(headers) => headers.encode(out),
+            EthMessage::Headers(headers) => headers.encode(out),
             EthMessage::GetBlockBodies(request) => request.encode(out),
             EthMessage::BlockBodies(bodies) => bodies.encode(out),
             EthMessage::GetPooledTransactions(request) => request.encode(out),
@@ -267,7 +270,7 @@ impl Encodable for EthMessage {
             EthMessage::NewPooledTransactionHashes66(hashes) => hashes.length(),
             EthMessage::NewPooledTransactionHashes68(hashes) => hashes.length(),
             EthMessage::GetBlockHeaders(request) => request.length(),
-            EthMessage::BlockHeaders(headers) => headers.length(),
+            EthMessage::Headers(headers) => headers.length(),
             EthMessage::GetBlockBodies(request) => request.length(),
             EthMessage::BlockBodies(bodies) => bodies.length(),
             EthMessage::GetPooledTransactions(request) => request.length(),
@@ -337,7 +340,7 @@ pub enum EthMessageID {
     /// Get block headers message.
     GetBlockHeaders = 0x03,
     /// Block headers message.
-    BlockHeaders = 0x04,
+    Headers = 0x04,
     /// Get block bodies message.
     GetBlockBodies = 0x05,
     /// Block bodies message.
@@ -383,7 +386,7 @@ impl Decodable for EthMessageID {
             0x01 => EthMessageID::NewBlockHashes,
             0x02 => EthMessageID::Transactions,
             0x03 => EthMessageID::GetBlockHeaders,
-            0x04 => EthMessageID::BlockHeaders,
+            0x04 => EthMessageID::Headers,
             0x05 => EthMessageID::GetBlockBodies,
             0x06 => EthMessageID::BlockBodies,
             0x07 => EthMessageID::NewBlock,
@@ -410,7 +413,7 @@ impl TryFrom<usize> for EthMessageID {
             0x01 => Ok(EthMessageID::NewBlockHashes),
             0x02 => Ok(EthMessageID::Transactions),
             0x03 => Ok(EthMessageID::GetBlockHeaders),
-            0x04 => Ok(EthMessageID::BlockHeaders),
+            0x04 => Ok(EthMessageID::Headers),
             0x05 => Ok(EthMessageID::GetBlockBodies),
             0x06 => Ok(EthMessageID::BlockBodies),
             0x07 => Ok(EthMessageID::NewBlock),

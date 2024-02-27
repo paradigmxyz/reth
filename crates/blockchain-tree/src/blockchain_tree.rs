@@ -1246,7 +1246,7 @@ mod tests {
         proofs::{calculate_receipt_root, calculate_transaction_root, state_root_unhashed},
         revm_primitives::AccountInfo,
         stage::StageCheckpoint,
-        Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
+        Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Headers, Signature,
         Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
         Withdrawals, B256, MAINNET,
     };

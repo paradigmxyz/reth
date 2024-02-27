@@ -51,12 +51,12 @@ pub mod fuzz_rlp {
     use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
     use reth_codecs::derive_arbitrary;
     use reth_eth_wire::{
-        BlockBodies, BlockHeaders, DisconnectReason, GetBlockBodies, GetBlockHeaders, GetNodeData,
+        BlockBodies, DisconnectReason, GetBlockBodies, GetBlockHeaders, GetNodeData,
         GetPooledTransactions, GetReceipts, HelloMessage, NewBlock, NewBlockHashes,
         NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData, P2PMessage,
         PooledTransactions, Receipts, Status, Transactions,
     };
-    use reth_primitives::{BlockHashOrNumber, TransactionSigned};
+    use reth_primitives::{BlockHashOrNumber, Headers, TransactionSigned};
     use serde::{Deserialize, Serialize};
     use test_fuzz::test_fuzz;
 
@@ -146,7 +146,7 @@ pub mod fuzz_rlp {
 
     fuzz_type_and_name!(GetBlockHeadersWrapper, fuzz_GetBlockHeaders);
 
-    fuzz_type_and_name!(BlockHeaders, fuzz_BlockHeaders);
+    fuzz_type_and_name!(Headers, fuzz_Headers);
     fuzz_type_and_name!(GetBlockBodies, fuzz_GetBlockBodies);
     fuzz_type_and_name!(BlockBodies, fuzz_BlockBodies);
     fuzz_type_and_name!(NewBlock, fuzz_NewBlock);

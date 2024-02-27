@@ -3,8 +3,7 @@
 use crate::{metrics::EthRequestHandlerMetrics, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
-    Receipts,
+    BlockBodies, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData, Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Headers, HeadersDirection, PeerId};
@@ -150,11 +149,11 @@ where
         &mut self,
         _peer_id: PeerId,
         request: GetBlockHeaders,
-        response: oneshot::Sender<RequestResult<BlockHeaders>>,
+        response: oneshot::Sender<RequestResult<Headers>>,
     ) {
         self.metrics.received_headers_requests.increment(1);
         let headers = self.get_headers_response(request);
-        let _ = response.send(Ok(BlockHeaders(headers)));
+        let _ = response.send(Ok(headers));
     }
 
     fn on_bodies_request(
@@ -294,7 +293,7 @@ pub enum IncomingEthRequest {
         /// The specific block headers requested.
         request: GetBlockHeaders,
         /// The channel sender for the response containing block headers.
-        response: oneshot::Sender<RequestResult<BlockHeaders>>,
+        response: oneshot::Sender<RequestResult<Headers>>,
     },
     /// Request Block bodies from the peer.
     ///

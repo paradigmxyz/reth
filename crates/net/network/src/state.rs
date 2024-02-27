@@ -348,7 +348,7 @@ where
                 BlockRequest::GetBlockHeaders(request) => {
                     let (response, rx) = oneshot::channel();
                     let request = PeerRequest::GetBlockHeaders { request, response };
-                    let response = PeerResponse::BlockHeaders { response: rx };
+                    let response = PeerResponse::Headers { response: rx };
                     (request, response)
                 }
                 BlockRequest::GetBlockBodies(request) => {
@@ -383,7 +383,7 @@ where
     /// a follow-up request or an instruction to slash the peer's reputation.
     fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult) -> Option<StateAction> {
         match resp {
-            PeerResponseResult::BlockHeaders(res) => {
+            PeerResponseResult::Headers(res) => {
                 let outcome = self.state_fetcher.on_block_headers_response(peer, res)?;
                 self.on_block_response_outcome(outcome)
             }

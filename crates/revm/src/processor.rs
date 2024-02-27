@@ -562,7 +562,7 @@ mod tests {
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
         keccak256,
         trie::AccountProof,
-        Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, MAINNET,
+        Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, Headers, StorageKey, MAINNET,
     };
     use reth_provider::{
         AccountReader, BlockHashReader, BundleStateWithReceipts, StateRootProvider,

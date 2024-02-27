@@ -3,7 +3,9 @@ use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_node_api::{ConfigureEvmEnv, EngineTypes};
-use reth_primitives::{Block, ChainSpec, Headers, IntoRecoveredTransaction, SealedBlockWithSenders};
+use reth_primitives::{
+    Block, ChainSpec, Headers, IntoRecoveredTransaction, SealedBlockWithSenders,
+};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_stages::PipelineEvent;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};

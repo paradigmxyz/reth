@@ -1,9 +1,9 @@
-//! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
+//! Implements the `GetBlockHeaders`, `GetBlockBodies`, and `BlockBodies` message
 //! types.
 
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Headers, HeadersDirection, B256};
+use reth_primitives::{BlockBody, BlockHashOrNumber, HeadersDirection, B256};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -35,21 +35,6 @@ pub struct GetBlockHeaders {
 
     /// The direction in which the headers should be returned in.
     pub direction: HeadersDirection,
-}
-
-/// The response to [`GetBlockHeaders`], containing headers if any headers were found.
-#[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct BlockHeaders(
-    /// The requested headers.
-    pub Headers,
-);
-
-impl From<Headers> for BlockHeaders {
-    fn from(headers: Headers) -> Self {
-        BlockHeaders(headers)
-    }
 }
 
 /// A request for a peer to return block bodies for the given block hashes.
@@ -91,13 +76,11 @@ impl From<Vec<BlockBody>> for BlockBodies {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::{
-        message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-    };
+    use crate::types::{message::RequestPair, BlockBodies, GetBlockBodies, GetBlockHeaders};
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
-        hex, BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction, TransactionKind,
-        TransactionSigned, TxLegacy, U256,
+        hex, BlockHashOrNumber, Header, Headers, HeadersDirection, Signature, Transaction,
+        TransactionKind, TransactionSigned, TxLegacy, U256,
     };
     use std::str::FromStr;
 
@@ -237,9 +220,9 @@ mod tests {
         // [ (f90202) 0x0457 = 1111, [ (f901fc) [ (f901f9) header ] ] ]
         let expected = hex!("f90202820457f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000");
         let mut data = vec![];
-        RequestPair::<BlockHeaders> {
+        RequestPair::<Headers> {
             request_id: 1111,
-            message: BlockHeaders(vec![
+            message: Headers(vec![
                 Header {
                     parent_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
                     ommers_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
@@ -262,7 +245,7 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                 },
-            ].into()),
+            ]),
         }.encode(&mut data);
         assert_eq!(data, expected);
     }
@@ -271,9 +254,9 @@ mod tests {
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     fn decode_block_header() {
         let data = hex!("f90202820457f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000");
-        let expected = RequestPair::<BlockHeaders> {
+        let expected = RequestPair::<Headers> {
             request_id: 1111,
-            message: BlockHeaders(vec![
+            message: Headers(vec![
                 Header {
                     parent_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
                     ommers_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
@@ -296,7 +279,7 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                 },
-            ].into()),
+            ]),
         };
         let result = RequestPair::decode(&mut &data[..]);
         assert_eq!(result.unwrap(), expected);
