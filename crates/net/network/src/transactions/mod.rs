@@ -405,6 +405,7 @@ where
             for tx in transactions.iter() {
                 peer.seen_transactions.insert(*tx.hash(), ());
             }
+
             // peer.seen_transactions.extend(transactions.iter().map(|tx| *tx.hash()));
 
             let resp = PooledTransactions(transactions);
@@ -1201,6 +1202,7 @@ where
         let start = Instant::now();
         let mut poll_durations = TxManagerPollDurations::default();
 
+        self.metrics.total_seen_hashes_by_peers.set(self.peers.iter().map(|(_, peer)| peer.seen_transactions.len()).sum::<usize>() as f64);
         let this = self.get_mut();
 
         // If the budget is exhausted we manually yield back control to tokio. See

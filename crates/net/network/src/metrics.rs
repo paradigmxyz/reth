@@ -192,6 +192,9 @@ pub struct TransactionsManagerMetrics {
 
     /// total pool imports
     pub(crate) total_pool_imports: Gauge,
+
+    /// total seen hashes by every peer
+    pub(crate) total_seen_hashes_by_peers: Gauge,
 }
 
 /// Measures the duration of executing the given code block. The duration is added to the given
