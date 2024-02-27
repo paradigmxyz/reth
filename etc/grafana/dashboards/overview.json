@@ -1,5 +1,4 @@
 {
-
   "__inputs": [
     {
       "name": "DS_PROMETHEUS",
@@ -8,10 +7,22 @@
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
+    },
+    {
+      "name": "DS_EXPRESSION",
+      "label": "Expression",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "__expr__"
     }
   ],
   "__elements": {},
   "__requires": [
+    {
+      "type": "datasource",
+      "id": "__expr__",
+      "version": "1.0.0"
+    },
     {
       "type": "panel",
       "id": "bargauge",
@@ -47,6 +58,12 @@
       "id": "prometheus",
       "name": "Prometheus",
       "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
     },
     {
       "type": "panel",
@@ -86,7 +103,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 1,
+  "id": null,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -4443,7 +4460,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4509,9 +4527,8 @@
         },
         {
           "datasource": {
-            "name": "Expression",
             "type": "__expr__",
-            "uid": "__expr__"
+            "uid": "${DS_EXPRESSION}"
           },
           "expression": "$A + $B",
           "hide": false,
@@ -4569,7 +4586,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4962,12 +4980,325 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Accumulated durations of nested function calls, in one call to poll `TransactionsManager` future (`TransactionsManager` future has a loop, hence accumulated).\n\nNetwork Events - stream peer session updates from `NetworkManager`\nTransaction Events - stream txns gossip fom `NetworkManager`\nImported Transactions - stream hashes of successfully inserted txns from `TransactionPool`\nPending pool imports - flush txns to pool from `TransactionsManager`\nFetch Events - stream fetch txn events (success case wraps a tx) from `TransactionFetcher`\nCommands - stream commands from (?) to fetch/serve/propagate txns\n  ",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 170
+      },
+      "id": 200,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_network_events{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Network Events",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_transaction_events{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Transaction Events",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_network_acc_duration_poll_imported_transactions{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Imported Transactions",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_pending_pool_imports{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Pending Pool Imports",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_fetch_events{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Fetch Events",
+          "range": true,
+          "refId": "F",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_commands{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Commands",
+          "range": true,
+          "refId": "G",
+          "useBackend": false
+        }
+      ],
+      "title": "Transactions Manager Poll Duration Nested Function Calls",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Duration spent insdie one call to poll the `TransactionsManager` future",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Transactions Manager Future"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 170
+      },
+      "id": 201,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_duration_poll_tx_manager{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Transactions Manager Future",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Transactions Manager Future Poll Duration",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 170
+        "y": 178
       },
       "id": 79,
       "panels": [],
@@ -5039,7 +5370,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 171
+        "y": 179
       },
       "id": 74,
       "options": {
@@ -5134,7 +5465,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 171
+        "y": 179
       },
       "id": 80,
       "options": {
@@ -5229,7 +5560,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 179
+        "y": 187
       },
       "id": 81,
       "options": {
@@ -5324,7 +5655,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 179
+        "y": 187
       },
       "id": 114,
       "options": {
@@ -5420,7 +5751,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 187
+        "y": 195
       },
       "id": 158,
       "options": {
@@ -5542,7 +5873,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 187
+        "y": 195
       },
       "id": 190,
       "options": {
@@ -5580,7 +5911,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 195
+        "y": 203
       },
       "id": 87,
       "panels": [],
@@ -5652,7 +5983,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 196
+        "y": 204
       },
       "id": 83,
       "options": {
@@ -5746,7 +6077,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 196
+        "y": 204
       },
       "id": 84,
       "options": {
@@ -5852,7 +6183,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 204
+        "y": 212
       },
       "id": 85,
       "options": {
@@ -5889,7 +6220,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 212
+        "y": 220
       },
       "id": 68,
       "panels": [],
@@ -5961,7 +6292,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 213
+        "y": 221
       },
       "id": 60,
       "options": {
@@ -6055,7 +6386,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 213
+        "y": 221
       },
       "id": 62,
       "options": {
@@ -6149,7 +6480,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 221
+        "y": 229
       },
       "id": 64,
       "options": {
@@ -6186,7 +6517,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 229
+        "y": 237
       },
       "id": 97,
       "panels": [],
@@ -6256,7 +6587,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 230
+        "y": 238
       },
       "id": 98,
       "options": {
@@ -6417,7 +6748,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 230
+        "y": 238
       },
       "id": 101,
       "options": {
@@ -6513,7 +6844,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 238
+        "y": 246
       },
       "id": 99,
       "options": {
@@ -6609,7 +6940,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 238
+        "y": 246
       },
       "id": 100,
       "options": {
@@ -6647,7 +6978,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 246
+        "y": 254
       },
       "id": 105,
       "panels": [],
@@ -6718,7 +7049,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 247
+        "y": 255
       },
       "id": 106,
       "options": {
@@ -6814,7 +7145,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 247
+        "y": 255
       },
       "id": 107,
       "options": {
@@ -6852,7 +7183,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 255
+        "y": 263
       },
       "id": 108,
       "panels": [],
@@ -6948,7 +7279,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 256
+        "y": 264
       },
       "id": 109,
       "options": {
@@ -7010,7 +7341,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 256
+        "y": 264
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -7137,7 +7468,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 264
+        "y": 272
       },
       "id": 120,
       "options": {
@@ -7195,7 +7526,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 264
+        "y": 272
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -7346,7 +7677,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 272
+        "y": 280
       },
       "id": 198,
       "options": {
@@ -7553,6 +7884,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 15,
+  "version": 4,
   "weekStart": ""
 }
