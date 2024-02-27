@@ -68,6 +68,7 @@ derive_more.workspace = true
 schnellru.workspace = true
 itertools.workspace = true
 tempfile = { workspace = true, optional = true }
+smallvec.workspace = true
 
 [dev-dependencies]
 # reth
