@@ -19,7 +19,7 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
 
     // Import relevant AccountChangeSets
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::AccountChangeSet, _>(
+        tx.import_table_with_range::<tables::AccountChangeSets, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from),
             to,

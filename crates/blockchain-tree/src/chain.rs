@@ -149,6 +149,7 @@ impl AppendableChain {
         let size = state.receipts().len();
         state.receipts_mut().drain(0..size - 1);
         state.state_mut().take_n_reverts(size - 1);
+        state.set_first_block(block.number);
 
         // If all is okay, return new chain back. Present chain is not modified.
         Ok(Self { chain: Chain::from_block(block, state, None) })

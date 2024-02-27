@@ -85,7 +85,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 
     // insert sync stage
     for stage in StageId::ALL.iter() {
-        tx.put::<tables::SyncStage>(stage.to_string(), Default::default())?;
+        tx.put::<tables::StageCheckpoints>(stage.to_string(), Default::default())?;
     }
 
     tx.commit()?;
@@ -348,7 +348,7 @@ mod tests {
         let tx = provider.tx_ref();
 
         assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::AccountHistory>(tx)
+            collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(tx)
                 .expect("failed to collect"),
             vec![
                 (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
@@ -357,7 +357,7 @@ mod tests {
         );
 
         assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::StorageHistory>(tx)
+            collect_table_entries::<Arc<DatabaseEnv>, tables::StoragesHistory>(tx)
                 .expect("failed to collect"),
             vec![(
                 StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),

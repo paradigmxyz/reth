@@ -11,7 +11,7 @@ use reth_interfaces::test_utils::{
     generators,
     generators::{
         random_block_range, random_changeset_range, random_contract_account_range,
-        random_eoa_account_range,
+        random_eoa_accounts,
     },
 };
 use reth_primitives::{fs, Account, Address, SealedBlock, B256, U256};
@@ -106,7 +106,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         println!("Transactions testdata not found, generating to {:?}", path.display());
 
         let accounts: BTreeMap<Address, Account> = concat([
-            random_eoa_account_range(&mut rng, 0..n_eoa),
+            random_eoa_accounts(&mut rng, n_eoa),
             random_contract_account_range(&mut rng, &mut (0..n_contract)),
         ])
         .into_iter()
@@ -170,7 +170,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         // initialize TD
         db.commit(|tx| {
             let (head, _) = tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
-            Ok(tx.put::<tables::HeaderTD>(head, U256::from(0).into())?)
+            Ok(tx.put::<tables::HeaderTerminalDifficulties>(head, U256::from(0).into())?)
         })
         .unwrap();
     }

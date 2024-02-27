@@ -17,6 +17,7 @@ use reth_primitives::{
     StaticFileSegment, StorageKey, StorageValue, B256,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
+use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -24,11 +25,11 @@ use reth_trie::{updates::TrieUpdates, HashedPostState};
 /// It means that all changes made in the provided block number are not included.
 ///
 /// Historical state provider reads the following tables:
-/// - [tables::AccountHistory]
+/// - [tables::AccountsHistory]
 /// - [tables::Bytecodes]
-/// - [tables::StorageHistory]
-/// - [tables::AccountChangeSet]
-/// - [tables::StorageChangeSet]
+/// - [tables::StoragesHistory]
+/// - [tables::AccountChangeSets]
+/// - [tables::StorageChangeSets]
 #[derive(Debug)]
 pub struct HistoricalStateProviderRef<'b, TX: DbTx> {
     /// Transaction
@@ -70,7 +71,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         Self { tx, block_number, lowest_available_blocks, static_file_provider }
     }
 
-    /// Lookup an account in the AccountHistory table
+    /// Lookup an account in the AccountsHistory table
     pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo> {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
@@ -78,14 +79,14 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
 
         // history key to search IntegerList of block number changesets.
         let history_key = ShardedKey::new(address, self.block_number);
-        self.history_info::<tables::AccountHistory, _>(
+        self.history_info::<tables::AccountsHistory, _>(
             history_key,
             |key| key.key == address,
             self.lowest_available_blocks.account_history_block_number,
         )
     }
 
-    /// Lookup a storage key in the StorageHistory table
+    /// Lookup a storage key in the StoragesHistory table
     pub fn storage_history_lookup(
         &self,
         address: Address,
@@ -97,7 +98,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
 
         // history key to search IntegerList of block number changesets.
         let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-        self.history_info::<tables::StorageHistory, _>(
+        self.history_info::<tables::StoragesHistory, _>(
             history_key,
             |key| key.address == address && key.sharded_key.key == storage_key,
             self.lowest_available_blocks.storage_history_block_number,
@@ -148,10 +149,16 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         // index, the first chunk for the next key will be returned so we filter out chunks that
         // have a different key.
         if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
-            let chunk = chunk.enable_rank();
+            // Get the rank of the first entry before or equal to our block.
+            let mut rank = chunk.rank(self.block_number);
 
-            // Get the rank of the first entry after our block.
-            let rank = chunk.rank(self.block_number as usize);
+            // Adjust the rank, so that we have the rank of the first entry strictly before our
+            // block (not equal to it).
+            if rank.checked_sub(1).and_then(|rank| chunk.select(rank)) == Some(self.block_number) {
+                rank -= 1
+            };
+
+            let block_number = chunk.select(rank);
 
             // If our block is before the first entry in the index chunk and this first entry
             // doesn't equal to our block, it might be before the first write ever. To check, we
@@ -160,20 +167,21 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             // short-circuit) and when it passes we save a full seek into the changeset/plain state
             // table.
             if rank == 0 &&
-                chunk.select(rank) as u64 != self.block_number &&
+                block_number != Some(self.block_number) &&
                 !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
             {
-                if lowest_available_block_number.is_some() {
+                if let (Some(_), Some(block_number)) = (lowest_available_block_number, block_number)
+                {
                     // The key may have been written, but due to pruning we may not have changesets
                     // and history, so we need to make a changeset lookup.
-                    Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
+                    Ok(HistoryInfo::InChangeset(block_number))
                 } else {
                     // The key is written to, but only after our block.
                     Ok(HistoryInfo::NotYetWritten)
                 }
-            } else if rank < chunk.len() {
+            } else if let Some(block_number) = block_number {
                 // The chunk contains an entry for a write after our block, return it.
-                Ok(HistoryInfo::InChangeset(chunk.select(rank) as u64))
+                Ok(HistoryInfo::InChangeset(block_number))
             } else {
                 // The chunk does not contain an entry for a write after our block. This can only
                 // happen if this is the last chunk and so we need to look in the plain state.
@@ -197,7 +205,7 @@ impl<'b, TX: DbTx> AccountReader for HistoricalStateProviderRef<'b, TX> {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(self
                 .tx
-                .cursor_dup_read::<tables::AccountChangeSet>()?
+                .cursor_dup_read::<tables::AccountChangeSets>()?
                 .seek_by_key_subkey(changeset_block_number, address)?
                 .filter(|acc| acc.address == address)
                 .ok_or(ProviderError::AccountChangesetNotFound {
@@ -278,7 +286,7 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
                 self.tx
-                    .cursor_dup_read::<tables::StorageChangeSet>()?
+                    .cursor_dup_read::<tables::StorageChangeSets>()?
                     .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
                     .filter(|entry| entry.key == storage_key)
                     .ok_or_else(|| ProviderError::StorageChangesetNotFound {
@@ -426,17 +434,17 @@ mod tests {
         let tx = factory.provider_rw().unwrap().into_tx();
         let static_file_provider = factory.static_file_provider();
 
-        tx.put::<tables::AccountHistory>(
+        tx.put::<tables::AccountsHistory>(
             ShardedKey { key: ADDRESS, highest_block_number: 7 },
             BlockNumberList::new([1, 3, 7]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::AccountHistory>(
+        tx.put::<tables::AccountsHistory>(
             ShardedKey { key: ADDRESS, highest_block_number: u64::MAX },
             BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::AccountHistory>(
+        tx.put::<tables::AccountsHistory>(
             ShardedKey { key: HIGHER_ADDRESS, highest_block_number: u64::MAX },
             BlockNumberList::new([4]).unwrap(),
         )
@@ -451,29 +459,29 @@ mod tests {
         let higher_acc_plain = Account { nonce: 4, balance: U256::ZERO, bytecode_hash: None };
 
         // setup
-        tx.put::<tables::AccountChangeSet>(1, AccountBeforeTx { address: ADDRESS, info: None })
+        tx.put::<tables::AccountChangeSets>(1, AccountBeforeTx { address: ADDRESS, info: None })
             .unwrap();
-        tx.put::<tables::AccountChangeSet>(
+        tx.put::<tables::AccountChangeSets>(
             3,
             AccountBeforeTx { address: ADDRESS, info: Some(acc_at3) },
         )
         .unwrap();
-        tx.put::<tables::AccountChangeSet>(
+        tx.put::<tables::AccountChangeSets>(
             4,
             AccountBeforeTx { address: HIGHER_ADDRESS, info: None },
         )
         .unwrap();
-        tx.put::<tables::AccountChangeSet>(
+        tx.put::<tables::AccountChangeSets>(
             7,
             AccountBeforeTx { address: ADDRESS, info: Some(acc_at7) },
         )
         .unwrap();
-        tx.put::<tables::AccountChangeSet>(
+        tx.put::<tables::AccountChangeSets>(
             10,
             AccountBeforeTx { address: ADDRESS, info: Some(acc_at10) },
         )
         .unwrap();
-        tx.put::<tables::AccountChangeSet>(
+        tx.put::<tables::AccountChangeSets>(
             15,
             AccountBeforeTx { address: ADDRESS, info: Some(acc_at15) },
         )
@@ -552,7 +560,7 @@ mod tests {
         let tx = factory.provider_rw().unwrap().into_tx();
         let static_file_provider = factory.static_file_provider();
 
-        tx.put::<tables::StorageHistory>(
+        tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
                 address: ADDRESS,
                 sharded_key: ShardedKey { key: STORAGE, highest_block_number: 7 },
@@ -560,7 +568,7 @@ mod tests {
             BlockNumberList::new([3, 7]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::StorageHistory>(
+        tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
                 address: ADDRESS,
                 sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
@@ -568,7 +576,7 @@ mod tests {
             BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
-        tx.put::<tables::StorageHistory>(
+        tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
                 address: HIGHER_ADDRESS,
                 sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
@@ -586,11 +594,11 @@ mod tests {
         let entry_at3 = StorageEntry { key: STORAGE, value: U256::from(0) };
 
         // setup
-        tx.put::<tables::StorageChangeSet>((3, ADDRESS).into(), entry_at3).unwrap();
-        tx.put::<tables::StorageChangeSet>((4, HIGHER_ADDRESS).into(), higher_entry_at4).unwrap();
-        tx.put::<tables::StorageChangeSet>((7, ADDRESS).into(), entry_at7).unwrap();
-        tx.put::<tables::StorageChangeSet>((10, ADDRESS).into(), entry_at10).unwrap();
-        tx.put::<tables::StorageChangeSet>((15, ADDRESS).into(), entry_at15).unwrap();
+        tx.put::<tables::StorageChangeSets>((3, ADDRESS).into(), entry_at3).unwrap();
+        tx.put::<tables::StorageChangeSets>((4, HIGHER_ADDRESS).into(), higher_entry_at4).unwrap();
+        tx.put::<tables::StorageChangeSets>((7, ADDRESS).into(), entry_at7).unwrap();
+        tx.put::<tables::StorageChangeSets>((10, ADDRESS).into(), entry_at10).unwrap();
+        tx.put::<tables::StorageChangeSets>((15, ADDRESS).into(), entry_at15).unwrap();
 
         // setup plain state
         tx.put::<tables::PlainStorageState>(ADDRESS, entry_plain).unwrap();

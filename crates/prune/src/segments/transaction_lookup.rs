@@ -61,7 +61,7 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         }
 
         let mut last_pruned_transaction = None;
-        let (pruned, _) = provider.prune_table_with_iterator::<tables::TxHashNumber>(
+        let (pruned, _) = provider.prune_table_with_iterator::<tables::TransactionHashNumbers>(
             hashes,
             input.delete_limit,
             |row| {
@@ -129,7 +129,7 @@ mod tests {
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            db.table::<tables::TxHashNumber>().unwrap().len()
+            db.table::<tables::TransactionHashNumbers>().unwrap().len()
         );
 
         let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
@@ -197,7 +197,7 @@ mod tests {
                 last_pruned_block_number.checked_sub(if result.done { 0 } else { 1 });
 
             assert_eq!(
-                db.table::<tables::TxHashNumber>().unwrap().len(),
+                db.table::<tables::TransactionHashNumbers>().unwrap().len(),
                 tx_hash_numbers.len() - (last_pruned_tx_number + 1)
             );
             assert_eq!(

@@ -33,7 +33,7 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
     })??;
 
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::AccountChangeSet, _>(
+        tx.import_table_with_range::<tables::AccountChangeSets, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from),
             to,
@@ -116,10 +116,11 @@ async fn unwind_and_copy<DB: Database>(
     let unwind_inner_tx = provider.into_tx();
 
     // TODO optimize we can actually just get the entries we need
-    output_db.update(|tx| tx.import_dupsort::<tables::StorageChangeSet, _>(&unwind_inner_tx))??;
+    output_db
+        .update(|tx| tx.import_dupsort::<tables::StorageChangeSets, _>(&unwind_inner_tx))??;
 
-    output_db.update(|tx| tx.import_table::<tables::HashedAccount, _>(&unwind_inner_tx))??;
-    output_db.update(|tx| tx.import_dupsort::<tables::HashedStorage, _>(&unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_table::<tables::HashedAccounts, _>(&unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_dupsort::<tables::HashedStorages, _>(&unwind_inner_tx))??;
     output_db.update(|tx| tx.import_table::<tables::AccountsTrie, _>(&unwind_inner_tx))??;
     output_db.update(|tx| tx.import_dupsort::<tables::StoragesTrie, _>(&unwind_inner_tx))??;
 

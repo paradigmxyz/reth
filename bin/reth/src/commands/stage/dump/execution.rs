@@ -59,7 +59,7 @@ fn import_tables_with_range<DB: Database>(
         )
     })??;
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::HeaderTD, _>(
+        tx.import_table_with_range::<tables::HeaderTerminalDifficulties, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from),
             to,
@@ -110,7 +110,7 @@ fn import_tables_with_range<DB: Database>(
     })??;
 
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::TxSenders, _>(
+        tx.import_table_with_range::<tables::TransactionSenders, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from_tx),
             to_tx,

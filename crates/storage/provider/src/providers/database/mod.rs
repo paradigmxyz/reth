@@ -722,7 +722,7 @@ mod tests {
                 Ok(_)
             );
 
-            let senders = provider.get_or_take::<tables::TxSenders, true>(range.clone());
+            let senders = provider.get_or_take::<tables::TransactionSenders, true>(range.clone());
             assert_eq!(
                 senders,
                 Ok(range

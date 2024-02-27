@@ -2,6 +2,7 @@
   - [`reth node`](./reth/node.md)
   - [`reth init`](./reth/init.md)
   - [`reth import`](./reth/import.md)
+  - [`reth dump-genesis`](./reth/dump-genesis.md)
   - [`reth db`](./reth/db.md)
     - [`reth db stats`](./reth/db/stats.md)
     - [`reth db list`](./reth/db/list.md)

@@ -7,7 +7,6 @@ use reth_db::{
 };
 use reth_interfaces::consensus;
 use reth_primitives::{
-    hex,
     stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
     BlockNumber, GotExpected, SealedHeader, B256,
@@ -107,7 +106,6 @@ impl MerkleStage {
             debug!(
                 target: "sync::stages::merkle::exec",
                 last_account_key = ?checkpoint.last_account_key,
-                last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
                 "Saving inner merkle checkpoint"
             );
             checkpoint.to_compact(&mut buf);
@@ -165,7 +163,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     current = ?current_block_number,
                     target = ?to_block,
                     last_account_key = ?checkpoint.last_account_key,
-                    last_walker_key = ?hex::encode(&checkpoint.last_walker_key),
                     "Continuing inner merkle checkpoint"
                 );
 
@@ -188,8 +185,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             }
             .unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (provider.count_entries::<tables::HashedAccount>()? +
-                    provider.count_entries::<tables::HashedStorage>()?)
+                total: (provider.count_entries::<tables::HashedAccounts>()? +
+                    provider.count_entries::<tables::HashedStorages>()?)
                     as u64,
             });
 
@@ -234,8 +231,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     .map_err(|e| StageError::Fatal(Box::new(e)))?;
             updates.flush(provider.tx_ref())?;
 
-            let total_hashed_entries = (provider.count_entries::<tables::HashedAccount>()? +
-                provider.count_entries::<tables::HashedStorage>()?)
+            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
+                provider.count_entries::<tables::HashedStorages>()?)
                 as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {
@@ -277,8 +274,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let mut entities_checkpoint =
             input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (tx.entries::<tables::HashedAccount>()? +
-                    tx.entries::<tables::HashedStorage>()?) as u64,
+                total: (tx.entries::<tables::HashedAccounts>()? +
+                    tx.entries::<tables::HashedStorages>()?) as u64,
             });
 
         if input.unwind_to == 0 {
@@ -392,8 +389,8 @@ mod tests {
                 done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
-                    runner.db.table::<tables::HashedAccount>().unwrap().len() +
-                    runner.db.table::<tables::HashedStorage>().unwrap().len()
+                    runner.db.table::<tables::HashedAccounts>().unwrap().len() +
+                    runner.db.table::<tables::HashedStorages>().unwrap().len()
                 ) as u64
         );
 
@@ -432,8 +429,8 @@ mod tests {
                 done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
-                    runner.db.table::<tables::HashedAccount>().unwrap().len() +
-                    runner.db.table::<tables::HashedStorage>().unwrap().len()
+                    runner.db.table::<tables::HashedAccounts>().unwrap().len() +
+                    runner.db.table::<tables::HashedStorages>().unwrap().len()
                 ) as u64
         );
 
@@ -530,8 +527,8 @@ mod tests {
             // Calculate state root
             let root = self.db.query(|tx| {
                 let mut accounts = BTreeMap::default();
-                let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
-                let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
+                let mut accounts_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
+                let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorages>()?;
                 for entry in accounts_cursor.walk_range(..)? {
                     let (key, account) = entry?;
                     let mut storage_entries = Vec::new();
@@ -587,9 +584,9 @@ mod tests {
             self.db
                 .commit(|tx| {
                     let mut storage_changesets_cursor =
-                        tx.cursor_dup_read::<tables::StorageChangeSet>().unwrap();
+                        tx.cursor_dup_read::<tables::StorageChangeSets>().unwrap();
                     let mut storage_cursor =
-                        tx.cursor_dup_write::<tables::HashedStorage>().unwrap();
+                        tx.cursor_dup_write::<tables::HashedStorages>().unwrap();
 
                     let mut tree: BTreeMap<B256, BTreeMap<B256, U256>> = BTreeMap::new();
 
@@ -623,7 +620,7 @@ mod tests {
                     }
 
                     let mut changeset_cursor =
-                        tx.cursor_dup_write::<tables::AccountChangeSet>().unwrap();
+                        tx.cursor_dup_write::<tables::AccountChangeSets>().unwrap();
                     let mut rev_changeset_walker = changeset_cursor.walk_back(None).unwrap();
 
                     while let Some((block_number, account_before_tx)) =
@@ -634,13 +631,13 @@ mod tests {
                         }
 
                         if let Some(acc) = account_before_tx.info {
-                            tx.put::<tables::HashedAccount>(
+                            tx.put::<tables::HashedAccounts>(
                                 keccak256(account_before_tx.address),
                                 acc,
                             )
                             .unwrap();
                         } else {
-                            tx.delete::<tables::HashedAccount>(
+                            tx.delete::<tables::HashedAccounts>(
                                 keccak256(account_before_tx.address),
                                 None,
                             )
