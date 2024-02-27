@@ -280,7 +280,7 @@ mod tests {
 
         // No last pruned block number was set before
         let first_block_number = 1;
-        assert!(pruner.is_pruning_needed(first_block_number));
+        assert!(!pruner.is_pruning_needed(first_block_number));
         pruner.previous_tip_block_number = Some(first_block_number);
 
         // Tip block number delta is >= than min block interval
