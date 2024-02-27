@@ -870,6 +870,8 @@ impl TransactionFetcher {
                 let unvalidated_payload_len = verified_payload.len();
 
                 // todo: report peer for sending invalid response
+                // <https://github.com/paradigmxyz/reth/issues/6529>
+
                 let (validation_outcome, valid_payload) =
                     self.filter_valid_message.partially_filter_valid_entries(verified_payload);
 
