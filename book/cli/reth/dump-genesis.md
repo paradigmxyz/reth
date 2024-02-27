@@ -1,26 +1,12 @@
-# reth
+# reth dump-genesis
 
-Reth
+This dumps genesis block JSON configuration to stdout
 
 ```bash
-$ reth --help
-Reth
+$ reth dump-genesis
+Dumps genesis block JSON configuration to stdout
 
-Usage: reth [OPTIONS] <COMMAND>
-
-Commands:
-  node          Start the node
-  init          Initialize the database from a genesis file
-  import        This syncs RLP encoded blocks from a file
-  dump-genesis  Dumps genesis block JSON configuration to stdout
-  db            Database debugging utilities
-  stage         Manipulate individual stages
-  p2p           P2P Debugging utilities
-  test-vectors  Generate Test Vectors
-  config        Write config to stdout
-  debug         Various debug routines
-  recover       Scripts for node recovery
-  help          Print this message or the help of the given subcommand(s)
+Usage: reth dump-genesis [OPTIONS]
 
 Options:
       --chain <CHAIN_OR_PATH>
@@ -45,9 +31,6 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
-
-  -V, --version
-          Print version
 
 Logging:
       --log.stdout.format <FORMAT>
@@ -83,7 +66,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default: <CACHE_DIR>/logs]
+          [default:  <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
