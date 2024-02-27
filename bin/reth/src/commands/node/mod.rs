@@ -6,8 +6,8 @@ use crate::{
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
     },
-    dirs::{DataDirPath, MaybePlatformPath},
     core::cli::runner::CliContext,
+    dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::{value_parser, Args, Parser};
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};

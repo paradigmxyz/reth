@@ -1829,6 +1829,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom-evm"
+version = "0.0.0"
+dependencies = [
+ "alloy-chains",
+ "eyre",
+ "reth",
+ "reth-basic-payload-builder",
+ "reth-ethereum-payload-builder",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-rpc-types",
+ "reth-tracing",
+ "serde",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "custom-node"
 version = "0.0.0"
 dependencies = [

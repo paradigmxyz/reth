@@ -4,8 +4,8 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
-    dirs::{DataDirPath, MaybePlatformPath},
     core::cli::runner::CliContext,
+    dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
 use eyre::Context;
