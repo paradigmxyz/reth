@@ -466,8 +466,10 @@ where
 
         if resp.is_none() {
             // tx not found on disk, check pool
-            if let Some(tx) =
-                self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
+            if let Some(Some(tx)) = self
+                .pool()
+                .get_pooled_transaction_element(hash)
+                .map(|tx| tx.into_transaction().into_ecrecovered())
             {
                 let tx = TransactionSource::Pool(tx);
                 resp = Some(T::into_rpc_transaction(tx));
