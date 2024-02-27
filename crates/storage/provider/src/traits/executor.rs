@@ -14,17 +14,20 @@ pub trait ExecutorFactory: Send + Sync + 'static {
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
         _sp: SP,
-    ) -> Box<dyn PrunableBlockExecutor + 'a>;
+    ) -> Box<dyn PrunableBlockExecutor<Error = BlockExecutionError> + 'a>;
 }
 
 /// An executor capable of executing a block.
 pub trait BlockExecutor {
+    /// The error type returned by the executor.
+    type Error;
+
     /// Execute a block.
     fn execute(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError>;
+    ) -> Result<(), Self::Error>;
 
     /// Executes the block and checks receipts.
     ///
@@ -33,7 +36,7 @@ pub trait BlockExecutor {
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError>;
+    ) -> Result<(), Self::Error>;
 
     /// Runs the provided transactions and commits their state to the run-time database.
     ///
@@ -51,13 +54,10 @@ pub trait BlockExecutor {
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>;
+    ) -> Result<(Vec<Receipt>, u64), Self::Error>;
 
     /// Return bundle state. This is output of executed blocks.
     fn take_output_state(&mut self) -> BundleStateWithReceipts;
-
-    /// Internal statistics of execution.
-    fn stats(&self) -> BlockExecutorStats;
 
     /// Returns the size hint of current in-memory changes.
     fn size_hint(&self) -> Option<usize>;
@@ -89,8 +89,8 @@ pub struct BlockExecutorStats {
 }
 
 impl BlockExecutorStats {
-    /// Log duration to info level log.
-    pub fn log_info(&self) {
+    /// Log duration to debug level log.
+    pub fn log_debug(&self) {
         debug!(
             target: "evm",
             evm_transact = ?self.execution_duration,

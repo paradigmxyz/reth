@@ -172,14 +172,11 @@ mod tests {
         let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
         let hashed_address = B256::random();
-        let key = vec![0x2, 0x3];
+        let key = StoredNibblesSubKey::from(vec![0x2, 0x3]);
         let value = BranchNodeCompact::new(1, 1, 1, vec![B256::random()], None);
 
         cursor
-            .upsert(
-                hashed_address,
-                StorageTrieEntry { nibbles: key.clone().into(), node: value.clone() },
-            )
+            .upsert(hashed_address, StorageTrieEntry { nibbles: key.clone(), node: value.clone() })
             .unwrap();
 
         let mut cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);

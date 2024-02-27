@@ -12,7 +12,6 @@ use reth_rpc_types::{
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-#[async_trait]
 pub trait EthApi {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
@@ -209,9 +208,9 @@ pub trait EthApi {
     #[method(name = "maxPriorityFeePerGas")]
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
 
-    /// Introduced in EIP-4844, returns the current blob gas price in wei.
-    #[method(name = "blobGasPrice")]
-    async fn blob_gas_price(&self) -> RpcResult<U256>;
+    /// Introduced in EIP-4844, returns the current blob base fee in wei.
+    #[method(name = "blobBaseFee")]
+    async fn blob_base_fee(&self) -> RpcResult<U256>;
 
     /// Returns the Transaction fee history
     ///

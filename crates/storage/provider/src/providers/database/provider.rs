@@ -114,48 +114,40 @@ impl<TX: DbTxMut> DatabaseProvider<TX> {
 }
 
 impl<TX: DbTx> DatabaseProvider<TX> {
-    fn cursor_read_collect<T: Table<Key = u64>, R>(
+    /// Iterates over read only values in the given table and collects them into a vector.
+    ///
+    /// Early-returns if the range is empty, without opening a cursor transaction.
+    fn cursor_read_collect<T: Table<Key = u64>>(
         &self,
         range: impl RangeBounds<T::Key>,
-        mut f: impl FnMut(T::Value) -> Result<R, DatabaseError>,
-    ) -> ProviderResult<Vec<R>> {
-        self.cursor_read_collect_with_key::<T, R>(range, |_, v| f(v))
-    }
-
-    fn cursor_read_collect_with_key<T: Table<Key = u64>, R>(
-        &self,
-        range: impl RangeBounds<T::Key>,
-        f: impl FnMut(T::Key, T::Value) -> Result<R, DatabaseError>,
-    ) -> ProviderResult<Vec<R>> {
+    ) -> ProviderResult<Vec<T::Value>> {
         let capacity = match range_size_hint(&range) {
             Some(0) | None => return Ok(Vec::new()),
             Some(capacity) => capacity,
         };
         let mut cursor = self.tx.cursor_read::<T>()?;
-        self.cursor_collect_with_capacity(&mut cursor, range, capacity, f)
+        self.cursor_collect_with_capacity(&mut cursor, range, capacity)
     }
 
-    fn cursor_collect<T: Table<Key = u64>, R>(
+    /// Iterates over read only values in the given table and collects them into a vector.
+    fn cursor_collect<T: Table<Key = u64>>(
         &self,
         cursor: &mut impl DbCursorRO<T>,
         range: impl RangeBounds<T::Key>,
-        mut f: impl FnMut(T::Value) -> Result<R, DatabaseError>,
-    ) -> ProviderResult<Vec<R>> {
+    ) -> ProviderResult<Vec<T::Value>> {
         let capacity = range_size_hint(&range).unwrap_or(0);
-        self.cursor_collect_with_capacity(cursor, range, capacity, |_, v| f(v))
+        self.cursor_collect_with_capacity(cursor, range, capacity)
     }
 
-    fn cursor_collect_with_capacity<T: Table<Key = u64>, R>(
+    fn cursor_collect_with_capacity<T: Table<Key = u64>>(
         &self,
         cursor: &mut impl DbCursorRO<T>,
         range: impl RangeBounds<T::Key>,
         capacity: usize,
-        mut f: impl FnMut(T::Key, T::Value) -> Result<R, DatabaseError>,
-    ) -> ProviderResult<Vec<R>> {
+    ) -> ProviderResult<Vec<T::Value>> {
         let mut items = Vec::with_capacity(capacity);
         for entry in cursor.walk_range(range)? {
-            let (key, value) = entry?;
-            items.push(f(key, value)?);
+            items.push(entry?.1);
         }
         Ok(items)
     }
@@ -360,7 +352,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             SnapshotSegment::Transactions,
             to_range(range),
             |snapshot, range, _| snapshot.transactions_by_tx_range(range),
-            |range, _| self.cursor_collect(cursor, range, Ok),
+            |range, _| self.cursor_collect(cursor, range),
             |_| true,
         )
     }
@@ -1136,9 +1128,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
             SnapshotSegment::Headers,
             to_range(range),
             |snapshot, range, _| snapshot.headers_range(range),
-            |range, _| {
-                self.cursor_read_collect::<tables::Headers, _>(range, Ok).map_err(Into::into)
-            },
+            |range, _| self.cursor_read_collect::<tables::Headers>(range).map_err(Into::into),
             |_| true,
         )
     }
@@ -1210,8 +1200,7 @@ impl<TX: DbTx> BlockHashReader for DatabaseProvider<TX> {
             start..end,
             |snapshot, range, _| snapshot.canonical_hashes_range(range.start, range.end),
             |range, _| {
-                self.cursor_read_collect::<tables::CanonicalHeaders, _>(range, Ok)
-                    .map_err(Into::into)
+                self.cursor_read_collect::<tables::CanonicalHeaders>(range).map_err(Into::into)
             },
             |_| true,
         )
@@ -1332,10 +1321,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         // in the database yet, or they do exit but are not indexed. If they exist but are not
         // indexed, we don't have enough information to return the block anyways, so we return
         // `None`.
-        let body = match self.block_body_indices(block_number)? {
-            Some(body) => body,
-            None => return Ok(None),
-        };
+        let Some(body) = self.block_body_indices(block_number)? else { return Ok(None) };
 
         let tx_range = body.tx_num_range();
 
@@ -1350,7 +1336,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
             .map(|tx| match transaction_kind {
                 TransactionVariant::NoHash => TransactionSigned {
                     // Caller explicitly asked for no hash, so we don't calculate it
-                    hash: Default::default(),
+                    hash: B256::ZERO,
                     signature: tx.signature,
                     transaction: tx.transaction,
                 },
@@ -1358,14 +1344,12 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
             })
             .collect();
 
-        let block = Block { header, body, ommers, withdrawals };
-        let block = block
+        Block { header, body, ommers, withdrawals }
             // Note: we're using unchecked here because we know the block contains valid txs wrt to
             // its height and can ignore the s value check so pre EIP-2 txs are allowed
             .try_with_senders_unchecked(senders)
-            .map_err(|_| ProviderError::SenderRecoveryError)?;
-
-        Ok(Some(block))
+            .map(Some)
+            .map_err(|_| ProviderError::SenderRecoveryError)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
@@ -1645,7 +1629,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.cursor_read_collect::<tables::TxSenders, _>(range, Ok).map_err(Into::into)
+        self.cursor_read_collect::<tables::TxSenders>(range).map_err(Into::into)
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
@@ -1693,9 +1677,7 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
             SnapshotSegment::Receipts,
             to_range(range),
             |snapshot, range, _| snapshot.receipts_by_tx_range(range),
-            |range, _| {
-                self.cursor_read_collect::<tables::Receipts, _>(range, Ok).map_err(Into::into)
-            },
+            |range, _| self.cursor_read_collect::<tables::Receipts>(range).map_err(Into::into),
             |_| true,
         )
     }

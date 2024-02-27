@@ -46,7 +46,6 @@ pub type TraceFilterResult =
 pub type TraceCallResult = Result<TraceResults, (RpcError, TraceCallRequest)>;
 
 /// An extension trait for the Trace API.
-#[async_trait::async_trait]
 pub trait TraceApiExt {
     /// The provider type that is used to make the requests.
     type Provider;
@@ -236,7 +235,6 @@ impl<'a> std::fmt::Debug for ReplayTransactionStream<'a> {
     }
 }
 
-#[async_trait::async_trait]
 impl<T: TraceApiClient + Sync> TraceApiExt for T {
     type Provider = T;
 

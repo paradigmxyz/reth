@@ -259,7 +259,7 @@ where
                         let (root, storage_slots_walked, updates) =
                             storage_root_calculator.root_with_updates()?;
                         hashed_entries_walked += storage_slots_walked;
-                        trie_updates.extend(updates.into_iter());
+                        trie_updates.extend(updates);
                         root
                     } else {
                         storage_root_calculator.root()?
@@ -286,7 +286,7 @@ where
                             last_account_key: hashed_address,
                         };
 
-                        trie_updates.extend(walker_updates.into_iter());
+                        trie_updates.extend(walker_updates);
                         trie_updates.extend_with_account_updates(hash_builder_updates);
 
                         return Ok(StateRootProgress::Progress(
@@ -304,7 +304,7 @@ where
         let (_, walker_updates) = account_node_iter.walker.split();
         let (_, hash_builder_updates) = hash_builder.split();
 
-        trie_updates.extend(walker_updates.into_iter());
+        trie_updates.extend(walker_updates);
         trie_updates.extend_with_account_updates(hash_builder_updates);
         trie_updates.extend_with_deletes(
             self.prefix_sets.destroyed_accounts.into_iter().map(TrieKey::StorageTrie),
@@ -455,7 +455,7 @@ where
         let (_, walker_updates) = storage_node_iter.walker.split();
 
         let mut trie_updates = TrieUpdates::default();
-        trie_updates.extend(walker_updates.into_iter());
+        trie_updates.extend(walker_updates);
         trie_updates.extend_with_storage_updates(self.hashed_address, hash_builder_updates);
 
         trace!(target: "trie::storage_root", ?root, hashed_address = ?self.hashed_address, "calculated storage root");
