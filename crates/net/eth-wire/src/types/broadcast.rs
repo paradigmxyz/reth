@@ -600,6 +600,7 @@ impl<V> PartiallyValidData<V> {
     pub fn from_raw_data(data: HashMap<TxHash, V>, version: Option<EthVersion>) -> Self {
         Self { data, version }
     }
+
     /// Wraps raw data with version [`EthVersion::Eth68`].
     pub fn from_raw_data_eth68(data: HashMap<TxHash, V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth68))
