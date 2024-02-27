@@ -146,12 +146,18 @@ pub trait EthTransactions: Send + Sync {
         block: BlockId,
     ) -> EthResult<Option<Vec<TransactionSigned>>>;
 
-    /// Returns the transaction by hash.
+    /// Returns the transaction by hash, converted to a specified type.
     ///
-    /// Checks the pool and state.
+    /// Checks the pool and state for a transaction matching the given hash. Utilizes the generic
+    /// type `T`, which must implement `IntoRpcTransaction`, to allow flexible return types.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
-    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>>;
+    ///
+    /// Consumers: `eth_getTransactionByHash` and `eth_getRawTransactionByHash`
+    async fn transaction_by_hash<T: IntoRpcTransaction + Sync + Send + 'static>(
+        &self,
+        hash: B256,
+    ) -> EthResult<Option<T>>;
 
     /// Returns the transaction by including its corresponding [BlockId]
     ///
@@ -428,7 +434,10 @@ where
         self.block_by_id(block).await.map(|block| block.map(|block| block.body))
     }
 
-    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>> {
+    async fn transaction_by_hash<T: IntoRpcTransaction + Sync + Send + 'static>(
+        &self,
+        hash: B256,
+    ) -> EthResult<Option<T>> {
         // Try to find the transaction on disk
         let mut resp = self
             .on_blocking_task(|this| async move {
@@ -449,7 +458,7 @@ where
                             block_number: meta.block_number,
                             base_fee: meta.base_fee,
                         };
-                        Ok(Some(tx))
+                        Ok(Some(T::into_rpc_transaction(tx)))
                     }
                 }
             })
@@ -460,7 +469,8 @@ where
             if let Some(tx) =
                 self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
             {
-                resp = Some(TransactionSource::Pool(tx));
+                let tx = TransactionSource::Pool(tx);
+                resp = Some(T::into_rpc_transaction(tx));
             }
         }
 
@@ -1352,6 +1362,26 @@ impl From<TransactionSource> for Transaction {
                 )
             }
         }
+    }
+}
+
+/// Converts a `TransactionSource` into a type suitable for RPC transaction responses.
+///
+/// Used by
+/// `eth_getTransactionByHash` or the raw bytes form used by `eth_getRawTransactionByHash`.
+pub trait IntoRpcTransaction {
+    fn into_rpc_transaction(source: TransactionSource) -> Self;
+}
+
+impl IntoRpcTransaction for TransactionSource {
+    fn into_rpc_transaction(source: TransactionSource) -> Self {
+        source
+    }
+}
+
+impl IntoRpcTransaction for Bytes {
+    fn into_rpc_transaction(source: TransactionSource) -> Self {
+        source.into_recovered().envelope_encoded()
     }
 }
 

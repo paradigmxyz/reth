@@ -96,6 +96,10 @@ pub trait EthApi {
     #[method(name = "getTransactionByHash")]
     async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction>>;
 
+    /// Returns the information about a raw transaction requested by transaction hash.
+    #[method(name = "getRawTransactionByHash")]
+    async fn raw_transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Bytes>>;
+
     /// Returns information about a transaction by block hash and transaction index position.
     #[method(name = "getTransactionByBlockHashAndIndex")]
     async fn transaction_by_block_hash_and_index(
@@ -104,6 +108,15 @@ pub trait EthApi {
         index: Index,
     ) -> RpcResult<Option<Transaction>>;
 
+    // /// Returns information about a raw transaction by block number and transaction index
+    // /// position.
+    // #[method(name = "getRawTransactionByBlockNumberAndIndex")]
+    // async fn raw_transaction_by_block_number_and_index(
+    //     &self,
+    //     number: BlockNumberOrTag,
+    //     index: Index,
+    // ) -> RpcResult<Option<Bytes>>;
+
     /// Returns information about a transaction by block number and transaction index position.
     #[method(name = "getTransactionByBlockNumberAndIndex")]
     async fn transaction_by_block_number_and_index(
@@ -111,6 +124,14 @@ pub trait EthApi {
         number: BlockNumberOrTag,
         index: Index,
     ) -> RpcResult<Option<Transaction>>;
+
+    // /// Returns information about a raw transaction by block hash and transaction index position.
+    // #[method(name = "getRawTransactionByBlockHashAndIndex")]
+    // async fn raw_transaction_by_block_hash_and_index(
+    //     &self,
+    //     hash: B256,
+    //     index: Index,
+    // ) -> RpcResult<Option<Bytes>>;
 
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]

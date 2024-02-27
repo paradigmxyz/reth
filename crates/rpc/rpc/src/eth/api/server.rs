@@ -7,6 +7,7 @@ use crate::{
         api::{EthApi, EthTransactions},
         error::EthApiError,
         revm_utils::EvmOverrides,
+        TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
 };
@@ -156,7 +157,15 @@ where
     /// Handler for: `eth_getTransactionByHash`
     async fn transaction_by_hash(&self, hash: B256) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
-        Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
+        Ok(EthTransactions::transaction_by_hash::<TransactionSource>(self, hash)
+            .await?
+            .map(Into::into))
+    }
+
+    /// Handler for: `eth_getRawTransactionByHash`
+    async fn raw_transaction_by_hash(&self, hash: B256) -> Result<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getRawTransactionByHash");
+        Ok(EthTransactions::transaction_by_hash::<Bytes>(self, hash).await?.map(Into::into))
     }
 
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
