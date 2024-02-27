@@ -36,6 +36,9 @@ pub(crate) trait EthSigner: Send + Sync {
 
     /// Encodes and signs the typed data according EIP-712. Payload must implement Eip712 trait.
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature>;
+
+    /// Clone boxed instance of EthSigner
+    fn clone_box(&self) -> Box<dyn EthSigner + Send + Sync>;
 }
 
 /// Holds developer keys
@@ -64,6 +67,11 @@ impl DevSigner {
     }
 }
 
+impl Clone for Box<dyn EthSigner + Send + Sync> {
+    fn clone(&self) -> Box<dyn EthSigner + Send + Sync> {
+        self.clone_box()
+    }
+}
 
 #[async_trait::async_trait]
 impl EthSigner for DevSigner {
@@ -100,6 +108,10 @@ impl EthSigner for DevSigner {
         let encoded = payload.eip712_signing_hash().map_err(|_| SignError::InvalidTypedData)?;
         // let b256 = encoded;
         self.sign_hash(encoded, address)
+    }
+
+    fn clone_box(&self) -> Box<dyn EthSigner + Send + Sync> {
+        Box::new(self.clone())
     }
 }
 
