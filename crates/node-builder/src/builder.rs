@@ -70,7 +70,7 @@ type RethFullAdapter<DB, N> =
 /// engine types.
 ///
 /// Next all stateful components of the node are configured, these include the
-/// [EvmConfig](reth_node_api::evm::EvmConfig), the database [Database] and finally all the
+/// [ConfigureEvm](reth_node_api::evm::ConfigureEvm), the database [Database] and finally all the
 /// components of the node that are downstream of those types, these include:
 ///
 ///  - The transaction pool: [PoolBuilder]

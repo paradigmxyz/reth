@@ -1272,76 +1272,77 @@ where
     where
         F: FnOnce(&EthHandlers<Provider, Pool, Network, Events, EvmConfig>) -> R,
     {
-        if self.eth.is_none() {
-            let cache = EthStateCache::spawn_with(
-                self.provider.clone(),
-                self.config.eth.cache.clone(),
-                self.executor.clone(),
-                self.evm_config.clone(),
-            );
-            let gas_oracle = GasPriceOracle::new(
-                self.provider.clone(),
-                self.config.eth.gas_oracle.clone(),
-                cache.clone(),
-            );
-            let new_canonical_blocks = self.events.canonical_state_stream();
-            let c = cache.clone();
+        f(match &self.eth {
+            Some(eth) => eth,
+            None => self.eth.insert(self.init_eth()),
+        })
+    }
 
-            self.executor.spawn_critical(
-                "cache canonical blocks task",
-                Box::pin(async move {
-                    cache_new_blocks_task(c, new_canonical_blocks).await;
-                }),
-            );
+    fn init_eth(&self) -> EthHandlers<Provider, Pool, Network, Events, EvmConfig> {
+        let cache = EthStateCache::spawn_with(
+            self.provider.clone(),
+            self.config.eth.cache.clone(),
+            self.executor.clone(),
+            self.evm_config.clone(),
+        );
+        let gas_oracle = GasPriceOracle::new(
+            self.provider.clone(),
+            self.config.eth.gas_oracle.clone(),
+            cache.clone(),
+        );
+        let new_canonical_blocks = self.events.canonical_state_stream();
+        let c = cache.clone();
 
-            let fee_history_cache =
-                FeeHistoryCache::new(cache.clone(), self.config.eth.fee_history_cache.clone());
-            let new_canonical_blocks = self.events.canonical_state_stream();
-            let fhc = fee_history_cache.clone();
-            let provider_clone = self.provider.clone();
-            self.executor.spawn_critical(
-                "cache canonical blocks for fee history task",
-                Box::pin(async move {
-                    fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider_clone)
-                        .await;
-                }),
-            );
+        self.executor.spawn_critical(
+            "cache canonical blocks task",
+            Box::pin(async move {
+                cache_new_blocks_task(c, new_canonical_blocks).await;
+            }),
+        );
 
-            let executor = Box::new(self.executor.clone());
-            let blocking_task_pool =
-                BlockingTaskPool::build().expect("failed to build tracing pool");
-            let api = EthApi::with_spawner(
-                self.provider.clone(),
-                self.pool.clone(),
-                self.network.clone(),
-                cache.clone(),
-                gas_oracle,
-                self.config.eth.rpc_gas_cap,
-                executor.clone(),
-                blocking_task_pool.clone(),
-                fee_history_cache,
-                self.evm_config.clone(),
-            );
-            let filter = EthFilter::new(
-                self.provider.clone(),
-                self.pool.clone(),
-                cache.clone(),
-                self.config.eth.filter_config(),
-                executor.clone(),
-            );
+        let fee_history_cache =
+            FeeHistoryCache::new(cache.clone(), self.config.eth.fee_history_cache.clone());
+        let new_canonical_blocks = self.events.canonical_state_stream();
+        let fhc = fee_history_cache.clone();
+        let provider_clone = self.provider.clone();
+        self.executor.spawn_critical(
+            "cache canonical blocks for fee history task",
+            Box::pin(async move {
+                fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider_clone).await;
+            }),
+        );
 
-            let pubsub = EthPubSub::with_spawner(
-                self.provider.clone(),
-                self.pool.clone(),
-                self.events.clone(),
-                self.network.clone(),
-                executor,
-            );
+        let executor = Box::new(self.executor.clone());
+        let blocking_task_pool = BlockingTaskPool::build().expect("failed to build tracing pool");
+        let api = EthApi::with_spawner(
+            self.provider.clone(),
+            self.pool.clone(),
+            self.network.clone(),
+            cache.clone(),
+            gas_oracle,
+            self.config.eth.rpc_gas_cap,
+            executor.clone(),
+            blocking_task_pool.clone(),
+            fee_history_cache,
+            self.evm_config.clone(),
+        );
+        let filter = EthFilter::new(
+            self.provider.clone(),
+            self.pool.clone(),
+            cache.clone(),
+            self.config.eth.filter_config(),
+            executor.clone(),
+        );
 
-            let eth = EthHandlers { api, cache, filter, pubsub, blocking_task_pool };
-            self.eth = Some(eth);
-        }
-        f(self.eth.as_ref().expect("exists; qed"))
+        let pubsub = EthPubSub::with_spawner(
+            self.provider.clone(),
+            self.pool.clone(),
+            self.events.clone(),
+            self.network.clone(),
+            executor,
+        );
+
+        EthHandlers { api, cache, filter, pubsub, blocking_task_pool }
     }
 
     /// Returns the configured [EthHandlers] or creates it if it does not exist yet
@@ -1643,9 +1644,7 @@ impl RpcServerConfig {
                     }
                     Some(ws_cors)
                 }
-                (None, cors @ Some(_)) => cors,
-                (cors @ Some(_), None) => cors,
-                _ => None,
+                (a, b) => a.or(b),
             }
             .cloned();
 
@@ -1656,7 +1655,7 @@ impl RpcServerConfig {
 
             modules.config.ensure_ws_http_identical()?;
 
-            let builder = self.http_server_config.take().expect("is set; qed");
+            let builder = self.http_server_config.take().expect("http_server_config is Some");
             let (server, addr) = WsHttpServerKind::build(
                 builder,
                 http_socket_addr,

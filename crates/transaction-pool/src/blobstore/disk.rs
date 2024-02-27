@@ -76,7 +76,7 @@ impl BlobStore for DiskFileBlobStore {
             let mut txs_to_delete = self.inner.txs_to_delete.write();
             std::mem::take(&mut *txs_to_delete)
         };
-        self.inner.size_tracker.sub_len(txs_to_delete.len());
+        let mut deleted_blobs = txs_to_delete.len();
         let mut subsize = 0;
         debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
         for tx in txs_to_delete {
@@ -85,11 +85,13 @@ impl BlobStore for DiskFileBlobStore {
                 subsize += meta.len();
             });
             let _ = fs::remove_file(&path).map_err(|e| {
+                deleted_blobs -= 1;
                 let err = DiskFileBlobStoreError::DeleteFile(tx, path, e);
-                debug!(target:"txpool::blob", ?err);
+                debug!(target:"txpool::blob", %err);
             });
         }
         self.inner.size_tracker.sub_size(subsize as usize);
+        self.inner.size_tracker.sub_len(deleted_blobs);
     }
 
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
@@ -197,7 +199,7 @@ impl DiskFileBlobStoreInner {
             let _lock = self.file_lock.write();
             for (path, data) in raw {
                 if let Err(err) = fs::write(&path, &data) {
-                    debug!( target:"txpool::blob", ?err, ?path, "Failed to write blob file");
+                    debug!(target:"txpool::blob", %err, ?path, "Failed to write blob file");
                 } else {
                     add += data.len();
                     num += 1;
@@ -284,7 +286,7 @@ impl DiskFileBlobStoreInner {
                     res.push((tx, data));
                 }
                 Err(err) => {
-                    debug!( target:"txpool::blob", ?err, ?tx, "Failed to read blob file");
+                    debug!(target:"txpool::blob", %err, ?tx, "Failed to read blob file");
                 }
             };
         }
@@ -294,7 +296,7 @@ impl DiskFileBlobStoreInner {
     /// Retries the blob data for the given transaction hash.
     #[inline]
     fn write_one_encoded(&self, tx: B256, data: &[u8]) -> Result<usize, DiskFileBlobStoreError> {
-        trace!( target:"txpool::blob", "[{:?}] writing blob file", tx);
+        trace!(target:"txpool::blob", "[{:?}] writing blob file", tx);
         let path = self.blob_disk_file(tx);
         {
             let _lock = self.file_lock.write();
@@ -397,6 +399,14 @@ pub struct DiskFileBlobStoreConfig {
 impl Default for DiskFileBlobStoreConfig {
     fn default() -> Self {
         Self { max_cached_entries: DEFAULT_MAX_CACHED_BLOBS, open: Default::default() }
+    }
+}
+
+impl DiskFileBlobStoreConfig {
+    /// Set maximum number of blobs to keep in the in memory blob cache.
+    pub const fn with_max_cached_entries(mut self, max_cached_entries: u32) -> Self {
+        self.max_cached_entries = max_cached_entries;
+        self
     }
 }
 

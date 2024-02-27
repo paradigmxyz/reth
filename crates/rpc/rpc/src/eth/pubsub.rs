@@ -305,7 +305,7 @@ where
     fn log_stream(&self, filter: FilteredParams) -> impl Stream<Item = Log> {
         BroadcastStream::new(self.chain_events.subscribe_to_canonical_state())
             .map(move |canon_state| {
-                canon_state.expect("new block subscription never ends; qed").block_receipts()
+                canon_state.expect("new block subscription never ends").block_receipts()
             })
             .flat_map(futures::stream::iter)
             .flat_map(move |(block_receipts, removed)| {

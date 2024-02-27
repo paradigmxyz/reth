@@ -29,7 +29,6 @@ alloy-rlp.workspace = true
 reth-revm = { workspace = true, optional = true }
 
 # async/futures
-async-trait.workspace = true
 futures-util.workspace = true
 parking_lot.workspace = true
 tokio = { workspace = true, default-features = false, features = ["sync"] }
@@ -48,6 +47,8 @@ serde = { workspace = true, features = ["derive", "rc"], optional = true }
 fnv = "1.0.7"
 bitflags.workspace = true
 auto_impl = "1.0"
+smallvec.workspace = true
+itertools.workspace = true
 
 # testing
 rand = { workspace = true, optional = true }
@@ -62,6 +63,7 @@ paste = "1.0"
 rand = "0.8"
 proptest.workspace = true
 criterion.workspace = true
+pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true

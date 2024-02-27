@@ -163,18 +163,18 @@ impl AppendableChain {
     ///   - [BlockAttachment] represents if the block extends the canonical chain, and thus we can
     ///     cache the trie state updates.
     ///   - [BlockValidationKind] determines if the state root __should__ be validated.
-    fn validate_and_execute<BSDP, DB, EF>(
+    fn validate_and_execute<BSDP, DB, EVM>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
         bundle_state_data_provider: BSDP,
-        externals: &TreeExternals<DB, EF>,
+        externals: &TreeExternals<DB, EVM>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
     where
         BSDP: BundleStateDataProvider,
         DB: Database,
-        EF: ExecutorFactory,
+        EVM: ExecutorFactory,
     {
         // some checks are done before blocks comes here.
         externals.consensus.validate_header_against_parent(&block, parent_block)?;

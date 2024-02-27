@@ -116,43 +116,43 @@ fn collect_memory_stats() {
     use metrics::gauge;
     use tracing::error;
 
-    if epoch::advance().map_err(|error| error!(?error, "Failed to advance jemalloc epoch")).is_err()
+    if epoch::advance().map_err(|error| error!(%error, "Failed to advance jemalloc epoch")).is_err()
     {
         return
     }
 
     if let Ok(value) = stats::active::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.active"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.active"))
     {
         gauge!("jemalloc.active", value as f64);
     }
 
     if let Ok(value) = stats::allocated::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.allocated"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.allocated"))
     {
         gauge!("jemalloc.allocated", value as f64);
     }
 
     if let Ok(value) = stats::mapped::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.mapped"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.mapped"))
     {
         gauge!("jemalloc.mapped", value as f64);
     }
 
     if let Ok(value) = stats::metadata::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.metadata"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.metadata"))
     {
         gauge!("jemalloc.metadata", value as f64);
     }
 
     if let Ok(value) = stats::resident::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.resident"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.resident"))
     {
         gauge!("jemalloc.resident", value as f64);
     }
 
     if let Ok(value) = stats::retained::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.retained"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.retained"))
     {
         gauge!("jemalloc.retained", value as f64);
     }
@@ -205,14 +205,14 @@ fn collect_io_stats() {
     use tracing::error;
 
     let Ok(process) = procfs::process::Process::myself()
-        .map_err(|error| error!(?error, "Failed to get currently running process"))
+        .map_err(|error| error!(%error, "Failed to get currently running process"))
     else {
         return
     };
 
-    let Ok(io) = process.io().map_err(|error| {
-        error!(?error, "Failed to get IO stats for the currently running process")
-    }) else {
+    let Ok(io) = process.io().map_err(
+        |error| error!(%error, "Failed to get IO stats for the currently running process"),
+    ) else {
         return
     };
 

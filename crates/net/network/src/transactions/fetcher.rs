@@ -2,11 +2,13 @@ use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
 };
+
 use derive_more::Constructor;
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
-    GetPooledTransactions, HandleAnnouncement, RequestTxHashes, ValidAnnouncementData,
+    EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
+    RequestTxHashes, ValidAnnouncementData,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
@@ -191,7 +193,7 @@ impl TransactionFetcher {
     pub(super) fn pack_request_eth68(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        hashes_from_announcement: impl HandleAnnouncement
+        hashes_from_announcement: impl HandleMempoolData
             + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
     ) -> RequestTxHashes {
         let mut acc_size_response = 0;
@@ -245,6 +247,7 @@ impl TransactionFetcher {
 
         surplus_hashes.extend(hashes_from_announcement_iter.map(|(hash, _metadata)| hash));
         surplus_hashes.shrink_to_fit();
+        hashes_to_request.shrink_to_fit();
 
         surplus_hashes
     }
@@ -260,16 +263,17 @@ impl TransactionFetcher {
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
-        let (mut request_hashes, _version) = hashes_from_announcement.into_request_hashes();
-        if request_hashes.len() <= SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST {
-            *hashes_to_request = request_hashes;
+        let (mut hashes, _version) = hashes_from_announcement.into_request_hashes();
+        if hashes.len() <= SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST {
+            *hashes_to_request = hashes;
+            hashes_to_request.shrink_to_fit();
 
             RequestTxHashes::default()
         } else {
-            let surplus_hashes = request_hashes
-                .split_off(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST - 1);
-
-            *hashes_to_request = request_hashes;
+            let surplus_hashes =
+                hashes.split_off(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST - 1);
+            *hashes_to_request = hashes;
+            hashes_to_request.shrink_to_fit();
 
             RequestTxHashes::new(surplus_hashes)
         }
@@ -351,7 +355,9 @@ impl TransactionFetcher {
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) {
-        let mut hashes_to_request = RequestTxHashes::with_capacity(32);
+        let init_capacity_req = approx_capacity_get_pooled_transactions_req_eth68(&self.info);
+        let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
+
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
         // budget to look for an idle peer before giving up
@@ -381,7 +387,7 @@ impl TransactionFetcher {
 
         self.fill_request_from_hashes_pending_fetch(
             &mut hashes_to_request,
-            peer.seen_transactions.maybe_pending_transaction_hashes(),
+            &peer.seen_transactions,
             budget_fill_request,
         );
 
@@ -440,7 +446,7 @@ impl TransactionFetcher {
                     if let Some(prev_size) = previously_seen_size {
                         // check if this peer is announcing a different size than a previous peer
                         if size != prev_size {
-                            debug!(target: "net::tx",
+                            trace!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
                                 hash=%hash,
                                 size=size,
@@ -797,6 +803,19 @@ impl TransactionFetcher {
             Some(limit)
         }
     }
+
+    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
+    /// have capacity for w.r.t. the given version of the protocol.
+    pub fn approx_capacity_get_pooled_transactions_req(
+        &self,
+        announcement_version: EthVersion,
+    ) -> usize {
+        if announcement_version.is_eth68() {
+            approx_capacity_get_pooled_transactions_req_eth68(&self.info)
+        } else {
+            approx_capacity_get_pooled_transactions_req_eth66()
+        }
+    }
 }
 
 impl Stream for TransactionFetcher {
@@ -825,7 +844,7 @@ impl Stream for TransactionFetcher {
             return match result {
                 Ok(Ok(transactions)) => {
                     // clear received hashes
-                    let mut fetched = Vec::with_capacity(transactions.hashes().count());
+                    let mut fetched = Vec::with_capacity(transactions.len());
                     requested_hashes.retain(|requested_hash| {
                         if transactions.hashes().any(|hash| hash == requested_hash) {
                             // hash is now known, stop tracking
@@ -834,6 +853,7 @@ impl Stream for TransactionFetcher {
                         }
                         true
                     });
+                    fetched.shrink_to_fit();
 
                     self.remove_hashes_from_transaction_fetcher(fetched);
 
@@ -984,7 +1004,7 @@ pub struct TransactionFetcherInfo {
     /// Soft limit for the byte size of the expected
     /// [`PooledTransactions`] response on packing a
     /// [`GetPooledTransactions`] request with hashes.
-    soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+    pub(super) soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
     /// Soft limit for the byte size of a [`PooledTransactions`]
     /// response on assembling a [`GetPooledTransactions`]
     /// request. Spec'd at 2 MiB.
@@ -1020,7 +1040,6 @@ mod test {
     use std::collections::HashSet;
 
     use derive_more::IntoIterator;
-    use reth_eth_wire::EthVersion;
     use reth_primitives::B256;
 
     use crate::transactions::tests::{default_cache, new_mock_session};
@@ -1030,17 +1049,13 @@ mod test {
     #[derive(IntoIterator)]
     struct TestValidAnnouncementData(Vec<(TxHash, Option<(u8, usize)>)>);
 
-    impl HandleAnnouncement for TestValidAnnouncementData {
+    impl HandleMempoolData for TestValidAnnouncementData {
         fn is_empty(&self) -> bool {
             self.0.is_empty()
         }
 
         fn len(&self) -> usize {
             self.0.len()
-        }
-
-        fn msg_version(&self) -> EthVersion {
-            EthVersion::Eth68
         }
 
         fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
@@ -1059,6 +1074,12 @@ mod test {
             }
 
             TestValidAnnouncementData(removed_hashes)
+        }
+    }
+
+    impl HandleVersionedMempoolData for TestValidAnnouncementData {
+        fn msg_version(&self) -> EthVersion {
+            EthVersion::Eth68
         }
     }
 
@@ -1142,11 +1163,11 @@ mod test {
         let (mut peer_1_data, mut peer_1_mock_session_rx) =
             new_mock_session(peer_1, EthVersion::Eth66);
         for hash in &seen_hashes {
-            peer_1_data.seen_transactions.seen_in_announcement(*hash);
+            peer_1_data.seen_transactions.insert(*hash);
         }
         let (mut peer_2_data, _) = new_mock_session(peer_2, EthVersion::Eth66);
         for hash in &seen_hashes {
-            peer_2_data.seen_transactions.seen_in_announcement(*hash);
+            peer_2_data.seen_transactions.insert(*hash);
         }
         let mut peers = HashMap::new();
         peers.insert(peer_1, peer_1_data);

@@ -70,8 +70,8 @@ where
 
         debug!(target: "payload_builder", parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building empty payload");
 
-        let state = client.state_by_block_hash(parent_block.hash()).map_err(|err| {
-                warn!(target: "payload_builder", parent_hash=%parent_block.hash(), ?err,  "failed to get state for empty payload");
+            let state = client.state_by_block_hash(parent_block.hash()).map_err(|err| {
+                warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to get state for empty payload");
                 err
             })?;
         let mut db = State::builder()
@@ -92,13 +92,13 @@ where
                 &initialized_block_env,
                 &attributes,
             ).map_err(|err| {
-                warn!(target: "payload_builder", parent_hash=%parent_block.hash(), ?err,  "failed to apply beacon root contract call for empty payload");
+                warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to apply beacon root contract call for empty payload");
                 err
             })?;
 
         let WithdrawalsOutcome { withdrawals_root, withdrawals } =
                 commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals.clone()).map_err(|err| {
-                    warn!(target: "payload_builder", parent_hash=%parent_block.hash(), ?err,  "failed to commit withdrawals for empty payload");
+                    warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to commit withdrawals for empty payload");
                     err
                 })?;
 
@@ -106,11 +106,11 @@ where
         // changes and 4788 contract call
         db.merge_transitions(BundleRetention::PlainState);
 
-        // calculate the state root
-        let bundle_state =
-            BundleStateWithReceipts::new(db.take_bundle(), Receipts::new(), block_number);
-        let state_root = state.state_root(&bundle_state).map_err(|err| {
-                warn!(target: "payload_builder", parent_hash=%parent_block.hash(), ?err,  "failed to calculate state root for empty payload");
+            // calculate the state root
+            let bundle_state =
+                BundleStateWithReceipts::new(db.take_bundle(), Receipts::new(), block_number);
+            let state_root = state.state_root(&bundle_state).map_err(|err| {
+                warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to calculate state root for empty payload");
                 err
             })?;
 
@@ -261,20 +261,20 @@ where
             ))
             .build();
 
-        let ResultAndState { result, state } = match evm.transact() {
-            Ok(res) => res,
-            Err(err) => {
-                match err {
-                    EVMError::Transaction(err) => {
-                        if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                            // if the nonce is too low, we can skip this transaction
-                            trace!(target: "payload_builder", ?err, ?tx, "skipping nonce too low transaction");
-                        } else {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
-                            trace!(target: "payload_builder", ?err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(&pool_tx);
-                        }
+            let ResultAndState { result, state } = match evm.transact() {
+                Ok(res) => res,
+                Err(err) => {
+                    match err {
+                        EVMError::Transaction(err) => {
+                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                                // if the nonce is too low, we can skip this transaction
+                                trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
+                            } else {
+                                // if the transaction is invalid, we can skip it and all of its
+                                // descendants
+                                trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                                best_txs.mark_invalid(&pool_tx);
+                            }
 
                         continue
                     }
