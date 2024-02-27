@@ -76,7 +76,7 @@ impl BlobStore for DiskFileBlobStore {
             let mut txs_to_delete = self.inner.txs_to_delete.write();
             std::mem::take(&mut *txs_to_delete)
         };
-        self.inner.size_tracker.sub_len(txs_to_delete.len());
+        let mut deleted_blobs = txs_to_delete.len();
         let mut subsize = 0;
         debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
         for tx in txs_to_delete {
@@ -85,11 +85,13 @@ impl BlobStore for DiskFileBlobStore {
                 subsize += meta.len();
             });
             let _ = fs::remove_file(&path).map_err(|e| {
+                deleted_blobs -= 1;
                 let err = DiskFileBlobStoreError::DeleteFile(tx, path, e);
                 debug!(target:"txpool::blob", %err);
             });
         }
         self.inner.size_tracker.sub_size(subsize as usize);
+        self.inner.size_tracker.sub_len(deleted_blobs);
     }
 
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {

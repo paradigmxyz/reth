@@ -365,7 +365,7 @@ where
         } = poll_durations;
 
         // update metrics for whole poll function
-        metrics.duration_poll_tx_manager.set(start.elapsed());
+        metrics.duration_poll_tx_manager.set(start.elapsed().as_secs_f64());
         // update poll metrics for nested streams
         metrics.acc_duration_poll_network_events.set(acc_network_events.as_secs_f64());
         metrics.acc_duration_poll_pending_pool_imports.set(acc_pending_imports.as_secs_f64());
@@ -868,6 +868,9 @@ where
             }
             NetworkTransactionEvent::GetPooledTransactions { peer_id, request, response } => {
                 self.on_get_pooled_transactions(peer_id, request, response)
+            }
+            NetworkTransactionEvent::GetTransactionsHandle(response) => {
+                let _ = response.send(Some(self.handle()));
             }
         }
     }
@@ -1561,6 +1564,8 @@ pub enum NetworkTransactionEvent {
         /// The sender for responding to the request with a result of `PooledTransactions`.
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
+    /// Represents the event of receiving a `GetTransactionsHandle` request.
+    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle>>),
 }
 
 /// Tracks stats about the [`TransactionsManager`].

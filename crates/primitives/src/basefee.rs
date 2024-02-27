@@ -132,7 +132,7 @@ mod tests {
 
     #[cfg(feature = "optimism")]
     #[test]
-    fn calculate_optimism_goerli_base_fee_success() {
+    fn calculate_optimism_sepolia_base_fee_success() {
         let base_fee = [
             1000000000, 1000000000, 1000000000, 1072671875, 1059263476, 1049238967, 1049238967, 0,
             1, 2,
@@ -157,7 +157,7 @@ mod tests {
                     gas_used[i],
                     gas_limit[i],
                     base_fee[i],
-                    crate::BaseFeeParams::optimism_goerli(),
+                    crate::BaseFeeParams::optimism_sepolia(),
                 )
             );
         }
