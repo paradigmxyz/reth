@@ -138,7 +138,9 @@ impl NetworkHandle {
     }
 
     /// Send message to get the [`TransactionsHandle`].
-    pub async fn transactions_handle(&self) -> TransactionsHandle {
+    ///
+    /// Returns `None` if no transaction task is installed.
+    pub async fn transactions_handle(&self) -> Option<TransactionsHandle> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetTransactionsHandle(tx));
         rx.await.unwrap()
@@ -330,7 +332,7 @@ impl SyncStateProvider for NetworkHandle {
     // used to guard the txpool
     fn is_initially_syncing(&self) -> bool {
         if self.inner.initial_sync_done.load(Ordering::Relaxed) {
-            return false;
+            return false
         }
         self.inner.is_syncing.load(Ordering::Relaxed)
     }
@@ -455,7 +457,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Gets the reputation for a specific peer via a oneshot sender.
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Retrieves the `TransactionsHandle` via a oneshot sender.
-    GetTransactionsHandle(oneshot::Sender<TransactionsHandle>),
+    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle>>),
     /// Initiates a graceful shutdown of the network via a oneshot sender.
     Shutdown(oneshot::Sender<()>),
     /// Sets the network state between hibernation and active.

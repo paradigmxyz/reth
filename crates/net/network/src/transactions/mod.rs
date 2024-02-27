@@ -837,7 +837,7 @@ where
                 self.on_get_pooled_transactions(peer_id, request, response)
             }
             NetworkTransactionEvent::GetTransactionsHandle(response) => {
-                let _ = response.send(self.handle());
+                let _ = response.send(Some(self.handle()));
             }
         }
     }
@@ -1530,7 +1530,7 @@ pub enum NetworkTransactionEvent {
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
     /// Represents the event of receiving a `GetTransactionsHandle` request.
-    GetTransactionsHandle(oneshot::Sender<TransactionsHandle>),
+    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle>>),
 }
 
 /// Tracks stats about the [`TransactionsManager`].
