@@ -17,6 +17,7 @@ pub use crate::{
     },
     error::{Error, Result},
     flags::*,
+    metrics::*,
     transaction::{CommitLatency, Transaction, TransactionKind, RO, RW},
 };
 pub mod ffi {
@@ -32,6 +33,7 @@ mod database;
 mod environment;
 mod error;
 mod flags;
+mod metrics;
 mod transaction;
 mod txn_manager;
 

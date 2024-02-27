@@ -141,7 +141,10 @@ impl TxnManager {
 
 #[cfg(feature = "read-tx-timeouts")]
 mod read_transactions {
-    use crate::{environment::EnvPtr, error::mdbx_result, txn_manager::TxnManager, Error, Result};
+    use crate::{
+        environment::EnvPtr, error::mdbx_result, metrics::TxnManagerMetrics,
+        txn_manager::TxnManager, Error, Result,
+    };
     use dashmap::DashMap;
     use std::{
         sync::{mpsc::sync_channel, Arc},
@@ -150,13 +153,6 @@ mod read_transactions {
     use tracing::{error, trace, warn};
 
     const READ_TRANSACTIONS_CHECK_INTERVAL: Duration = Duration::from_secs(5);
-
-    #[cfg(not(test))]
-    const MAX_DURATION_ABORTED: Duration =
-        READ_TRANSACTIONS_CHECK_INTERVAL.saturating_add(Duration::from_secs(60));
-    #[cfg(test)]
-    const MAX_DURATION_ABORTED: Duration =
-        READ_TRANSACTIONS_CHECK_INTERVAL.saturating_add(Duration::from_secs(2));
 
     impl TxnManager {
         /// Sets the maximum duration that a read transaction can be open.
@@ -220,11 +216,13 @@ mod read_transactions {
         /// comparable. The time of transaction opening is stored as a value.
         active: DashMap<usize, Instant>,
         /// List of read transactions aborted by the [ReadTransactions::start_monitor] or the user.
-        /// We keep them until the user tries to reuse them or until they timeout, so we're able
-        /// to report a nice [Error::ReadTransactionAborted] error.
+        /// We keep them until the user tries to reuse, so we're able to report a nice
+        /// [Error::ReadTransactionAborted] error.
         ///
         /// We store `usize` instead of a raw pointer, because pointers are not comparable.
         aborted: DashMap<usize, Instant>,
+        #[doc(hidden)]
+        metrics: TxnManagerMetrics,
     }
 
     impl ReadTransactions {
@@ -269,13 +267,6 @@ mod read_transactions {
 
                 loop {
                     let now = Instant::now();
-
-                    // A nice `Error::ReadTransactionAborted` error won't be reported anymore for
-                    // evicted transactions.
-                    self.aborted.retain(|_, start| {
-                        let duration = now - *start;
-                        duration < MAX_DURATION_ABORTED
-                    });
 
                     let mut max_active_transaction_duration = None;
 
@@ -342,6 +333,8 @@ mod read_transactions {
                         );
                     }
 
+                    self.update_monitor_metrics();
+
                     // Sleep not more than `READ_TRANSACTIONS_CHECK_INTERVAL`, but at least until
                     // the closest deadline of an active read transaction
                     let duration_until_closest_deadline =
@@ -352,14 +345,17 @@ mod read_transactions {
                 }
             });
         }
+
+        fn update_monitor_metrics(&self) {
+            self.metrics.aborted.set(self.aborted.len() as f64)
+        }
     }
 
     #[cfg(test)]
     mod tests {
         use crate::{
             txn_manager::{
-                read_transactions::{MAX_DURATION_ABORTED, READ_TRANSACTIONS_CHECK_INTERVAL},
-                TxnManagerMessage, TxnPtr,
+                read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, TxnManagerMessage, TxnPtr,
             },
             Environment, Error, MaxReadTransactionDuration, TransactionKind, RO,
         };
@@ -525,34 +521,6 @@ mod read_transactions {
                 sender,
             });
             assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
-        }
-
-        #[test]
-        fn txn_manager_evict_aborted_after_timeout() {
-            const MAX_DURATION: Duration = Duration::from_secs(1);
-
-            let dir = tempdir().unwrap();
-            let env = Environment::builder()
-                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
-                .open(dir.path())
-                .unwrap();
-
-            let read_transactions = env.txn_manager().read_transactions.as_ref().unwrap();
-
-            // Create a read-only transaction, successfully use it, close it by dropping.
-            let tx = env.begin_ro_txn().unwrap();
-            let tx_ptr = tx.txn() as usize;
-            assert!(read_transactions.active.contains_key(&tx_ptr));
-
-            tx.open_db(None).unwrap();
-            drop(tx);
-
-            assert!(!read_transactions.active.contains_key(&tx_ptr));
-            assert!(read_transactions.aborted.contains_key(&tx_ptr));
-
-            sleep(MAX_DURATION_ABORTED + READ_TRANSACTIONS_CHECK_INTERVAL);
-
-            assert!(!read_transactions.aborted.contains_key(&tx_ptr));
         }
     }
 }

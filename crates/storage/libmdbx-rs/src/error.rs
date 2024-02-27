@@ -216,6 +216,8 @@ pub(crate) fn mdbx_result(err_code: c_int) -> Result<bool> {
     }
 }
 
+/// Returns the appropriate error. Removes the transaction from aborted transactions, if present,
+/// as a side-effect.
 #[cfg(feature = "read-tx-timeouts")]
 #[inline]
 pub(crate) fn mdbx_result_with_tx_kind<K: TransactionKind>(
