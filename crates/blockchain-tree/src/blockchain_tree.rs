@@ -1756,11 +1756,15 @@ mod tests {
             ]))
             .assert(&tree);
         // chain 0 has two blocks so receipts and reverts len is 2
-        assert_eq!(tree.state.chains.get(&0.into()).unwrap().state().receipts().len(), 2);
-        assert_eq!(tree.state.chains.get(&0.into()).unwrap().state().state().reverts.len(), 2);
+        let chain0 = tree.state.chains.get(&0.into()).unwrap().state();
+        assert_eq!(chain0.receipts().len(), 2);
+        assert_eq!(chain0.state().reverts.len(), 2);
+        assert_eq!(chain0.first_block(), block1.number);
         // chain 1 has one block so receipts and reverts len is 1
-        assert_eq!(tree.state.chains.get(&1.into()).unwrap().state().receipts().len(), 1);
-        assert_eq!(tree.state.chains.get(&1.into()).unwrap().state().state().reverts.len(), 1);
+        let chain1 = tree.state.chains.get(&1.into()).unwrap().state();
+        assert_eq!(chain1.receipts().len(), 1);
+        assert_eq!(chain1.state().reverts.len(), 1);
+        assert_eq!(chain1.first_block(), block2.number);
     }
 
     #[test]
