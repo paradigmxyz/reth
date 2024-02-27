@@ -78,7 +78,6 @@ pub trait PartiallyFilterMessage {
 
         // 2. checks if announcement is spam packed with duplicate hashes
         let original_len = msg.len();
-
         let partially_valid_data = msg.dedup();
 
         (
