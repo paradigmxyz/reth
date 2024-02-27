@@ -251,8 +251,7 @@ where
     ) -> Result<(), ReverseHeadersDownloaderError> {
         let mut validated = Vec::with_capacity(headers.len());
 
-        let sealed_headers =
-            headers.into_vec().into_par_iter().map(|h| h.seal_slow()).collect::<Vec<_>>();
+        let sealed_headers = headers.0.into_par_iter().map(|h| h.seal_slow()).collect::<Vec<_>>();
         for parent in sealed_headers {
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =

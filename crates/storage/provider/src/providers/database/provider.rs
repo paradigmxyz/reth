@@ -1132,7 +1132,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         let headers_range = self.get_range_with_snapshot(
             SnapshotSegment::Headers,
             to_range(range),
-            |snapshot, range, _| snapshot.headers_range(range).map(|h| h.into_vec()),
+            |snapshot, range, _| snapshot.headers_range(range).map(|h| h.0),
             |range, _| {
                 self.cursor_read_collect::<tables::Headers, _>(range, Ok).map_err(Into::into)
             },

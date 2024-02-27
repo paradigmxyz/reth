@@ -597,11 +597,6 @@ impl Headers {
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Header> {
         self.0.iter_mut()
     }
-
-    /// Convert [Headers] into a Vec<[Header]>
-    pub fn into_vec(self) -> Vec<Header> {
-        self.0
-    }
 }
 
 impl IntoIterator for Headers {
