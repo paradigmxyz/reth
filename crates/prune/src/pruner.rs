@@ -244,15 +244,12 @@ impl<DB: Database> Pruner<DB> {
     /// Returns `true` if the pruning is needed at the provided tip block number.
     /// This determined by the check against minimum pruning interval and last pruned block number.
     pub fn is_pruning_needed(&self, tip_block_number: BlockNumber) -> bool {
-        if tip_block_number < self.min_block_interval as u64 {
-            false
-        } else if self.previous_tip_block_number.map_or(true, |previous_tip_block_number| {
-            // Saturating subtraction is needed for the case when the chain was reverted, meaning
-            // current block number might be less than the previous tip block number.
-            // If that's the case, no pruning is needed as outdated data is also reverted.
-            tip_block_number.saturating_sub(previous_tip_block_number) >=
-                self.min_block_interval as u64
-        }) {
+        // Saturating subtraction is needed for the case when the chain was reverted, meaning
+        // current block number might be less than the previous tip block number.
+        // If that's the case, no pruning is needed as outdated data is also reverted.
+        if tip_block_number.saturating_sub(self.previous_tip_block_number.unwrap_or_default()) >=
+            self.min_block_interval as u64
+        {
             debug!(
                 target: "pruner",
                 previous_tip_block_number = ?self.previous_tip_block_number,
@@ -283,7 +280,7 @@ mod tests {
 
         // No last pruned block number was set before
         let first_block_number = 1;
-        assert!(pruner.is_pruning_needed(first_block_number));
+        assert!(!pruner.is_pruning_needed(first_block_number));
         pruner.previous_tip_block_number = Some(first_block_number);
 
         // Tip block number delta is >= than min block interval
