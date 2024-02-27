@@ -94,8 +94,8 @@ where
     /// Write downloaded headers to the given transaction from ETL.
     ///
     /// Writes to the following tables:
-    /// [`tables::Headers`], [`tables::CanonicalHeaders`], [`tables::HeaderTD`] and
-    /// [`tables::HeaderNumbers`].
+    /// [`tables::Headers`], [`tables::CanonicalHeaders`], [`tables::HeaderTerminalDifficulties`]
+    /// and [`tables::HeaderNumbers`].
     fn write_headers<DB: Database>(
         &mut self,
         tx: &<DB as Database>::TXMut,
@@ -533,7 +533,10 @@ mod tests {
                     .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
                 self.db.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
                 self.db.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
-                self.db.ensure_no_entry_above::<tables::HeaderTD, _>(block, |num| num)?;
+                self.db.ensure_no_entry_above::<tables::HeaderTerminalDifficulties, _>(
+                    block,
+                    |num| num,
+                )?;
                 Ok(())
             }
 

@@ -27,7 +27,8 @@ use strum::{AsRefStr, EnumIter, EnumString};
 /// Segment of the data that can be moved to static files.
 pub enum StaticFileSegment {
     #[strum(serialize = "headers")]
-    /// Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables.
+    /// Static File segment responsible for the `CanonicalHeaders`, `Headers`,
+    /// `HeaderTerminalDifficulties` tables.
     Headers,
     #[strum(serialize = "transactions")]
     /// Static File segment responsible for the `Transactions` table.

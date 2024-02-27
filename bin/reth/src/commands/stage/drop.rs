@@ -91,9 +91,12 @@ impl Command {
                 StageEnum::Headers => {
                     tx.clear::<tables::CanonicalHeaders>()?;
                     tx.clear::<tables::Headers>()?;
-                    tx.clear::<tables::HeaderTD>()?;
+                    tx.clear::<tables::HeaderTerminalDifficulties>()?;
                     tx.clear::<tables::HeaderNumbers>()?;
-                    tx.put::<tables::SyncStage>(StageId::Headers.to_string(), Default::default())?;
+                    tx.put::<tables::StageCheckpoints>(
+                        StageId::Headers.to_string(),
+                        Default::default(),
+                    )?;
                     insert_genesis_header::<DatabaseEnv>(tx, static_file_provider, self.chain)?;
                 }
                 StageEnum::Bodies => {

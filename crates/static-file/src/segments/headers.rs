@@ -32,7 +32,8 @@ impl<DB: Database> Segment<DB> for Headers {
         let mut headers_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
         let headers_walker = headers_cursor.walk_range(block_range.clone())?;
 
-        let mut header_td_cursor = provider.tx_ref().cursor_read::<tables::HeaderTD>()?;
+        let mut header_td_cursor =
+            provider.tx_ref().cursor_read::<tables::HeaderTerminalDifficulties>()?;
         let header_td_walker = header_td_cursor.walk_range(block_range.clone())?;
 
         let mut canonical_headers_cursor =
@@ -79,7 +80,7 @@ impl<DB: Database> Segment<DB> for Headers {
                         &block_range,
                         range_len,
                     )?,
-                    dataset_for_compression::<DB, tables::HeaderTD>(
+                    dataset_for_compression::<DB, tables::HeaderTerminalDifficulties>(
                         provider,
                         &block_range,
                         range_len,
@@ -107,7 +108,7 @@ impl<DB: Database> Segment<DB> for Headers {
 
         create_static_file_T1_T2_T3::<
             tables::Headers,
-            tables::HeaderTD,
+            tables::HeaderTerminalDifficulties,
             tables::CanonicalHeaders,
             BlockNumber,
             SegmentHeader,

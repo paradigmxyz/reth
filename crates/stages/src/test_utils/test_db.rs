@@ -142,7 +142,7 @@ impl TestStageDB {
             writer.append_header(header.header().clone(), td, header.hash())?;
         } else {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-            tx.put::<tables::HeaderTD>(header.number, td.into())?;
+            tx.put::<tables::HeaderTerminalDifficulties>(header.number, td.into())?;
             tx.put::<tables::Headers>(header.number, header.header().clone())?;
         }
 

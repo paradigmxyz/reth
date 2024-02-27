@@ -9,7 +9,7 @@ Usage: reth db get static-file [OPTIONS] <SEGMENT> <KEY>
 Arguments:
   <SEGMENT>
           Possible values:
-          - headers:      Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTD` tables
+          - headers:      Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
           - transactions: Static File segment responsible for the `Transactions` table
           - receipts:     Static File segment responsible for the `Receipts` table
 
