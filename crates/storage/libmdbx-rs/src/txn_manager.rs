@@ -141,7 +141,7 @@ impl TxnManager {
 
 #[cfg(feature = "read-tx-timeouts")]
 mod read_transactions {
-    use crate::{environment::EnvPtr, txn_manager::TxnManager, Error, Result};
+    use crate::{environment::EnvPtr, error::mdbx_result, txn_manager::TxnManager, Error, Result};
     use dashmap::{DashMap, DashSet};
     use std::{
         sync::{mpsc::sync_channel, Arc},
@@ -275,11 +275,11 @@ mod read_transactions {
                         if duration > self.max_duration {
                             let ptr = *ptr as *mut ffi::MDBX_txn;
 
-                            // Add the transaction to the list of aborted transactions, so further
+                             // Add the transaction to the list of aborted transactions, so further
                             // usages report the correct error when the transaction is closed.
                             let result = self
                                 .add_aborted(ptr)
-                                .and_then(|| mdbx_result(unsafe { ffi::mdbx_txn_abort(ptr) }));
+                                .and_then(|_| mdbx_result(unsafe { ffi::mdbx_txn_abort(ptr) }));
 
                             // Add the transaction to `aborted_active`. We can't remove it
                             // instantly from the list of active transactions, because we iterate
