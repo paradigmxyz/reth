@@ -301,7 +301,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// the pool. Returns hashes already known to the pool.
     ///
     /// Consumer: P2P
-    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
+    fn retain_unknown<A>(&self, announcement: &mut A)
     where
         A: HandleMempoolData;
 

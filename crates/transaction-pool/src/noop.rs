@@ -180,11 +180,10 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
-    fn retain_unknown<A>(&self, _announcement: &mut A) -> Option<A>
+    fn retain_unknown<A>(&self, _announcement: &mut A)
     where
         A: HandleMempoolData,
     {
-        None
     }
 
     fn get(&self, _tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
