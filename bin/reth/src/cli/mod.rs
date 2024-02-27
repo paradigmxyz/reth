@@ -131,7 +131,6 @@ pub enum Commands<Ext: RethCliExt = ()> {
     #[command(name = "import")]
     Import(import::ImportCommand),
     /// Dumps genesis block JSON configuration to stdout.
-    #[command(name = "dumpgenesis")]
     DumpGenesis(dump_genesis::DumpGenesisCommand),
     /// Database debugging utilities
     #[command(name = "db")]
