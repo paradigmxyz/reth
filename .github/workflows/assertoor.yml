@@ -1,4 +1,4 @@
-name: Run manual assertoor test
+name: Assertoor Tests
 
 on:
   workflow_dispatch:
@@ -33,9 +33,9 @@ jobs:
 
         cat etc/assertoor/assertoor-template.yaml | envsubst > etc/assertoor/assertoor.yaml
 
-        kurtosis run github.com/kurtosis-tech/ethereum-package --enclave assertoor-${{ github.base_ref }} --args-file etc/assertoor/assertoor.yaml
+        kurtosis run github.com/kurtosis-tech/ethereum-package --enclave assertoor-${{ github.run_id }} --args-file etc/assertoor/assertoor.yaml
 
-        enclave_dump=$(kurtosis enclave inspect assertoor-${{ github.base_ref }})
+        enclave_dump=$(kurtosis enclave inspect assertoor-${{ github.run_id }})
 
         assertoor_url=$(echo "$enclave_dump" | grep assertoor | grep http | sed 's/.*\(http:\/\/[0-9.:]\+\).*/\1/')
         echo "assertoor_url: ${assertoor_url}"
@@ -189,13 +189,13 @@ jobs:
         cd ./temp/dump
         cp ../../etc/assertoor/assertoor.yaml ./kurtosis-params.yaml
 
-        kurtosis enclave dump assertoor-${{ github.base_ref }}
-        kurtosis enclave rm -f assertoor-${{ github.base_ref }}
+        kurtosis enclave dump assertoor-${{ github.run_id }}
+        kurtosis enclave rm -f assertoor-${{ github.run_id }}
 
     - name: Upload dump artifact
       uses: actions/upload-artifact@v3
       with:
-        name: "kurtosis-enclave-dump-${{ github.base_ref }}"
+        name: "kurtosis-enclave-dump-${{ github.run_id }}"
         path: ./temp/dump
     
     - name: Return test result

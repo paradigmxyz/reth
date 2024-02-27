@@ -12,7 +12,9 @@ participants:
 - el_client_type: reth
   el_client_image: ghcr.io/paradigmxyz/reth
   cl_client_type: prysm
-  cl_client_image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable,gcr.io/prysmaticlabs/prysm/validator:stable
+  cl_client_image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
+  validator_client_type: prysm
+  validator_client_image: gcr.io/prysmaticlabs/prysm/validator:stable
   count: 1
 - el_client_type: reth
   el_client_image: ghcr.io/paradigmxyz/reth
