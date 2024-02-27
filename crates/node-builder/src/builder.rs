@@ -11,7 +11,6 @@ use crate::{
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     NodeHandle,
 };
-use alloy_primitives::utils::format_ether;
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
@@ -40,7 +39,7 @@ use reth_node_core::{
 };
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    ChainSpec,
+    format_ether, ChainSpec,
 };
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
 use reth_prune::{PrunerBuilder, PrunerEvent};

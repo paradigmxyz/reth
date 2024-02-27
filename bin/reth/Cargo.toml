@@ -61,7 +61,6 @@ reth-node-optimism = { workspace = true, optional = true, features = [
 reth-node-core.workspace = true
 
 # crypto
-alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-chains.workspace = true
 secp256k1 = { workspace = true, features = [

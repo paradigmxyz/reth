@@ -1,7 +1,6 @@
 //! Contains types and methods that can be used to launch a node based off of a [NodeConfig].
 
 use crate::commands::debug_cmd::engine_api_store::EngineApiStore;
-use alloy_primitives::utils::format_ether;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
@@ -37,6 +36,7 @@ use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]
 use reth_node_optimism::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_rpc_engine_api::EngineApi;

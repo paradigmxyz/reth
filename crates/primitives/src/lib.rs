@@ -100,9 +100,10 @@ pub use self::ruint::UintTryTo;
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes,
     bytes::{Buf, BufMut, BytesMut},
-    eip191_hash_message, hex, hex_literal, keccak256, ruint, Address, BlockHash, BlockNumber,
-    Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey, StorageValue, TxHash, TxIndex,
-    TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
+    eip191_hash_message, hex, hex_literal, keccak256, ruint,
+    utils::format_ether,
+    Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
+    StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpMap};
