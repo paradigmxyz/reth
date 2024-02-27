@@ -685,15 +685,15 @@ where
     }
 
     /// Removes and returns all transactions that are present in the pool.
-    pub(crate) fn retain_unknown<A: HandleMempoolData>(&self, announcement: &mut A) -> Option<A>
+    pub(crate) fn retain_unknown<A: HandleMempoolData>(&self, announcement: &mut A)
     where
         A: HandleMempoolData,
     {
         if announcement.is_empty() {
-            return None
+            return
         }
         let pool = self.get_pool_data();
-        Some(announcement.retain_by_hash(|tx| !pool.contains(tx)))
+        announcement.retain_by_hash(|tx| !pool.contains(tx))
     }
 
     /// Returns the transaction by hash.
