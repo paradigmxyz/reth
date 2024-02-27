@@ -55,7 +55,7 @@ use reth_transaction_pool::{
     error::PoolResult, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
 };
-use schnellru::{ByLength, LruMap};
+use schnellru::{ByLength, ByMemoryUsage, LruMap};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     num::NonZeroUsize,
@@ -1202,7 +1202,10 @@ where
         let start = Instant::now();
         let mut poll_durations = TxManagerPollDurations::default();
 
-        self.metrics.total_seen_hashes_by_peers.set(self.peers.iter().map(|(_, peer)| peer.seen_transactions.len()).sum::<usize>() as f64);
+        self.metrics
+            .total_seen_hashes_by_peers
+            .set(self.peers.iter().map(|(_, peer)| peer.seen_transactions.len()).sum::<usize>()
+                as f64);
         let this = self.get_mut();
 
         // If the budget is exhausted we manually yield back control to tokio. See
@@ -1510,7 +1513,7 @@ struct PeerMetadata {
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.
-    seen_transactions: LruMap<TxHash, ()>,
+    seen_transactions: LruMap<TxHash, (), ByMemoryUsage>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender,
     /// negotiated version of the session.
@@ -1523,9 +1526,7 @@ impl PeerMetadata {
     /// Returns a new instance of [`PeerMetadata`].
     fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
         Self {
-            seen_transactions: LruMap::new(ByLength::new(
-                DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER.try_into().expect("todo: this message etc"),
-            )),
+            seen_transactions: LruMap::new(ByMemoryUsage::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER)),
             request_tx,
             version,
             client_version,

@@ -52,7 +52,7 @@ pub mod tx_manager {
     /// Default limit for number of bad imports to keep track of.
     ///
     /// Default is 10 KiB.
-    pub const DEFAULT_CAPACITY_CACHE_BAD_IMPORTS: usize = 100 * 1024;
+    pub const DEFAULT_CAPACITY_CACHE_BAD_IMPORTS: usize = 320;
 }
 
 /// Constants used by [`TransactionFetcher`](super::TransactionFetcher).
