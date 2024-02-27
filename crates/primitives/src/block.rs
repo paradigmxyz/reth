@@ -142,7 +142,7 @@ pub struct BlockWithSenders {
 impl BlockWithSenders {
     /// New block with senders. Return none if len of tx and senders does not match
     pub fn new(block: Block, senders: Vec<Address>) -> Option<Self> {
-        (!block.body.len() != senders.len()).then_some(Self { block, senders })
+        (block.body.len() == senders.len()).then_some(Self { block, senders })
     }
 
     /// Seal the block with a known hash.
