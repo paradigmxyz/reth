@@ -31,6 +31,7 @@
     - [`reth node`](./cli/reth/node.md)
     - [`reth init`](./cli/reth/init.md)
     - [`reth import`](./cli/reth/import.md)
+    - [`reth dump-genesis`](./cli/reth/dump-genesis.md)
     - [`reth db`](./cli/reth/db.md)
       - [`reth db stats`](./cli/reth/db/stats.md)
       - [`reth db list`](./cli/reth/db/list.md)

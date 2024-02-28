@@ -1,6 +1,7 @@
 use crate::{
     config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    peers::PeersHandle, protocol::RlpxSubProtocol, swarm::NetworkConnectionState, FetchClient,
+    peers::PeersHandle, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
+    transactions::TransactionsHandle, FetchClient,
 };
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
@@ -134,6 +135,15 @@ impl NetworkHandle {
             peer_id,
             msg: SharedTransactions(msg),
         })
+    }
+
+    /// Send message to get the [`TransactionsHandle`].
+    ///
+    /// Returns `None` if no transaction task is installed.
+    pub async fn transactions_handle(&self) -> Option<TransactionsHandle> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetTransactionsHandle(tx));
+        rx.await.unwrap()
     }
 
     /// Provides a shareable reference to the [`BandwidthMeter`] stored on the `NetworkInner`.
@@ -446,6 +456,8 @@ pub(crate) enum NetworkHandleMessage {
     GetPeerInfosByPeerKind(PeerKind, oneshot::Sender<Vec<PeerInfo>>),
     /// Gets the reputation for a specific peer via a oneshot sender.
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
+    /// Retrieves the `TransactionsHandle` via a oneshot sender.
+    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle>>),
     /// Initiates a graceful shutdown of the network via a oneshot sender.
     Shutdown(oneshot::Sender<()>),
     /// Sets the network state between hibernation and active.
