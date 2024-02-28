@@ -6,7 +6,6 @@ use reth_rpc_types::relay::{BuilderBlockValidationRequest, BuilderBlockValidatio
 /// Block validation rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "flashbots"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "flashbots"))]
-#[async_trait::async_trait]
 pub trait BlockSubmissionValidationApi {
     /// A Request to validate a block submission.
     #[method(name = "validateBuilderSubmissionV1")]

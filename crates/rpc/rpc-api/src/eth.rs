@@ -12,7 +12,6 @@ use reth_rpc_types::{
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-#[async_trait]
 pub trait EthApi {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
@@ -92,6 +91,12 @@ pub trait EthApi {
         number: BlockNumberOrTag,
         index: Index,
     ) -> RpcResult<Option<RichBlock>>;
+
+    /// Returns the EIP-2718 encoded transaction if it exists.
+    ///
+    /// If this is a EIP-4844 transaction that is in the pool it will include the sidecar.
+    #[method(name = "getRawTransactionByHash")]
+    async fn raw_transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Bytes>>;
 
     /// Returns the information about a transaction requested by transaction hash.
     #[method(name = "getTransactionByHash")]

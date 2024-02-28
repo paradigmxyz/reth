@@ -382,7 +382,6 @@ mod tests {
             }
         }
 
-        #[async_trait::async_trait]
         impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
             type Seed = Vec<SealedHeader>;
 

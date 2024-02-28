@@ -7,7 +7,8 @@ use crate::{
     },
     cli::ext::RethCliExt,
     commands::{
-        config_cmd, db, debug_cmd, import, init_cmd, node, p2p, recover, stage, test_vectors,
+        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, node, p2p, recover, stage,
+        test_vectors,
     },
     core::cli::runner::CliRunner,
     version::{LONG_VERSION, SHORT_VERSION},
@@ -81,6 +82,7 @@ impl<Ext: RethCliExt> Cli<Ext> {
             Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
@@ -128,6 +130,8 @@ pub enum Commands<Ext: RethCliExt = ()> {
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand),
+    /// Dumps genesis block JSON configuration to stdout.
+    DumpGenesis(dump_genesis::DumpGenesisCommand),
     /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command),
