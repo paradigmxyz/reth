@@ -195,7 +195,7 @@ impl Error {
             Error::BadSignature => ffi::MDBX_EBADSIGN,
             Error::WriteTransactionUnsupportedInReadOnlyMode => ffi::MDBX_EACCESS,
             Error::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
-            Error::ReadTransactionAborted => -69000, // Custom non-MDBX error code
+            Error::ReadTransactionAborted => -96000, // Custom non-MDBX error code
             Error::Other(err_code) => *err_code,
         }
     }
