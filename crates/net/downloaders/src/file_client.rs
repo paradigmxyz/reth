@@ -315,7 +315,6 @@ mod tests {
     async fn test_download_headers_from_file() {
         // Generate some random blocks
         let (file, headers, _) = generate_bodies_file(0..=19).await;
-
         // now try to read them back
         let client = Arc::new(FileClient::from_file(file).await.unwrap());
 

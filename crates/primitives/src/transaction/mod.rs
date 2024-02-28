@@ -1236,7 +1236,6 @@ impl TransactionSigned {
     ) -> alloy_rlp::Result<TransactionSigned> {
         // keep this around so we can use it to calculate the hash
         let original_encoding = *data;
-
         let tx_type = *data.first().ok_or(RlpError::InputTooShort)?;
         data.advance(1);
 
