@@ -1257,7 +1257,6 @@ impl TransactionSigned {
         data.advance(1);
 
         let min_len = match tx_type {
-            0 => MIN_LENGTH_LEGACY_TX_ENCODED,
             1 => MIN_LENGTH_EIP2930_TX_ENCODED,
             2 => MIN_LENGTH_EIP1559_TX_ENCODED,
             3 => MIN_LENGTH_EIP4844_TX_ENCODED,

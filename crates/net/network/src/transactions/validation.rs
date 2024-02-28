@@ -9,7 +9,7 @@ use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
 };
-use reth_primitives::{Signature, TxHash, TxType};
+use reth_primitives::{transaction::MIN_LENGTH_LEGACY_TX_ENCODED, Signature, TxHash, TxType};
 use tracing::{debug, trace};
 
 /// The size of a decoded signature in bytes.
@@ -241,8 +241,8 @@ impl ValidateTx68 for EthMessageFilter {
     }
 
     fn strict_min_encoded_tx_length(&self, _ty: TxType) -> Option<usize> {
-        // decoding a tx will exit right away if it's not at least a byte
-        Some(1)
+        // legacy is the smallest tx type
+        Some(MIN_LENGTH_LEGACY_TX_ENCODED)
     }
 }
 
