@@ -149,8 +149,8 @@ impl Hardfork {
     pub fn sepolia_activation_block(&self) -> Option<u64> {
         match self {
             Hardfork::Paris => Some(1735371),
-            Hardfork::Shanghai => todo!(),
-            Hardfork::Cancun => todo!(),
+            Hardfork::Shanghai => Some(2990908),
+            Hardfork::Cancun => Some(5187023),
             _ => Some(0), /* todo: potential dangerous if forget to add a new fork number here,
                            * might refactor to have list of fork happen before chain initialized
                            * for each chain */
@@ -161,10 +161,10 @@ impl Hardfork {
     #[cfg(feature = "optimism")]
     pub fn base_sepolia_activation_block(&self) -> Option<u64> {
         match self {
-            Hardfork::Shanghai => todo!(),
-            Hardfork::Canyon => todo!(),
-            Hardfork::Cancun => todo!(),
-            Hardfork::Ecotone => todo!(),
+            Hardfork::Shanghai => Some(2106456),
+            Hardfork::Canyon => Some(2106456),
+            Hardfork::Cancun => Some(6383256),
+            Hardfork::Ecotone => Some(6383256),
             _ => Some(0),
         }
     }
@@ -173,10 +173,10 @@ impl Hardfork {
     #[cfg(feature = "optimism")]
     pub fn base_mainnet_activation_block(&self) -> Option<u64> {
         match self {
-            Hardfork::Shanghai => todo!(),
-            Hardfork::Canyon => todo!(),
-            Hardfork::Cancun => todo!(),
-            Hardfork::Ecotone => todo!(),
+            Hardfork::Shanghai => Some(9101527),
+            Hardfork::Canyon => Some(9101527),
+            Hardfork::Cancun => Some(11188936),
+            Hardfork::Ecotone => Some(11188936),
             _ => Some(0),
         }
     }
@@ -184,8 +184,8 @@ impl Hardfork {
     /// Retrieves the activation block for the specified hardfork on the holesky testnet.
     fn holesky_activation_block(&self) -> Option<u64> {
         match self {
-            Hardfork::Shanghai => todo!(),
-            Hardfork::Cancun => todo!(),
+            Hardfork::Shanghai => Some(6698),
+            Hardfork::Cancun => Some(894733),
             _ => Some(0),
         }
     }
