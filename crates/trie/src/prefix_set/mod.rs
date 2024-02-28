@@ -1,7 +1,7 @@
 use reth_primitives::{trie::Nibbles, B256};
 use std::{
     collections::{HashMap, HashSet},
-    rc::Rc,
+    sync::Arc,
 };
 
 mod loader;
@@ -121,7 +121,7 @@ impl PrefixSetMut {
             self.keys.dedup();
         }
 
-        PrefixSet { keys: Rc::new(self.keys), index: self.index }
+        PrefixSet { keys: Arc::new(self.keys), index: self.index }
     }
 }
 
@@ -130,7 +130,7 @@ impl PrefixSetMut {
 /// See also [PrefixSetMut::freeze].
 #[derive(Debug, Default, Clone)]
 pub struct PrefixSet {
-    keys: Rc<Vec<Nibbles>>,
+    keys: Arc<Vec<Nibbles>>,
     index: usize,
 }
 
