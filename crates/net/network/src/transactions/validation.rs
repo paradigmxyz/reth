@@ -275,9 +275,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
         for (i, (&ty, &hash, &size)) in izip!(&types, &hashes, &sizes).enumerate() {
             match self.should_fetch(ty, hash, size, &mut tx_types_counter) {
                 ValidationOutcome::Fetch => {}
-                ValidationOutcome::Ignore => {
-                    indices_to_remove.push(i);
-                }
+                ValidationOutcome::Ignore => indices_to_remove.push(i),
                 ValidationOutcome::ReportPeer => {
                     indices_to_remove.push(i);
                     should_report_peer = true;
@@ -373,9 +371,9 @@ mod test {
 
         let announcement = NewPooledTransactionHashes68 { types, sizes, hashes };
 
-        let filter = EthAnnouncementFilter;
+        let filter = EthAnnouncementFilter::default();
 
-        let (outcome, _data, _tx_types_counter) = filter.filter_valid_entries_68(announcement);
+        let (outcome, _data) = filter.filter_valid_entries_68(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
     }
@@ -400,7 +398,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthAnnouncementFilter;
+        let filter = EthAnnouncementFilter::default();
 
         let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
@@ -436,7 +434,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthAnnouncementFilter;
+        let filter = EthAnnouncementFilter::default();
 
         let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
@@ -475,7 +473,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthAnnouncementFilter;
+        let filter = EthAnnouncementFilter::default();
 
         let (outcome, data) = filter.filter_valid_entries_68(announcement);
 
@@ -533,8 +531,8 @@ mod test {
     }
 
     #[test]
-    fn test_derive_more_display_for_zst() {
-        let filter = EthAnnouncementFilter;
+    fn test_display_for_zst() {
+        let filter = EthAnnouncementFilter::default();
         assert_eq!("EthAnnouncementFilter", &filter.to_string());
     }
 }
