@@ -1,5 +1,6 @@
 use crate::{
     basefee::calculate_next_block_base_fee,
+    block::{generate_valid_header, valid_header_strategy},
     constants,
     constants::{
         ALLOWED_FUTURE_BLOCK_TIME_SECONDS, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH,
@@ -840,44 +841,8 @@ impl SealedHeader {
 impl proptest::arbitrary::Arbitrary for SealedHeader {
     type Parameters = ();
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        prop_compose! {
-            fn valid_header_strategy()(
-                mut header in any::<Header>(),
-                eip_4844_active in any::<bool>(),
-                blob_gas_used in any::<u64>(),
-                excess_blob_gas in any::<u64>(),
-                parent_beacon_block_root in any::<B256>()
-            ) -> SealedHeader {
-                // EIP-1559 logic
-                if header.base_fee_per_gas.is_none() {
-                    // If EIP-1559 is not active, clear related fields
-                    header.withdrawals_root = None;
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                } else if header.withdrawals_root.is_none() {
-                    // If EIP-4895 is not active, clear related fields
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                } else if eip_4844_active {
-                    // Set fields based on EIP-4844 being active
-                    header.blob_gas_used = Some(blob_gas_used);
-                    header.excess_blob_gas = Some(excess_blob_gas);
-                    header.parent_beacon_block_root = Some(parent_beacon_block_root);
-                } else {
-                    // If EIP-4844 is not active, clear related fields
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                }
-
-                // Seal the header
-                header.seal_slow()
-            }
-        }
-
-        valid_header_strategy().boxed()
+        // map valid header strategy by sealing
+        valid_header_strategy().prop_map(|header| header.seal_slow()).boxed()
     }
     type Strategy = proptest::strategy::BoxedStrategy<SealedHeader>;
 }
@@ -885,46 +850,15 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        // Directly generate values for Header and BlockHash using Unstructured
-        let mut header: Header = u.arbitrary()?;
-        let block_hash: BlockHash = u.arbitrary()?;
-        let blob_gas_used: u64 = u.arbitrary()?;
-        let excess_blob_gas: u64 = u.arbitrary()?;
-        let parent_beacon_block_root: B256 = u.arbitrary()?;
-        // Determine if EIP-4844 is active using a random bool
-        let eip_4844_active: bool = u.arbitrary()?;
-
-        // Set fields based on EIP-1559 activation
-        if header.base_fee_per_gas.is_none() {
-            // EIP-1559 not active, clear related fields
-            header.withdrawals_root = None;
-            header.blob_gas_used = None;
-            header.excess_blob_gas = None;
-            header.parent_beacon_block_root = None;
-        } else {
-            // 4895 is not active
-            if header.withdrawals_root.is_none() {
-                header.blob_gas_used = None;
-                header.excess_blob_gas = None;
-                header.parent_beacon_block_root = None;
-            } else {
-                // 4895 is active
-                if eip_4844_active {
-                    // EIP-4844 is active
-                    header.blob_gas_used = Some(blob_gas_used);
-                    header.excess_blob_gas = Some(excess_blob_gas);
-                    header.parent_beacon_block_root = Some(parent_beacon_block_root);
-                } else {
-                    // EIP-4844 is not active
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                };
-            }
-        }
-
-        // Seal the header and create SealedHeader
-        Ok(SealedHeader { header, hash: block_hash })
+        let sealed_header = generate_valid_header(
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+        )
+        .seal_slow();
+        Ok(sealed_header)
     }
 }
 
