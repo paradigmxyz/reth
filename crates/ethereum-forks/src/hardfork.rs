@@ -90,12 +90,35 @@ impl Hardfork {
 
     /// Retrieves the activation block for the specified hardfork on the given chain.
     pub fn activation_block(&self, chain: Chain) -> Option<u64> {
-        if chain == Chain::mainnet() {
-            return self.mainnet_activation_block()
+        match chain {
+            Chain::mainnet() => self.mainnet_activation_block(),
+            Chain::sepolia() => self.sepolia_activation_block(),
+            Chain::holesky() => self.holesky_activation_block(),
+            Chain::base_sepolia() => {
+                #[cfg(feature = "optimism")]
+                {
+                    self.base_sepolia_activation_block()
+                }
+                #[cfg(not(feature = "optimism"))]
+                {
+                    None
+                }
+            },
+            Chain::base_mainnet() => {
+                #[cfg(feature = "optimism")]
+                {
+                    self.base_mainnet_activation_block()
+                }
+                #[cfg(not(feature = "optimism"))]
+                {
+                    None
+                }
+            },
+            _ => None,
         }
-        None
     }
-
+    
+    
     /// Retrieves the activation block for the specified hardfork on the Ethereum mainnet.
     pub fn mainnet_activation_block(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
@@ -124,12 +147,77 @@ impl Hardfork {
         }
     }
 
+    /// Retrieves the activation block for the specified hardfork on the Sepolia testnet.
+    pub fn sepolia_activation_block(&self) -> Option<u64> {
+        match self {
+            Hardfork::Paris => Some(1735371), 
+            Hardfork::Shanghai => todo!(), 
+            Hardfork::Cancun => todo!(),
+            _ => Some(0), //todo: potential dangerous if forget to add a new fork number here, might refactor to have list of fork happen before chain initialized for each chain 
+        }
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the Base Sepolia testnet.
+    #[cfg(feature = "optimism")]
+    pub fn base_sepolia_activation_block(&self) -> Option<u64> {
+        match self {
+            Hardfork::Shanghai => todo!(),
+            Hardfork::Canyon => todo!(),
+            Hardfork::Cancun => todo!(),
+            Hardfork::Ecotone => todo!(),
+            _ => Some(0),
+        }
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the Base mainnet.
+    #[cfg(feature = "optimism")]
+    fn base_mainnet_activation_block(&self) -> Option<u64> {
+        match self {
+            Hardfork::Shanghai => todo!(),
+            Hardfork::Canyon => todo!(),
+            Hardfork::Cancun => todo!(),
+            Hardfork::Ecotone => todo!(),
+            _ => Some(0),
+        }
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the holesky testnet.
+    fn holesky_activation_block(&self) -> Option<u64> {
+        match self {
+            Hardfork::Shanghai => todo!(), 
+            Hardfork::Cancun => todo!(),
+            _ => Some(0),
+        }
+    }
+
     /// Retrieves the activation timestamp for the specified hardfork on the given chain.
     pub fn activation_timestamp(&self, chain: Chain) -> Option<u64> {
-        if chain == Chain::mainnet() {
-            return self.mainnet_activation_timestamp()
+        match chain {
+            Chain::mainnet() => self.mainnet_activation_timestamp(),
+            Chain::sepolia() => self.sepolia_activation_timestamp(),
+            Chain::holesky() => self.holesky_activation_timestamp(),
+            Chain::base_sepolia() => {
+                #[cfg(feature = "optimism")]
+                {
+                    self.base_sepolia_activation_timestamp()
+                }
+                #[cfg(not(feature = "optimism"))]
+                {
+                    None
+                }
+            },
+            Chain::base_mainnet() => {
+                #[cfg(feature = "optimism")]
+                {
+                    self.base_mainnet_activation_timestamp()
+                }
+                #[cfg(not(feature = "optimism"))]
+                {
+                    None
+                }
+            },
+            _ => None,
         }
-        None
     }
 
     /// Retrieves the activation timestamp for the specified hardfork on the Ethereum mainnet.
@@ -158,6 +246,51 @@ impl Hardfork {
             _ => None,
         }
     }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Sepolia testnet.
+    pub fn sepolia_activation_timestamp(&self) -> Option<u64> {
+        match self {
+            Hardfork::Shanghai => Some(1677557088),
+            Hardfork::Cancun => Some(1706655072),
+            _ => Some(0),
+        }
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Holesky testnet.
+    pub fn holesky_activation_timestamp(&self) -> Option<u64> {
+        match self {
+            Hardfork::Shanghai => Some(1696000704),
+            Hardfork::Cancun => Some(1707305664),
+            _ => Some(0),
+        }
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Base Sepolia testnet.
+    #[cfg(feature = "optimism")]
+    pub fn base_sepolia_activation_timestamp(&self) -> Option<u64> {
+        match self {
+            Hardfork::Shanghai => Some(1699981200),
+            Hardfork::Canyon => Some(1699981200),
+            Hardfork::Cancun => Some(1708534800),
+            Hardfork::Ecotone => Some(1708534800),
+            _ => Some(0),
+        }
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Base mainnet.
+    #[cfg(feature = "optimism")]
+    pub fn base_mainnet_activation_timestamp(&self) -> Option<u64> {
+        match self {
+            Hardfork::Shanghai => Some(1704992401),
+            Hardfork::Canyon => Some(1704992401),
+            Hardfork::Cancun => Some(1710374401),
+            Hardfork::Ecotone => Some(1710374401),
+            _ => Some(0),
+        }
+    }
+
+
+
 }
 
 impl FromStr for Hardfork {
