@@ -538,6 +538,10 @@ impl TransactionPtr {
 
         // When transaction is aborted via `TxnManager`, it's actually reset using `mdbn_txn_reset`
         // that makes the transaction unusable and sets the `MDBX_TXN_FINISHED` flag.
+        //
+        // No race condition with the `TxnManager` aborting our transaction is possible here,
+        // because we're taking a lock for any actions on the transaction pointer, including a call
+        // to the `mdbx_txn_reset`.
         if unsafe { ffi::mdbx_txn_flags(self.txn) } & ffi::MDBX_TXN_FINISHED != 0 {
             return Err(Error::ReadTransactionAborted)
         }
