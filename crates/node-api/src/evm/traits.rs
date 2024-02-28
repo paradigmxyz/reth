@@ -1,5 +1,5 @@
 use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Transaction, U256};
-use revm::{interpreter::Host, Database, Evm, EvmBuilder, Handler};
+use revm::{Database, Evm, EvmBuilder};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
 
 /// Trait for configuring the EVM for executing full blocks.
