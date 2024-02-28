@@ -78,15 +78,15 @@ fn bench_get_seq_raw(c: &mut Criterion) {
     let (_dir, env) = setup_bench_db(n);
 
     let dbi = env.begin_ro_txn().unwrap().open_db(None).unwrap().dbi();
-    let _txn = env.begin_ro_txn().unwrap();
+    let txn = env.begin_ro_txn().unwrap();
 
-    _txn.txn_execute(|txn| {
-        let mut key = MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
-        let mut data = MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
-        let mut cursor: *mut MDBX_cursor = ptr::null_mut();
+    let mut key = MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+    let mut data = MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+    let mut cursor: *mut MDBX_cursor = ptr::null_mut();
 
-        c.bench_function("bench_get_seq_raw", |b| {
-            b.iter(|| unsafe {
+    c.bench_function("bench_get_seq_raw", |b| {
+        b.iter(|| unsafe {
+            txn.txn_execute(|txn| {
                 mdbx_cursor_open(txn, dbi, &mut cursor);
                 let mut i = 0;
                 let mut count = 0u32;
@@ -100,9 +100,9 @@ fn bench_get_seq_raw(c: &mut Criterion) {
                 assert_eq!(count, n);
                 mdbx_cursor_close(cursor);
             })
-        });
-    })
-    .unwrap();
+            .unwrap();
+        })
+    });
 }
 
 criterion_group! {
