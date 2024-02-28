@@ -1,9 +1,9 @@
 //! Validation of [`NewPooledTransactionHashes66`] and [`NewPooledTransactionHashes68`]
 //! announcements. Validation and filtering of announcements is network dependent.
 
-use std::{collections::HashMap, mem};
+use std::{collections::HashMap, fmt::Display, mem};
 
-use crate::metrics::TxTypesCounter;
+use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
 use derive_more::{Deref, DerefMut, Display};
 use itertools::izip;
 use reth_eth_wire::{
@@ -26,7 +26,8 @@ pub trait ValidateTx68 {
         ty: u8,
         hash: TxHash,
         size: usize,
-    ) -> (ValidationOutcome, Option<TxType>);
+        tx_types_counter: &mut TxTypesCounter,
+    ) -> ValidationOutcome;
 
     /// Returns the reasonable maximum encoded transaction length configured for this network, if
     /// any. This property is not spec'ed out but can be inferred by looking how much data can be
@@ -71,7 +72,7 @@ pub trait FilterAnnouncement {
     fn filter_valid_entries_68(
         &self,
         msg: NewPooledTransactionHashes68,
-    ) -> (FilterOutcome, ValidAnnouncementData, TxTypesCounter)
+    ) -> (FilterOutcome, ValidAnnouncementData)
     where
         Self: ValidateTx68;
 
@@ -103,8 +104,16 @@ pub enum FilterOutcome {
 pub struct AnnouncementFilter<N = EthAnnouncementFilter>(N);
 
 /// Filter for announcements containing EIP [`TxType`]s.
-#[derive(Debug, Display, Default)]
-pub struct EthAnnouncementFilter;
+#[derive(Debug, Default)]
+pub struct EthAnnouncementFilter {
+    announced_tx_types_metrics: AnnouncedTxTypesMetrics,
+}
+
+impl Display for EthAnnouncementFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EthAnnouncementFilter")
+    }
+}
 
 impl ValidateTx68 for EthAnnouncementFilter {
     fn should_fetch(
@@ -112,7 +121,8 @@ impl ValidateTx68 for EthAnnouncementFilter {
         ty: u8,
         hash: TxHash,
         size: usize,
-    ) -> (ValidationOutcome, Option<TxType>) {
+        tx_types_counter: &mut TxTypesCounter,
+    ) -> ValidationOutcome {
         //
         // 1. checks if tx type is valid value for this network
         //
@@ -123,13 +133,14 @@ impl ValidateTx68 for EthAnnouncementFilter {
                     ty=ty,
                     size=size,
                     hash=%hash,
-                    network=%Self,
+                    network=%self,
                     "invalid tx type in eth68 announcement"
                 );
 
-                return (ValidationOutcome::ReportPeer, None)
+                return ValidationOutcome::ReportPeer
             }
         };
+        tx_types_counter.increase_by_tx_type(tx_type);
 
         //
         // 2. checks if tx's encoded length is within limits for this network
@@ -144,11 +155,11 @@ impl ValidateTx68 for EthAnnouncementFilter {
                     size=size,
                     hash=%hash,
                     strict_min_encoded_tx_length=strict_min_encoded_tx_length,
-                    network=%Self,
+                    network=%self,
                     "invalid tx size in eth68 announcement"
                 );
 
-                return (ValidationOutcome::Ignore, Some(tx_type))
+                return ValidationOutcome::Ignore
             }
         }
         if let Some(reasonable_min_encoded_tx_length) = self.min_encoded_tx_length(tx_type) {
@@ -159,7 +170,7 @@ impl ValidateTx68 for EthAnnouncementFilter {
                     hash=%hash,
                     reasonable_min_encoded_tx_length=reasonable_min_encoded_tx_length,
                     strict_min_encoded_tx_length=self.strict_min_encoded_tx_length(tx_type),
-                    network=%Self,
+                    network=%self,
                     "tx size in eth68 announcement, is unreasonably small"
                 );
 
@@ -176,7 +187,7 @@ impl ValidateTx68 for EthAnnouncementFilter {
                     hash=%hash,
                     reasonable_max_encoded_tx_length=reasonable_max_encoded_tx_length,
                     strict_max_encoded_tx_length=self.strict_max_encoded_tx_length(tx_type),
-                    network=%Self,
+                    network=%self,
                     "tx size in eth68 announcement, is unreasonably large"
                 );
 
@@ -185,7 +196,7 @@ impl ValidateTx68 for EthAnnouncementFilter {
             }
         }
 
-        (ValidationOutcome::Fetch, Some(tx_type))
+        ValidationOutcome::Fetch
     }
 
     fn max_encoded_tx_length(&self, ty: TxType) -> Option<usize> {
@@ -219,7 +230,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
     fn filter_valid_entries_68(
         &self,
         msg: NewPooledTransactionHashes68,
-    ) -> (FilterOutcome, ValidAnnouncementData, TxTypesCounter)
+    ) -> (FilterOutcome, ValidAnnouncementData)
     where
         Self: ValidateTx68,
     {
@@ -227,7 +238,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
             types=?msg.types,
             sizes=?msg.sizes,
             hashes=?msg.hashes,
-            network=%Self,
+            network=%self,
             "validating eth68 announcement data.."
         );
 
@@ -240,25 +251,20 @@ impl FilterAnnouncement for EthAnnouncementFilter {
 `%sizes: {sizes:?}`"
         );
 
-        let mut tx_types_counter = TxTypesCounter::default();
-
         //
         // 1. checks if the announcement is empty
         //
         if hashes.is_empty() {
             debug!(target: "net::tx",
-                network=%Self,
+                network=%self,
                 "empty eth68 announcement"
             );
-            return (
-                FilterOutcome::ReportPeer,
-                ValidAnnouncementData::empty_eth68(),
-                tx_types_counter,
-            )
+            return (FilterOutcome::ReportPeer, ValidAnnouncementData::empty_eth68())
         }
 
         let mut should_report_peer = false;
         let mut indices_to_remove = vec![];
+        let mut tx_types_counter = TxTypesCounter::default();
 
         //
         // 2. checks if eth68 announcement metadata is valid
@@ -267,15 +273,12 @@ impl FilterAnnouncement for EthAnnouncementFilter {
         // that are unknowingly sending announcements with invalid data.
         //
         for (i, (&ty, &hash, &size)) in izip!(&types, &hashes, &sizes).enumerate() {
-            match self.should_fetch(ty, hash, size) {
-                (ValidationOutcome::Fetch, tx_type) => {
-                    tx_types_counter.increase_by_tx_type(tx_type);
-                }
-                (ValidationOutcome::Ignore, tx_type) => {
+            match self.should_fetch(ty, hash, size, &mut tx_types_counter) {
+                ValidationOutcome::Fetch => {}
+                ValidationOutcome::Ignore => {
                     indices_to_remove.push(i);
-                    tx_types_counter.increase_by_tx_type(tx_type);
                 }
-                (ValidationOutcome::ReportPeer, _) => {
+                ValidationOutcome::ReportPeer => {
                     indices_to_remove.push(i);
                     should_report_peer = true;
                 }
@@ -304,10 +307,10 @@ impl FilterAnnouncement for EthAnnouncementFilter {
         if deduped_data.len() != original_len {
             should_report_peer = true
         }
+        self.announced_tx_types_metrics.update_eth68_announcement_metrics(tx_types_counter);
         (
             if should_report_peer { FilterOutcome::ReportPeer } else { FilterOutcome::Ok },
             ValidAnnouncementData::new_eth68(deduped_data),
-            tx_types_counter,
         )
     }
 
@@ -317,7 +320,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
     ) -> (FilterOutcome, ValidAnnouncementData) {
         trace!(target: "net::tx::validation",
             hashes=?msg.0,
-            network=%Self,
+            network=%self,
             "validating eth66 announcement data.."
         );
 
@@ -328,7 +331,7 @@ impl FilterAnnouncement for EthAnnouncementFilter {
         //
         if hashes.is_empty() {
             debug!(target: "net::tx",
-                network=%Self,
+                network=%self,
                 "empty eth66 announcement"
             );
             return (FilterOutcome::ReportPeer, ValidAnnouncementData::empty_eth66())

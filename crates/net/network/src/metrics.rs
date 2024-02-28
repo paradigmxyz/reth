@@ -273,23 +273,21 @@ pub struct TxTypesCounter {
 }
 
 impl TxTypesCounter {
-    pub(crate) fn increase_by_tx_type(&mut self, tx_type: Option<TxType>) {
-        if let Some(tx_type) = tx_type {
-            match tx_type {
-                TxType::Legacy => {
-                    self.legacy += 1;
-                }
-                TxType::EIP2930 => {
-                    self.eip2930 += 1;
-                }
-                TxType::EIP1559 => {
-                    self.eip1559 += 1;
-                }
-                TxType::EIP4844 => {
-                    self.eip4844 += 1;
-                }
-                _ => {}
+    pub(crate) fn increase_by_tx_type(&mut self, tx_type: TxType) {
+        match tx_type {
+            TxType::Legacy => {
+                self.legacy += 1;
             }
+            TxType::EIP2930 => {
+                self.eip2930 += 1;
+            }
+            TxType::EIP1559 => {
+                self.eip1559 += 1;
+            }
+            TxType::EIP4844 => {
+                self.eip4844 += 1;
+            }
+            _ => {}
         }
     }
 }
