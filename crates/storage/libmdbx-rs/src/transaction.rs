@@ -120,21 +120,6 @@ where
         self.inner.txn.txn
     }
 
-    /// Executes the given closure once
-    ///
-    /// This is only intended to be used when accessing mdbx ffi functions directly is required.
-    ///
-    /// The caller **must** ensure that the pointer is only used within the closure.
-    #[inline]
-    #[doc(hidden)]
-    pub fn with_raw_tx_ptr<F, T>(&self, f: F) -> T
-    where
-        F: FnOnce(*mut ffi::MDBX_txn) -> T,
-    {
-        let _lock = self.inner.txn.lock.lock();
-        f(self.inner.txn.txn)
-    }
-
     /// Returns a raw pointer to the MDBX environment.
     pub fn env(&self) -> &Environment {
         &self.inner.env
