@@ -1069,11 +1069,11 @@ where
                         }
                     }
                 }
-
-                self.metrics.transactions_by_peers_length.set(self.transactions_by_peers.len() as f64);
-                self.metrics.transactions_by_peers_total_count.set(self.transactions_by_peers.values().map(Vec::len).sum::<usize>() as f64);
             }
             new_txs.shrink_to_fit();
+
+            self.metrics.transactions_by_peers_length.set(self.transactions_by_peers.len() as f64);
+            self.metrics.transactions_by_peers_total_count.set(self.transactions_by_peers.values().map(Vec::len).sum::<usize>() as f64);
 
             // 3. import new transactions as a batch to minimize lock contention on the underlying
             // pool
@@ -1091,7 +1091,6 @@ where
                 let added = new_txs.len();
 
                 // update metrics
-                self.metrics.pending_pool_imports.decrement(added as f64);
                 self.metrics.total_pool_imports.increment(added as f64);
 
                 let import = Box::pin(async move {
