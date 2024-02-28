@@ -1,3 +1,5 @@
+#[cfg(any(test, feature = "arbitrary"))]
+use crate::block::{generate_valid_header, valid_header_strategy};
 use crate::{
     basefee::calculate_next_block_base_fee,
     constants,
@@ -13,8 +15,6 @@ use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{BufMut, BytesMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
-#[cfg(any(test, feature = "arbitrary"))]
-use crate::block::{generate_valid_header, valid_header_strategy};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
