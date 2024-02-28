@@ -52,9 +52,6 @@ impl TxnManager {
     /// - [TxnManagerMessage::Abort] aborts a transaction with [ffi::mdbx_txn_abort]
     /// - [TxnManagerMessage::Commit] commits a transaction with [ffi::mdbx_txn_commit_ex]
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
-        #[cfg(feature = "read-tx-timeouts")]
-        let read_transactions = self.read_transactions.clone();
-
         std::thread::spawn(move || {
             #[allow(clippy::redundant_locals)]
             let env = env;
@@ -76,19 +73,9 @@ impl TxnManager {
                             sender.send(res).unwrap();
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
-                            #[cfg(feature = "read-tx-timeouts")]
-                            if let Some(read_transactions) = &read_transactions {
-                                read_transactions.remove_active(tx.0);
-                            }
-
                             sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
-                            #[cfg(feature = "read-tx-timeouts")]
-                            if let Some(read_transactions) = &read_transactions {
-                                read_transactions.remove_active(tx.0);
-                            }
-
                             sender
                                 .send({
                                     let mut latency = CommitLatency::new();
@@ -117,7 +104,7 @@ mod read_transactions {
         environment::EnvPtr, error::mdbx_result, transaction::TransactionPtr,
         txn_manager::TxnManager, Error,
     };
-    use dashmap::{DashMap, DashSet};
+    use dashmap::DashMap;
     use std::{
         sync::{mpsc::sync_channel, Arc},
         time::{Duration, Instant},

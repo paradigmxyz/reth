@@ -1,4 +1,3 @@
-use crate::{txn_manager::TxnManager, TransactionKind};
 use libc::c_int;
 use std::result;
 
