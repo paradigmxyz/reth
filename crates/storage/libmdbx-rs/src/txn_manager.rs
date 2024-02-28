@@ -418,5 +418,39 @@ mod read_transactions {
 
             assert!(read_transactions.active.contains_key(&(txn_ptr.0 as usize)));
         }
+
+        #[test]
+        fn txn_manager_reassign_transaction_removes_from_aborted_transactions() {
+            const MAX_DURATION: Duration = Duration::from_secs(1);
+
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
+                .open(dir.path())
+                .unwrap();
+
+            let read_transactions = env.txn_manager().read_transactions.as_ref().unwrap();
+
+            // Create a read-only transaction, wait until `MAX_DURATION` time is elapsed so the
+            // manager kills it, use it and observe the `Error::ReadTransactionAborted` error.
+            {
+                let tx = env.begin_ro_txn().unwrap();
+                let tx_ptr = tx.txn() as usize;
+                assert!(read_transactions.active.contains_key(&tx_ptr));
+
+                sleep(MAX_DURATION + READ_TRANSACTIONS_CHECK_INTERVAL);
+
+                assert!(!read_transactions.active.contains_key(&tx_ptr));
+                assert!(read_transactions.aborted.contains(&tx_ptr));
+            }
+
+            // Create a read-only transaction, ensure this removes it from aborted set if mdbx
+            // reassigns same recently aborted transaction pointer.
+            {
+                let tx = env.begin_ro_txn().unwrap();
+                let tx_ptr = tx.txn() as usize;
+                assert!(!read_transactions.aborted.contains(&tx_ptr));
+            }
+        }
     }
 }
