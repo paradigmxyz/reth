@@ -4,7 +4,7 @@ use crate::{
 };
 use reth_db::database::Database;
 use reth_network::NetworkHandle;
-use reth_node_api::{evm::EvmConfig, primitives::NodePrimitives, EngineTypes};
+use reth_node_api::{evm::ConfigureEvm, primitives::NodePrimitives, EngineTypes};
 use reth_node_core::{
     cli::components::FullProvider,
     dirs::{ChainPath, DataDirPath},
@@ -21,7 +21,7 @@ pub trait NodeTypes: Send + Sync + 'static {
     /// The node's engine types.
     type Engine: EngineTypes;
     /// The node's evm configuration.
-    type Evm: EvmConfig;
+    type Evm: ConfigureEvm;
 
     /// Returns the node's evm config.
     fn evm_config(&self) -> Self::Evm;

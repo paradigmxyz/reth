@@ -82,7 +82,7 @@ rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
 
 [workspace.package]
-version = "0.1.0-alpha.19"
+version = "0.1.0-alpha.21"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
@@ -170,9 +170,9 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { version = "6.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "2.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "ac63f06" }
+revm = { version = "6.1.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "2.1.0", features = ["std"], default-features = false }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "75a187b" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
@@ -180,13 +180,13 @@ alloy-primitives = "0.6"
 alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
-alloy-trie = "0.2"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "5062eaf" }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "5062eaf" }
-alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "5062eaf" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "5062eaf" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "5062eaf" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "5062eaf" }
+alloy-trie = "0.3"
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "76c70fb" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "76c70fb" }
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "76c70fb" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "76c70fb" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "76c70fb" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "76c70fb" }
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
@@ -223,7 +223,8 @@ metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::me
 hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
-nybbles = "0.1"
+nybbles = "0.2.1"
+smallvec = "1.13"
 
 # proc-macros
 proc-macro2 = "1.0"

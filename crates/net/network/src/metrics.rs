@@ -1,8 +1,10 @@
+use metrics::Histogram;
 use reth_eth_wire::DisconnectReason;
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
+use reth_primitives::TxType;
 
 /// Scope for monitoring transactions sent from the manager to the tx manager
 pub(crate) const NETWORK_POOL_TRANSACTIONS_SCOPE: &str = "network.pool.transactions";
@@ -189,6 +191,19 @@ pub struct TransactionsManagerMetrics {
     pub(crate) acc_duration_poll_commands: Gauge,
 }
 
+/// Measures the duration of executing the given code block. The duration is added to the given
+/// accumulator value passed as a mutable reference.
+#[macro_export]
+macro_rules! duration_metered_exec {
+    ($code:block, $acc:ident) => {
+        let start = Instant::now();
+
+        $code;
+
+        *$acc += start.elapsed();
+    };
+}
+
 /// Metrics for Disconnection types
 ///
 /// These are just counters, and ideally we would implement these metrics on a peer-by-peer basis,
@@ -269,15 +284,59 @@ pub struct EthRequestHandlerMetrics {
     pub(crate) received_bodies_requests: Counter,
 }
 
-/// Measures the duration of executing the given code block. The duration is added to the given
-/// accumulator value passed as a mutable reference.
-#[macro_export]
-macro_rules! duration_metered_exec {
-    ($code:block, $acc:ident) => {
-        let start = Instant::now();
+/// Eth67 announcement metrics, track entries by TxType
+#[derive(Metrics)]
+#[metrics(scope = "network.transaction_fetcher")]
+pub struct AnnouncedTxTypesMetrics {
+    /// Histogram for tracking frequency of legacy transaction type
+    pub(crate) legacy: Histogram,
 
-        $code;
+    /// Histogram for tracking frequency of EIP-2930 transaction type
+    pub(crate) eip2930: Histogram,
 
-        *$acc += start.elapsed();
-    };
+    /// Histogram for tracking frequency of EIP-1559 transaction type
+    pub(crate) eip1559: Histogram,
+
+    /// Histogram for tracking frequency of EIP-4844 transaction type
+    pub(crate) eip4844: Histogram,
+}
+
+#[derive(Debug, Default)]
+pub struct TxTypesCounter {
+    pub(crate) legacy: usize,
+    pub(crate) eip2930: usize,
+    pub(crate) eip1559: usize,
+    pub(crate) eip4844: usize,
+}
+
+impl TxTypesCounter {
+    pub(crate) fn increase_by_tx_type(&mut self, tx_type: TxType) {
+        match tx_type {
+            TxType::Legacy => {
+                self.legacy += 1;
+            }
+            TxType::EIP2930 => {
+                self.eip2930 += 1;
+            }
+            TxType::EIP1559 => {
+                self.eip1559 += 1;
+            }
+            TxType::EIP4844 => {
+                self.eip4844 += 1;
+            }
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => {}
+        }
+    }
+}
+
+impl AnnouncedTxTypesMetrics {
+    /// Update metrics during announcement validation, by examining each announcement entry based on
+    /// TxType
+    pub(crate) fn update_eth68_announcement_metrics(&self, tx_types_counter: TxTypesCounter) {
+        self.legacy.record(tx_types_counter.legacy as f64);
+        self.eip2930.record(tx_types_counter.eip2930 as f64);
+        self.eip1559.record(tx_types_counter.eip1559 as f64);
+        self.eip4844.record(tx_types_counter.eip4844 as f64);
+    }
 }

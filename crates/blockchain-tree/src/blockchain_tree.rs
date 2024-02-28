@@ -58,13 +58,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// * [BlockchainTree::make_canonical]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
-pub struct BlockchainTree<DB: Database, EF: ExecutorFactory> {
+pub struct BlockchainTree<DB: Database, EVM: ExecutorFactory> {
     /// The state of the tree
     ///
     /// Tracks all the chains, the block indices, and the block buffer.
     state: TreeState,
     /// External components (the database, consensus engine etc.)
-    externals: TreeExternals<DB, EF>,
+    externals: TreeExternals<DB, EVM>,
     /// Tree configuration
     config: BlockchainTreeConfig,
     /// Broadcast channel for canon state changes notifications.
@@ -76,10 +76,10 @@ pub struct BlockchainTree<DB: Database, EF: ExecutorFactory> {
     prune_modes: Option<PruneModes>,
 }
 
-impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
+impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
     /// Create a new blockchain tree.
     pub fn new(
-        externals: TreeExternals<DB, EF>,
+        externals: TreeExternals<DB, EVM>,
         config: BlockchainTreeConfig,
         prune_modes: Option<PruneModes>,
     ) -> RethResult<Self> {
@@ -837,7 +837,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
                 .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation)
                 .map_err(|err| {
                     debug!(
-                        target: "blockchain_tree", ?err,
+                        target: "blockchain_tree", %err,
                         "Failed to insert buffered block",
                     );
                     err
@@ -951,7 +951,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTree<DB, EF> {
         }
 
         let Some(chain_id) = self.block_indices().get_blocks_chain_id(block_hash) else {
-            debug!(target: "blockchain_tree", ?block_hash,  "Block hash not found in block indices");
+            debug!(target: "blockchain_tree", ?block_hash, "Block hash not found in block indices");
             return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
                 block_hash: *block_hash,
             })
@@ -1756,11 +1756,15 @@ mod tests {
             ]))
             .assert(&tree);
         // chain 0 has two blocks so receipts and reverts len is 2
-        assert_eq!(tree.state.chains.get(&0.into()).unwrap().state().receipts().len(), 2);
-        assert_eq!(tree.state.chains.get(&0.into()).unwrap().state().state().reverts.len(), 2);
+        let chain0 = tree.state.chains.get(&0.into()).unwrap().state();
+        assert_eq!(chain0.receipts().len(), 2);
+        assert_eq!(chain0.state().reverts.len(), 2);
+        assert_eq!(chain0.first_block(), block1.number);
         // chain 1 has one block so receipts and reverts len is 1
-        assert_eq!(tree.state.chains.get(&1.into()).unwrap().state().receipts().len(), 1);
-        assert_eq!(tree.state.chains.get(&1.into()).unwrap().state().state().reverts.len(), 1);
+        let chain1 = tree.state.chains.get(&1.into()).unwrap().state();
+        assert_eq!(chain1.receipts().len(), 1);
+        assert_eq!(chain1.state().reverts.len(), 1);
+        assert_eq!(chain1.first_block(), block2.number);
     }
 
     #[test]

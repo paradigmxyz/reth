@@ -25,7 +25,7 @@ alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { workspace = true, features = ["serde"] }
 ethers-core = { workspace = true, default-features = false, optional = true }
-nybbles = { version = "0.1.2", features = ["serde", "rlp"] }
+nybbles = { workspace = true, features = ["serde", "rlp"] }
 alloy-genesis.workspace = true
 alloy-eips.workspace = true
 # crypto
@@ -119,13 +119,10 @@ harness = false
 
 [[bench]]
 name = "validate_blob_tx"
+required-features = ["arbitrary"]
 harness = false
 
 [[bench]]
 name = "trie_root"
 required-features = ["arbitrary", "test-utils"]
-harness = false
-
-[[bench]]
-name = "nibbles"
 harness = false

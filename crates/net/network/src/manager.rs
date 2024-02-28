@@ -366,7 +366,7 @@ where
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
-        trace!(target: "net", ?peer_id,  "received unexpected message");
+        trace!(target: "net", ?peer_id, "received unexpected message");
         self.swarm
             .state_mut()
             .peers_mut()
@@ -607,6 +607,13 @@ where
                 let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peers));
             }
             NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
+            NetworkHandleMessage::GetTransactionsHandle(tx) => {
+                if let Some(ref tx_inner) = self.to_transactions_manager {
+                    let _ = tx_inner.send(NetworkTransactionEvent::GetTransactionsHandle(tx));
+                } else {
+                    let _ = tx.send(None);
+                }
+            }
         }
     }
 
@@ -622,7 +629,7 @@ where
                 trace!(target: "net", ?remote_addr, "TCP listener closed.");
             }
             SwarmEvent::TcpListenerError(err) => {
-                trace!(target: "net", ?err, "TCP connection error.");
+                trace!(target: "net", %err, "TCP connection error.");
             }
             SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
                 trace!(target: "net", ?session_id, ?remote_addr, "Incoming connection");
@@ -815,7 +822,7 @@ where
                     target: "net",
                     ?remote_addr,
                     ?peer_id,
-                    ?error,
+                    %error,
                     "Outgoing connection error"
                 );
 

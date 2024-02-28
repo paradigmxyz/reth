@@ -1,9 +1,10 @@
 use crate::{
     identifier::{SenderId, TransactionId},
     pool::size::SizeTracker,
-    PoolTransaction, SubPoolLimit, ValidPoolTransaction,
+    PoolTransaction, SubPoolLimit, ValidPoolTransaction, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
 };
 use fnv::FnvHashMap;
+use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry, BTreeMap, BTreeSet},
@@ -151,8 +152,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
         Some(tx.transaction.into())
     }
 
-    /// Get transactions by sender
-    pub(crate) fn get_txs_by_sender(&self, sender: SenderId) -> Vec<TransactionId> {
+    /// Retrieves transactions by sender, using `SmallVec` to efficiently handle up to
+    /// `TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER` transactions.
+    pub(crate) fn get_txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]> {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)

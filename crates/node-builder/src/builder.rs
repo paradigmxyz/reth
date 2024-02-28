@@ -39,7 +39,7 @@ use reth_node_core::{
 };
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    ChainSpec,
+    format_ether, ChainSpec,
 };
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
 use reth_prune::{PrunerBuilder, PrunerEvent};
@@ -66,7 +66,7 @@ type RethFullProviderType<DB, Evm> =
 /// engine types.
 ///
 /// Next all stateful components of the node are configured, these include the
-/// [EvmConfig](reth_node_api::evm::EvmConfig), the database [Database] and finally all the
+/// [ConfigureEvm](reth_node_api::evm::ConfigureEvm), the database [Database] and finally all the
 /// components of the node that are downstream of those types, these include:
 ///
 ///  - The transaction pool: [PoolBuilder](crate::components::PoolBuilder)
@@ -444,6 +444,10 @@ where
         // Configure the pipeline
         let (mut pipeline, client) = if config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
+            for (idx, (address, alloc)) in config.chain.genesis.alloc.iter().enumerate() {
+                info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
+            }
+
             let mining_mode = config.mining_mode(transaction_pool.pending_transactions_listener());
 
             let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(

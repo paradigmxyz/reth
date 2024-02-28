@@ -318,7 +318,6 @@ where
 }
 
 /// implements the `TransactionPool` interface for various transaction pool API consumers.
-#[async_trait::async_trait]
 impl<V, T, S> TransactionPool for Pool<V, T, S>
 where
     V: TransactionValidator,
@@ -417,6 +416,10 @@ where
         self.pool.get_pooled_transaction_elements(tx_hashes, limit)
     }
 
+    fn get_pooled_transaction_element(&self, tx_hash: TxHash) -> Option<PooledTransactionsElement> {
+        self.pool.get_pooled_transaction_element(tx_hash)
+    }
+
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
@@ -456,7 +459,7 @@ where
         self.pool.remove_transactions(hashes)
     }
 
-    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
+    fn retain_unknown<A>(&self, announcement: &mut A)
     where
         A: HandleMempoolData,
     {

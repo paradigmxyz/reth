@@ -1,8 +1,8 @@
 use crate::{
     config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    peers::PeersHandle, protocol::RlpxSubProtocol, swarm::NetworkConnectionState, FetchClient,
+    peers::PeersHandle, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
+    transactions::TransactionsHandle, FetchClient,
 };
-use async_trait::async_trait;
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
@@ -137,6 +137,15 @@ impl NetworkHandle {
         })
     }
 
+    /// Send message to get the [`TransactionsHandle`].
+    ///
+    /// Returns `None` if no transaction task is installed.
+    pub async fn transactions_handle(&self) -> Option<TransactionsHandle> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetTransactionsHandle(tx));
+        rx.await.unwrap()
+    }
+
     /// Provides a shareable reference to the [`BandwidthMeter`] stored on the `NetworkInner`.
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         &self.inner.bandwidth_meter
@@ -226,7 +235,6 @@ impl PeersInfo for NetworkHandle {
     }
 }
 
-#[async_trait]
 impl Peers for NetworkHandle {
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
     /// set, with the given kind.
@@ -288,7 +296,6 @@ impl Peers for NetworkHandle {
     }
 }
 
-#[async_trait]
 impl NetworkInfo for NetworkHandle {
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
@@ -449,6 +456,8 @@ pub(crate) enum NetworkHandleMessage {
     GetPeerInfosByPeerKind(PeerKind, oneshot::Sender<Vec<PeerInfo>>),
     /// Gets the reputation for a specific peer via a oneshot sender.
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
+    /// Retrieves the `TransactionsHandle` via a oneshot sender.
+    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle>>),
     /// Initiates a graceful shutdown of the network via a oneshot sender.
     Shutdown(oneshot::Sender<()>),
     /// Sets the network state between hibernation and active.

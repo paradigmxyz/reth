@@ -11,7 +11,6 @@ use std::io;
 
 /// Errors when sending/receiving messages
 #[derive(thiserror::Error, Debug)]
-
 pub enum EthStreamError {
     #[error(transparent)]
     /// Error of the underlying P2P connection.
