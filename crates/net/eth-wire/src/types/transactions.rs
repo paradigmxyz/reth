@@ -1,6 +1,7 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{PooledTransactionsElement, TransactionSigned, B256};
 
@@ -33,7 +34,18 @@ where
 /// corresponds to a requested hash. Hashes may need to be re-requested if the bodies are not
 /// included in the response.
 // #[derive_arbitrary(rlp, 10)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    IntoIterator,
+    Deref,
+    Constructor,
+)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PooledTransactions(
     /// The transaction bodies, each of which should correspond to a requested hash.
@@ -50,6 +62,12 @@ impl PooledTransactions {
 impl From<Vec<TransactionSigned>> for PooledTransactions {
     fn from(txs: Vec<TransactionSigned>) -> Self {
         PooledTransactions(txs.into_iter().map(Into::into).collect())
+    }
+}
+
+impl FromIterator<PooledTransactionsElement> for PooledTransactions {
+    fn from_iter<I: IntoIterator<Item = PooledTransactionsElement>>(iter: I) -> Self {
+        PooledTransactions(iter.into_iter().collect())
     }
 }
 

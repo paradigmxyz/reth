@@ -36,7 +36,7 @@ use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]
 use reth_node_optimism::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives::DisplayHardforks;
+use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_rpc_engine_api::EngineApi;
@@ -77,8 +77,13 @@ pub async fn launch_from_config<E: RethCliExt>(
 ) -> eyre::Result<NodeHandle> {
     info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
+    // Register the prometheus recorder before creating the database,
+    // because database init needs it to register metrics.
+    config.install_prometheus_recorder()?;
+
     let database = std::mem::take(&mut config.database);
     let db_instance = database.init_db(config.db.log_level, config.chain.chain)?;
+    info!(target: "reth::cli", "Database opened");
 
     match db_instance {
         DatabaseInstance::Real { db, data_dir } => {
@@ -121,7 +126,6 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let config = self.load_config()?;
 
         let prometheus_handle = self.config.install_prometheus_recorder()?;
-        info!(target: "reth::cli", "Database opened");
 
         let mut provider_factory =
             ProviderFactory::new(Arc::clone(&self.db), Arc::clone(&self.config.chain));
@@ -144,7 +148,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         let genesis_hash = init_genesis(Arc::clone(&self.db), self.config.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", DisplayHardforks::new(self.config.chain.hardforks()));
+        info!(target: "reth::cli", "{}", self.config.chain.display_hardforks());
 
         let consensus = self.config.consensus();
 
@@ -269,6 +273,9 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         // Configure the pipeline
         let (mut pipeline, client) = if self.config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
+            for (idx, (address, alloc)) in self.config.chain.genesis.alloc.iter().enumerate() {
+                info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
+            }
             let mining_mode =
                 self.config.mining_mode(transaction_pool.pending_transactions_listener());
 

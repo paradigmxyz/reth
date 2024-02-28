@@ -6,7 +6,6 @@ use reth_rpc_types::{
 /// Mev rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "mev"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "mev"))]
-#[async_trait::async_trait]
 pub trait MevApi {
     /// Submitting bundles to the relay. It takes in a bundle and provides a bundle hash as a
     /// return value.

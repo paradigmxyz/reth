@@ -110,7 +110,7 @@ impl Chain {
             return Some(self.state.clone())
         }
 
-        if self.blocks.get(&block_number).is_some() {
+        if self.blocks.contains_key(&block_number) {
             let mut state = self.state.clone();
             state.revert_to(block_number);
             return Some(state)
@@ -243,7 +243,7 @@ impl Chain {
     fn append_trie_updates(&mut self, other_trie_updates: Option<TrieUpdates>) {
         if let Some((trie_updates, other)) = self.trie_updates.as_mut().zip(other_trie_updates) {
             // Extend trie updates.
-            trie_updates.extend(other.into_iter());
+            trie_updates.extend(other);
         } else {
             // Reset trie updates as they are no longer valid.
             self.trie_updates.take();
@@ -471,11 +471,8 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Address, Receipts, B256};
-    use revm::{
-        db::BundleState,
-        primitives::{AccountInfo, HashMap},
-    };
+    use reth_primitives::{Receipts, B256};
+    use revm::primitives::{AccountInfo, HashMap};
 
     #[test]
     fn chain_append() {

@@ -125,8 +125,12 @@ fn stage_checkpoint<DB: Database>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::test_utils::{
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestStageDB, UnwindStageTestRunner,
+    };
     use assert_matches::assert_matches;
-    use reth_db::transaction::DbTx;
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_header, random_header_range},
@@ -134,12 +138,6 @@ mod tests {
     };
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedHeader};
     use reth_provider::HeaderProvider;
-
-    use super::*;
-    use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestStageDB, UnwindStageTestRunner,
-    };
 
     stage_test_suite_ext!(TotalDifficultyTestRunner, total_difficulty);
 
@@ -226,7 +224,6 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
     impl ExecuteStageTestRunner for TotalDifficultyTestRunner {
         type Seed = Vec<SealedHeader>;
 

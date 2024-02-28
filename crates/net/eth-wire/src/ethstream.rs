@@ -315,7 +315,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<S> CanDisconnect<EthMessage> for EthStream<S>
 where
     S: CanDisconnect<Bytes> + Send,

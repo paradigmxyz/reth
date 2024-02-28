@@ -232,15 +232,13 @@ mod tests {
     use rand::Rng;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
-        models::{BlockNumberAddress, StoredBlockBodyIndices},
+        models::StoredBlockBodyIndices,
     };
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_contract_account_range},
     };
-    use reth_primitives::{
-        stage::StageUnitCheckpoint, Address, SealedBlock, StorageEntry, B256, U256,
-    };
+    use reth_primitives::{stage::StageUnitCheckpoint, Address, SealedBlock, B256, U256};
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 
@@ -479,7 +477,6 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
     impl ExecuteStageTestRunner for StorageHashingTestRunner {
         type Seed = Vec<SealedBlock>;
 
@@ -623,24 +620,24 @@ mod tests {
         fn insert_storage_entry<TX: DbTxMut>(
             &self,
             tx: &TX,
-            tid_address: BlockNumberAddress,
+            bn_address: BlockNumberAddress,
             entry: StorageEntry,
             hash: bool,
         ) -> Result<(), reth_db::DatabaseError> {
             let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
             let prev_entry =
-                match storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)? {
+                match storage_cursor.seek_by_key_subkey(bn_address.address(), entry.key)? {
                     Some(e) if e.key == entry.key => {
-                        tx.delete::<tables::PlainStorageState>(tid_address.address(), Some(e))
+                        tx.delete::<tables::PlainStorageState>(bn_address.address(), Some(e))
                             .expect("failed to delete entry");
                         e
                     }
                     _ => StorageEntry { key: entry.key, value: U256::from(0) },
                 };
-            tx.put::<tables::PlainStorageState>(tid_address.address(), entry)?;
+            tx.put::<tables::PlainStorageState>(bn_address.address(), entry)?;
 
             if hash {
-                let hashed_address = keccak256(tid_address.address());
+                let hashed_address = keccak256(bn_address.address());
                 let hashed_entry = StorageEntry { key: keccak256(entry.key), value: entry.value };
 
                 if let Some(e) = tx
@@ -655,7 +652,7 @@ mod tests {
                 tx.put::<tables::HashedStorage>(hashed_address, hashed_entry)?;
             }
 
-            tx.put::<tables::StorageChangeSet>(tid_address, prev_entry)?;
+            tx.put::<tables::StorageChangeSet>(bn_address, prev_entry)?;
             Ok(())
         }
 

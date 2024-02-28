@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     fs::File,
-    marker::Sync,
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -240,15 +239,14 @@ impl<H: NippyJarHeader> NippyJar<H> {
         Ok(obj)
     }
 
-    /// Loads filters into memory
-    pub fn load_filters(mut self) -> Result<Self, NippyJarError> {
+    /// Loads filters into memory.
+    pub fn load_filters(&mut self) -> Result<(), NippyJarError> {
         // Read the offsets lists located at the index file.
         let mut offsets_file = File::open(self.index_path())?;
-
         self.offsets_index = PrefixSummedEliasFano::deserialize_from(&mut offsets_file)?;
         self.phf = bincode::deserialize_from(&mut offsets_file)?;
         self.filter = bincode::deserialize_from(&mut offsets_file)?;
-        Ok(self)
+        Ok(())
     }
 
     /// Returns the path for the data file
@@ -589,8 +587,8 @@ mod tests {
             nippy
                 .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
                 .unwrap();
-            let loaded_nippy =
-                NippyJar::load_without_header(file_path.path()).unwrap().load_filters().unwrap();
+            let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+            loaded_nippy.load_filters().unwrap();
             assert_eq!(indexes, collect_indexes(&loaded_nippy));
         };
 
@@ -634,8 +632,8 @@ mod tests {
         assert!(InclusionFilter::add(&mut nippy, &col1[3]).is_ok());
 
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
-        let loaded_nippy =
-            NippyJar::load_without_header(file_path.path()).unwrap().load_filters().unwrap();
+        let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        loaded_nippy.load_filters().unwrap();
 
         assert_eq!(nippy, loaded_nippy);
 
@@ -688,8 +686,8 @@ mod tests {
 
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
 
-        let loaded_nippy =
-            NippyJar::load_without_header(file_path.path()).unwrap().load_filters().unwrap();
+        let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        loaded_nippy.load_filters().unwrap();
         assert_eq!(nippy.version, loaded_nippy.version);
         assert_eq!(nippy.columns, loaded_nippy.columns);
         assert_eq!(nippy.filter, loaded_nippy.filter);
@@ -731,8 +729,8 @@ mod tests {
 
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
 
-        let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
-        let loaded_nippy = loaded_nippy.load_filters().unwrap();
+        let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        loaded_nippy.load_filters().unwrap();
         assert_eq!(nippy, loaded_nippy);
 
         if let Some(Compressors::Lz4(_)) = loaded_nippy.compressor() {
@@ -768,8 +766,8 @@ mod tests {
 
         nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows).unwrap();
 
-        let loaded_nippy =
-            NippyJar::load_without_header(file_path.path()).unwrap().load_filters().unwrap();
+        let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        loaded_nippy.load_filters().unwrap();
         assert_eq!(nippy, loaded_nippy);
 
         if let Some(Compressors::Zstd(zstd)) = loaded_nippy.compressor() {
@@ -824,8 +822,8 @@ mod tests {
 
         // Read file
         {
-            let loaded_nippy =
-                NippyJar::<BlockJarHeader>::load(file_path.path()).unwrap().load_filters().unwrap();
+            let mut loaded_nippy = NippyJar::<BlockJarHeader>::load(file_path.path()).unwrap();
+            loaded_nippy.load_filters().unwrap();
 
             assert!(loaded_nippy.compressor().is_some());
             assert!(loaded_nippy.filter.is_some());
@@ -895,8 +893,8 @@ mod tests {
 
         // Read file
         {
-            let loaded_nippy =
-                NippyJar::load_without_header(file_path.path()).unwrap().load_filters().unwrap();
+            let mut loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+            loaded_nippy.load_filters().unwrap();
 
             if let Some(Compressors::Zstd(_zstd)) = loaded_nippy.compressor() {
                 let mut cursor = NippyJarCursor::new(&loaded_nippy).unwrap();

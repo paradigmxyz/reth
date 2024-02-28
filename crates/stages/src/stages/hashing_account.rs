@@ -435,12 +435,7 @@ mod tests {
 
     mod test_utils {
         use super::*;
-        use crate::{
-            stages::hashing_account::AccountHashingStage,
-            test_utils::{StageTestRunner, TestStageDB},
-            ExecInput, ExecOutput, UnwindInput,
-        };
-        use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
+        use crate::test_utils::{StageTestRunner, TestStageDB};
         use reth_primitives::Address;
 
         pub(crate) struct AccountHashingTestRunner {
@@ -525,7 +520,6 @@ mod tests {
             }
         }
 
-        #[async_trait::async_trait]
         impl ExecuteStageTestRunner for AccountHashingTestRunner {
             type Seed = Vec<(Address, Account)>;
 

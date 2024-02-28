@@ -54,7 +54,7 @@ where
                     info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
                 }
                 Err(err) => {
-                    warn!(target: "reth::cli", ?err, peers_file=?file_path, "Failed to write network peers to file");
+                    warn!(target: "reth::cli", %err, peers_file=?file_path, "Failed to write network peers to file");
                 }
             }
         }

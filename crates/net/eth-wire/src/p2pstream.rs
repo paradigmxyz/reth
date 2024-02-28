@@ -134,7 +134,7 @@ where
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             Err(err) => {
-                debug!(?err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
+                debug!(%err, msg=%hex::encode(&first_message_bytes), "Failed to decode first message from peer");
                 Err(P2PStreamError::HandshakeError(err.into()))
             }
             Ok(msg) => {
@@ -195,7 +195,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<S> CanDisconnect<Bytes> for P2PStream<S>
 where
     S: Sink<Bytes, Error = io::Error> + Unpin + Send + Sync,
@@ -350,7 +349,7 @@ impl<S> DisconnectP2P for P2PStream<S> {
         let compressed_size =
             self.encoder.compress(&buf[1..], &mut compressed[1..]).map_err(|err| {
                 debug!(
-                    ?err,
+                    %err,
                     msg=%hex::encode(&buf[1..]),
                     "error compressing disconnect"
                 );
@@ -437,7 +436,7 @@ where
             // to decompress the message before we can decode it.
             this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..]).map_err(|err| {
                 debug!(
-                    ?err,
+                    %err,
                     msg=%hex::encode(&bytes[1..]),
                     "error decompressing p2p message"
                 );
@@ -456,7 +455,7 @@ where
                 _ if id == P2PMessageID::Disconnect as u8 => {
                     let reason = DisconnectReason::decode(&mut &decompress_buf[1..]).map_err(|err| {
                         debug!(
-                            ?err, msg=%hex::encode(&decompress_buf[1..]), "Failed to decode disconnect message from peer"
+                            %err, msg=%hex::encode(&decompress_buf[1..]), "Failed to decode disconnect message from peer"
                         );
                         err
                     })?;
@@ -574,7 +573,7 @@ where
         let compressed_size =
             this.encoder.compress(&item[1..], &mut compressed[1..]).map_err(|err| {
                 debug!(
-                    ?err,
+                    %err,
                     msg=%hex::encode(&item[1..]),
                     "error compressing p2p message"
                 );
@@ -809,9 +808,7 @@ impl Decodable for ProtocolVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        capability::SharedCapability, test_utils::eth_hello, DisconnectReason, EthVersion,
-    };
+    use crate::{capability::SharedCapability, test_utils::eth_hello, EthVersion};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 

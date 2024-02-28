@@ -227,6 +227,7 @@ fn block2(
     );
 
     let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
+
     block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;

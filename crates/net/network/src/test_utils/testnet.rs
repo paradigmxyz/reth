@@ -289,28 +289,34 @@ impl<C, Pool> TestnetHandle<C, Pool> {
         &self.peers
     }
 
-    /// Connects all peers with each other
+    /// Connects all peers with each other.
+    ///
+    /// This establishes sessions concurrently between all peers.
+    ///
+    /// Returns once all sessions are established.
     pub async fn connect_peers(&self) {
         if self.peers.len() < 2 {
             return
         }
 
-        let mut streams = Vec::with_capacity(self.peers.len());
-        let mut num_sessions = Vec::with_capacity(self.peers.len());
+        // add an event stream for _each_ peer
+        let streams =
+            self.peers.iter().map(|handle| NetworkEventStream::new(handle.event_listener()));
+
+        // add all peers to each other
         for (idx, handle) in self.peers.iter().enumerate().take(self.peers.len() - 1) {
-            streams.push(NetworkEventStream::new(handle.event_listener()));
-            let mut num = 0;
             for idx in (idx + 1)..self.peers.len() {
                 let neighbour = &self.peers[idx];
                 handle.network.add_peer(*neighbour.peer_id(), neighbour.local_addr());
-                num += 1;
             }
-            num_sessions.push(num);
         }
-        let fut = streams
-            .into_iter()
-            .zip(num_sessions)
-            .map(|(mut stream, num)| async move { stream.take_session_established(num).await });
+
+        // await all sessions to be established
+        let num_sessions_per_peer = self.peers.len() - 1;
+        let fut = streams.into_iter().map(|mut stream| async move {
+            stream.take_session_established(num_sessions_per_peer).await
+        });
+
         futures::future::join_all(fut).await;
     }
 }
@@ -485,10 +491,12 @@ impl<Pool> PeerHandle<Pool> {
         self.network.peer_id()
     }
 
+    /// Returns the [`PeersHandle`] from the network.
     pub fn peer_handle(&self) -> &PeersHandle {
         self.network.peers_handle()
     }
 
+    /// Returns the local socket as configured for the network.
     pub fn local_addr(&self) -> SocketAddr {
         self.network.local_addr()
     }

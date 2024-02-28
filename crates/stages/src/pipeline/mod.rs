@@ -1,6 +1,5 @@
 use crate::{
-    error::*, BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage,
-    StageError, StageExt, UnwindInput,
+    error::*, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageExt, UnwindInput,
 };
 use futures_util::Future;
 use reth_db::database::Database;
@@ -404,7 +403,7 @@ fn on_stage_error<DB: Database>(
     err: StageError,
 ) -> Result<Option<ControlFlow>, PipelineError> {
     if let StageError::DetachedHead { local_head, header, error } = err {
-        warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, ?error, "Stage encountered detached head");
+        warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, %error, "Stage encountered detached head");
 
         // We unwind because of a detached head.
         let unwind_to =
@@ -493,7 +492,6 @@ mod tests {
         provider::ProviderError,
         test_utils::{generators, generators::random_header},
     };
-    use reth_primitives::stage::StageCheckpoint;
     use reth_provider::test_utils::create_test_provider_factory;
     use tokio_stream::StreamExt;
 

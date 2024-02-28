@@ -2,24 +2,21 @@
 
 use super::cursor::Cursor;
 use crate::{
-    metrics::{
-        DatabaseEnvMetrics, Operation, TransactionMetrics, TransactionMode, TransactionOutcome,
-    },
+    metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     table::{Compress, DupSort, Encode, Table, TableImporter},
     tables::{utils::decode_one, Tables},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use parking_lot::RwLock;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
-use reth_tracing::tracing::{trace, warn};
+use reth_tracing::tracing::{debug, trace, warn};
 use std::{
     backtrace::Backtrace,
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
     time::{Duration, Instant},
 };
@@ -32,36 +29,50 @@ const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 pub struct Tx<K: TransactionKind> {
     /// Libmdbx-sys transaction.
     pub inner: Transaction<K>,
-    /// Database table handle cache.
-    pub(crate) db_handles: Arc<RwLock<[Option<DBI>; Tables::COUNT]>>,
+
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
     /// closed by [Tx::commit] or [Tx::abort], but we still need to report it in the metrics.
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
+
+    /// Database table handle cache.
+    db_handles: [OnceLock<DBI>; Tables::COUNT],
 }
 
 impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction.
+    #[inline]
     pub fn new(inner: Transaction<K>) -> Self {
-        Self { inner, db_handles: Default::default(), metrics_handler: None }
+        Self::new_inner(inner, None)
     }
 
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
+    #[inline]
     #[track_caller]
     pub fn new_with_metrics(
         inner: Transaction<K>,
-        metrics: Option<Arc<DatabaseEnvMetrics>>,
+        env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> Self {
-        let metrics_handler = if let Some(metrics) = metrics {
-            let handler = MetricsHandler::<K>::new(inner.id(), metrics);
-            TransactionMetrics::record_open(handler.transaction_mode());
+        let metrics_handler = env_metrics.map(|env_metrics| {
+            let handler = MetricsHandler::<K>::new(inner.id(), env_metrics);
+            handler.env_metrics.record_opened_transaction(handler.transaction_mode());
             handler.log_transaction_opened();
-            Some(handler)
-        } else {
-            None
-        };
-        Self { inner, db_handles: Default::default(), metrics_handler }
+            handler
+        });
+        Self::new_inner(inner, metrics_handler)
+    }
+
+    #[inline]
+    fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
+        // NOTE: These constants are needed to initialize `OnceLock` at compile-time, as array
+        // initialization is not allowed with non-Copy types, and `const { }` blocks are not stable
+        // yet.
+        #[allow(clippy::declare_interior_mutable_const)]
+        const ONCELOCK_DBI_NEW: OnceLock<DBI> = OnceLock::new();
+        #[allow(clippy::declare_interior_mutable_const)]
+        const DB_HANDLES: [OnceLock<DBI>; Tables::COUNT] = [ONCELOCK_DBI_NEW; Tables::COUNT];
+        Self { inner, db_handles: DB_HANDLES, metrics_handler }
     }
 
     /// Gets this transaction ID.
@@ -71,18 +82,23 @@ impl<K: TransactionKind> Tx<K> {
 
     /// Gets a table database handle if it exists, otherwise creates it.
     pub fn get_dbi<T: Table>(&self) -> Result<DBI, DatabaseError> {
-        let mut handles = self.db_handles.write();
-
-        let table = T::TABLE;
-
-        let dbi_handle = handles.get_mut(table as usize).expect("should exist");
-        if dbi_handle.is_none() {
-            *dbi_handle = Some(
-                self.inner.open_db(Some(T::NAME)).map_err(|e| DatabaseError::Open(e.into()))?.dbi(),
-            );
+        // TODO: Use `OnceLock::get_or_try_init` once it's stable.
+        let slot = &self.db_handles[T::TABLE as usize];
+        match slot.get() {
+            Some(handle) => Ok(*handle),
+            None => self.open_and_store_db::<T>(slot),
         }
+    }
 
-        Ok(dbi_handle.expect("is some; qed"))
+    #[cold]
+    fn open_and_store_db<T: Table>(&self, slot: &OnceLock<DBI>) -> Result<DBI, DatabaseError> {
+        match self.inner.open_db(Some(T::NAME)) {
+            Ok(db) => {
+                slot.set(db.dbi()).unwrap();
+                Ok(db.dbi())
+            }
+            Err(e) => Err(DatabaseError::Open(e.into())),
+        }
     }
 
     /// Create db Cursor
@@ -107,16 +123,28 @@ impl<K: TransactionKind> Tx<K> {
         outcome: TransactionOutcome,
         f: impl FnOnce(Self) -> (R, Option<CommitLatency>),
     ) -> R {
+        let run = |tx| {
+            let start = Instant::now();
+            let (result, commit_latency) = f(tx);
+            let total_duration = start.elapsed();
+
+            debug!(
+                target: "storage::db::mdbx",
+                ?total_duration,
+                ?commit_latency,
+                "Commit"
+            );
+
+            (result, commit_latency, total_duration)
+        };
+
         if let Some(mut metrics_handler) = self.metrics_handler.take() {
             metrics_handler.close_recorded = true;
             metrics_handler.log_backtrace_on_long_read_transaction();
 
-            let start = Instant::now();
-            let (result, commit_latency) = f(self);
+            let (result, commit_latency, close_duration) = run(self);
             let open_duration = metrics_handler.start.elapsed();
-            let close_duration = start.elapsed();
-
-            TransactionMetrics::record_close(
+            metrics_handler.env_metrics.record_closed_transaction(
                 metrics_handler.transaction_mode(),
                 outcome,
                 open_duration,
@@ -126,7 +154,7 @@ impl<K: TransactionKind> Tx<K> {
 
             result
         } else {
-            f(self).0
+            run(self).0
         }
     }
 
@@ -232,8 +260,7 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
     fn drop(&mut self) {
         if !self.close_recorded {
             self.log_backtrace_on_long_read_transaction();
-
-            TransactionMetrics::record_close(
+            self.env_metrics.record_closed_transaction(
                 self.transaction_mode(),
                 TransactionOutcome::Drop,
                 self.start.elapsed(),

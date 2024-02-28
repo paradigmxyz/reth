@@ -149,6 +149,7 @@ impl AppendableChain {
         let size = state.receipts().len();
         state.receipts_mut().drain(0..size - 1);
         state.state_mut().take_n_reverts(size - 1);
+        state.set_first_block(block.number);
 
         // If all is okay, return new chain back. Present chain is not modified.
         Ok(Self { chain: Chain::from_block(block, state, None) })
@@ -163,18 +164,18 @@ impl AppendableChain {
     ///   - [BlockAttachment] represents if the block extends the canonical chain, and thus we can
     ///     cache the trie state updates.
     ///   - [BlockValidationKind] determines if the state root __should__ be validated.
-    fn validate_and_execute<BSDP, DB, EF>(
+    fn validate_and_execute<BSDP, DB, EVM>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
         bundle_state_data_provider: BSDP,
-        externals: &TreeExternals<DB, EF>,
+        externals: &TreeExternals<DB, EVM>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
     where
         BSDP: BundleStateDataProvider,
         DB: Database,
-        EF: ExecutorFactory,
+        EVM: ExecutorFactory,
     {
         // some checks are done before blocks comes here.
         externals.consensus.validate_header_against_parent(&block, parent_block)?;

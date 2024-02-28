@@ -63,31 +63,29 @@ impl TxnManager {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
                             let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
-                            sender
-                                .send(
-                                    mdbx_result(unsafe {
-                                        ffi::mdbx_txn_begin_ex(
-                                            env.0,
-                                            parent.0,
-                                            flags,
-                                            &mut txn,
-                                            ptr::null_mut(),
-                                        )
-                                    })
-                                    .map(|_| TxnPtr(txn)),
+                            let res = mdbx_result(unsafe {
+                                ffi::mdbx_txn_begin_ex(
+                                    env.0,
+                                    parent.0,
+                                    flags,
+                                    &mut txn,
+                                    ptr::null_mut(),
                                 )
-                                .unwrap();
+                            })
+                            .map(|_| TxnPtr(txn));
 
                             #[cfg(feature = "read-tx-timeouts")]
                             {
                                 use crate::transaction::TransactionKind;
 
-                                if flags == crate::transaction::RO::OPEN_FLAGS {
+                                if res.is_ok() && flags == crate::transaction::RO::OPEN_FLAGS {
                                     if let Some(read_transactions) = &read_transactions {
                                         read_transactions.add_active(txn);
                                     }
                                 }
                             }
+
+                            sender.send(res).unwrap();
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
                             #[cfg(feature = "read-tx-timeouts")]
@@ -127,10 +125,10 @@ impl TxnManager {
 
 #[cfg(feature = "read-tx-timeouts")]
 mod read_transactions {
-    use crate::{error::mdbx_result, txn_manager::TxnManager, Error};
+    use crate::{environment::EnvPtr, error::mdbx_result, txn_manager::TxnManager, Error};
     use dashmap::{DashMap, DashSet};
     use std::{
-        sync::Arc,
+        sync::{mpsc::sync_channel, Arc},
         time::{Duration, Instant},
     };
     use tracing::{error, trace, warn};
@@ -138,16 +136,22 @@ mod read_transactions {
     const READ_TRANSACTIONS_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
     impl TxnManager {
-        /// Sets the maximum duration that a read transaction can be open.
-        pub(crate) fn with_max_read_transaction_duration(
-            mut self,
+        /// Returns a new instance for which the maximum duration that a read transaction can be
+        /// open is set.
+        pub(crate) fn new_with_max_read_transaction_duration(
+            env: EnvPtr,
             duration: Duration,
-        ) -> TxnManager {
+        ) -> Self {
             let read_transactions = Arc::new(ReadTransactions::new(duration));
             read_transactions.clone().start_monitor();
-            self.read_transactions = Some(read_transactions);
 
-            self
+            let (tx, rx) = sync_channel(0);
+
+            let txn_manager = Self { sender: tx, read_transactions: Some(read_transactions) };
+
+            txn_manager.start_message_listener(env, rx);
+
+            txn_manager
         }
 
         /// Adds a new transaction to the list of active read transactions.
@@ -271,7 +275,7 @@ mod read_transactions {
                             if was_in_active && err != Error::BadSignature {
                                 // If the transaction was in the list of active transactions and the
                                 // error code is not `EBADSIGN`, then user didn't abort it.
-                                error!(target: "libmdbx", ?err, ?open_duration, "Failed to abort the long-lived read transactions");
+                                error!(target: "libmdbx", %err, ?open_duration, "Failed to abort the long-lived read transactions");
                             }
                         } else {
                             // Happy path, the transaction has been aborted by us with no errors.
@@ -311,10 +315,12 @@ mod read_transactions {
     #[cfg(test)]
     mod tests {
         use crate::{
-            txn_manager::read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, Environment, Error,
-            MaxReadTransactionDuration,
+            txn_manager::{
+                read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, TxnManagerMessage, TxnPtr,
+            },
+            Environment, Error, MaxReadTransactionDuration, TransactionKind, RO,
         };
-        use std::{thread::sleep, time::Duration};
+        use std::{ptr, sync::mpsc::sync_channel, thread::sleep, time::Duration};
         use tempfile::tempdir;
 
         #[test]
@@ -386,6 +392,65 @@ mod read_transactions {
             let tx = env.begin_ro_txn().unwrap();
             sleep(READ_TRANSACTIONS_CHECK_INTERVAL);
             assert!(tx.commit().is_ok())
+        }
+
+        #[test]
+        fn txn_manager_begin_read_transaction_via_message_listener() {
+            const MAX_DURATION: Duration = Duration::from_secs(1);
+
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
+                .open(dir.path())
+                .unwrap();
+
+            let read_transactions = env.txn_manager().read_transactions.as_ref().unwrap();
+
+            // Create a read-only transaction via the message listener.
+            let (tx, rx) = sync_channel(0);
+            env.txn_manager().send_message(TxnManagerMessage::Begin {
+                parent: TxnPtr(ptr::null_mut()),
+                flags: RO::OPEN_FLAGS,
+                sender: tx,
+            });
+
+            let txn_ptr = rx.recv().unwrap().unwrap();
+
+            assert!(read_transactions.active.contains_key(&(txn_ptr.0 as usize)));
+        }
+
+        #[test]
+        fn txn_manager_reassign_transaction_removes_from_aborted_transactions() {
+            const MAX_DURATION: Duration = Duration::from_secs(1);
+
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
+                .open(dir.path())
+                .unwrap();
+
+            let read_transactions = env.txn_manager().read_transactions.as_ref().unwrap();
+
+            // Create a read-only transaction, wait until `MAX_DURATION` time is elapsed so the
+            // manager kills it, use it and observe the `Error::ReadTransactionAborted` error.
+            {
+                let tx = env.begin_ro_txn().unwrap();
+                let tx_ptr = tx.txn() as usize;
+                assert!(read_transactions.active.contains_key(&tx_ptr));
+
+                sleep(MAX_DURATION + READ_TRANSACTIONS_CHECK_INTERVAL);
+
+                assert!(!read_transactions.active.contains_key(&tx_ptr));
+                assert!(read_transactions.aborted.contains(&tx_ptr));
+            }
+
+            // Create a read-only transaction, ensure this removes it from aborted set if mdbx
+            // reassigns same recently aborted transaction pointer.
+            {
+                let tx = env.begin_ro_txn().unwrap();
+                let tx_ptr = tx.txn() as usize;
+                assert!(!read_transactions.aborted.contains(&tx_ptr));
+            }
         }
     }
 }
