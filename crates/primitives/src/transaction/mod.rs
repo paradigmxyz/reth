@@ -1179,10 +1179,6 @@ impl TransactionSigned {
     pub(crate) fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
     ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
-        if data.len() < MIN_LENGTH_LEGACY_TX_ENCODED {
-            return Err(RlpError::InputTooShort)
-        }
-
         // keep this around, so we can use it to calculate the hash
         let original_encoding = *data;
 
@@ -1414,27 +1410,6 @@ impl Decodable for TransactionSigned {
 
         // if the transaction is encoded as a string then it is a typed transaction
         if !header.list {
-            let tx_type = *buf.first().ok_or(RlpError::InputTooShort)?;
-
-            let Ok(tx_type) = TxType::try_from(tx_type) else {
-                return Err(RlpError::Custom("unsupported typed transaction type"))
-            };
-
-            let min_len = match tx_type {
-                TxType::EIP2930 => MIN_LENGTH_EIP2930_TX_ENCODED,
-                TxType::EIP1559 => MIN_LENGTH_EIP1559_TX_ENCODED,
-                TxType::EIP4844 => MIN_LENGTH_EIP4844_TX_ENCODED,
-                #[cfg(feature = "optimism")]
-                TxType::DEPOSIT => MIN_LENGTH_DEPOSIT_TX_ENCODED,
-                TxType::Legacy => {
-                    unreachable!("path for legacy tx has diverged before this scope")
-                }
-            };
-
-            if original_encoding.len() < min_len {
-                return Err(RlpError::InputTooShort)
-            }
-
             let tx = TransactionSigned::decode_enveloped_typed_transaction(buf)?;
 
             let bytes_consumed = remaining_len - buf.len();
