@@ -360,13 +360,12 @@ where
                 if K::IS_READ_ONLY {
                     #[cfg(feature = "read-tx-timeouts")]
                     {
-                        self.env.txn_manager().remove_active_read_transaction(txn);
-
-                        if let Some(Err(_)) =
-                            self.env.txn_manager().add_aborted_read_transaction(txn)
+                        if let Some(true) = self.env.txn_manager().is_aborted_read_transaction(txn)
                         {
                             return
                         }
+
+                        self.env.txn_manager().remove_active_read_transaction(txn);
                     }
 
                     unsafe {

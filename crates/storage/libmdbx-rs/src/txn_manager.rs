@@ -1,7 +1,7 @@
 use crate::{
     environment::EnvPtr,
     error::{mdbx_result, Result},
-    CommitLatency,
+    CommitLatency, Error,
 };
 use std::{
     ptr,
@@ -98,12 +98,14 @@ impl TxnManager {
                             {
                                 if flags == crate::transaction::RO::OPEN_FLAGS {
                                     if let Some(read_transactions) = &read_transactions {
-                                        read_transactions.remove_active(tx.0);
-
-                                        if let Err(err) = read_transactions.add_aborted(tx.0) {
-                                            sender.send(Err(err)).unwrap();
+                                        if read_transactions.is_aborted(tx.0) {
+                                            sender
+                                                .send(Err(Error::ReadTransactionAborted))
+                                                .unwrap();
                                             continue
                                         }
+
+                                        read_transactions.remove_active(tx.0);
                                     }
                                 }
                             }
@@ -143,7 +145,7 @@ impl TxnManager {
 mod read_transactions {
     use crate::{
         environment::EnvPtr, error::mdbx_result, metrics::TxnManagerMetrics,
-        txn_manager::TxnManager, Error, Result,
+        txn_manager::TxnManager, Error,
     };
     use dashmap::{DashMap, DashSet};
     use std::{
@@ -188,13 +190,9 @@ mod read_transactions {
             self.read_transactions.as_ref()?.remove_active(ptr)
         }
 
-        /// Adds a transaction to the list of aborted read transactions. Returns `Some(Ok())` if
-        /// the key was not already in the set.
-        pub(crate) fn add_aborted_read_transaction(
-            &self,
-            ptr: *mut ffi::MDBX_txn,
-        ) -> Option<Result<()>> {
-            Some(self.read_transactions.as_ref()?.add_aborted(ptr))
+        /// Returns `Some(true)` if a transaction has already been aborted due to timeout.
+        pub(crate) fn is_aborted_read_transaction(&self, ptr: *mut ffi::MDBX_txn) -> Option<bool> {
+            Some(self.read_transactions.as_ref()?.is_aborted(ptr))
         }
 
         /// Removes a transaction from the list of aborted read transactions.
@@ -216,8 +214,8 @@ mod read_transactions {
         /// We store `usize` instead of a raw pointer as a key, because pointers are not
         /// comparable. The time of transaction opening is stored as a value.
         active: DashMap<usize, Instant>,
-        /// List of read transactions aborted by the [ReadTransactions::start_monitor] or the user.
-        /// We keep them until the user tries to reuse, so we're able to report a nice
+        /// List of read transactions aborted by the [ReadTransactions::start_monitor]. We keep
+        /// them until the user tries to reuse, so we're able to report a nice
         /// [Error::ReadTransactionAborted] error.
         ///
         /// We store `usize` instead of a raw pointer, because pointers are not comparable.
@@ -241,13 +239,15 @@ mod read_transactions {
             self.active.remove(&(ptr as usize))
         }
 
-        /// Adds a new transaction to the list of aborted read transactions. Returns `Ok(())`
-        /// if the transaction hasn't already been aborted.
-        pub(super) fn add_aborted(&self, ptr: *mut ffi::MDBX_txn) -> Result<()> {
-            if self.aborted.insert(ptr as usize) {
-                return Ok(())
-            }
-            Err(Error::ReadTransactionAborted)
+        /// Adds a new transaction to the set of aborted read transactions. Returns `true` if the
+        /// transaction isn't already in the set.
+        fn add_aborted(&self, ptr: *mut ffi::MDBX_txn) -> bool {
+            self.aborted.insert(ptr as usize)
+        }
+
+        /// Returns `true` if the transaction is in set of aborted transactions.
+        pub(super) fn is_aborted(&self, ptr: *mut ffi::MDBX_txn) -> bool {
+            self.aborted.contains(&(ptr as usize))
         }
 
         /// Removes a transaction from the list of aborted read transactions.
@@ -282,9 +282,9 @@ mod read_transactions {
 
                             // Add the transaction to the list of aborted transactions, so further
                             // usages report the correct error when the transaction is closed.
-                            let result = self
-                                .add_aborted(ptr)
-                                .and_then(|_| mdbx_result(unsafe { ffi::mdbx_txn_abort(ptr) }));
+                            _ = self.add_aborted(ptr);
+
+                            let result = mdbx_result(unsafe { ffi::mdbx_txn_abort(ptr) });
 
                             // Add the transaction to `aborted_active`. We can't remove it
                             // instantly from the list of active transactions, because we iterate
@@ -303,10 +303,7 @@ mod read_transactions {
                         // Try deleting the transaction from the list of active transactions.
                         let was_in_active = self.remove_active(ptr).is_some();
                         if let Some(err) = err {
-                            if was_in_active &&
-                                err != Error::ReadTransactionAborted &&
-                                err != Error::BadSignature
-                            {
+                            if was_in_active && err != Error::BadSignature {
                                 // If the transaction was in the list of active transactions and
                                 // the user didn't abort it.
                                 error!(target: "libmdbx", %err, ?open_duration, "Failed to abort the long-lived read transactions");
@@ -385,7 +382,7 @@ mod read_transactions {
                 drop(tx);
 
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
-                assert!(read_transactions.aborted.contains(&tx_ptr));
+                assert!(!read_transactions.aborted.contains(&tx_ptr));
             }
 
             // Create a read-only transaction, successfully use it, close it by committing.
@@ -460,40 +457,6 @@ mod read_transactions {
         }
 
         #[test]
-        fn txn_manager_abort_transaction_twice() {
-            const MAX_DURATION: Duration = Duration::from_secs(1);
-
-            let dir = tempdir().unwrap();
-            let env = Environment::builder()
-                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
-                .open(dir.path())
-                .unwrap();
-
-            assert!(env.txn_manager().read_transactions.is_some());
-
-            // Create a ro transaction. Abort it by message to tx manager.
-            let tx = env.begin_ro_txn().unwrap();
-            let tx_ptr = TxnPtr(tx.txn());
-
-            let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort {
-                tx: tx_ptr,
-                flags: RO::OPEN_FLAGS,
-                sender,
-            });
-            assert!(rx.recv().unwrap().is_ok());
-
-            // Attempt to abort again throws error.
-            let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort {
-                tx: tx_ptr,
-                flags: RO::OPEN_FLAGS,
-                sender,
-            });
-            assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
-        }
-
-        #[test]
         fn txn_manager_abort_timed_out_transaction() {
             const MAX_DURATION: Duration = Duration::from_secs(1);
 
@@ -510,34 +473,6 @@ mod read_transactions {
             let tx_ptr = TxnPtr(tx.txn());
 
             sleep(MAX_DURATION + READ_TRANSACTIONS_CHECK_INTERVAL);
-
-            // Attempt to abort again throws error.
-            let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort {
-                tx: tx_ptr,
-                flags: RO::OPEN_FLAGS,
-                sender,
-            });
-            assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
-        }
-
-        #[test]
-        fn txn_manager_abort_dropped_transaction() {
-            const MAX_DURATION: Duration = Duration::from_secs(1);
-
-            let dir = tempdir().unwrap();
-            let env = Environment::builder()
-                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
-                .open(dir.path())
-                .unwrap();
-
-            assert!(env.txn_manager().read_transactions.is_some());
-
-            // Create a ro transaction. Abort it by dropping.
-            let tx = env.begin_ro_txn().unwrap();
-            let tx_ptr = TxnPtr(tx.txn());
-
-            drop(tx);
 
             // Attempt to abort again throws error.
             let (sender, rx) = sync_channel(0);
