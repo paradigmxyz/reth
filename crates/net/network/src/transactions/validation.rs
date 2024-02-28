@@ -5,7 +5,7 @@
 use std::{fmt, fmt::Display, mem};
 
 use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
-use derive_more::{Deref, DerefMut, Display};
+use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
@@ -374,7 +374,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthMessageFilter::default;
+        let filter = EthMessageFilter::default();
 
         let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
