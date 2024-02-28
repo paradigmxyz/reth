@@ -453,7 +453,7 @@ mod read_transactions {
 
             assert!(read_transactions.active.contains_key(&(txn_ptr.0 as usize)));
         }
-      
+
         #[test]
         fn txn_manager_reassign_transaction_removes_from_aborted_transactions() {
             const MAX_DURATION: Duration = Duration::from_secs(1);
