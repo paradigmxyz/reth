@@ -113,7 +113,7 @@ impl Hardfork {
         if chain == Chain::base_mainnet() {
             return self.base_mainnet_activation_block();
         }
-        
+
         None
     }
 
