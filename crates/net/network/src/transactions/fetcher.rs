@@ -867,6 +867,10 @@ impl TransactionFetcher {
                     );
                 }
 
+                if verified_payload.is_empty() {
+                    return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
+                }
+
                 let unvalidated_payload_len = verified_payload.len();
 
                 // todo: report peer for sending invalid response
@@ -882,6 +886,10 @@ impl TransactionFetcher {
                         valid_payload_len=valid_payload.len(),
                         "received invalid `PooledTransactions` response from peer, filtered out invalid entries"
                     );
+                }
+
+                if valid_payload.is_empty() {
+                    return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
                 }
 
                 // clear received hashes
