@@ -1425,7 +1425,7 @@ impl Decodable for TransactionSigned {
                 TxType::EIP1559 => MIN_LENGTH_EIP1559_TX_ENCODED,
                 TxType::EIP4844 => MIN_LENGTH_EIP4844_TX_ENCODED,
                 #[cfg(feature = "optimism")]
-                TxType::Deposit => MIN_LENGTH_DEPOSIT_TX_ENCODED,
+                TxType::DEPOSIT => MIN_LENGTH_DEPOSIT_TX_ENCODED,
                 TxType::Legacy => {
                     unreachable!("path for legacy tx has diverged before this scope")
                 }
