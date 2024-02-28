@@ -171,7 +171,7 @@ where
     Provider: FullProvider<DB> + Clone + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + Unpin + 'static,
-    Network: NetworkInfo + Peers + NetworkProtocols + NetworkEvents + Clone + 'static,
+    Network: NetworkInfo + Peers + NetworkProtocols + NetworkEvents + Clone + Unpin + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvmEnv + 'static,
 {
