@@ -1,7 +1,6 @@
 #![allow(unreachable_pub)]
 //! Helper extension traits for working with clique providers.
 
-use async_trait::async_trait;
 use enr::k256::ecdsa::SigningKey;
 use ethers_core::{
     types::{transaction::eip2718::TypedTransaction, Address, Block, BlockNumber, H256},
@@ -51,7 +50,6 @@ pub type CliqueMiddlewareError<M> = CliqueError<<M as Middleware>::Error>;
 
 /// Extension trait for [`Middleware`](ethers_providers::Middleware) to provide clique specific
 /// functionality.
-#[async_trait(?Send)]
 pub trait CliqueMiddleware: Send + Sync + Middleware {
     /// Enable mining on the clique geth instance by importing and unlocking the signer account
     /// derived from given private key and password.

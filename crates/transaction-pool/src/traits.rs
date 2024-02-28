@@ -8,7 +8,7 @@ use crate::{
     AllTransactionsEvents,
 };
 use futures_util::{ready, Stream};
-use reth_eth_wire::HandleAnnouncement;
+use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{
     kzg::KzgSettings, AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
     FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -35,7 +36,6 @@ use tokio::sync::mpsc::Receiver;
 ///
 /// Note: This requires `Clone` for convenience, since it is assumed that this will be implemented
 /// for a wrapped `Arc` type, see also [`Pool`](crate::Pool).
-#[async_trait::async_trait]
 #[auto_impl::auto_impl(Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
@@ -55,19 +55,22 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// p2p network.
     ///
     /// Consumer: P2P
-    async fn add_external_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash> {
-        self.add_transaction(TransactionOrigin::External, transaction).await
+    fn add_external_transaction(
+        &self,
+        transaction: Self::Transaction,
+    ) -> impl Future<Output = PoolResult<TxHash>> + Send {
+        self.add_transaction(TransactionOrigin::External, transaction)
     }
 
     /// Imports all _external_ transactions
     ///
     ///
     /// Consumer: Utility
-    async fn add_external_transactions(
+    fn add_external_transactions(
         &self,
         transactions: Vec<Self::Transaction>,
-    ) -> Vec<PoolResult<TxHash>> {
-        self.add_transactions(TransactionOrigin::External, transactions).await
+    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send {
+        self.add_transactions(TransactionOrigin::External, transactions)
     }
 
     /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
@@ -76,31 +79,31 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// given transaction.
     ///
     /// Consumer: Custom
-    async fn add_transaction_and_subscribe(
+    fn add_transaction_and_subscribe(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TransactionEvents>;
+    ) -> impl Future<Output = PoolResult<TransactionEvents>> + Send;
 
     /// Adds an _unvalidated_ transaction into the pool.
     ///
     /// Consumer: RPC
-    async fn add_transaction(
+    fn add_transaction(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TxHash>;
+    ) -> impl Future<Output = PoolResult<TxHash>> + Send;
 
     /// Adds the given _unvalidated_ transaction into the pool.
     ///
     /// Returns a list of results.
     ///
     /// Consumer: RPC
-    async fn add_transactions(
+    fn add_transactions(
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> Vec<PoolResult<TxHash>>;
+    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send;
 
     /// Returns a new transaction change event stream for the given transaction.
     ///
@@ -114,15 +117,15 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// inserted into the pool that are allowed to be propagated.
     ///
     /// Note: This is intended for networking and will __only__ yield transactions that are allowed
-    /// to be propagated over the network.
+    /// to be propagated over the network, see also [TransactionListenerKind].
     ///
     /// Consumer: RPC/P2P
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
         self.pending_transactions_listener_for(TransactionListenerKind::PropagateOnly)
     }
 
-    /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
-    /// inserted into the pool depending on the given [TransactionListenerKind] argument.
+    /// Returns a new [Receiver] that yields transactions hashes for new __pending__ transactions
+    /// inserted into the pending pool depending on the given [TransactionListenerKind] argument.
     fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
@@ -130,7 +133,7 @@ pub trait TransactionPool: Send + Sync + Clone {
         self.new_transactions_listener_for(TransactionListenerKind::PropagateOnly)
     }
 
-    /// Returns a new Stream that yields blob "sidecars" (blobs w/ assoc. kzg
+    /// Returns a new [Receiver] that yields blob "sidecars" (blobs w/ assoc. kzg
     /// commitments/proofs) for eip-4844 transactions inserted into the pool
     fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar>;
 
@@ -206,7 +209,9 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns converted [PooledTransactionsElement] for the given transaction hashes.
     ///
-    /// This adheres to the expected behavior of [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
+    /// This adheres to the expected behavior of
+    /// [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
+    ///
     /// The transactions must be in same order as in the request, but it is OK to skip transactions
     /// which are not available.
     ///
@@ -218,6 +223,16 @@ pub trait TransactionPool: Send + Sync + Clone {
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
     ) -> Vec<PooledTransactionsElement>;
+
+    /// Returns converted [PooledTransactionsElement] for the given transaction hash.
+    ///
+    /// This adheres to the expected behavior of
+    /// [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
+    ///
+    /// If the transaction is a blob transaction, the sidecar will be included.
+    ///
+    /// Consumer: P2P
+    fn get_pooled_transaction_element(&self, tx_hash: TxHash) -> Option<PooledTransactionsElement>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
@@ -247,7 +262,11 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns all transactions that can be included in the next block.
     ///
-    /// This is primarily used for the `txpool_` RPC namespace: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes between `pending` and `queued` transactions, where `pending` are transactions ready for inclusion in the next block and `queued` are transactions that are ready for inclusion in future blocks.
+    /// This is primarily used for the `txpool_` RPC namespace:
+    /// <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes
+    /// between `pending` and `queued` transactions, where `pending` are transactions ready for
+    /// inclusion in the next block and `queued` are transactions that are ready for inclusion in
+    /// future blocks.
     ///
     /// Consumer: RPC
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
@@ -271,7 +290,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     ///
     /// Also removes all _dependent_ transactions.
     ///
-    /// Consumer: Block production
+    /// Consumer: Utility
     fn remove_transactions(
         &self,
         hashes: Vec<TxHash>,
@@ -282,9 +301,9 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// the pool. Returns hashes already known to the pool.
     ///
     /// Consumer: P2P
-    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
+    fn retain_unknown<A>(&self, announcement: &mut A)
     where
-        A: HandleAnnouncement;
+        A: HandleMempoolData;
 
     /// Returns if the transaction for the given hash is already included in this pool.
     fn contains(&self, tx_hash: &TxHash) -> bool {
@@ -562,7 +581,7 @@ impl TransactionOrigin {
 /// known block hash.
 ///
 /// This is used to update the pool state accordingly.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct CanonicalStateUpdate<'a> {
     /// Hash of the tip block.
     pub new_tip: &'a SealedBlock,
@@ -607,10 +626,16 @@ impl<'a> CanonicalStateUpdate<'a> {
     }
 }
 
-impl<'a> fmt::Display for CanonicalStateUpdate<'a> {
+impl fmt::Display for CanonicalStateUpdate<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{ hash: {}, number: {}, pending_block_base_fee: {}, pending_block_blob_fee: {:?}, changed_accounts: {}, mined_transactions: {} }}",
-            self.hash(), self.number(), self.pending_block_base_fee, self.pending_block_blob_fee,  self.changed_accounts.len(), self.mined_transactions.len())
+        f.debug_struct("CanonicalStateUpdate")
+            .field("hash", &self.hash())
+            .field("number", &self.number())
+            .field("pending_block_base_fee", &self.pending_block_base_fee)
+            .field("pending_block_blob_fee", &self.pending_block_blob_fee)
+            .field("changed_accounts", &self.changed_accounts.len())
+            .field("mined_transactions", &self.mined_transactions.len())
+            .finish()
     }
 }
 

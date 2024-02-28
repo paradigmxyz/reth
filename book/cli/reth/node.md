@@ -344,9 +344,14 @@ TxPool:
           [default: 100]
 
       --txpool.max_tx_input_bytes <MAX_TX_INPUT_BYTES>
-        Maximum size a single transaction can have
+          Maximum size a single transaction can have
 
           [default: 131072]
+
+      --txpool.max_cached_entries <MAX_CACHED_ENTRIES>
+          The maximum number of blobs to keep in the in memory blob cache
+
+          [default: 100]
 
       --txpool.nolocals
           Flag to disable local transaction exemptions

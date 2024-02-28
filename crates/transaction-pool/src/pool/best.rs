@@ -17,13 +17,14 @@ use tracing::debug;
 ///
 /// This is a wrapper around [`BestTransactions`] that also enforces a specific basefee.
 ///
-/// This iterator guarantees that all transaction it returns satisfy the base fee.
-pub(crate) struct BestTransactionsWithBasefee<T: TransactionOrdering> {
+/// This iterator guarantees that all transaction it returns satisfy both the base fee and blob fee!
+pub(crate) struct BestTransactionsWithFees<T: TransactionOrdering> {
     pub(crate) best: BestTransactions<T>,
     pub(crate) base_fee: u64,
+    pub(crate) base_fee_per_blob_gas: u64,
 }
 
-impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithBasefee<T> {
+impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithFees<T> {
     fn mark_invalid(&mut self, tx: &Self::Item) {
         BestTransactions::mark_invalid(&mut self.best, tx)
     }
@@ -41,7 +42,7 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
     }
 }
 
-impl<T: TransactionOrdering> Iterator for BestTransactionsWithBasefee<T> {
+impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
     type Item = Arc<ValidPoolTransaction<T::Transaction>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -52,6 +53,13 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithBasefee<T> {
                 // tx violates base fee, mark it as invalid and continue
                 crate::traits::BestTransactions::mark_invalid(self, &best);
             } else {
+                // tx is EIP4844 and violates blob fee, mark it as invalid and continue
+                if best.transaction.max_fee_per_blob_gas().is_some_and(|max_fee_per_blob_gas| {
+                    max_fee_per_blob_gas < self.base_fee_per_blob_gas as u128
+                }) {
+                    crate::traits::BestTransactions::mark_invalid(self, &best);
+                    continue
+                };
                 return Some(best)
             }
         }

@@ -5,11 +5,12 @@ use crate::{
             inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
             EvmOverrides,
         },
-        EthTransactions, TransactionSource,
+        EthTransactions,
     },
     result::{internal_rpc_err, ToRpcResult},
     BlockingTaskGuard, EthApiSpec,
 };
+use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -381,7 +382,8 @@ where
     }
 
     /// The debug_traceCallMany method lets you run an `eth_callMany` within the context of the
-    /// given block execution using the first n transactions in the given block as base
+    /// given block execution using the first n transactions in the given block as base.
+    /// Each following bundle increments block number by 1 and block timestamp by 12 seconds
     pub async fn debug_trace_call_many(
         &self,
         bundles: Vec<Bundle>,
@@ -396,7 +398,7 @@ where
         let transaction_index = transaction_index.unwrap_or_default();
 
         let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let ((cfg, block_env, _), block) = futures::try_join!(
+        let ((cfg, mut block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(target_block),
             self.inner.eth_api.block_by_id_with_senders(target_block),
         )?;
@@ -479,6 +481,9 @@ where
                         }
                         results.push(trace);
                     }
+                    // Increment block_env number and timestamp for the next bundle
+                    block_env.number += U256::from(1);
+                    block_env.timestamp += U256::from(12);
 
                     all_bundles.push(results);
                 }
@@ -630,13 +635,12 @@ where
     }
 
     /// Handler for `debug_getRawTransaction`
+    ///
+    /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
+    ///
     /// Returns the bytes of the transaction for the given hash.
-    async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes> {
-        let tx = self.inner.eth_api.transaction_by_hash(hash).await?;
-        Ok(tx
-            .map(TransactionSource::into_recovered)
-            .map(|tx| tx.envelope_encoded())
-            .unwrap_or_default())
+    async fn raw_transaction(&self, hash: B256) -> RpcResult<Option<Bytes>> {
+        Ok(self.inner.eth_api.raw_transaction_by_hash(hash).await?)
     }
 
     /// Handler for `debug_getRawTransactions`

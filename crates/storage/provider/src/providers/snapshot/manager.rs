@@ -156,20 +156,19 @@ impl SnapshotProvider {
         tx_range: &RangeInclusive<u64>,
     ) -> ProviderResult<SnapshotJarProvider<'_>> {
         let key = (*block_range.end(), segment);
-        if let Some(jar) = self.map.get(&key) {
-            Ok(jar.into())
-        } else {
-            let jar = NippyJar::load(&self.path.join(segment.filename(block_range, tx_range)))
-                .map(|jar| {
+        let entry = match self.map.entry(key) {
+            dashmap::mapref::entry::Entry::Occupied(entry) => entry.into_ref(),
+            dashmap::mapref::entry::Entry::Vacant(entry) => {
+                let path = self.path.join(segment.filename(block_range, tx_range));
+                let mut jar = NippyJar::load(&path)?;
                 if self.load_filters {
-                    return jar.load_filters()
+                    jar.load_filters()?;
                 }
-                Ok(jar)
-            })??;
-
-            self.map.insert(key, LoadedJar::new(jar)?);
-            Ok(self.map.get(&key).expect("qed").into())
-        }
+                let loaded_jar = LoadedJar::new(jar)?;
+                entry.insert(loaded_jar)
+            }
+        };
+        Ok(entry.downgrade().into())
     }
 
     /// Gets a snapshot segment's block range and transaction range from the provider inner block

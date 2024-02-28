@@ -7,7 +7,7 @@ use reth_primitives::{
 use reth_provider::{BlockReader, DatabaseProviderRW, ProviderError, TransactionsProvider};
 use std::{
     cmp::{max, min},
-    future::poll_fn,
+    future::{poll_fn, Future},
     ops::{Range, RangeInclusive},
     task::{Context, Poll},
 };
@@ -247,12 +247,14 @@ pub trait Stage<DB: Database>: Send + Sync {
 }
 
 /// [Stage] trait extension.
-#[async_trait::async_trait]
 pub trait StageExt<DB: Database>: Stage<DB> {
     /// Utility extension for the `Stage` trait that invokes `Stage::poll_execute_ready`
     /// with [poll_fn] context. For more information see [Stage::poll_execute_ready].
-    async fn execute_ready(&mut self, input: ExecInput) -> Result<(), StageError> {
-        poll_fn(|cx| self.poll_execute_ready(cx, input)).await
+    fn execute_ready(
+        &mut self,
+        input: ExecInput,
+    ) -> impl Future<Output = Result<(), StageError>> + Send {
+        poll_fn(move |cx| self.poll_execute_ready(cx, input))
     }
 }
 

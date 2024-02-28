@@ -104,8 +104,8 @@ struct IntegerListVisitor;
 impl<'de> Visitor<'de> for IntegerListVisitor {
     type Value = IntegerList;
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("a usize array")
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a usize array")
     }
 
     fn visit_seq<E>(self, mut seq: E) -> Result<Self::Value, E::Error>

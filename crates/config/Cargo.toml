@@ -17,9 +17,10 @@ reth-net-nat.workspace = true
 reth-discv4.workspace = true
 reth-primitives.workspace = true
 
-# io
+# serde
 serde.workspace = true
 serde_json.workspace = true
+humantime-serde.workspace = true
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }

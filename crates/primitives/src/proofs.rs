@@ -261,12 +261,9 @@ pub mod triehash {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(feature = "optimism"))]
-    use crate::proofs::calculate_receipt_root;
     use crate::{
-        bloom, constants::EMPTY_ROOT_HASH, hex_literal::hex, proofs::calculate_transaction_root,
-        Address, Block, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, B256, GOERLI,
-        HOLESKY, MAINNET, SEPOLIA, U256,
+        bloom, constants::EMPTY_ROOT_HASH, hex_literal::hex, Block, GenesisAccount, Log, TxType,
+        GOERLI, HOLESKY, MAINNET, SEPOLIA,
     };
     use alloy_primitives::b256;
     use alloy_rlp::Decodable;
@@ -291,7 +288,7 @@ mod tests {
     #[cfg(feature = "optimism")]
     #[test]
     fn check_optimism_receipt_root() {
-        use crate::{Bloom, Bytes, OP_GOERLI};
+        use crate::{Bloom, Bytes, BASE_SEPOLIA};
 
         let cases = [
             // Deposit nonces didn't exist in Bedrock; No need to strip. For the purposes of this
@@ -299,7 +296,7 @@ mod tests {
             (
                 "bedrock",
                 1679079599,
-                b256!("6eefbb5efb95235476654a8bfbf8cb64a4f5f0b0c80b700b0c5964550beee6d7"),
+                b256!("e255fed45eae7ede0556fe4fabc77b0d294d18781a5a581cab09127bc4cd9ffb"),
             ),
             // Deposit nonces introduced in Regolith. They weren't included in the receipt RLP,
             // so we need to strip them - the receipt root will differ.
@@ -540,7 +537,7 @@ mod tests {
                     bloom: Bloom(hex!("00000000000000000000000000000000400000000000000000000000000000000000004000000000000001000000000000000002000000000100000000000000000000000000000000000008000000000000000000000000000000000000000004000000020000000000000000000800000000000000000000000010200100200008000002000000000000000000800000000000000000000002000000000000000000000000000000080000000000000000000000004000000000000000000000000002000000000000000000000000000000000000200000000000000020002000000000000000002000000000000000000000000000000000000000000000").into()),
                 },
             ];
-            let root = calculate_receipt_root_optimism(&receipts, OP_GOERLI.as_ref(), case.1);
+            let root = calculate_receipt_root_optimism(&receipts, BASE_SEPOLIA.as_ref(), case.1);
             assert_eq!(root, case.2);
         }
     }
@@ -562,7 +559,7 @@ mod tests {
             bloom,
         };
         let receipt = vec![receipt];
-        let root = calculate_receipt_root_optimism(&receipt, crate::OP_GOERLI.as_ref(), 0);
+        let root = calculate_receipt_root_optimism(&receipt, crate::BASE_SEPOLIA.as_ref(), 0);
         assert_eq!(root, b256!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"));
     }
 

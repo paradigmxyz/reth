@@ -113,7 +113,7 @@ impl Message {
         // Sign the payload with the secret key using recoverable ECDSA
         let signature: RecoverableSignature = SECP256K1.sign_ecdsa_recoverable(
             &secp256k1::Message::from_slice(keccak256(&payload).as_ref())
-                .expect("is correct MESSAGE_SIZE; qed"),
+                .expect("B256.len() == MESSAGE_SIZE"),
             secret_key,
         );
 

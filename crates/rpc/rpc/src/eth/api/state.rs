@@ -48,25 +48,11 @@ where
         block_id: Option<BlockId>,
     ) -> EthResult<U256> {
         if let Some(BlockId::Number(BlockNumberOrTag::Pending)) = block_id {
-            // lookup transactions in pool
             let address_txs = self.pool().get_transactions_by_sender(address);
-
-            if !address_txs.is_empty() {
-                // get max transaction with the highest nonce
-                let highest_nonce_tx = address_txs
-                    .into_iter()
-                    .reduce(|accum, item| {
-                        if item.transaction.nonce() > accum.transaction.nonce() {
-                            item
-                        } else {
-                            accum
-                        }
-                    })
-                    .expect("Not empty; qed");
-
-                let tx_count = highest_nonce_tx
-                    .transaction
-                    .nonce()
+            if let Some(highest_nonce) =
+                address_txs.iter().map(|item| item.transaction.nonce()).max()
+            {
+                let tx_count = highest_nonce
                     .checked_add(1)
                     .ok_or(RpcInvalidTransactionError::NonceMaxValue)?;
                 return Ok(U256::from(tx_count))

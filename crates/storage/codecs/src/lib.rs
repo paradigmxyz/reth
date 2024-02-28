@@ -6,11 +6,10 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![warn(unused_crate_dependencies)]
+// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
+#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
-
-extern crate alloc;
-use alloc::vec::Vec;
 
 pub use codecs_derive::*;
 
@@ -372,7 +371,6 @@ const fn decode_varuint_panic() -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, Bytes};
 
     #[test]
     fn compact_bytes() {

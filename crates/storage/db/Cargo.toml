@@ -57,7 +57,7 @@ rand.workspace = true
 serde_json.workspace = true
 
 tempfile.workspace = true
-test-fuzz = "5"
+test-fuzz.workspace = true
 
 pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion.workspace = true

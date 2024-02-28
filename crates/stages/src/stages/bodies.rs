@@ -114,7 +114,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
-        // Get id for the next tx_num of zero if there are no transactions.
+        // Get id for the next tx_num or zero if there are no transactions.
         let mut next_tx_num = tx_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
@@ -565,7 +565,6 @@ mod tests {
             }
         }
 
-        #[async_trait::async_trait]
         impl ExecuteStageTestRunner for BodyTestRunner {
             type Seed = Vec<SealedBlock>;
 
