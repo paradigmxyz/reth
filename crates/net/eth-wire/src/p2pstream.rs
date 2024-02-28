@@ -892,7 +892,7 @@ mod tests {
             let (mut p2p_stream, _) =
                 UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
-            // Unrolled `disconnect` method
+            // Unrolled `disconnect` method, without compression
             p2p_stream.outgoing_messages.clear();
             let disconnect = P2PMessage::Disconnect(DisconnectReason::SubprotocolSpecific);
             let mut buf = BytesMut::with_capacity(disconnect.length());
