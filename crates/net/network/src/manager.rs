@@ -743,6 +743,14 @@ where
                                     .peers_mut()
                                     .on_incoming_session_established(peer_id, remote_addr);
                             }
+
+                            if direction.is_outgoing() {
+                                this.swarm
+                                    .state_mut()
+                                    .peers_mut()
+                                    .on_active_session_established(peer_id);
+                            }
+
                             this.event_listeners.notify(NetworkEvent::SessionEstablished {
                                 peer_id,
                                 remote_addr,
