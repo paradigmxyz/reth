@@ -1,5 +1,5 @@
 use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Transaction, U256};
-use revm::{Database, Evm, EvmBuilder, Handler, interpreter::Host};
+use revm::{interpreter::Host, Database, Evm, EvmBuilder, Handler};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
 
 /// Trait for configuring the EVM for executing full blocks.
@@ -22,10 +22,21 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         EvmBuilder::default().with_db(db).with_external_context(inspector).build()
     }
 
+    /// Returns a new EVM with the given handler and database.
+    fn evm_with_handler<'a, DB: Database + 'a, I, H: Host>(
+        &self,
+        handler: Handler<'a, H, I, DB>,
+        db: DB,
+    ) -> H {
+        EvmBuilder::default().with_db(db).with_handler(handler).build()
+    }
+
     /// Returns a new EVM with the given handler, inspector, and database.
     fn evm_with_handler_and_inspector<'a, DB: Database + 'a, I, H: Host>(
         &self,
         handler: Handler<'a, H, I, DB>,
+        inspector: I,
+        db: DB,
     ) -> H {
         EvmBuilder::default()
             .with_db(db)
