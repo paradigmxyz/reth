@@ -1,6 +1,5 @@
 use crate::{
     basefee::calculate_next_block_base_fee,
-    block::{generate_valid_header, valid_header_strategy},
     constants,
     constants::{
         ALLOWED_FUTURE_BLOCK_TIME_SECONDS, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH,
@@ -12,8 +11,10 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{BufMut, BytesMut};
-#[cfg(feature = "arbitrary")]
+#[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
+#[cfg(any(test, feature = "arbitrary"))]
+use crate::block::{generate_valid_header, valid_header_strategy};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
