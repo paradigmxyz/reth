@@ -102,7 +102,7 @@ impl TxnManager {
 mod read_transactions {
     use crate::{
         environment::EnvPtr, error::mdbx_result, transaction::TransactionPtr,
-        txn_manager::TxnManager, Error,
+        txn_manager::TxnManager,
     };
     use dashmap::DashMap;
     use std::{
