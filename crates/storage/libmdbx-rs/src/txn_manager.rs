@@ -208,9 +208,9 @@ mod read_transactions {
                                     //
                                     // We use `mdbx_txn_reset` instead of `mdbx_txn_abort` here to
                                     // prevent MDBX from reusing the pointer of the aborted
-                                    // tranasction for new read-only transactions. This is
+                                    // transaction for new read-only transactions. This is
                                     // important because we store the pointer in the `active` list
-                                    // and we don't want to accidentally abort a new transaction.
+                                    // and assume that it is unique.
                                     //
                                     // See https://erthink.github.io/libmdbx/group__c__transactions.html#gae9f34737fe60b0ba538d5a09b6a25c8d for more info.
                                     mdbx_result(unsafe { ffi::mdbx_txn_reset(txn_ptr) }),
