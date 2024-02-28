@@ -90,35 +90,33 @@ impl Hardfork {
 
     /// Retrieves the activation block for the specified hardfork on the given chain.
     pub fn activation_block(&self, chain: Chain) -> Option<u64> {
-            if chain == Chain::mainnet() {
-                return self.mainnet_activation_block();
-            }
-            if chain == Chain::sepolia() {
-                return self.sepolia_activation_block();
-            }
-            if chain == Chain::holesky() {
-                return self.holesky_activation_block();
-            }
-            if chain == Chain::base_sepolia() {
-                #[cfg(feature = "optimism")]
-                {
-                    return self.base_sepolia_activation_block();
-                }
-                #[cfg(not(feature = "optimism"))]
-                {
-                    return None;
-                }
-            } 
+        if chain == Chain::mainnet() {
+            return self.mainnet_activation_block();
+        }
+        if chain == Chain::sepolia() {
+            return self.sepolia_activation_block();
+        }
+        if chain == Chain::holesky() {
+            return self.holesky_activation_block();
+        }
+        if chain == Chain::base_sepolia() {
             #[cfg(feature = "optimism")]
-            if chain == Chain::base_mainnet() {
-                return self.base_mainnet_activation_block();
+            {
+                return self.base_sepolia_activation_block();
             }
             #[cfg(not(feature = "optimism"))]
-            None
+            {
+                return None;
+            }
+        }
+        #[cfg(feature = "optimism")]
+        if chain == Chain::base_mainnet() {
+            return self.base_mainnet_activation_block();
+        }
+        #[cfg(not(feature = "optimism"))]
+        None
     }
-    
-    
-    
+
     /// Retrieves the activation block for the specified hardfork on the Ethereum mainnet.
     pub fn mainnet_activation_block(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
@@ -150,10 +148,12 @@ impl Hardfork {
     /// Retrieves the activation block for the specified hardfork on the Sepolia testnet.
     pub fn sepolia_activation_block(&self) -> Option<u64> {
         match self {
-            Hardfork::Paris => Some(1735371), 
-            Hardfork::Shanghai => todo!(), 
+            Hardfork::Paris => Some(1735371),
+            Hardfork::Shanghai => todo!(),
             Hardfork::Cancun => todo!(),
-            _ => Some(0), //todo: potential dangerous if forget to add a new fork number here, might refactor to have list of fork happen before chain initialized for each chain 
+            _ => Some(0), /* todo: potential dangerous if forget to add a new fork number here,
+                           * might refactor to have list of fork happen before chain initialized
+                           * for each chain */
         }
     }
 
@@ -184,7 +184,7 @@ impl Hardfork {
     /// Retrieves the activation block for the specified hardfork on the holesky testnet.
     fn holesky_activation_block(&self) -> Option<u64> {
         match self {
-            Hardfork::Shanghai => todo!(), 
+            Hardfork::Shanghai => todo!(),
             Hardfork::Cancun => todo!(),
             _ => Some(0),
         }
@@ -287,9 +287,6 @@ impl Hardfork {
             _ => Some(0),
         }
     }
-
-
-
 }
 
 impl FromStr for Hardfork {
