@@ -60,8 +60,8 @@ impl<DB> Inspector<DB> for DummyInspector
 where
     DB: Database,
 {
-    fn step(&mut self, interp: &mut Interpreter, context: &mut EvmContext<DB>) {
-        if let Some(opcode) = OpCode::new(interp.op()) {
+    fn step(&mut self, interp: &mut Interpreter, _context: &mut EvmContext<DB>) {
+        if let Some(opcode) = OpCode::new(interp.current_opcode()) {
             self.ret_val.push(format!("{}: {}", interp.program_counter(), opcode));
         }
     }
