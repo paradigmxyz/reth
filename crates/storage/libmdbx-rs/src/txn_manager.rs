@@ -201,9 +201,12 @@ mod read_transactions {
 
                         if duration > self.max_duration {
                             let result = tx.txn_execute(|txn_ptr| {
-                                // Abort the transaction
-                                let result = mdbx_result(unsafe { ffi::mdbx_txn_reset(txn_ptr) });
-                                (txn_ptr, duration, result.err())
+                                (
+                                    txn_ptr,
+                                    duration,
+                                    // Abort the transaction
+                                    mdbx_result(unsafe { ffi::mdbx_txn_reset(txn_ptr) }),
+                                )
                             });
 
                             match result {
@@ -229,10 +232,10 @@ mod read_transactions {
                     for (ptr, open_duration, err) in aborted_active.iter().copied() {
                         // Try deleting the transaction from the list of active transactions.
                         let was_in_active = self.remove_active(ptr).is_some();
-                        if let Some(err) = err {
-                            if was_in_active && err != Error::BadSignature {
-                                // If the transaction was in the list of active transactions and the
-                                // error code is not `EBADSIGN`, then user didn't abort it.
+                        if let Err(err) = err {
+                            if was_in_active {
+                                // If the transaction was in the list of active transactions then
+                                // user didn't abort it and we failed to do so.
                                 error!(target: "libmdbx", %err, ?open_duration, "Failed to abort the long-lived read transaction");
                             }
                         } else {

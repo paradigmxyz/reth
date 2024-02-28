@@ -351,7 +351,7 @@ where
                     self.env.txn_manager().remove_active_read_transaction(txn);
 
                     unsafe {
-                        let _ = mdbx_result(ffi::mdbx_txn_abort(txn));
+                        ffi::mdbx_txn_abort(txn);
                     }
                 } else {
                     let (sender, rx) = sync_channel(0);

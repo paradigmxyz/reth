@@ -192,9 +192,10 @@ impl Error {
             Error::DecodeErrorLenDiff | Error::DecodeError => ffi::MDBX_EINVAL,
             Error::Access => ffi::MDBX_EACCESS,
             Error::TooLarge => ffi::MDBX_TOO_LARGE,
-            Error::BadSignature | Error::ReadTransactionAborted => ffi::MDBX_EBADSIGN,
+            Error::BadSignature => ffi::MDBX_EBADSIGN,
             Error::WriteTransactionUnsupportedInReadOnlyMode => ffi::MDBX_EACCESS,
             Error::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
+            Error::ReadTransactionAborted => -69000, // Custom non-MDBX error code
             Error::Other(err_code) => *err_code,
         }
     }
