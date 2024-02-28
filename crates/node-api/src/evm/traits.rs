@@ -21,29 +21,6 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     fn evm_with_inspector<'a, DB: Database + 'a, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB> {
         EvmBuilder::default().with_db(db).with_external_context(inspector).build()
     }
-
-    /// Returns a new EVM with the given handler and database.
-    fn evm_with_handler<'a, DB: Database + 'a, I, H: Host>(
-        &self,
-        handler: Handler<'a, H, I, DB>,
-        db: DB,
-    ) -> H {
-        EvmBuilder::default().with_db(db).with_handler(handler).build()
-    }
-
-    /// Returns a new EVM with the given handler, inspector, and database.
-    fn evm_with_handler_and_inspector<'a, DB: Database + 'a, I, H: Host>(
-        &self,
-        handler: Handler<'a, H, I, DB>,
-        inspector: I,
-        db: DB,
-    ) -> H {
-        EvmBuilder::default()
-            .with_db(db)
-            .with_external_context(inspector)
-            .with_handler(handler)
-            .build()
-    }
 }
 
 /// This represents the set of methods used to configure the EVM's environment before block
