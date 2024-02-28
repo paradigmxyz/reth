@@ -2,8 +2,13 @@
 //! types.
 
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use reth_codecs::derive_arbitrary;
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
+
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::{collection::vec, prelude::*};
+#[cfg(any(test, feature = "arbitrary"))]
+use reth_primitives::{generate_valid_header, valid_header_strategy};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -38,13 +43,45 @@ pub struct GetBlockHeaders {
 }
 
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[add_arbitrary_tests(rlp, 10)]
 pub struct BlockHeaders(
     /// The requested headers.
     pub Vec<Header>,
 );
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for BlockHeaders {
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        let headers_strategy = vec(valid_header_strategy(), 0..10); // Adjust the range as needed
+
+        headers_strategy.prop_map(BlockHeaders).boxed()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let headers_count: usize = u.int_in_range(0..=10)?;
+        let mut headers = Vec::with_capacity(headers_count);
+
+        for _ in 0..headers_count {
+            headers.push(generate_valid_header(
+                u.arbitrary()?,
+                u.arbitrary()?,
+                u.arbitrary()?,
+                u.arbitrary()?,
+                u.arbitrary()?,
+            ))
+        }
+
+        Ok(BlockHeaders(headers))
+    }
+}
 
 impl From<Vec<Header>> for BlockHeaders {
     fn from(headers: Vec<Header>) -> Self {
