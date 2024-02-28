@@ -216,33 +216,6 @@ pub(crate) fn mdbx_result(err_code: c_int) -> Result<bool> {
     }
 }
 
-#[cfg(feature = "read-tx-timeouts")]
-#[inline]
-pub(crate) fn mdbx_result_with_tx_kind<K: TransactionKind>(
-    err_code: c_int,
-    txn: *mut ffi::MDBX_txn,
-    txn_manager: &TxnManager,
-) -> Result<bool> {
-    if K::IS_READ_ONLY &&
-        err_code == ffi::MDBX_EBADSIGN &&
-        txn_manager.remove_aborted_read_transaction(txn).is_some()
-    {
-        return Err(Error::ReadTransactionAborted)
-    }
-
-    mdbx_result(err_code)
-}
-
-#[cfg(not(feature = "read-tx-timeouts"))]
-#[inline]
-pub(crate) fn mdbx_result_with_tx_kind<K: TransactionKind>(
-    err_code: c_int,
-    _txn: *mut ffi::MDBX_txn,
-    _txn_manager: &TxnManager,
-) -> Result<bool> {
-    mdbx_result(err_code)
-}
-
 #[macro_export]
 macro_rules! mdbx_try_optional {
     ($expr:expr) => {{

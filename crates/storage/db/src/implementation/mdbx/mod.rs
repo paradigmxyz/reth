@@ -96,17 +96,19 @@ impl Database for DatabaseEnv {
     type TXMut = tx::Tx<RW>;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
-        Ok(Tx::new_with_metrics(
+        Tx::new_with_metrics(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.metrics.as_ref().cloned(),
-        ))
+        )
+        .map_err(|e| DatabaseError::InitTx(e.into()))
     }
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
-        Ok(Tx::new_with_metrics(
+        Tx::new_with_metrics(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.metrics.as_ref().cloned(),
-        ))
+        )
+        .map_err(|e| DatabaseError::InitTx(e.into()))
     }
 }
 
