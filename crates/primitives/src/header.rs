@@ -882,6 +882,7 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
     type Strategy = proptest::strategy::BoxedStrategy<SealedHeader>;
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         // Directly generate values for Header and BlockHash using Unstructured

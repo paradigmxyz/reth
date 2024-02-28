@@ -33,7 +33,7 @@ pub struct Block {
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for Block {
     type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::{collection::vec, prelude::*};
@@ -337,7 +337,7 @@ pub struct SealedBlock {
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for SealedBlock {
     type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::{collection::vec, prelude::*};
@@ -724,12 +724,10 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
     }
 }
 
-use proptest::prelude::BoxedStrategy;
-
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for BlockBody {
     type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::{collection::vec, prelude::*};
