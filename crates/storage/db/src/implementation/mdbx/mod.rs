@@ -63,9 +63,18 @@ pub struct DatabaseArguments {
     log_level: Option<LogLevel>,
     /// Maximum duration of a read transaction. If [None], the default value is used.
     max_read_transaction_duration: Option<MaxReadTransactionDuration>,
-    /// Mdbx exclusive flag. If [None], the default value is used.
-    ///
-    /// See docs at: <https://libmdbx.dqdkfa.ru/group__c__opening.html#gga9138119a904355d245777c4119534061aa516c74e6fed22c9812bb909c8c459ed>
+    /// Open environment in exclusive/monopolistic mode. If [None], the default value is used.
+    /// 
+    /// This can be used as a replacement for `MDB_NOLOCK`, which don't supported by MDBX. In this way, you can get the minimal overhead, but with the correct multi-process and multi-thread locking.
+    /// 
+    /// If `true` = open environment in exclusive/monopolistic mode or return `MDBX_BUSY` if environment already used by other process. The main feature of the exclusive mode is the ability to open the environment placed on a network share.
+    /// 
+    /// If `false` = open environment in cooperative mode, i.e. for multi-process access/interaction/cooperation. The main requirements of the cooperative mode are:
+    /// - Data files MUST be placed in the LOCAL file system, but NOT on a network share.
+    /// - Environment MUST be opened only by LOCAL processes, but NOT over a network.
+    /// - OS kernel (i.e. file system and memory mapping implementation) and all processes that open the given environment MUST be running in the physically single RAM with cache-coherency. The only exception for cache-consistency requirement is Linux on MIPS architecture, but this case has not been tested for a long time).
+    /// 
+    /// This flag affects only at environment opening but can't be changed after.
     exclusive: Option<bool>,
 }
 
