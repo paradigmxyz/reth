@@ -63,31 +63,29 @@ impl TxnManager {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
                             let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
-                            sender
-                                .send(
-                                    mdbx_result(unsafe {
-                                        ffi::mdbx_txn_begin_ex(
-                                            env.0,
-                                            parent.0,
-                                            flags,
-                                            &mut txn,
-                                            ptr::null_mut(),
-                                        )
-                                    })
-                                    .map(|_| TxnPtr(txn)),
+                            let res = mdbx_result(unsafe {
+                                ffi::mdbx_txn_begin_ex(
+                                    env.0,
+                                    parent.0,
+                                    flags,
+                                    &mut txn,
+                                    ptr::null_mut(),
                                 )
-                                .unwrap();
+                            })
+                            .map(|_| TxnPtr(txn));
 
                             #[cfg(feature = "read-tx-timeouts")]
                             {
                                 use crate::transaction::TransactionKind;
 
-                                if flags == crate::transaction::RO::OPEN_FLAGS {
+                                if res.is_ok() && flags == crate::transaction::RO::OPEN_FLAGS {
                                     if let Some(read_transactions) = &read_transactions {
                                         read_transactions.add_active(txn);
                                     }
                                 }
                             }
+
+                            sender.send(res).unwrap();
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
                             #[cfg(feature = "read-tx-timeouts")]
