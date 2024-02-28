@@ -63,20 +63,17 @@ impl TxnManager {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
                             let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
-                            sender
-                                .send(
-                                    mdbx_result(unsafe {
-                                        ffi::mdbx_txn_begin_ex(
-                                            env.0,
-                                            parent.0,
-                                            flags,
-                                            &mut txn,
-                                            ptr::null_mut(),
-                                        )
-                                    })
-                                    .map(|_| TxnPtr(txn)),
+                            let res = mdbx_result(unsafe {
+                                ffi::mdbx_txn_begin_ex(
+                                    env.0,
+                                    parent.0,
+                                    flags,
+                                    &mut txn,
+                                    ptr::null_mut(),
                                 )
-                                .unwrap();
+                            })
+                            .map(|_| TxnPtr(txn));
+                            sender.send(res).unwrap();
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
                             #[cfg(feature = "read-tx-timeouts")]
@@ -288,12 +285,10 @@ mod read_transactions {
     #[cfg(test)]
     mod tests {
         use crate::{
-            txn_manager::{
-                read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, TxnManagerMessage, TxnPtr,
-            },
-            Environment, Error, MaxReadTransactionDuration, TransactionKind, RO,
+            txn_manager::read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, Environment, Error,
+            MaxReadTransactionDuration,
         };
-        use std::{ptr, sync::mpsc::sync_channel, thread::sleep, time::Duration};
+        use std::{thread::sleep, time::Duration};
         use tempfile::tempdir;
 
         #[test]

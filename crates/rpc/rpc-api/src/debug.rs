@@ -21,8 +21,10 @@ pub trait DebugApi {
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
     /// Returns a EIP-2718 binary-encoded transaction.
+    ///
+    /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
     #[method(name = "getRawTransaction")]
-    async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes>;
+    async fn raw_transaction(&self, hash: B256) -> RpcResult<Option<Bytes>>;
 
     /// Returns an array of EIP-2718 binary-encoded transactions for the given [BlockId].
     #[method(name = "getRawTransactions")]
