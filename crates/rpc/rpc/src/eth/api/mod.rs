@@ -36,7 +36,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex, RWLock};
 
 mod block;
 mod call;
@@ -472,7 +472,7 @@ struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// An interface to interact with the network
     network: Network,
     /// All configured Signers
-    signers: Mutex<Vec<Box<dyn EthSigner>>>,
+    signers: RWLock<Vec<Box<dyn EthSigner>>>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache,
     /// The async gas oracle frontend for gas price suggestions

@@ -50,9 +50,11 @@ pub(crate) struct DevSigner {
 
 impl DevSigner {
     pub fn new() -> DevSigner {
-        let secret = SecretKey::new(&mut rand::thread_rng());
-        let addresses = vec![];
-        let accounts = HashMap::from([(Address::default(), secret)]);
+        let (pk, sk) = secp256k1::generate_keypair(&mut rand::thread_rng());
+        
+        let address = reth_primitives::public_key_to_address(sk);
+        let addresses = vec![address]; 
+        let accounts = HashMap::from([(address, pk)]);
         DevSigner { addresses, accounts }
     }
 

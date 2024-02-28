@@ -42,9 +42,8 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
             .ok_or(SignError::NoAccount)
     }
 
-    pub(crate) async fn add_signer(&self) -> EthResult<()> {
-        let dev_signer = DevSigner::new();
-        self.inner.signers.lock().await.push(std::boxed::Box::new(dev_signer));
+    pub(crate) async fn add_signer<S:EthSigner + 'static>(&self, s: S) -> EthResult<()> {
+        self.inner.signers.lock().await.push(std::boxed::Box::new(s));
         Ok(())
     }
 }
