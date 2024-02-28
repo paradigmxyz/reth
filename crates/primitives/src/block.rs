@@ -3,7 +3,9 @@ use crate::{
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use reth_codecs::add_arbitrary_tests;
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::prelude::{any, prop_compose};
+use reth_codecs::derive_arbitrary;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
@@ -14,132 +16,31 @@ pub use reth_rpc_types::{
 /// Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
+#[derive_arbitrary(rlp, 25)]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
-#[add_arbitrary_tests(rlp, 25)]
 #[rlp(trailing)]
 pub struct Block {
     /// Block header.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "valid_header_strategy()"))]
     pub header: Header,
     /// Transactions in this block.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
+        )
+    )]
     pub body: Vec<TransactionSigned>,
     /// Ommers/uncles header.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
+    )]
     pub ommers: Vec<Header>,
     /// Block withdrawals.
     pub withdrawals: Option<Withdrawals>,
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for Block {
-    type Parameters = ();
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::{collection::vec, prelude::*};
-
-        prop_compose! {
-            fn valid_header_strategy()(
-                mut header in any::<Header>(),
-                eip_4844_active in any::<bool>(),
-                blob_gas_used in any::<u64>(),
-                excess_blob_gas in any::<u64>(),
-                parent_beacon_block_root in any::<B256>()
-            ) -> Header {
-                // EIP-1559 logic
-                if header.base_fee_per_gas.is_none() {
-                    // If EIP-1559 is not active, clear related fields
-                    header.withdrawals_root = None;
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                } else if header.withdrawals_root.is_none() {
-                    // If EIP-4895 is not active, clear related fields
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                } else if eip_4844_active {
-                    // Set fields based on EIP-4844 being active
-                    header.blob_gas_used = Some(blob_gas_used);
-                    header.excess_blob_gas = Some(excess_blob_gas);
-                    header.parent_beacon_block_root = Some(parent_beacon_block_root);
-                } else {
-                    // If EIP-4844 is not active, clear related fields
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                }
-
-                header
-            }
-        }
-
-        let header_strategy = valid_header_strategy();
-        let body_strategy = vec(any::<TransactionSigned>(), 0..25);
-        let ommers_strategy = vec(valid_header_strategy(), 0..=2);
-        let withdrawals_strategy = any::<Option<Withdrawals>>();
-
-        (header_strategy, body_strategy, ommers_strategy, withdrawals_strategy)
-            .prop_map(|(header, body, ommers, withdrawals)| Self {
-                header,
-                body,
-                ommers,
-                withdrawals,
-            })
-            .boxed()
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for Block {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut header: Header = Header::arbitrary(u)?;
-        let blob_gas_used: u64 = u.arbitrary()?;
-        let excess_blob_gas: u64 = u.arbitrary()?;
-        let parent_beacon_block_root: B256 = u.arbitrary()?;
-        // Determine if EIP-4844 is active using a random bool
-        let eip_4844_active: bool = u.arbitrary()?;
-        // Set fields based on EIP-1559 activation
-        if header.base_fee_per_gas.is_none() {
-            // EIP-1559 not active, clear related fields
-            header.withdrawals_root = None;
-            header.blob_gas_used = None;
-            header.excess_blob_gas = None;
-            header.parent_beacon_block_root = None;
-        } else {
-            // 4895 is not active
-            if header.withdrawals_root.is_none() {
-                header.blob_gas_used = None;
-                header.excess_blob_gas = None;
-                header.parent_beacon_block_root = None;
-            } else {
-                // 4895 is active
-                if eip_4844_active {
-                    // EIP-4844 is active
-                    header.blob_gas_used = Some(blob_gas_used);
-                    header.excess_blob_gas = Some(excess_blob_gas);
-                    header.parent_beacon_block_root = Some(parent_beacon_block_root);
-                } else {
-                    // EIP-4844 is not active
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                };
-            }
-        }
-        let body: Vec<TransactionSigned> = u.arbitrary()?;
-
-        let ommers_count: usize = u.int_in_range(0..=2)?;
-        let mut ommers = Vec::with_capacity(ommers_count);
-        for _ in 0..ommers_count {
-            let ommer: Header = Header::arbitrary(u)?;
-            ommers.push(ommer);
-        }
-
-        let withdrawals: Option<Withdrawals> = u.arbitrary()?;
-
-        Ok(Block { header, body, ommers, withdrawals })
-    }
 }
 
 impl Block {
@@ -318,89 +219,41 @@ impl std::ops::DerefMut for BlockWithSenders {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
+#[derive_arbitrary(rlp)]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
-#[add_arbitrary_tests(rlp)]
 #[rlp(trailing)]
 pub struct SealedBlock {
     /// Locked block header.
     pub header: SealedHeader,
     /// Transactions with signatures.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
+        )
+    )]
     pub body: Vec<TransactionSigned>,
     /// Ommer/uncle headers
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
+    )]
     pub ommers: Vec<Header>,
     /// Block withdrawals.
     pub withdrawals: Option<Withdrawals>,
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for SealedBlock {
-    type Parameters = ();
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::{collection::vec, prelude::*};
-        prop_compose! {
-            fn valid_header_strategy()(
-                mut header in any::<Header>(),
-                eip_4844_active in any::<bool>(),
-                blob_gas_used in any::<u64>(),
-                excess_blob_gas in any::<u64>(),
-                parent_beacon_block_root in any::<B256>()
-            ) -> Header {
-                // EIP-1559 logic
-                if header.base_fee_per_gas.is_none() {
-                    // If EIP-1559 is not active, clear related fields
-                    header.withdrawals_root = None;
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                } else if header.withdrawals_root.is_none() {
-                    // If EIP-4895 is not active, clear related fields
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                } else if eip_4844_active {
-                    // Set fields based on EIP-4844 being active
-                    header.blob_gas_used = Some(blob_gas_used);
-                    header.excess_blob_gas = Some(excess_blob_gas);
-                    header.parent_beacon_block_root = Some(parent_beacon_block_root);
-                } else {
-                    // If EIP-4844 is not active, clear related fields
-                    header.blob_gas_used = None;
-                    header.excess_blob_gas = None;
-                    header.parent_beacon_block_root = None;
-                }
-
-                header
-            }
-        }
-
-        let body_strategy = vec(any::<TransactionSigned>(), 0..10);
-        let ommers_strategy = vec(valid_header_strategy(), 0..2);
-        let withdrawals_strategy = any::<Option<Withdrawals>>();
-
-        (valid_header_strategy(), body_strategy, ommers_strategy, withdrawals_strategy)
-            .prop_map(|(header, body, ommers, withdrawals)| Self {
-                header: header.seal_slow(),
-                body,
-                ommers,
-                withdrawals,
-            })
-            .boxed()
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for SealedBlock {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut header: Header = Header::arbitrary(u)?;
-        let blob_gas_used: u64 = u.arbitrary()?;
-        let excess_blob_gas: u64 = u.arbitrary()?;
-        let parent_beacon_block_root: B256 = u.arbitrary()?;
-        // Determine if EIP-4844 is active using a random bool
-        let eip_4844_active: bool = u.arbitrary()?;
+prop_compose! {
+    fn valid_header_strategy()(
+        mut header in any::<Header>(),
+        eip_4844_active in any::<bool>(),
+        blob_gas_used in any::<u64>(),
+        excess_blob_gas in any::<u64>(),
+        parent_beacon_block_root in any::<B256>()
+    ) -> Header {
         // EIP-1559 logic
         if header.base_fee_per_gas.is_none() {
             // If EIP-1559 is not active, clear related fields
@@ -424,47 +277,11 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedBlock {
             header.excess_blob_gas = None;
             header.parent_beacon_block_root = None;
         }
-        let body: Vec<TransactionSigned> = u.arbitrary()?;
 
-        let ommers_count: usize = u.int_in_range(0..=2)?;
-        let mut ommers = Vec::with_capacity(ommers_count);
-        for _ in 0..ommers_count {
-            let mut ommer: Header = Header::arbitrary(u)?;
-            let blob_gas_used: u64 = u.arbitrary()?;
-            let excess_blob_gas: u64 = u.arbitrary()?;
-            let parent_beacon_block_root: B256 = u.arbitrary()?;
-            let eip_4844_active: bool = u.arbitrary()?;
-            if ommer.base_fee_per_gas.is_none() {
-                // If EIP-1559 is not active, clear related fields
-                ommer.withdrawals_root = None;
-                ommer.blob_gas_used = None;
-                ommer.excess_blob_gas = None;
-                ommer.parent_beacon_block_root = None;
-            } else if ommer.withdrawals_root.is_none() {
-                // If EIP-4895 is not active, clear related fields
-                ommer.blob_gas_used = None;
-                ommer.excess_blob_gas = None;
-                ommer.parent_beacon_block_root = None;
-            } else if eip_4844_active {
-                // Set fields based on EIP-4844 being active
-                ommer.blob_gas_used = Some(blob_gas_used);
-                ommer.excess_blob_gas = Some(excess_blob_gas);
-                ommer.parent_beacon_block_root = Some(parent_beacon_block_root);
-            } else {
-                // If EIP-4844 is not active, clear related fields
-                ommer.blob_gas_used = None;
-                ommer.excess_blob_gas = None;
-                ommer.parent_beacon_block_root = None;
-            }
-
-            ommers.push(ommer);
-        }
-
-        let withdrawals: Option<Withdrawals> = u.arbitrary()?;
-
-        Ok(SealedBlock { header: header.seal_slow(), body, ommers, withdrawals })
+        header
     }
 }
+
 impl SealedBlock {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]
@@ -692,65 +509,28 @@ impl std::ops::DerefMut for SealedBlockWithSenders {
 /// A response to `GetBlockBodies`, containing bodies if any bodies were found.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
+#[derive_arbitrary(rlp, 10)]
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
-#[add_arbitrary_tests(rlp, 10)]
 #[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(
+            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
+        )
+    )]
     pub transactions: Vec<TransactionSigned>,
     /// Uncle headers for the given block
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
+    )]
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let transactions: Vec<TransactionSigned> = u.arbitrary()?;
-
-        let ommers_count: usize = u.int_in_range(0..=2)?;
-        let mut ommers = Vec::with_capacity(ommers_count);
-        for _ in 0..ommers_count {
-            let sealed_header: SealedHeader = u.arbitrary()?;
-            ommers.push(sealed_header.header().clone());
-        }
-
-        let withdrawals: Option<Withdrawals> = u.arbitrary()?;
-
-        Ok(BlockBody { transactions, ommers, withdrawals })
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for BlockBody {
-    type Parameters = ();
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::{collection::vec, prelude::*};
-
-        let headers_strategy = vec(
-            {
-                <Self as Default>::default();
-                SealedHeader::arbitrary_with(())
-            },
-            0..=2,
-        )
-        .prop_map(|sealed_headers| {
-            sealed_headers.into_iter().map(|sh| sh.header().clone()).collect::<Vec<_>>()
-        });
-
-        (vec(any::<TransactionSigned>(), 0..=100), headers_strategy, any::<Option<Withdrawals>>())
-            .prop_map(|(transactions, ommers, withdrawals)| Self {
-                transactions,
-                ommers,
-                withdrawals,
-            })
-            .boxed()
-    }
 }
 
 impl BlockBody {
