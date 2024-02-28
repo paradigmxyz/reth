@@ -113,7 +113,7 @@ impl Hardfork {
         if chain == Chain::base_mainnet() {
             return self.base_mainnet_activation_block();
         }
-        #[cfg(not(feature = "optimism"))]
+        
         None
     }
 
@@ -215,7 +215,7 @@ impl Hardfork {
         if chain == Chain::base_mainnet() {
             return self.base_mainnet_activation_timestamp();
         }
-        #[cfg(not(feature = "optimism"))]
+
         None
     }
 
