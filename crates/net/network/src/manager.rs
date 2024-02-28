@@ -18,7 +18,6 @@
 use crate::{
     config::NetworkConfig,
     discovery::Discovery,
-    duration_metered_exec,
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
@@ -900,72 +899,63 @@ where
             this.on_block_import_result(outcome);
         }
 
-        let acc = &mut poll_durations.acc_network_handle;
-        duration_metered_exec!(
-            {
-                // process incoming messages from a handle
-                loop {
-                    match this.from_handle_rx.poll_next_unpin(cx) {
-                        Poll::Pending => break,
-                        Poll::Ready(None) => {
-                            // This is only possible if the channel was deliberately closed since we
-                            // always have an instance of
-                            // `NetworkHandle`
-                            error!("Network message channel closed.");
-                            return Poll::Ready(())
-                        }
-                        Poll::Ready(Some(msg)) => this.on_handle_message(msg),
-                    };
+        // process incoming messages from a handle
+        let start_network_handle = Instant::now();
+        loop {
+            match this.from_handle_rx.poll_next_unpin(cx) {
+                Poll::Pending => break,
+                Poll::Ready(None) => {
+                    // This is only possible if the channel was deliberately closed since we
+                    // always have an instance of
+                    // `NetworkHandle`
+                    error!("Network message channel closed.");
+                    return Poll::Ready(())
                 }
-            },
-            acc
-        );
+                Poll::Ready(Some(msg)) => this.on_handle_message(msg),
+            };
+        }
 
-        let acc = &mut poll_durations.acc_swarm;
-        duration_metered_exec!(
-            {
-                // This loop drives the entire state of network and does a lot of work.
-                // Under heavy load (many messages/events), data may arrive faster than it can be
-                // processed (incoming messages/requests -> events), and it is
-                // possible that more data has already arrived by the time an
-                // internal event is processed. Which could turn this loop into a
-                // busy loop.  Without yielding back to the executor, it can starve other tasks
-                // waiting on that executor to execute them, or drive underlying
-                // resources To prevent this, we preemptively return control when
-                // the `budget` is exhausted. The value itself is chosen somewhat
-                // arbitrarily, it is high enough so the swarm can make meaningful progress
-                // but low enough that this loop does not starve other tasks for too long.
-                // If the budget is exhausted we manually yield back control to the (coop)
-                // scheduler. This manual yield point should prevent situations where polling
-                // appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
-                // And tokio's docs on cooperative scheduling
-                // <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
-                //
-                // Testing has shown that this loop naturally reaches the pending state within 1-5
-                // iterations in << 100µs in most cases. On average it requires ~50µs, which is
-                // inside the range of what's recommended as rule of thumb.
-                // <https://ryhl.io/blog/async-what-is-blocking/>
-                let mut budget = 10;
+        poll_durations.acc_network_handle = start_network_handle.elapsed();
 
-                loop {
-                    // advance the swarm
-                    match this.swarm.poll_next_unpin(cx) {
-                        Poll::Pending | Poll::Ready(None) => break,
-                        Poll::Ready(Some(event)) => this.on_swarm_event(event),
-                    }
+        // This loop drives the entire state of network and does a lot of work. Under heavy load
+        // (many messages/events), data may arrive faster than it can be processed (incoming
+        // messages/requests -> events), and it is possible that more data has already arrived by
+        // the time an internal event is processed. Which could turn this loop into a busy loop.
+        // Without yielding back to the executor, it can starve other tasks waiting on that
+        // executor to execute them, or drive underlying resources To prevent this, we
+        // preemptively return control when the `budget` is exhausted. The value itself is chosen
+        // somewhat arbitrarily, it is high enough so the swarm can make meaningful progress but
+        // low enough that this loop does not starve other tasks for too long. If the budget is
+        // exhausted we manually yield back control to the (coop) scheduler. This manual yield
+        // point should prevent situations where polling appears to be frozen. See also
+        // <https://tokio.rs/blog/2020-04-preemption> And tokio's docs on cooperative scheduling
+        // <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
+        //
+        // Testing has shown that this loop naturally reaches the pending state within 1-5
+        // iterations in << 100µs in most cases. On average it requires ~50µs, which is inside the
+        // range of what's recommended as rule of thumb.
+        // <https://ryhl.io/blog/async-what-is-blocking/>
+        let mut budget = 10;
 
-                    // ensure we still have enough budget for another iteration
-                    budget -= 1;
-                    if budget == 0 {
-                        trace!(target: "net", budget=10, "exhausted network manager budget");
-                        // make sure we're woken up again
-                        cx.waker().wake_by_ref();
-                        break
-                    }
-                }
-            },
-            acc
-        );
+        loop {
+            // advance the swarm
+            match this.swarm.poll_next_unpin(cx) {
+                Poll::Pending | Poll::Ready(None) => break,
+                Poll::Ready(Some(event)) => this.on_swarm_event(event),
+            }
+
+            // ensure we still have enough budget for another iteration
+            budget -= 1;
+            if budget == 0 {
+                trace!(target: "net", budget=10, "exhausted network manager budget");
+                // make sure we're woken up again
+                cx.waker().wake_by_ref();
+                break
+            }
+        }
+
+        poll_durations.acc_swarm =
+            start_network_handle.elapsed() - poll_durations.acc_network_handle;
 
         this.update_poll_metrics(start, poll_durations);
 
