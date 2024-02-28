@@ -318,7 +318,8 @@ mod read_transactions {
             }
 
             // Create a read-only transaction, wait until `MAX_DURATION` time is elapsed so the
-            // manager kills it, use it and observe the `Error::ReadTransactionAborted` error.
+            // manager kills it, use it two times and observe the `Error::ReadTransactionAborted`
+            // error.
             {
                 let tx = env.begin_ro_txn().unwrap();
                 let tx_ptr = tx.txn() as usize;
@@ -329,6 +330,9 @@ mod read_transactions {
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
 
                 assert_eq!(tx.open_db(None).err(), Some(Error::ReadTransactionAborted));
+                assert!(!read_transactions.active.contains_key(&tx_ptr));
+
+                assert_eq!(tx.id().err(), Some(Error::ReadTransactionAborted));
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
             }
         }
