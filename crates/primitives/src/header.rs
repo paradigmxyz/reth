@@ -10,7 +10,7 @@ use alloy_rlp::{
     EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use derive_more::{Deref, DerefMut, From, Into, IntoIterator};
+use derive_more::{Constructor, Deref, DerefMut, From, Into, IntoIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -593,25 +593,9 @@ impl Decodable for Header {
     From,
     Into,
     IntoIterator,
+    Constructor,
 )]
-pub struct Headers(pub Vec<Header>);
-
-impl Headers {
-    /// Create a new Headers instance.
-    pub fn new(headers: Vec<Header>) -> Self {
-        Headers(headers)
-    }
-
-    /// Get an iterator over the headers.
-    pub fn iter(&self) -> std::slice::Iter<'_, Header> {
-        self.0.iter()
-    }
-
-    /// Get a mutable iterator over the headers.
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Header> {
-        self.0.iter_mut()
-    }
-}
+pub struct Headers(#[into_iterator(owned, ref, ref_mut)] pub Vec<Header>);
 
 impl FromIterator<Header> for Headers {
     fn from_iter<T: IntoIterator<Item = Header>>(iter: T) -> Self {
