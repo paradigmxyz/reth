@@ -69,29 +69,27 @@ impl TxnManager {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
                             let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
-                            sender
-                                .send(
-                                    mdbx_result(unsafe {
-                                        ffi::mdbx_txn_begin_ex(
-                                            env.0,
-                                            parent.0,
-                                            flags,
-                                            &mut txn,
-                                            ptr::null_mut(),
-                                        )
-                                    })
-                                    .map(|_| TxnPtr(txn)),
+                            let res = mdbx_result(unsafe {
+                                ffi::mdbx_txn_begin_ex(
+                                    env.0,
+                                    parent.0,
+                                    flags,
+                                    &mut txn,
+                                    ptr::null_mut(),
                                 )
-                                .unwrap();
+                            })
+                            .map(|_| TxnPtr(txn));
 
                             #[cfg(feature = "read-tx-timeouts")]
                             {
-                                if flags == crate::transaction::RO::OPEN_FLAGS {
+                                if res.is_ok() && flags == crate::transaction::RO::OPEN_FLAGS {
                                     if let Some(read_transactions) = &read_transactions {
                                         read_transactions.add_active(txn);
                                     }
                                 }
                             }
+
+                            sender.send(res).unwrap();
                         }
                         TxnManagerMessage::Abort { tx, flags, sender } => {
                             #[cfg(feature = "read-tx-timeouts")]
@@ -455,35 +453,7 @@ mod read_transactions {
 
             assert!(read_transactions.active.contains_key(&(txn_ptr.0 as usize)));
         }
-
-        #[test]
-        fn txn_manager_abort_timed_out_transaction() {
-            const MAX_DURATION: Duration = Duration::from_secs(1);
-
-            let dir = tempdir().unwrap();
-            let env = Environment::builder()
-                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
-                .open(dir.path())
-                .unwrap();
-
-            assert!(env.txn_manager().read_transactions.is_some());
-
-            // Create a ro transaction. Abort it by letting it time out.
-            let tx = env.begin_ro_txn().unwrap();
-            let tx_ptr = TxnPtr(tx.txn());
-
-            sleep(MAX_DURATION + READ_TRANSACTIONS_CHECK_INTERVAL);
-
-            // Attempt to abort again throws error.
-            let (sender, rx) = sync_channel(0);
-            env.txn_manager().send_message(TxnManagerMessage::Abort {
-                tx: tx_ptr,
-                flags: RO::OPEN_FLAGS,
-                sender,
-            });
-            assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
-        }
-
+      
         #[test]
         fn txn_manager_reassign_transaction_removes_from_aborted_transactions() {
             const MAX_DURATION: Duration = Duration::from_secs(1);
@@ -516,6 +486,34 @@ mod read_transactions {
                 let tx_ptr = tx.txn() as usize;
                 assert!(!read_transactions.aborted.contains(&tx_ptr));
             }
+        }
+
+        #[test]
+        fn txn_manager_abort_timed_out_transaction() {
+            const MAX_DURATION: Duration = Duration::from_secs(1);
+
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
+                .open(dir.path())
+                .unwrap();
+
+            assert!(env.txn_manager().read_transactions.is_some());
+
+            // Create a ro transaction. Abort it by letting it time out.
+            let tx = env.begin_ro_txn().unwrap();
+            let tx_ptr = TxnPtr(tx.txn());
+
+            sleep(MAX_DURATION + READ_TRANSACTIONS_CHECK_INTERVAL);
+
+            // Attempt to abort again throws error.
+            let (sender, rx) = sync_channel(0);
+            env.txn_manager().send_message(TxnManagerMessage::Abort {
+                tx: tx_ptr,
+                flags: RO::OPEN_FLAGS,
+                sender,
+            });
+            assert_eq!(Err(Error::ReadTransactionAborted), rx.recv().unwrap());
         }
     }
 }
