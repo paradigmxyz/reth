@@ -1276,7 +1276,7 @@ impl TransactionSigned {
             TxType::EIP1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
             TxType::EIP4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             #[cfg(feature = "optimism")]
-            TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
+            TxType::DEPOSIT => Transaction::Deposit(TxDeposit::decode_inner(data)?),
             TxType::Legacy => unreachable!("path for legacy tx has diverged before this method"),
         };
 
@@ -1284,7 +1284,7 @@ impl TransactionSigned {
         let signature = Signature::decode(data)?;
 
         #[cfg(feature = "optimism")]
-        let signature = if tx_type == DEPOSIT_TX_TYPE_ID {
+        let signature = if let TxType::DEPOSIT = tx_type {
             Signature::optimism_deposit_tx_signature()
         } else {
             Signature::decode(data)?
