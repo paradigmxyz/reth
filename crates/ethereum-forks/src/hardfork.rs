@@ -69,11 +69,36 @@ pub enum Hardfork {
 }
 
 impl Hardfork {
-    /// Retrieves the activation block for the specified hardfork on the Ethereum mainnet.
-    pub fn mainnet_activation_block(&self, chain: Chain) -> Option<u64> {
-        if chain != Chain::mainnet() {
-            return None
+    /// Retrieves the consensus type for the specified hardfork.
+    pub fn consensus_type(&self) -> ConsensusType {
+        if *self >= Hardfork::Paris {
+            ConsensusType::ProofOfStake
+        } else {
+            ConsensusType::ProofOfWork
         }
+    }
+
+    /// Checks if the hardfork uses Proof of Stake consensus.
+    pub fn is_proof_of_stake(&self) -> bool {
+        matches!(self.consensus_type(), ConsensusType::ProofOfStake)
+    }
+
+    /// Checks if the hardfork uses Proof of Work consensus.
+    pub fn is_proof_of_work(&self) -> bool {
+        matches!(self.consensus_type(), ConsensusType::ProofOfWork)
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the given chain.
+    pub fn activation_block(&self, chain: Chain) -> Option<u64> {
+        if chain == Chain::mainnet() {
+            return self.mainnet_activation_block()
+        }
+        None
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the Ethereum mainnet.
+    pub fn mainnet_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
         match self {
             Hardfork::Frontier => Some(0),
             Hardfork::Homestead => Some(1150000),
@@ -95,47 +120,21 @@ impl Hardfork {
             // upcoming hardforks
             Hardfork::Cancun => None,
 
-            // optimism hardforks
-            #[cfg(feature = "optimism")]
-            Hardfork::Bedrock => None,
-            #[cfg(feature = "optimism")]
-            Hardfork::Regolith => None,
-            #[cfg(feature = "optimism")]
-            Hardfork::Canyon => None,
-            #[cfg(feature = "optimism")]
-            Hardfork::Ecotone => None,
+            _ => None,
         }
-    }
-
-    /// Retrieves the consensus type for the specified hardfork.
-    pub fn consensus_type(&self) -> ConsensusType {
-        if *self >= Hardfork::Paris {
-            ConsensusType::ProofOfStake
-        } else {
-            ConsensusType::ProofOfWork
-        }
-    }
-
-    /// Checks if the hardfork uses Proof of Stake consensus.
-    pub fn is_proof_of_stake(&self) -> bool {
-        matches!(self.consensus_type(), ConsensusType::ProofOfStake)
-    }
-
-    /// Checks if the hardfork uses Proof of Work consensus.
-    pub fn is_proof_of_work(&self) -> bool {
-        matches!(self.consensus_type(), ConsensusType::ProofOfWork)
     }
 
     /// Retrieves the activation timestamp for the specified hardfork on the given chain.
     pub fn activation_timestamp(&self, chain: Chain) -> Option<u64> {
-        if chain != Chain::mainnet() {
-            return None
+        if chain == Chain::mainnet() {
+            return self.mainnet_activation_timestamp()
         }
-        self.mainnet_activation_timestamp()
+        None
     }
 
     /// Retrieves the activation timestamp for the specified hardfork on the Ethereum mainnet.
     pub fn mainnet_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
         match self {
             Hardfork::Frontier => Some(1438226773),
             Hardfork::Homestead => Some(1457938193),
@@ -153,19 +152,10 @@ impl Hardfork {
             Hardfork::GrayGlacier => Some(1656586444),
             Hardfork::Paris => Some(1663224162),
             Hardfork::Shanghai => Some(1681338455),
+            Hardfork::Cancun => Some(1710338135),
 
             // upcoming hardforks
-            Hardfork::Cancun => None,
-
-            // optimism hardforks
-            #[cfg(feature = "optimism")]
-            Hardfork::Bedrock => None,
-            #[cfg(feature = "optimism")]
-            Hardfork::Regolith => None,
-            #[cfg(feature = "optimism")]
-            Hardfork::Canyon => None,
-            #[cfg(feature = "optimism")]
-            Hardfork::Ecotone => None,
+            _ => None,
         }
     }
 }

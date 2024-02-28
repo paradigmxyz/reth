@@ -2,9 +2,10 @@
 //! and [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)
 //! announcements. Validation and filtering of announcements is network dependent.
 
-use std::{fmt, mem};
+use std::{fmt, fmt::Display, mem};
 
-use derive_more::{Deref, DerefMut, Display};
+use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
+use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
@@ -22,7 +23,13 @@ pub trait ValidateTx68 {
     /// entry. Returns [`ValidationOutcome`] which signals to the caller wether to fetch the
     /// transaction or wether to drop it, and wether the sender of the announcement should be
     /// penalized.
-    fn should_fetch(&self, ty: u8, hash: &TxHash, size: usize) -> ValidationOutcome;
+    fn should_fetch(
+        &self,
+        ty: u8,
+        hash: &TxHash,
+        size: usize,
+        tx_types_counter: &mut TxTypesCounter,
+    ) -> ValidationOutcome;
 
     /// Returns the reasonable maximum encoded transaction length configured for this network, if
     /// any. This property is not spec'ed out but can be inferred by looking how much data can be
@@ -137,13 +144,27 @@ pub enum FilterOutcome {
 pub struct MessageFilter<N = EthMessageFilter>(N);
 
 /// Filter for announcements containing EIP [`TxType`]s.
-#[derive(Debug, Display, Default)]
-pub struct EthMessageFilter;
+#[derive(Debug, Default)]
+pub struct EthMessageFilter {
+    announced_tx_types_metrics: AnnouncedTxTypesMetrics,
+}
+
+impl Display for EthMessageFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EthMessageFilter")
+    }
+}
 
 impl PartiallyFilterMessage for EthMessageFilter {}
 
 impl ValidateTx68 for EthMessageFilter {
-    fn should_fetch(&self, ty: u8, hash: &TxHash, size: usize) -> ValidationOutcome {
+    fn should_fetch(
+        &self,
+        ty: u8,
+        hash: &TxHash,
+        size: usize,
+        tx_types_counter: &mut TxTypesCounter,
+    ) -> ValidationOutcome {
         //
         // 1. checks if tx type is valid value for this network
         //
@@ -154,13 +175,14 @@ impl ValidateTx68 for EthMessageFilter {
                     ty=ty,
                     size=size,
                     hash=%hash,
-                    network=%Self,
+                    network=%self,
                     "invalid tx type in eth68 announcement"
                 );
 
                 return ValidationOutcome::ReportPeer
             }
         };
+        tx_types_counter.increase_by_tx_type(tx_type);
 
         //
         // 2. checks if tx's encoded length is within limits for this network
@@ -175,7 +197,7 @@ impl ValidateTx68 for EthMessageFilter {
                     size=size,
                     hash=%hash,
                     strict_min_encoded_tx_length=strict_min_encoded_tx_length,
-                    network=%Self,
+                    network=%self,
                     "invalid tx size in eth68 announcement"
                 );
 
@@ -190,7 +212,7 @@ impl ValidateTx68 for EthMessageFilter {
                     hash=%hash,
                     reasonable_min_encoded_tx_length=reasonable_min_encoded_tx_length,
                     strict_min_encoded_tx_length=self.strict_min_encoded_tx_length(tx_type),
-                    network=%Self,
+                    network=%self,
                     "tx size in eth68 announcement, is unreasonably small"
                 );
 
@@ -207,7 +229,7 @@ impl ValidateTx68 for EthMessageFilter {
                     hash=%hash,
                     reasonable_max_encoded_tx_length=reasonable_max_encoded_tx_length,
                     strict_max_encoded_tx_length=self.strict_max_encoded_tx_length(tx_type),
-                    network=%Self,
+                    network=%self,
                     "tx size in eth68 announcement, is unreasonably large"
                 );
 
@@ -256,11 +278,12 @@ impl FilterAnnouncement for EthMessageFilter {
     {
         trace!(target: "net::tx::validation",
             msg=?*msg,
-            network=%Self,
+            network=%self,
             "validating eth68 announcement data.."
         );
 
         let mut should_report_peer = false;
+        let mut tx_types_counter = TxTypesCounter::default();
 
         // checks if eth68 announcement metadata is valid
         //
@@ -278,7 +301,7 @@ impl FilterAnnouncement for EthMessageFilter {
                 return false
             };
 
-            match self.should_fetch(*ty, hash, *size) {
+            match self.should_fetch(*ty, hash, *size, &mut tx_types_counter) {
                 ValidationOutcome::Fetch => true,
                 ValidationOutcome::Ignore => false,
                 ValidationOutcome::ReportPeer => {
@@ -287,6 +310,7 @@ impl FilterAnnouncement for EthMessageFilter {
                 }
             }
         });
+        self.announced_tx_types_metrics.update_eth68_announcement_metrics(tx_types_counter);
         (
             if should_report_peer { FilterOutcome::ReportPeer } else { FilterOutcome::Ok },
             ValidAnnouncementData::from_partially_valid_data(msg),
@@ -299,7 +323,7 @@ impl FilterAnnouncement for EthMessageFilter {
     ) -> (FilterOutcome, ValidAnnouncementData) {
         trace!(target: "net::tx::validation",
             hashes=?*partially_valid_data,
-            network=%Self,
+            network=%self,
             "validating eth66 announcement data.."
         );
 
@@ -323,7 +347,7 @@ mod test {
 
         let announcement = NewPooledTransactionHashes68 { types, sizes, hashes };
 
-        let filter = EthMessageFilter;
+        let filter = EthMessageFilter::default();
 
         let (outcome, _partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
@@ -350,7 +374,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthMessageFilter;
+        let filter = EthMessageFilter::default();
 
         let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
@@ -390,7 +414,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthMessageFilter;
+        let filter = EthMessageFilter::default();
 
         let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
@@ -433,7 +457,7 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthMessageFilter;
+        let filter = EthMessageFilter::default();
 
         let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
@@ -491,8 +515,8 @@ mod test {
     }
 
     #[test]
-    fn test_derive_more_display_for_zst() {
-        let filter = EthMessageFilter;
+    fn test_display_for_zst() {
+        let filter = EthMessageFilter::default();
         assert_eq!("EthMessageFilter", &filter.to_string());
     }
 }
