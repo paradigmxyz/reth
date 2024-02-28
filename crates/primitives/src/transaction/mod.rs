@@ -1256,13 +1256,17 @@ impl TransactionSigned {
         let tx_type = *data.first().ok_or(RlpError::InputTooShort)?;
         data.advance(1);
 
+        let Ok(tx_type) = TxType::try_from(tx_type) else {
+            return Err(RlpError::Custom("unsupported typed transaction type"))
+        };
+
         let min_len = match tx_type {
-            1 => MIN_LENGTH_EIP2930_TX_ENCODED,
-            2 => MIN_LENGTH_EIP1559_TX_ENCODED,
-            3 => MIN_LENGTH_EIP4844_TX_ENCODED,
+            TxType::EIP2930 => MIN_LENGTH_EIP2930_TX_ENCODED,
+            TxType::EIP1559 => MIN_LENGTH_EIP1559_TX_ENCODED,
+            TxType::EIP4844 => MIN_LENGTH_EIP4844_TX_ENCODED,
             #[cfg(feature = "optimism")]
-            0x7E => MIN_LENGTH_DEPOSIT_TX_ENCODED,
-            _ => return Err(RlpError::Custom("unsupported typed transaction type")),
+            TxType::Deposit => MIN_LENGTH_DEPOSIT_TX_ENCODED,
+            TxType::Legacy => unreachable!("path for legacy txns has diverged before this method"),
         };
 
         if original_encoding.len() < min_len {
@@ -1282,12 +1286,12 @@ impl TransactionSigned {
 
         // decode common fields
         let transaction = match tx_type {
-            1 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
-            2 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
-            3 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
+            TxType::EIP2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
+            TxType::EIP1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
+            TxType::EIP4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             #[cfg(feature = "optimism")]
-            0x7E => Transaction::Deposit(TxDeposit::decode_inner(data)?),
-            _ => unreachable!(),
+            TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
+            TxType::Legacy => unreachable!("path for legacy txns has diverged before this method"),
         };
 
         #[cfg(not(feature = "optimism"))]
