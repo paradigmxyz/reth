@@ -103,7 +103,6 @@ use crate::{
     traits::{GetPooledTransactionLimit, NewBlobSidecar, TransactionListenerKind},
     validate::ValidTransaction,
 };
-use alloy_rlp::Encodable;
 pub use best::BestTransactionFilter;
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
@@ -319,6 +318,7 @@ where
         let mut elements = Vec::with_capacity(transactions.len());
         let mut size = 0;
         for transaction in transactions {
+            let encoded_len = transaction.encoded_length();
             let tx = transaction.to_recovered_transaction().into_signed();
             let pooled = if tx.is_eip4844() {
                 if let Some(blob) = self.get_blob_transaction(tx) {
@@ -330,7 +330,7 @@ where
                 PooledTransactionsElement::from(tx)
             };
 
-            size += pooled.length();
+            size += encoded_len;
             elements.push(pooled);
 
             if limit.exceeds(size) {
