@@ -71,6 +71,18 @@ pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
         _ => 5,
     });
 
+/// Minimum length of a rlp-encoded legacy transaction.
+pub const MIN_LENGTH_LEGACY_TX_ENCODED: usize = 10;
+/// Minimum length of a rlp-encoded eip2930 transaction.
+pub const MIN_LENGTH_EIP2930_TX_ENCODED: usize = 14;
+/// Minimum length of a rlp-encoded eip1559 transaction.
+pub const MIN_LENGTH_EIP1559_TX_ENCODED: usize = 15;
+/// Minimum length of a rlp-encoded eip4844 transaction.
+pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 17;
+/// Minimum length of a rlp-encoded deposit transaction.
+#[cfg(feature = "optimism")]
+pub const MIN_LENGTH_DEPOSIT_TX_ENCODED: usize = 65;
+
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
@@ -1167,6 +1179,10 @@ impl TransactionSigned {
     pub(crate) fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
     ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
+        if data.len() < MIN_LENGTH_LEGACY_TX_ENCODED {
+            return Err(RlpError::InputTooShort)
+        }
+
         // keep this around, so we can use it to calculate the hash
         let original_encoding = *data;
 
@@ -1240,6 +1256,20 @@ impl TransactionSigned {
         let tx_type = *data.first().ok_or(RlpError::InputTooShort)?;
         data.advance(1);
 
+        let min_len = match tx_type {
+            0 => MIN_LENGTH_LEGACY_TX_ENCODED,
+            1 => MIN_LENGTH_EIP2930_TX_ENCODED,
+            2 => MIN_LENGTH_EIP1559_TX_ENCODED,
+            3 => MIN_LENGTH_EIP4844_TX_ENCODED,
+            #[cfg(feature = "optimism")]
+            0x7E => MIN_LENGTH_DEPOSIT_TX_ENCODED,
+            _ => return Err(RlpError::Custom("unsupported typed transaction type")),
+        };
+
+        if original_encoding.len() < min_len {
+            return Err(RlpError::InputTooShort)
+        }
+
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
@@ -1258,7 +1288,7 @@ impl TransactionSigned {
             3 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             #[cfg(feature = "optimism")]
             0x7E => Transaction::Deposit(TxDeposit::decode_inner(data)?),
-            _ => return Err(RlpError::Custom("unsupported typed transaction type")),
+            _ => unreachable!(),
         };
 
         #[cfg(not(feature = "optimism"))]
@@ -1582,9 +1612,12 @@ mod tests {
         hex, sign_message,
         transaction::{
             signature::Signature, TransactionKind, TxEip1559, TxLegacy,
+            MIN_LENGTH_EIP1559_TX_ENCODED, MIN_LENGTH_EIP2930_TX_ENCODED,
+            MIN_LENGTH_EIP4844_TX_ENCODED, MIN_LENGTH_LEGACY_TX_ENCODED,
             PARALLEL_SENDER_RECOVERY_THRESHOLD,
         },
-        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
+        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip2930,
+        TxEip4844, B256, U256,
     };
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
@@ -1928,5 +1961,107 @@ mod tests {
         assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
         let encoded = tx.envelope_encoded();
         assert_eq!(encoded.as_ref(), data.as_slice());
+    }
+
+    #[test]
+    fn min_length_encoded_legacy_transaction() {
+        let transaction = TxLegacy::default();
+        let signature = Signature::default();
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Legacy(transaction),
+            signature,
+        );
+
+        let mut encoded = BytesMut::new();
+        signed_tx.encode(&mut encoded);
+
+        assert_eq!(b"\xc9\x80\x80\x80\x80\x80\x80\x1b\x80\x80", &encoded[..]);
+        assert_eq!(MIN_LENGTH_LEGACY_TX_ENCODED, encoded.len());
+
+        TransactionSigned::decode(&mut &encoded[..]).unwrap();
+    }
+
+    #[test]
+    fn min_length_encoded_eip2930_transaction() {
+        let transaction = TxEip2930::default();
+        let signature = Signature::default();
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Eip2930(transaction),
+            signature,
+        );
+
+        let mut encoded = BytesMut::new();
+        signed_tx.encode(&mut encoded);
+
+        assert_eq!(b"\x8d\x01\xcb\x80\x80\x80\x80\x80\x80\x80\xc0\x80\x80\x80", &encoded[..]);
+        assert_eq!(MIN_LENGTH_EIP2930_TX_ENCODED, encoded.len());
+
+        TransactionSigned::decode(&mut &encoded[..]).unwrap();
+    }
+
+    #[test]
+    fn min_length_encoded_eip1559_transaction() {
+        let transaction = TxEip1559::default();
+        let signature = Signature::default();
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Eip1559(transaction),
+            signature,
+        );
+
+        let mut encoded = BytesMut::new();
+        signed_tx.encode(&mut encoded);
+
+        assert_eq!(b"\x8e\x02\xcc\x80\x80\x80\x80\x80\x80\x80\x80\xc0\x80\x80\x80", &encoded[..]);
+        assert_eq!(MIN_LENGTH_EIP1559_TX_ENCODED, encoded.len());
+
+        TransactionSigned::decode(&mut &encoded[..]).unwrap();
+    }
+
+    #[test]
+    fn min_length_encoded_eip4844_transaction() {
+        let transaction = TxEip4844::default();
+        let signature = Signature::default();
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Eip4844(transaction),
+            signature,
+        );
+
+        let mut encoded = BytesMut::new();
+        signed_tx.encode(&mut encoded);
+
+        assert_eq!(
+            b"\x90\x03\xce\x80\x80\x80\x80\x80\x80\x80\x80\xc0\x80\xc0\x80\x80\x80",
+            &encoded[..]
+        );
+        assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
+
+        TransactionSigned::decode(&mut &encoded[..]).unwrap();
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn min_length_encoded_deposit_transaction() {
+        use super::MIN_LENGTH_DEPOSIT_TX_ENCODED;
+        use crate::TxDeposit;
+
+        let transaction = TxDeposit::default();
+        let signature = Signature::default();
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Deposit(transaction),
+            signature,
+        );
+
+        let mut encoded = BytesMut::new();
+        signed_tx.encode(&mut encoded);
+
+        assert_eq!(b"\xb8?~\xf8<\xa0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x94\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\x80\x80\x80\x80\x80", &encoded[..]);
+        assert_eq!(MIN_LENGTH_DEPOSIT_TX_ENCODED, encoded.len());
+
+        TransactionSigned::decode(&mut &encoded[..]).unwrap();
     }
 }
