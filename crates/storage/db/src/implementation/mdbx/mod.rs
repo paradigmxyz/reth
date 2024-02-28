@@ -266,7 +266,7 @@ impl DatabaseEnv {
             // worsens it for random access (which is our access pattern outside of sync)
             no_rdahead: true,
             coalesce: true,
-            exclusive: inner_env.is_exclusive(),
+            exclusive: args.exclusive,
             ..Default::default()
         });
         // Configure more readers
