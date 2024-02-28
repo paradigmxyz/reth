@@ -223,6 +223,7 @@ pub(crate) fn mdbx_result_with_tx_kind<K: TransactionKind>(
     txn: *mut ffi::MDBX_txn,
     txn_manager: &TxnManager,
 ) -> Result<bool> {
+    println!("err_code {err_code}, txn {}", txn as usize);
     if K::IS_READ_ONLY &&
         err_code == ffi::MDBX_EBADSIGN &&
         txn_manager.remove_aborted_read_transaction(txn).is_some()
