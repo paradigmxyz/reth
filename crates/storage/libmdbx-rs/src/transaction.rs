@@ -536,6 +536,8 @@ impl TransactionPtr {
     {
         let _lck = self.lock.lock();
 
+        // When transaction is aborted via `TxnManager`, it's actually reset using `mdbn_txn_reset`
+        // that makes the transaction unusable and sets the `MDBX_TXN_FINISHED` flag.
         if unsafe { ffi::mdbx_txn_flags(self.txn) } & ffi::MDBX_TXN_FINISHED != 0 {
             return Err(Error::ReadTransactionAborted)
         }
