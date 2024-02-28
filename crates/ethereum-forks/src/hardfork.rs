@@ -90,33 +90,33 @@ impl Hardfork {
 
     /// Retrieves the activation block for the specified hardfork on the given chain.
     pub fn activation_block(&self, chain: Chain) -> Option<u64> {
-        match chain {
-            Chain::mainnet() => self.mainnet_activation_block(),
-            Chain::sepolia() => self.sepolia_activation_block(),
-            Chain::holesky() => self.holesky_activation_block(),
-            Chain::base_sepolia() => {
+            if chain == Chain::mainnet() {
+                return self.mainnet_activation_block();
+            }
+            if chain == Chain::sepolia() {
+                return self.sepolia_activation_block();
+            }
+            if chain == Chain::holesky() {
+                return self.holesky_activation_block();
+            }
+            if chain == Chain::base_sepolia() {
                 #[cfg(feature = "optimism")]
                 {
-                    self.base_sepolia_activation_block()
+                    return self.base_sepolia_activation_block();
                 }
                 #[cfg(not(feature = "optimism"))]
                 {
-                    None
+                    return None;
                 }
-            },
-            Chain::base_mainnet() => {
-                #[cfg(feature = "optimism")]
-                {
-                    self.base_mainnet_activation_block()
-                }
-                #[cfg(not(feature = "optimism"))]
-                {
-                    None
-                }
-            },
-            _ => None,
-        }
+            } 
+            #[cfg(feature = "optimism")]
+            if chain == Chain::base_mainnet() {
+                return self.base_mainnet_activation_block();
+            }
+            #[cfg(not(feature = "optimism"))]
+            None
     }
+    
     
     
     /// Retrieves the activation block for the specified hardfork on the Ethereum mainnet.
@@ -171,7 +171,7 @@ impl Hardfork {
 
     /// Retrieves the activation block for the specified hardfork on the Base mainnet.
     #[cfg(feature = "optimism")]
-    fn base_mainnet_activation_block(&self) -> Option<u64> {
+    pub fn base_mainnet_activation_block(&self) -> Option<u64> {
         match self {
             Hardfork::Shanghai => todo!(),
             Hardfork::Canyon => todo!(),
@@ -192,32 +192,31 @@ impl Hardfork {
 
     /// Retrieves the activation timestamp for the specified hardfork on the given chain.
     pub fn activation_timestamp(&self, chain: Chain) -> Option<u64> {
-        match chain {
-            Chain::mainnet() => self.mainnet_activation_timestamp(),
-            Chain::sepolia() => self.sepolia_activation_timestamp(),
-            Chain::holesky() => self.holesky_activation_timestamp(),
-            Chain::base_sepolia() => {
-                #[cfg(feature = "optimism")]
-                {
-                    self.base_sepolia_activation_timestamp()
-                }
-                #[cfg(not(feature = "optimism"))]
-                {
-                    None
-                }
-            },
-            Chain::base_mainnet() => {
-                #[cfg(feature = "optimism")]
-                {
-                    self.base_mainnet_activation_timestamp()
-                }
-                #[cfg(not(feature = "optimism"))]
-                {
-                    None
-                }
-            },
-            _ => None,
+        if chain == Chain::mainnet() {
+            return self.mainnet_activation_timestamp();
         }
+        if chain == Chain::sepolia() {
+            return self.sepolia_activation_timestamp();
+        }
+        if chain == Chain::holesky() {
+            return self.holesky_activation_timestamp();
+        }
+        if chain == Chain::base_sepolia() {
+            #[cfg(feature = "optimism")]
+            {
+                return self.base_sepolia_activation_timestamp();
+            }
+            #[cfg(not(feature = "optimism"))]
+            {
+                return None;
+            }
+        }
+        #[cfg(feature = "optimism")]
+        if chain == Chain::base_mainnet() {
+            return self.base_mainnet_activation_timestamp();
+        }
+        #[cfg(not(feature = "optimism"))]
+        None
     }
 
     /// Retrieves the activation timestamp for the specified hardfork on the Ethereum mainnet.
