@@ -83,6 +83,7 @@ schnellru.workspace = true
 futures.workspace = true
 derive_more = "0.99"
 lazy_static = "*"
+dyn-clone = "1.0.17"
 
 [dev-dependencies]
 jsonrpsee = { workspace = true, features = ["client"] }

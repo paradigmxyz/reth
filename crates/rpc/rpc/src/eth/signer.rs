@@ -7,6 +7,7 @@ use reth_primitives::{
 };
 use reth_rpc_types::TypedTransactionRequest;
 
+use dyn_clone::DynClone;
 use reth_rpc_types_compat::transaction::to_primitive_transaction;
 use secp256k1::SecretKey;
 use std::collections::HashMap;
@@ -15,7 +16,7 @@ type Result<T> = std::result::Result<T, SignError>;
 
 /// An Ethereum Signer used via RPC.
 #[async_trait::async_trait]
-pub(crate) trait EthSigner: Send + Sync {
+pub(crate) trait EthSigner: Send + Sync + DynClone {
     /// Returns the available accounts for this signer.
     fn accounts(&self) -> Vec<Address>;
 
@@ -36,10 +37,9 @@ pub(crate) trait EthSigner: Send + Sync {
 
     /// Encodes and signs the typed data according EIP-712. Payload must implement Eip712 trait.
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature>;
-
-    /// Clone boxed instance of EthSigner
-    fn clone_box(&self) -> Box<dyn EthSigner + Send + Sync>;
 }
+
+dyn_clone::clone_trait_object!(EthSigner);
 
 /// Holds developer keys
 #[derive(Clone)]
@@ -51,9 +51,9 @@ pub(crate) struct DevSigner {
 impl DevSigner {
     pub fn new() -> DevSigner {
         let (pk, sk) = secp256k1::generate_keypair(&mut rand::thread_rng());
-        
+
         let address = reth_primitives::public_key_to_address(sk);
-        let addresses = vec![address]; 
+        let addresses = vec![address];
         let accounts = HashMap::from([(address, pk)]);
         DevSigner { addresses, accounts }
     }
@@ -66,12 +66,6 @@ impl DevSigner {
         let secret = self.get_key(account)?;
         let signature = sign_message(B256::from_slice(secret.as_ref()), hash);
         signature.map_err(|_| SignError::CouldNotSign)
-    }
-}
-
-impl Clone for Box<dyn EthSigner + Send + Sync> {
-    fn clone(&self) -> Box<dyn EthSigner + Send + Sync> {
-        self.clone_box()
     }
 }
 
@@ -110,10 +104,6 @@ impl EthSigner for DevSigner {
         let encoded = payload.eip712_signing_hash().map_err(|_| SignError::InvalidTypedData)?;
         // let b256 = encoded;
         self.sign_hash(encoded, address)
-    }
-
-    fn clone_box(&self) -> Box<dyn EthSigner + Send + Sync> {
-        Box::new(self.clone())
     }
 }
 

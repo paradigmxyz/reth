@@ -3,7 +3,7 @@
 use crate::{
     eth::{
         error::{EthResult, SignError},
-        signer::{DevSigner, EthSigner},
+        signer::EthSigner,
     },
     EthApi,
 };
@@ -31,19 +31,19 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
     pub(crate) async fn find_signer(
         &self,
         account: &Address,
-    ) -> Result<Box<(dyn EthSigner + Send + Sync + 'static)>, SignError> {
+    ) -> Result<Box<(dyn EthSigner + 'static)>, SignError> {
         self.inner
             .signers
-            .lock()
+            .read()
             .await
             .iter()
             .find(|signer| signer.is_signer_for(account))
-            .map(|signer| signer.clone_box())
+            .map(|signer| dyn_clone::clone_box(&**signer))
             .ok_or(SignError::NoAccount)
     }
 
-    pub(crate) async fn add_signer<S:EthSigner + 'static>(&self, s: S) -> EthResult<()> {
-        self.inner.signers.lock().await.push(std::boxed::Box::new(s));
+    pub(crate) async fn add_signer<S: EthSigner + 'static>(&self, s: S) -> EthResult<()> {
+        self.inner.signers.write().await.push(std::boxed::Box::new(s));
         Ok(())
     }
 }
