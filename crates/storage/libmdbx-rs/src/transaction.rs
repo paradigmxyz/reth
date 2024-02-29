@@ -536,14 +536,15 @@ impl TransactionPtr {
     {
         let _lck = self.lock.lock();
 
-        // When transaction is aborted via `TxnManager`, it's actually reset using `mdbx_txn_reset`
-        // that makes the transaction unusable and sets the `MDBX_TXN_FINISHED` flag.
+        // When transaction is timeouted via `TxnManager`, it's actually reset using
+        // `mdbx_txn_reset` that makes the transaction unusable and sets the
+        // `MDBX_TXN_FINISHED` flag.
         //
-        // No race condition with the `TxnManager` aborting our transaction is possible here,
+        // No race condition with the `TxnManager` timeouting our transaction is possible here,
         // because we're taking a lock for any actions on the transaction pointer, including a call
         // to the `mdbx_txn_reset`.
         if unsafe { ffi::mdbx_txn_flags(self.txn) } & ffi::MDBX_TXN_FINISHED != 0 {
-            return Err(Error::ReadTransactionAborted)
+            return Err(Error::ReadTransactionTimeout)
         }
 
         Ok((f)(self.txn))

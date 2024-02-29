@@ -439,7 +439,7 @@ mod tests {
 
         assert_eq!(
             tx.get::<tables::Transactions>(0).err(),
-            Some(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionAborted.into()))
+            Some(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionTimeout.into()))
         ); // Transaction is timeout-ed
         assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
         // Backtrace is recorded

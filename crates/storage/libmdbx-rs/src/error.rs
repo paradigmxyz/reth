@@ -117,8 +117,8 @@ pub enum Error {
     /// [Mode::ReadOnly](crate::flags::Mode::ReadOnly), write transactions can't be opened.
     #[error("write transactions are not supported in read-only mode")]
     WriteTransactionUnsupportedInReadOnlyMode,
-    #[error("read transaction has been aborted by the transaction manager")]
-    ReadTransactionAborted,
+    #[error("read transaction has been timeouted")]
+    ReadTransactionTimeout,
     /// Unknown error code.
     #[error("unknown error code")]
     Other(i32),
@@ -195,7 +195,7 @@ impl Error {
             Error::BadSignature => ffi::MDBX_EBADSIGN,
             Error::WriteTransactionUnsupportedInReadOnlyMode => ffi::MDBX_EACCESS,
             Error::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
-            Error::ReadTransactionAborted => -96000, // Custom non-MDBX error code
+            Error::ReadTransactionTimeout => -96000, // Custom non-MDBX error code
             Error::Other(err_code) => *err_code,
         }
     }

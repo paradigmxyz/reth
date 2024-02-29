@@ -199,11 +199,11 @@ mod read_transactions {
         }
 
         /// Spawns a new thread with [std::thread::spawn] that monitors the list of active read
-        /// transactions and aborts those that are open for longer than
+        /// transactions and timeouts those that are open for longer than
         /// `ReadTransactions.max_duration`.
         pub(super) fn start_monitor(self: Arc<Self>) {
             std::thread::spawn(move || {
-                let mut aborted_active = Vec::new();
+                let mut timeouted_active = Vec::new();
 
                 loop {
                     let now = Instant::now();
@@ -220,7 +220,7 @@ mod read_transactions {
                                 (
                                     txn_ptr,
                                     duration,
-                                    // Abort the transaction.
+                                    // Timeout the transaction.
                                     //
                                     // We use `mdbx_txn_reset` instead of `mdbx_txn_abort` here to
                                     // prevent MDBX from reusing the pointer of the aborted
@@ -238,7 +238,7 @@ mod read_transactions {
                                     // Add the transaction to `aborted_active`. We can't remove it
                                     // instantly from the list of active
                                     // transactions, because we iterate through it.
-                                    aborted_active.push((txn_ptr, duration, error));
+                                    timeouted_active.push((txn_ptr, duration, error));
                                 }
                                 Err(err) => {
                                     error!(target: "libmdbx", %err, "Failed to abort the long-lived read transaction")
@@ -251,29 +251,29 @@ mod read_transactions {
                         }
                     }
 
-                    // Walk through aborted transactions, and delete them from the list of active
+                    // Walk through timeouted transactions, and delete them from the list of active
                     // transactions.
-                    for (ptr, open_duration, err) in aborted_active.iter().copied() {
+                    for (ptr, open_duration, err) in timeouted_active.iter().copied() {
                         // Try deleting the transaction from the list of active transactions.
                         let was_in_active = self.remove_active(ptr).is_some();
                         if let Err(err) = err {
                             if was_in_active {
-                                // If the transaction was in the list of active transactions then
-                                // user didn't abort it and we failed to do so.
-                                error!(target: "libmdbx", %err, ?open_duration, "Failed to abort the long-lived read transaction");
+                                // If the transaction was in the list of active transactions,
+                                // then user didn't abort it and we failed to do so.
+                                error!(target: "libmdbx", %err, ?open_duration, "Failed to timeout the long-lived read transaction");
                             }
                         } else {
-                            // Happy path, the transaction has been aborted by us with no errors.
-                            warn!(target: "libmdbx", ?open_duration, "Long-lived read transaction has been aborted");
+                            // Happy path, the transaction has been timeouted by us with no errors.
+                            warn!(target: "libmdbx", ?open_duration, "Long-lived read transaction has been timeouted");
                             // Add transaction to the list of timeouted transactions that were not
                             // aborted by the user yet.
                             self.timeouted_not_aborted.insert(ptr as usize);
                         }
                     }
 
-                    // Clear the list of aborted transactions, but not de-allocate the reserved
+                    // Clear the list of timeouted transactions, but not de-allocate the reserved
                     // capacity to save on further pushes.
-                    aborted_active.clear();
+                    timeouted_active.clear();
 
                     if !self.active.is_empty() {
                         trace!(
@@ -345,7 +345,7 @@ mod read_transactions {
             }
 
             // Create a read-only transaction, wait until `MAX_DURATION` time is elapsed so the
-            // manager kills it, use it two times and observe the `Error::ReadTransactionAborted`
+            // manager kills it, use it two times and observe the `Error::ReadTransactionTimeout`
             // error. Also, ensure that the transaction pointer is not reused when opening a new
             // read-only transaction.
             {
@@ -357,10 +357,10 @@ mod read_transactions {
 
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
 
-                assert_eq!(tx.open_db(None).err(), Some(Error::ReadTransactionAborted));
+                assert_eq!(tx.open_db(None).err(), Some(Error::ReadTransactionTimeout));
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
 
-                assert_eq!(tx.id().err(), Some(Error::ReadTransactionAborted));
+                assert_eq!(tx.id().err(), Some(Error::ReadTransactionTimeout));
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
 
                 let tx = env.begin_ro_txn().unwrap();
