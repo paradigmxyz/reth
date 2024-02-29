@@ -287,7 +287,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
-            imported_transactions: ReceiverStream::new(pending),
+            pending_transactions: ReceiverStream::new(pending),
             transaction_events: UnboundedMeteredReceiver::new(
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
