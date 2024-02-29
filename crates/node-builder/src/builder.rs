@@ -350,22 +350,22 @@ where
 
         info!(target: "reth::cli", "Database opened");
 
-        let mut provider_factory =
-            ProviderFactory::new(database.clone(), Arc::clone(&config.chain));
-
-        // configure snapshotter
-        let snapshotter = reth_snapshot::Snapshotter::new(
-            provider_factory.clone(),
-            data_dir.snapshots_path(),
-            config.chain.snapshot_block_interval,
+        let provider_factory = ProviderFactory::new(
+            database.clone(),
+            Arc::clone(&config.chain),
+            data_dir.static_files_path(),
         )?;
 
-        provider_factory = provider_factory
-            .with_snapshots(data_dir.snapshots_path(), snapshotter.highest_snapshot_receiver())?;
+        // configure static_file_producer
+        let static_file_producer = reth_static_file::StaticFileProducer::new(
+            provider_factory.clone(),
+            provider_factory.static_file_provider(),
+            config.prune_config()?.unwrap_or_default().segments,
+        );
 
         debug!(target: "reth::cli", chain=%config.chain.chain, genesis=?config.chain.genesis_hash(), "Initializing genesis");
 
-        let genesis_hash = init_genesis(database.clone(), config.chain.clone())?;
+        let genesis_hash = init_genesis(provider_factory.clone())?;
 
         info!(target: "reth::cli", "{}", config.chain.display_hardforks());
 
@@ -471,6 +471,7 @@ where
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
+                    static_file_producer,
                     evm_config,
                 )
                 .await?;
@@ -492,6 +493,7 @@ where
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
+                    static_file_producer,
                     evm_config,
                 )
                 .await?;
@@ -508,7 +510,7 @@ where
             let mut pruner = PrunerBuilder::new(prune_config.clone())
                 .max_reorg_depth(tree_config.max_reorg_depth() as usize)
                 .prune_delete_limit(config.chain.prune_delete_limit)
-                .build(provider_factory, snapshotter.highest_snapshot_receiver());
+                .build(provider_factory);
 
             let events = pruner.events();
             hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));

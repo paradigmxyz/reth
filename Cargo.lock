@@ -2301,6 +2301,7 @@ name = "ef-tests"
 version = "0.1.0-alpha.21"
 dependencies = [
  "alloy-rlp",
+ "rayon",
  "reth-db",
  "reth-interfaces",
  "reth-node-ethereum",
@@ -2727,6 +2728,7 @@ dependencies = [
  "async-trait",
  "eyre",
  "futures",
+ "jemallocator",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-db",
@@ -5691,6 +5693,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "retain_mut"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c31b5c4033f8fdde8700e4657be2c497e7288f01515be52168c631e2e4d4086"
+
+[[package]]
 name = "reth"
 version = "0.1.0-alpha.21"
 dependencies = [
@@ -5755,8 +5763,8 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-rpc-types",
  "reth-rpc-types-compat",
- "reth-snapshot",
  "reth-stages",
+ "reth-static-file",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
@@ -5844,12 +5852,13 @@ dependencies = [
  "reth-revm",
  "reth-rpc-types",
  "reth-rpc-types-compat",
- "reth-snapshot",
  "reth-stages",
+ "reth-static-file",
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
  "schnellru",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -6144,6 +6153,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-etl"
+version = "0.1.0-alpha.21"
+dependencies = [
+ "rayon",
+ "reth-db",
+ "reth-primitives",
+ "tempfile",
+]
+
+[[package]]
 name = "reth-interfaces"
 version = "0.1.0-alpha.21"
 dependencies = [
@@ -6344,8 +6363,9 @@ dependencies = [
  "memmap2 0.7.1",
  "ph",
  "rand 0.8.5",
+ "reth-primitives",
  "serde",
- "sucds 0.8.1",
+ "sucds",
  "tempfile",
  "thiserror",
  "tracing",
@@ -6388,8 +6408,8 @@ dependencies = [
  "reth-revm",
  "reth-rpc",
  "reth-rpc-engine-api",
- "reth-snapshot",
  "reth-stages",
+ "reth-static-file",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
@@ -6405,6 +6425,7 @@ dependencies = [
  "assert_matches",
  "clap",
  "const-str",
+ "derive_more",
  "dirs-next",
  "eyre",
  "futures",
@@ -6449,8 +6470,8 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-rpc-types",
  "reth-rpc-types-compat",
- "reth-snapshot",
  "reth-stages",
+ "reth-static-file",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
@@ -6571,6 +6592,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
+ "anyhow",
  "arbitrary",
  "assert_matches",
  "byteorder",
@@ -6598,12 +6620,13 @@ dependencies = [
  "reth-rpc-types",
  "revm",
  "revm-primitives",
+ "roaring",
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
  "sha2",
  "strum 0.26.1",
- "sucds 0.6.0",
+ "sucds",
  "tempfile",
  "test-fuzz",
  "thiserror",
@@ -6627,6 +6650,7 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "rayon",
+ "reth-codecs",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
@@ -6656,8 +6680,8 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
- "reth-snapshot",
  "reth-stages",
+ "reth-static-file",
  "reth-tokio-util",
  "thiserror",
  "tokio",
@@ -6868,24 +6892,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-snapshot"
-version = "0.1.0-alpha.21"
-dependencies = [
- "assert_matches",
- "clap",
- "reth-db",
- "reth-interfaces",
- "reth-nippy-jar",
- "reth-primitives",
- "reth-provider",
- "reth-stages",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "reth-stages"
 version = "0.1.0-alpha.21"
 dependencies = [
@@ -6908,6 +6914,7 @@ dependencies = [
  "reth-db",
  "reth-downloaders",
  "reth-eth-wire",
+ "reth-etl",
  "reth-interfaces",
  "reth-metrics",
  "reth-node-ethereum",
@@ -6915,11 +6922,34 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-static-file",
  "reth-tokio-util",
  "reth-trie",
  "revm",
  "serde",
  "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
+name = "reth-static-file"
+version = "0.1.0-alpha.21"
+dependencies = [
+ "assert_matches",
+ "clap",
+ "rayon",
+ "reth-db",
+ "reth-interfaces",
+ "reth-nippy-jar",
+ "reth-primitives",
+ "reth-provider",
+ "reth-stages",
+ "reth-tokio-util",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -7192,6 +7222,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "roaring"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6106b5cf8587f5834158895e9715a3c6c9716c8aefab57f1f7680917191c7873"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "retain_mut",
 ]
 
 [[package]]
@@ -8067,15 +8108,6 @@ name = "subtle"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
-
-[[package]]
-name = "sucds"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64accd20141dfbef67ad83c51d588146cff7810616e1bda35a975be369059533"
-dependencies = [
- "anyhow",
-]
 
 [[package]]
 name = "sucds"

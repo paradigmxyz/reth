@@ -1,15 +1,15 @@
-use crate::{StateChanges, StateReverts};
+use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::db::DatabaseError;
+use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
-    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StorageEntry, B256,
-    U256,
+    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StaticFileSegment,
+    StorageEntry, B256, U256,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -285,15 +285,21 @@ impl BundleStateWithReceipts {
         std::mem::swap(&mut self.bundle, &mut other)
     }
 
-    /// Write the [BundleStateWithReceipts] to the database.
+    /// Write the [BundleStateWithReceipts] to database and receipts to either database or static
+    /// files if `static_file_producer` is `Some`. It should be none if there is any kind of
+    /// pruning/filtering over the receipts.
     ///
-    /// `is_value_known` should be set to `Not` if the [BundleStateWithReceipts] has some of its
-    /// state detached, This would make some original values not known.
-    pub fn write_to_db<TX: DbTxMut + DbTx>(
+    /// `omit_changed_check` should be set to true of bundle has some of it data
+    /// detached, This would make some original values not known.
+    pub fn write_to_storage<TX>(
         self,
         tx: &TX,
+        mut static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
         is_value_known: OriginalValuesKnown,
-    ) -> Result<(), DatabaseError> {
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut + DbTx,
+    {
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
@@ -303,15 +309,22 @@ impl BundleStateWithReceipts {
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
         for (idx, receipts) in self.receipts.into_iter().enumerate() {
-            if !receipts.is_empty() {
-                let block_number = self.first_block + idx as u64;
-                let (_, body_indices) =
-                    bodies_cursor.seek_exact(block_number)?.unwrap_or_else(|| {
-                        let last_available = bodies_cursor.last().ok().flatten().map(|(number, _)| number);
-                        panic!("body indices for block {block_number} must exist. last available block number: {last_available:?}");
-                    });
+            let block_number = self.first_block + idx as u64;
+            let first_tx_index = bodies_cursor
+                .seek_exact(block_number)?
+                .map(|(_, indices)| indices.first_tx_num())
+                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
-                let first_tx_index = body_indices.first_tx_num();
+            if let Some(static_file_producer) = &mut static_file_producer {
+                // Increment block on static file header.
+                static_file_producer.increment_block(StaticFileSegment::Receipts)?;
+
+                for (tx_idx, receipt) in receipts.into_iter().enumerate() {
+                    let receipt = receipt
+                        .expect("receipt should not be filtered when saving to static files.");
+                    static_file_producer.append_receipt(first_tx_index + tx_idx as u64, receipt)?;
+                }
+            } else if !receipts.is_empty() {
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {
                     if let Some(receipt) = receipt {
                         receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
@@ -426,7 +439,7 @@ mod tests {
         // Check change set
         let mut changeset_cursor = provider
             .tx_ref()
-            .cursor_dup_read::<tables::AccountChangeSet>()
+            .cursor_dup_read::<tables::AccountChangeSets>()
             .expect("Could not open changeset cursor");
         assert_eq!(
             changeset_cursor.seek_exact(1).expect("Could not read account change set"),
@@ -549,7 +562,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
 
         BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -594,7 +607,7 @@ mod tests {
         // Check change set
         let mut changeset_cursor = provider
             .tx_ref()
-            .cursor_dup_read::<tables::StorageChangeSet>()
+            .cursor_dup_read::<tables::StorageChangeSets>()
             .expect("Could not open storage changeset cursor");
         assert_eq!(
             changeset_cursor.seek_exact(BlockNumberAddress((1, address_a))).unwrap(),
@@ -647,7 +660,7 @@ mod tests {
 
         state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 2)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -711,7 +724,7 @@ mod tests {
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -856,12 +869,12 @@ mod tests {
         let bundle = state.take_bundle();
 
         BundleStateWithReceipts::new(bundle, Receipts::new(), 1)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
             .tx_ref()
-            .cursor_dup_read::<tables::StorageChangeSet>()
+            .cursor_dup_read::<tables::StorageChangeSets>()
             .expect("Could not open plain storage state cursor");
         let mut storage_changes = storage_changeset_cursor.walk_range(..).unwrap();
 
@@ -1019,7 +1032,7 @@ mod tests {
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -1064,12 +1077,12 @@ mod tests {
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
         BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
-            .write_to_db(provider.tx_ref(), OriginalValuesKnown::Yes)
+            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
             .tx_ref()
-            .cursor_dup_read::<tables::StorageChangeSet>()
+            .cursor_dup_read::<tables::StorageChangeSets>()
             .expect("Could not open plain storage state cursor");
         let range = BlockNumberAddress::range(1..=1);
         let mut storage_changes = storage_changeset_cursor.walk_range(range).unwrap();
@@ -1138,9 +1151,9 @@ mod tests {
         db.update(|tx| {
             for (address, (account, storage)) in prestate.iter() {
                 let hashed_address = keccak256(address);
-                tx.put::<tables::HashedAccount>(hashed_address, *account).unwrap();
+                tx.put::<tables::HashedAccounts>(hashed_address, *account).unwrap();
                 for (slot, value) in storage {
-                    tx.put::<tables::HashedStorage>(
+                    tx.put::<tables::HashedStorages>(
                         hashed_address,
                         StorageEntry { key: keccak256(slot), value: *value },
                     )

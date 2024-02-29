@@ -200,7 +200,7 @@ where
                 TransactionKind::Call(to) => TransactTo::Call(to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = tx.value.into();
+            tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = tx.chain_id;
             tx_env.nonce = Some(tx.nonce);
@@ -216,7 +216,7 @@ where
                 TransactionKind::Call(to) => TransactTo::Call(to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = tx.value.into();
+            tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);
             tx_env.nonce = Some(tx.nonce);
@@ -239,7 +239,7 @@ where
                 TransactionKind::Call(to) => TransactTo::Call(to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = tx.value.into();
+            tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);
             tx_env.nonce = Some(tx.nonce);
@@ -262,7 +262,7 @@ where
                 TransactionKind::Call(to) => TransactTo::Call(to),
                 TransactionKind::Create => TransactTo::create(),
             };
-            tx_env.value = tx.value.into();
+            tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);
             tx_env.nonce = Some(tx.nonce);
@@ -287,7 +287,7 @@ where
                 TransactionKind::Call(to) => tx_env.transact_to = TransactTo::Call(to),
                 TransactionKind::Create => tx_env.transact_to = TransactTo::create(),
             }
-            tx_env.value = tx.value.into();
+            tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = None;
             tx_env.nonce = None;

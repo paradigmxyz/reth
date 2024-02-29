@@ -13,6 +13,8 @@ macro_rules! stage_test_suite {
 
                 // Run stage execution
                 let result = runner.execute(input).await;
+                runner.db().factory.static_file_provider().commit().unwrap();
+
                 // Check that the result is returned and the stage does not panic.
                 // The return result with empty db is stage-specific.
                 assert_matches::assert_matches!(result, Ok(_));
@@ -44,6 +46,8 @@ macro_rules! stage_test_suite {
 
                 // Assert the successful result
                 let result = rx.await.unwrap();
+                runner.db().factory.static_file_provider().commit().unwrap();
+
                 assert_matches::assert_matches!(
                     result,
                     Ok(ExecOutput { done, checkpoint })
@@ -72,6 +76,8 @@ macro_rules! stage_test_suite {
 
                 // Run stage unwind
                 let rx = runner.unwind(input).await;
+                runner.db().factory.static_file_provider().commit().unwrap();
+
                 assert_matches::assert_matches!(
                     rx,
                     Ok(UnwindOutput { checkpoint }) if checkpoint.block_number == input.unwind_to
@@ -104,6 +110,8 @@ macro_rules! stage_test_suite {
 
                 // Assert the successful execution result
                 let result = rx.await.unwrap();
+                runner.db().factory.static_file_provider().commit().unwrap();
+
                 assert_matches::assert_matches!(
                     result,
                     Ok(ExecOutput { done, checkpoint })
@@ -171,6 +179,8 @@ macro_rules! stage_test_suite_ext {
 
                 // Assert the successful result
                 let result = rx.await.unwrap();
+                runner.db().factory.static_file_provider().commit().unwrap();
+
                 assert_matches::assert_matches!(
                     result,
                     Ok(ExecOutput { done, checkpoint })

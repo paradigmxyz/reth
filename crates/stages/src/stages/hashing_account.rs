@@ -8,7 +8,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_interfaces::db::DatabaseError;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
     stage::{
@@ -16,7 +16,7 @@ use reth_primitives::{
         StageId,
     },
 };
-use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter};
+use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
 use std::{
     cmp::max,
     fmt::Debug,
@@ -65,8 +65,8 @@ impl Default for AccountHashingStage {
 pub struct SeedOpts {
     /// The range of blocks to be generated
     pub blocks: RangeInclusive<u64>,
-    /// The range of accounts to be generated
-    pub accounts: Range<u64>,
+    /// The number of accounts to be generated
+    pub accounts: usize,
     /// The range of transactions to be generated per block.
     pub txs: Range<u8>,
 }
@@ -77,7 +77,7 @@ impl AccountHashingStage {
     /// at the target block, with `txs_range` transactions in each block.
     ///
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
-    /// account state in the `AccountChangeSet` table.
+    /// account state in the `AccountChangeSets` table.
     pub fn seed<DB: Database>(
         provider: &DatabaseProviderRW<DB>,
         opts: SeedOpts,
@@ -85,19 +85,25 @@ impl AccountHashingStage {
         use reth_db::models::AccountBeforeTx;
         use reth_interfaces::test_utils::{
             generators,
-            generators::{random_block_range, random_eoa_account_range},
+            generators::{random_block_range, random_eoa_accounts},
         };
         use reth_primitives::{Account, B256, U256};
-        use reth_provider::BlockWriter;
+        use reth_provider::providers::StaticFileWriter;
 
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs);
 
         for block in blocks {
-            provider.insert_block(block.try_seal_with_senders().unwrap(), None).unwrap();
+            provider.insert_historical_block(block.try_seal_with_senders().unwrap(), None).unwrap();
         }
-        let mut accounts = random_eoa_account_range(&mut rng, opts.accounts);
+        provider
+            .static_file_provider()
+            .latest_writer(reth_primitives::StaticFileSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
+        let mut accounts = random_eoa_accounts(&mut rng, opts.accounts);
         {
             // Account State generator
             let mut account_cursor =
@@ -108,7 +114,7 @@ impl AccountHashingStage {
             }
 
             let mut acc_changeset_cursor =
-                provider.tx_ref().cursor_write::<tables::AccountChangeSet>()?;
+                provider.tx_ref().cursor_write::<tables::AccountChangeSets>()?;
             for (t, (addr, acc)) in (opts.blocks).zip(&accounts) {
                 let Account { nonce, balance, .. } = acc;
                 let prev_acc = Account {
@@ -166,7 +172,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 }
                 _ => {
                     // clear table, load all accounts and hash it
-                    tx.clear::<tables::HashedAccount>()?;
+                    tx.clear::<tables::HashedAccounts>()?;
 
                     None
                 }
@@ -213,7 +219,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 hashed_batch.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
                 let mut hashed_account_cursor =
-                    tx.cursor_write::<RawTable<tables::HashedAccount>>()?;
+                    tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
 
                 // iterate and put presorted hashed accounts
                 if start_address.is_none() {
@@ -289,10 +295,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
 fn stage_checkpoint_progress<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, DatabaseError> {
+) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::HashedAccount>()? as u64,
-        total: provider.tx_ref().entries::<tables::PlainAccountState>()? as u64,
+        processed: provider.count_entries::<tables::HashedAccounts>()? as u64,
+        total: provider.count_entries::<tables::PlainAccountState>()? as u64,
     })
 }
 
@@ -300,10 +306,12 @@ fn stage_checkpoint_progress<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
+    use reth_provider::providers::StaticFileWriter;
     use test_utils::*;
 
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
@@ -400,7 +408,7 @@ mod tests {
             }) if address == fifth_address &&
                 total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
-        assert_eq!(runner.db.table::<tables::HashedAccount>().unwrap().len(), 5);
+        assert_eq!(runner.db.table::<tables::HashedAccounts>().unwrap().len(), 5);
 
         // second run, hash next five accounts.
         input.checkpoint = Some(result.unwrap().checkpoint);
@@ -427,7 +435,7 @@ mod tests {
             }) if processed == total &&
                 total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
-        assert_eq!(runner.db.table::<tables::HashedAccount>().unwrap().len(), 10);
+        assert_eq!(runner.db.table::<tables::HashedAccounts>().unwrap().len(), 10);
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
@@ -435,7 +443,7 @@ mod tests {
 
     mod test_utils {
         use super::*;
-        use crate::test_utils::{StageTestRunner, TestStageDB};
+        use crate::test_utils::TestStageDB;
         use reth_primitives::Address;
 
         pub(crate) struct AccountHashingTestRunner {
@@ -455,11 +463,11 @@ mod tests {
             }
 
             /// Iterates over PlainAccount table and checks that the accounts match the ones
-            /// in the HashedAccount table
+            /// in the HashedAccounts table
             pub(crate) fn check_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {
                     let mut acc_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
-                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
                     while let Some((address, account)) = acc_cursor.next()? {
                         let hashed_addr = keccak256(address);
@@ -478,7 +486,7 @@ mod tests {
             pub(crate) fn check_old_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {
                     let mut acc_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
-                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
                     while let Some((address, account)) = acc_cursor.next()? {
                         let Account { nonce, balance, .. } = account;
@@ -527,7 +535,7 @@ mod tests {
                 let provider = self.db.factory.provider_rw()?;
                 let res = Ok(AccountHashingStage::seed(
                     &provider,
-                    SeedOpts { blocks: 1..=input.target(), accounts: 0..10, txs: 0..3 },
+                    SeedOpts { blocks: 1..=input.target(), accounts: 10, txs: 0..3 },
                 )
                 .unwrap());
                 provider.commit().expect("failed to commit");

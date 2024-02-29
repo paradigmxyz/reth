@@ -6,7 +6,7 @@ use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::AutoSealBuilder;
 use reth_beacon_consensus::{
-    hooks::{EngineHooks, PruneHook},
+    hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{config::BlockchainTreeConfig, ShareableBlockchainTree};
@@ -40,6 +40,7 @@ use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_rpc_engine_api::EngineApi;
+use reth_static_file::StaticFileProducer;
 use reth_tasks::{TaskExecutor, TaskManager};
 use reth_transaction_pool::TransactionPool;
 use std::{path::PathBuf, sync::Arc};
@@ -127,26 +128,18 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         let prometheus_handle = self.config.install_prometheus_recorder()?;
 
-        let mut provider_factory =
-            ProviderFactory::new(Arc::clone(&self.db), Arc::clone(&self.config.chain));
-
-        // configure snapshotter
-        let snapshotter = reth_snapshot::Snapshotter::new(
-            provider_factory.clone(),
-            self.data_dir.snapshots_path(),
-            self.config.chain.snapshot_block_interval,
-        )?;
-
-        provider_factory = provider_factory.with_snapshots(
-            self.data_dir.snapshots_path(),
-            snapshotter.highest_snapshot_receiver(),
-        )?;
+        let provider_factory = ProviderFactory::new(
+            Arc::clone(&self.db),
+            Arc::clone(&self.config.chain),
+            self.data_dir.static_files_path(),
+        )?
+        .with_static_files_metrics();
 
         self.config.start_metrics_endpoint(prometheus_handle, Arc::clone(&self.db)).await?;
 
         debug!(target: "reth::cli", chain=%self.config.chain.chain, genesis=?self.config.chain.genesis_hash(), "Initializing genesis");
 
-        let genesis_hash = init_genesis(Arc::clone(&self.db), self.config.chain.clone())?;
+        let genesis_hash = init_genesis(provider_factory.clone())?;
 
         info!(target: "reth::cli", "{}", self.config.chain.display_hardforks());
 
@@ -270,6 +263,17 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         };
         let max_block = self.config.max_block(&network_client, provider_factory.clone()).await?;
 
+        let mut hooks = EngineHooks::new();
+
+        let mut static_file_producer = StaticFileProducer::new(
+            provider_factory.clone(),
+            provider_factory.static_file_provider(),
+            prune_config.clone().unwrap_or_default().segments,
+        );
+        let static_file_producer_events = static_file_producer.events();
+        hooks.add(StaticFileHook::new(static_file_producer.clone(), Box::new(executor.clone())));
+        info!(target: "reth::cli", "StaticFileProducer initialized");
+
         // Configure the pipeline
         let (mut pipeline, client) = if self.config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
@@ -301,6 +305,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
+                    static_file_producer,
                     evm_config,
                 )
                 .await?;
@@ -323,6 +328,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
                     sync_metrics_tx,
                     prune_config.clone(),
                     max_block,
+                    static_file_producer,
                     evm_config,
                 )
                 .await?;
@@ -333,22 +339,16 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let pipeline_events = pipeline.events();
 
         let initial_target = self.config.initial_pipeline_target(genesis_hash);
-        let mut hooks = EngineHooks::new();
 
-        let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = PrunerBuilder::new(prune_config.clone())
-                .max_reorg_depth(tree_config.max_reorg_depth() as usize)
-                .prune_delete_limit(self.config.chain.prune_delete_limit)
-                .build(provider_factory, snapshotter.highest_snapshot_receiver());
+        let prune_config = prune_config.unwrap_or_default();
+        let mut pruner = PrunerBuilder::new(prune_config.clone())
+            .max_reorg_depth(tree_config.max_reorg_depth() as usize)
+            .prune_delete_limit(self.config.chain.prune_delete_limit)
+            .build(provider_factory.clone());
 
-            let events = pruner.events();
-            hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
-
-            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
-            Either::Left(events)
-        } else {
-            Either::Right(stream::empty())
-        };
+        let pruner_events = pruner.events();
+        hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
+        info!(target: "reth::cli", ?prune_config, "Pruner initialized");
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
@@ -380,7 +380,8 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             } else {
                 Either::Right(stream::empty())
             },
-            pruner_events.map(Into::into)
+            pruner_events.map(Into::into),
+            static_file_producer_events.map(Into::into),
         );
         executor.spawn_critical(
             "events task",
