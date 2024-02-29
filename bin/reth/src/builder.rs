@@ -372,7 +372,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             network.event_listener().map(Into::into),
             beacon_engine_handle.event_listener().map(Into::into),
             pipeline_events.map(Into::into),
-            if self.config.debug.tip.is_none() {
+            if self.config.debug.tip.is_none() && !self.config.dev.dev {
                 Either::Left(
                     ConsensusLayerHealthEvents::new(Box::new(blockchain_db.clone()))
                         .map(Into::into),

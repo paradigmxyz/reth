@@ -61,21 +61,6 @@ impl<DB> ProviderFactory<DB> {
         })
     }
 
-    /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
-    /// instance.
-    pub fn new_with_database_path<P: AsRef<Path>>(
-        path: P,
-        chain_spec: Arc<ChainSpec>,
-        args: DatabaseArguments,
-        static_files_path: PathBuf,
-    ) -> RethResult<ProviderFactory<DatabaseEnv>> {
-        Ok(ProviderFactory::<DatabaseEnv> {
-            db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
-            chain_spec,
-            static_file_provider: StaticFileProvider::new(static_files_path)?,
-        })
-    }
-
     /// Enables metrics on the static file provider.
     pub fn with_static_files_metrics(mut self) -> Self {
         self.static_file_provider = self.static_file_provider.with_metrics();
@@ -96,6 +81,23 @@ impl<DB> ProviderFactory<DB> {
     /// Consumes Self and returns DB
     pub fn into_db(self) -> DB {
         self.db
+    }
+}
+
+impl ProviderFactory<DatabaseEnv> {
+    /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
+    /// instance.
+    pub fn new_with_database_path<P: AsRef<Path>>(
+        path: P,
+        chain_spec: Arc<ChainSpec>,
+        args: DatabaseArguments,
+        static_files_path: PathBuf,
+    ) -> RethResult<Self> {
+        Ok(ProviderFactory::<DatabaseEnv> {
+            db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
+            chain_spec,
+            static_file_provider: StaticFileProvider::new(static_files_path)?,
+        })
     }
 }
 
@@ -607,7 +609,6 @@ mod tests {
     use reth_db::{
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
-        DatabaseEnv,
     };
     use reth_interfaces::{
         provider::ProviderError,
@@ -653,7 +654,7 @@ mod tests {
     #[test]
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
-        let factory = ProviderFactory::<DatabaseEnv>::new_with_database_path(
+        let factory = ProviderFactory::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             Default::default(),
