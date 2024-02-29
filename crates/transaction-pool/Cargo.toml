@@ -11,12 +11,6 @@ description = "Transaction pool implementation"
 [lints]
 workspace = true
 
-[package.metadata.cargo-udeps.ignore]
-normal = [
-    # Used for diagrams in docs
-    "aquamarine",
-]
-
 [dependencies]
 # reth
 reth-eth-wire.workspace = true
