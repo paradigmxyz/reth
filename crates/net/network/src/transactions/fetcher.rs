@@ -17,6 +17,7 @@ use reth_metrics::common::mpsc::{
 };
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::{ByLength, Unlimited};
+#[cfg(debug_assertions)]
 use smallvec::{smallvec, SmallVec};
 use std::{
     collections::HashMap,
@@ -1111,7 +1112,7 @@ impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
     fn verify(
         self,
         requested_hashes: &[TxHash],
-        peer_id: &PeerId,
+        _peer_id: &PeerId,
     ) -> (VerificationOutcome, VerifiedPooledTransactions) {
         let mut verification_outcome = VerificationOutcome::Ok;
 
@@ -1134,7 +1135,7 @@ impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
 
         #[cfg(debug_assertions)]
         trace!(target: "net::tx",
-            peer_id=format!("{peer_id:#}"),
+            peer_id=format!("{_peer_id:#}"),
             tx_hashes_not_requested=?tx_hashes_not_requested,
             "transactions in `PooledTransactions` response from peer were not requested"
         );
