@@ -5296,7 +5296,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Durations of advancing nested streams, in one call to poll `NetworkManager` future.\n\n`NetworkHandleMessage` - stream transaction relate gossip from `TransactionManager` to propagate via `Swarm`\n`SwarmEvent` - stream transaction/announcement gossip fom `Swarm`",
+      "description": "Durations of advancing nested streams, in one call to poll `NetworkManager` future.\n\n`NetworkHandleMessage` - stream transaction relate gossip from `TransactionManager` to propagate via `Swarm`\n`SwarmEvent` - stream transaction/announcement gossip and requests fom `Swarm`",
       "fieldConfig": {
         "defaults": {
           "color": {
