@@ -34,6 +34,7 @@ reth-network-api.workspace = true
 reth-node-api.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
+reth-basic-payload-builder.workspace = true
 reth-consensus-common.workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
@@ -44,6 +45,7 @@ reth-prune.workspace = true
 reth-blockchain-tree.workspace = true
 revm-inspectors.workspace = true
 reth-static-file.workspace = true
+reth-eth-wire.workspace = true
 
 # `optimism` feature
 reth-optimism-payload-builder = { workspace = true, optional = true }
@@ -83,6 +85,7 @@ tracing.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
+alloy-chains.workspace = true
 secp256k1 = { workspace = true, features = [
     "global-context",
     "rand-std",
