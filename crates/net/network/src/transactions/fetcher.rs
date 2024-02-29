@@ -20,9 +20,9 @@ use reth_metrics::common::mpsc::{
     metered_unbounded_channel, UnboundedMeteredReceiver, UnboundedMeteredSender,
 };
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
+use schnellru::{ByLength, ByMemoryUsage, Unlimited};
 #[cfg(debug_assertions)]
 use smallvec::{smallvec, SmallVec};
-use schnellru::{ByLength, ByMemoryUsage, Unlimited};
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -877,7 +877,7 @@ impl TransactionFetcher {
                 // <https://github.com/paradigmxyz/reth/issues/6529>
 
                 let (validation_outcome, valid_payload) =
-                    self.filter_valid_message.partially_filter_valid_entries(verified_payload);
+                    self.filter_valid_hashes.partially_filter_valid_entries(verified_payload);
 
                 if let FilterOutcome::ReportPeer = validation_outcome {
                     trace!(target: "net::tx",

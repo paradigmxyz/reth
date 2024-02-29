@@ -34,7 +34,7 @@ use std::{
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
 };
-use tracing::{info, trace};
+use tracing::{trace};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A pool that manages transactions.

@@ -94,7 +94,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 mod events;
 use crate::{
     blobstore::BlobStore,

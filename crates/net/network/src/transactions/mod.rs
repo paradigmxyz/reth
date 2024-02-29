@@ -690,7 +690,7 @@ where
 
         // 1. filter out spam
         let (validation_outcome, mut partially_valid_msg) =
-            self.transaction_fetcher.filter_valid_message.partially_filter_valid_entries(msg);
+            self.transaction_fetcher.filter_valid_hashes.partially_filter_valid_entries(msg);
 
         if let FilterOutcome::ReportPeer = validation_outcome {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
@@ -729,12 +729,12 @@ where
         {
             // validate eth68 announcement data
             self.transaction_fetcher
-                .filter_valid_message
+                .filter_valid_hashes
                 .filter_valid_entries_68(partially_valid_msg)
         } else {
             // validate eth66 announcement data
             self.transaction_fetcher
-                .filter_valid_message
+                .filter_valid_hashes
                 .filter_valid_entries_66(partially_valid_msg)
         };
 
@@ -1075,7 +1075,7 @@ where
             self.metrics.transactions_by_peers_length.set(self.transactions_by_peers.len() as f64);
             self.metrics
                 .transactions_by_peers_total_count
-                .set(self.transactions_by_peers.values().map(Vec::len).sum::<usize>() as f64);
+                .set(self.transactions_by_peers.values().map(HashSet::len).sum::<usize>() as f64);
 
             // 3. import new transactions as a batch to minimize lock contention on the underlying
             // pool
@@ -1161,7 +1161,7 @@ where
         self.metrics.transactions_by_peers_length.set(self.transactions_by_peers.len() as f64);
         self.metrics
             .transactions_by_peers_total_count
-            .set(self.transactions_by_peers.values().map(Vec::len).sum::<usize>() as f64);
+            .set(self.transactions_by_peers.values().map(HashSet::len).sum::<usize>() as f64);
     }
 
     /// Penalize the peers that sent the bad transaction and cache it to avoid fetching or
@@ -1176,7 +1176,7 @@ where
         self.metrics.transactions_by_peers_length.set(self.transactions_by_peers.len() as f64);
         self.metrics
             .transactions_by_peers_total_count
-            .set(self.transactions_by_peers.values().map(Vec::len).sum::<usize>() as f64);
+            .set(self.transactions_by_peers.values().map(HashSet::len).sum::<usize>() as f64);
         self.transaction_fetcher.remove_hashes_from_transaction_fetcher([hash]);
         self.bad_imports.insert(hash);
     }
