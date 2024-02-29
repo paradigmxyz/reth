@@ -13,14 +13,22 @@
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::EvmProcessorFactory;
-//! # use reth_primitives::MAINNET;
+//! # use reth_primitives::{PruneModes, MAINNET};
 //! # use reth_node_ethereum::EthEvmConfig;
 //! # use reth_provider::test_utils::create_test_provider_factory;
+//! # use reth_static_file::StaticFileProducer;
 //!
 //! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone(), EthEvmConfig::default());
 //! # let provider_factory = create_test_provider_factory();
+//! # let static_file_producer =  StaticFileProducer::new(
+//!     provider_factory.clone(),
+//!     provider_factory.static_file_provider(),
+//!     PruneModes::default(),
+//! );
 //! // Build a pipeline with all offline stages.
-//! # let pipeline = Pipeline::builder().add_stages(OfflineStages::new(executor_factory)).build(provider_factory);
+//! # let pipeline = Pipeline::builder()
+//!     .add_stages(OfflineStages::new(executor_factory))
+//!     .build(provider_factory, static_file_producer);
 //! ```
 //!
 //! ```ignore
@@ -42,9 +50,9 @@ use crate::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
+        StorageHashingStage, TransactionLookupStage,
     },
-    StageSet, StageSetBuilder,
+    StageError, StageSet, StageSetBuilder,
 };
 use reth_db::database::Database;
 use reth_interfaces::{
@@ -53,6 +61,7 @@ use reth_interfaces::{
 };
 use reth_provider::{ExecutorFactory, HeaderSyncGapProvider, HeaderSyncMode};
 use std::sync::Arc;
+use tempfile::TempDir;
 
 /// A set containing all stages to run a fully syncing instance of reth.
 ///
@@ -64,7 +73,6 @@ use std::sync::Arc;
 ///
 /// This expands to the following series of stages:
 /// - [`HeaderStage`]
-/// - [`TotalDifficultyStage`]
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
 /// - [`ExecutionStage`]
@@ -93,20 +101,21 @@ impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
         header_downloader: H,
         body_downloader: B,
         executor_factory: EF,
-    ) -> Self
+    ) -> Result<Self, StageError>
     where
         EF: ExecutorFactory,
     {
-        Self {
+        Ok(Self {
             online: OnlineStages::new(
                 provider,
                 header_mode,
                 consensus,
                 header_downloader,
                 body_downloader,
+                Arc::new(TempDir::new()?),
             ),
             executor_factory,
-        }
+        })
     }
 }
 
@@ -119,17 +128,20 @@ where
         default_offline: StageSetBuilder<DB>,
         executor_factory: EF,
     ) -> StageSetBuilder<DB> {
-        default_offline.add_set(OfflineStages::new(executor_factory)).add_stage(FinishStage)
+        StageSetBuilder::default()
+            .add_set(default_offline)
+            .add_set(OfflineStages::new(executor_factory))
+            .add_stage(FinishStage)
     }
 }
 
-impl<DB, Provider, H, B, EF> StageSet<DB> for DefaultStages<Provider, H, B, EF>
+impl<Provider, H, B, EF, DB> StageSet<DB> for DefaultStages<Provider, H, B, EF>
 where
-    DB: Database,
     Provider: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
     EF: ExecutorFactory,
+    DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
         Self::add_offline_stages(self.online.builder(), self.executor_factory)
@@ -152,6 +164,8 @@ pub struct OnlineStages<Provider, H, B> {
     header_downloader: H,
     /// The block body downloader
     body_downloader: B,
+    /// Temporary directory for ETL usage on headers stage.
+    temp_dir: Arc<TempDir>,
 }
 
 impl<Provider, H, B> OnlineStages<Provider, H, B> {
@@ -162,8 +176,9 @@ impl<Provider, H, B> OnlineStages<Provider, H, B> {
         consensus: Arc<dyn Consensus>,
         header_downloader: H,
         body_downloader: B,
+        temp_dir: Arc<TempDir>,
     ) -> Self {
-        Self { provider, header_mode, consensus, header_downloader, body_downloader }
+        Self { provider, header_mode, consensus, header_downloader, body_downloader, temp_dir }
     }
 }
 
@@ -177,12 +192,8 @@ where
     pub fn builder_with_headers<DB: Database>(
         headers: HeaderStage<Provider, H>,
         body_downloader: B,
-        consensus: Arc<dyn Consensus>,
     ) -> StageSetBuilder<DB> {
-        StageSetBuilder::default()
-            .add_stage(headers)
-            .add_stage(TotalDifficultyStage::new(consensus.clone()))
-            .add_stage(BodyStage::new(body_downloader))
+        StageSetBuilder::default().add_stage(headers).add_stage(BodyStage::new(body_downloader))
     }
 
     /// Create a new builder using the given bodies stage.
@@ -192,10 +203,16 @@ where
         mode: HeaderSyncMode,
         header_downloader: H,
         consensus: Arc<dyn Consensus>,
+        temp_dir: Arc<TempDir>,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(provider, header_downloader, mode))
-            .add_stage(TotalDifficultyStage::new(consensus.clone()))
+            .add_stage(HeaderStage::new(
+                provider,
+                header_downloader,
+                mode,
+                consensus.clone(),
+                temp_dir.clone(),
+            ))
             .add_stage(bodies)
     }
 }
@@ -209,8 +226,13 @@ where
 {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(self.provider, self.header_downloader, self.header_mode))
-            .add_stage(TotalDifficultyStage::new(self.consensus.clone()))
+            .add_stage(HeaderStage::new(
+                self.provider,
+                self.header_downloader,
+                self.header_mode,
+                self.consensus.clone(),
+                self.temp_dir.clone(),
+            ))
             .add_stage(BodyStage::new(self.body_downloader))
     }
 }

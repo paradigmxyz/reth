@@ -14,6 +14,7 @@ use reth_primitives::{
 };
 use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
+use reth_static_file::StaticFileProducerEvent;
 use std::{
     fmt::{Display, Formatter},
     future::Future,
@@ -233,8 +234,22 @@ impl<DB> NodeState<DB> {
 
     fn handle_pruner_event(&self, event: PrunerEvent) {
         match event {
+            PrunerEvent::Started { tip_block_number } => {
+                info!(tip_block_number, "Pruner started");
+            }
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
                 info!(tip_block_number, ?elapsed, ?stats, "Pruner finished");
+            }
+        }
+    }
+
+    fn handle_static_file_producer_event(&self, event: StaticFileProducerEvent) {
+        match event {
+            StaticFileProducerEvent::Started { targets } => {
+                info!(?targets, "Static File Producer started");
+            }
+            StaticFileProducerEvent::Finished { targets, elapsed } => {
+                info!(?targets, ?elapsed, "Static File Producer finished");
             }
         }
     }
@@ -282,6 +297,8 @@ pub enum NodeEvent {
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
     /// A pruner event
     Pruner(PrunerEvent),
+    /// A static_file_producer event
+    StaticFileProducer(StaticFileProducerEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -311,6 +328,12 @@ impl From<ConsensusLayerHealthEvent> for NodeEvent {
 impl From<PrunerEvent> for NodeEvent {
     fn from(event: PrunerEvent) -> Self {
         NodeEvent::Pruner(event)
+    }
+}
+
+impl From<StaticFileProducerEvent> for NodeEvent {
+    fn from(event: StaticFileProducerEvent) -> Self {
+        NodeEvent::StaticFileProducer(event)
     }
 }
 
@@ -429,6 +452,9 @@ where
                 }
                 NodeEvent::Pruner(event) => {
                     this.state.handle_pruner_event(event);
+                }
+                NodeEvent::StaticFileProducer(event) => {
+                    this.state.handle_static_file_producer_event(event);
                 }
             }
         }

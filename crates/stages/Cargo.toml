@@ -26,6 +26,8 @@ reth-codecs.workspace = true
 reth-provider.workspace = true
 reth-trie.workspace = true
 reth-tokio-util.workspace = true
+reth-etl.workspace = true
+reth-static-file.workspace = true
 
 # revm
 revm.workspace = true
@@ -41,6 +43,7 @@ tracing.workspace = true
 
 # io
 serde.workspace = true
+tempfile.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -66,6 +69,7 @@ reth-node-optimism.workspace = true
 reth-blockchain-tree.workspace = true
 reth-revm.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
 
 alloy-rlp.workspace = true
 itertools.workspace = true
@@ -82,7 +86,7 @@ criterion = { workspace = true, features = ["async_futures"] }
 serde_json.workspace = true
 
 [features]
-test-utils = ["reth-interfaces/test-utils", "reth-db/test-utils"]
+test-utils = ["reth-interfaces/test-utils", "reth-db/test-utils", "reth-provider/test-utils"]
 
 [[bench]]
 name = "criterion"

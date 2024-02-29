@@ -10,6 +10,7 @@ use reth_db::{
     DatabaseError, RawTable, TableRawRow,
 };
 use reth_primitives::{fs, ChainSpec};
+use reth_provider::ProviderFactory;
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
 
@@ -24,17 +25,17 @@ pub use reth_node_core::utils::*;
 
 /// Wrapper over DB that implements many useful DB queries.
 #[derive(Debug)]
-pub struct DbTool<'a, DB: Database> {
-    /// The database that the db tool will use.
-    pub db: &'a DB,
+pub struct DbTool<DB: Database> {
+    /// The provider factory that the db tool will use.
+    pub provider_factory: ProviderFactory<DB>,
     /// The [ChainSpec] that the db tool will use.
     pub chain: Arc<ChainSpec>,
 }
 
-impl<'a, DB: Database> DbTool<'a, DB> {
+impl<DB: Database> DbTool<DB> {
     /// Takes a DB where the tables have already been created.
-    pub fn new(db: &'a DB, chain: Arc<ChainSpec>) -> eyre::Result<Self> {
-        Ok(Self { db, chain })
+    pub fn new(provider_factory: ProviderFactory<DB>, chain: Arc<ChainSpec>) -> eyre::Result<Self> {
+        Ok(Self { provider_factory, chain })
     }
 
     /// Grabs the contents of the table within a certain index range and places the
@@ -50,7 +51,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
         let mut hits = 0;
 
-        let data = self.db.view(|tx| {
+        let data = self.provider_factory.db_ref().view(|tx| {
             let mut cursor =
                 tx.cursor_read::<RawTable<T>>().expect("Was not able to obtain a cursor.");
 
@@ -118,27 +119,38 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     /// Grabs the content of the table for the given key
     pub fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>> {
-        self.db.view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
+        self.provider_factory.db_ref().view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
     }
 
     /// Grabs the content of the DupSort table for the given key and subkey
     pub fn get_dup<T: DupSort>(&self, key: T::Key, subkey: T::SubKey) -> Result<Option<T::Value>> {
-        self.db
+        self.provider_factory
+            .db_ref()
             .view(|tx| tx.cursor_dup_read::<T>()?.seek_by_key_subkey(key, subkey))?
             .map_err(|e| eyre::eyre!(e))
     }
 
-    /// Drops the database at the given path.
-    pub fn drop(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        let path = path.as_ref();
-        info!(target: "reth::cli", "Dropping database at {:?}", path);
-        fs::remove_dir_all(path)?;
+    /// Drops the database and the static files at the given path.
+    pub fn drop(
+        &mut self,
+        db_path: impl AsRef<Path>,
+        static_files_path: impl AsRef<Path>,
+    ) -> Result<()> {
+        let db_path = db_path.as_ref();
+        info!(target: "reth::cli", "Dropping database at {:?}", db_path);
+        fs::remove_dir_all(db_path)?;
+
+        let static_files_path = static_files_path.as_ref();
+        info!(target: "reth::cli", "Dropping static files at {:?}", static_files_path);
+        fs::remove_dir_all(static_files_path)?;
+        fs::create_dir_all(static_files_path)?;
+
         Ok(())
     }
 
     /// Drops the provided table from the database.
     pub fn drop_table<T: Table>(&mut self) -> Result<()> {
-        self.db.update(|tx| tx.clear::<T>())??;
+        self.provider_factory.db_ref().update(|tx| tx.clear::<T>())??;
         Ok(())
     }
 }

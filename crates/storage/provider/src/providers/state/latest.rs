@@ -1,6 +1,6 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    BundleStateWithReceipts, StateProvider, StateRootProvider,
+    providers::{state::macros::delegate_provider_impls, StaticFileProvider},
+    AccountReader, BlockHashReader, BundleStateWithReceipts, StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -9,7 +9,8 @@ use reth_db::{
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
-    trie::AccountProof, Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256,
+    trie::AccountProof, Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey,
+    StorageValue, B256,
 };
 use reth_trie::{proof::Proof, updates::TrieUpdates};
 
@@ -18,12 +19,14 @@ use reth_trie::{proof::Proof, updates::TrieUpdates};
 pub struct LatestStateProviderRef<'b, TX: DbTx> {
     /// database transaction
     db: &'b TX,
+    /// Static File provider
+    static_file_provider: StaticFileProvider,
 }
 
 impl<'b, TX: DbTx> LatestStateProviderRef<'b, TX> {
     /// Create new state provider
-    pub fn new(db: &'b TX) -> Self {
-        Self { db }
+    pub fn new(db: &'b TX, static_file_provider: StaticFileProvider) -> Self {
+        Self { db, static_file_provider }
     }
 }
 
@@ -37,7 +40,12 @@ impl<'b, TX: DbTx> AccountReader for LatestStateProviderRef<'b, TX> {
 impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.db.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Headers,
+            number,
+            |static_file| static_file.block_hash(number),
+            || Ok(self.db.get::<tables::CanonicalHeaders>(number)?),
+        )
     }
 
     fn canonical_hashes_range(
@@ -45,16 +53,23 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        let range = start..end;
-        self.db
-            .cursor_read::<tables::CanonicalHeaders>()
-            .map(|mut cursor| {
-                cursor
-                    .walk_range(range)?
-                    .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
-                    .collect::<ProviderResult<Vec<_>>>()
-            })?
-            .map_err(Into::into)
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Headers,
+            start..end,
+            |static_file, range, _| static_file.canonical_hashes_range(range.start, range.end),
+            |range, _| {
+                self.db
+                    .cursor_read::<tables::CanonicalHeaders>()
+                    .map(|mut cursor| {
+                        cursor
+                            .walk_range(range)?
+                            .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
+                            .collect::<ProviderResult<Vec<_>>>()
+                    })?
+                    .map_err(Into::into)
+            },
+            |_| true,
+        )
     }
 }
 
@@ -110,18 +125,20 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
 pub struct LatestStateProvider<TX: DbTx> {
     /// database transaction
     db: TX,
+    /// Static File provider
+    static_file_provider: StaticFileProvider,
 }
 
 impl<TX: DbTx> LatestStateProvider<TX> {
     /// Create new state provider
-    pub fn new(db: TX) -> Self {
-        Self { db }
+    pub fn new(db: TX, static_file_provider: StaticFileProvider) -> Self {
+        Self { db, static_file_provider }
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     fn as_ref(&self) -> LatestStateProviderRef<'_, TX> {
-        LatestStateProviderRef::new(&self.db)
+        LatestStateProviderRef::new(&self.db, self.static_file_provider.clone())
     }
 }
 

@@ -8,6 +8,7 @@ members = [
     "crates/consensus/beacon-core/",
     "crates/consensus/common/",
     "crates/ethereum-forks/",
+    "crates/etl",
     "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
@@ -41,8 +42,8 @@ members = [
     "crates/node-optimism/",
     "crates/node-core/",
     "crates/node-api/",
-    "crates/snapshot/",
     "crates/stages/",
+    "crates/static-file/",
     "crates/storage/codecs/",
     "crates/storage/codecs/derive/",
     "crates/storage/db/",
@@ -137,6 +138,7 @@ reth-ecies = { path = "crates/net/ecies" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
 reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
+reth-etl = { path = "crates/etl" }
 reth-optimism-payload-builder = { path = "crates/payload/optimism" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
@@ -162,8 +164,8 @@ reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
-reth-snapshot = { path = "crates/snapshot" }
 reth-stages = { path = "crates/stages" }
+reth-static-file = { path = "crates/static-file" }
 reth-tasks = { path = "crates/tasks" }
 reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing" }
