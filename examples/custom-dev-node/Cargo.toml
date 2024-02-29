@@ -1,16 +1,18 @@
 [package]
-name = "beacon-api-sse"
+name = "custom-dev-node"
 version = "0.0.0"
 publish = false
 edition.workspace = true
 license.workspace = true
 
+
 [dependencies]
 reth.workspace = true
+reth-node-core.workspace = true
+reth-primitives.workspace = true
 reth-node-ethereum.workspace = true
-
-clap.workspace = true
-tracing.workspace = true
 futures-util.workspace = true
-tokio = { workspace = true, features = ["time"] }
-mev-share-sse = {  version = "0.1.6" , default-features = false }
+
+eyre.workspace = true
+tokio.workspace = true
+serde_json.workspace = true

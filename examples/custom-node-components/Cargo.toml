@@ -1,12 +1,16 @@
 [package]
-name = "trace-transaction-cli"
+name = "custom-node-components"
 version = "0.0.0"
 publish = false
 edition.workspace = true
 license.workspace = true
 
+
 [dependencies]
 reth.workspace = true
 reth-node-ethereum.workspace = true
-clap = { workspace = true, features = ["derive"] }
-futures-util.workspace = true
+reth-transaction-pool.workspace = true
+reth-tracing.workspace = true
+
+
+eyre.workspace = true

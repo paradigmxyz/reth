@@ -5,18 +5,19 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         LogArgs,
     },
-    cli::ext::RethCliExt,
     commands::{
-        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, node, p2p, recover, stage,
-        test_vectors,
+        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, node, node::NoArgs, p2p,
+        recover, stage, test_vectors,
     },
     core::cli::runner::CliRunner,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
+use reth_db::DatabaseEnv;
+use reth_node_builder::{InitState, WithLaunchContext};
 use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
-use std::sync::Arc;
+use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 
 /// Re-export of the `reth_node_core` types specifically in the `cli` module.
 ///
@@ -30,7 +31,7 @@ pub use crate::core::cli::*;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<Ext: RethCliExt = ()> {
+pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
     command: Commands<Ext>,
@@ -68,9 +69,70 @@ pub struct Cli<Ext: RethCliExt = ()> {
     logs: LogArgs,
 }
 
-impl<Ext: RethCliExt> Cli<Ext> {
+impl Cli {
+    /// Parsers only the default CLI arguments
+    pub fn parse_args() -> Self {
+        Self::parse()
+    }
+
+    /// Parsers only the default CLI arguments from the given iterator
+    pub fn try_parse_args_from<I, T>(itr: I) -> Result<Self, clap::error::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        Cli::try_parse_from(itr)
+    }
+}
+
+impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     /// Execute the configured cli command.
-    pub fn run(mut self) -> eyre::Result<()> {
+    ///
+    /// This accepts a closure that is used to launch the node via the
+    /// [NodeCommand](node::NodeCommand).
+    ///
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use reth::cli::Cli;
+    /// use reth_node_ethereum::EthereumNode;
+    ///
+    /// Cli::parse_args()
+    ///     .run(|builder, _| async move {
+    ///         let handle = builder.launch_node(EthereumNode::default()).await?;
+    ///
+    ///         handle.wait_for_node_exit().await
+    ///     })
+    ///     .unwrap();
+    /// ```
+    ///
+    /// # Example
+    ///
+    /// Parse additional CLI arguments for the node command and use it to configure the node.
+    ///
+    /// ```no_run
+    /// use clap::Parser;
+    /// use reth::cli::Cli;
+    ///
+    /// #[derive(Debug, Parser)]
+    /// pub struct MyArgs {
+    ///     pub enable: bool,
+    /// }
+    ///
+    /// Cli::parse()
+    ///     .run(|builder, my_args: MyArgs| async move {
+    ///         // launch the node
+    ///
+    ///         Ok(())
+    ///     })
+    ///     .unwrap();
+    /// ````
+    pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
+    where
+        L: FnOnce(WithLaunchContext<Arc<DatabaseEnv>, InitState>, Ext) -> Fut,
+        Fut: Future<Output = eyre::Result<()>>,
+    {
         // add network name to logs dir
         self.logs.log_file_directory =
             self.logs.log_file_directory.join(self.chain.chain.to_string());
@@ -79,7 +141,9 @@ impl<Ext: RethCliExt> Cli<Ext> {
 
         let runner = CliRunner::default();
         match self.command {
-            Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::Node(command) => {
+                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
+            }
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
@@ -101,26 +165,11 @@ impl<Ext: RethCliExt> Cli<Ext> {
         let guard = self.logs.init_tracing()?;
         Ok(guard)
     }
-
-    /// Configures the given node extension.
-    pub fn with_node_extension<C>(mut self, conf: C) -> Self
-    where
-        C: Into<Ext::Node>,
-    {
-        self.command.set_node_extension(conf.into());
-        self
-    }
-}
-
-/// Convenience function for parsing CLI options, set up logging and run the chosen command.
-#[inline]
-pub fn run() -> eyre::Result<()> {
-    Cli::<()>::parse().run()
 }
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands<Ext: RethCliExt = ()> {
+pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Start the node
     #[command(name = "node")]
     Node(node::NodeCommand<Ext>),
@@ -155,17 +204,6 @@ pub enum Commands<Ext: RethCliExt = ()> {
     Recover(recover::Command),
 }
 
-impl<Ext: RethCliExt> Commands<Ext> {
-    /// Sets the node extension if it is the [NodeCommand](node::NodeCommand).
-    ///
-    /// This is a noop if the command is not the [NodeCommand](node::NodeCommand).
-    pub fn set_node_extension(&mut self, ext: Ext::Node) {
-        if let Commands::Node(command) = self {
-            command.ext = ext
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,7 +212,7 @@ mod tests {
 
     #[test]
     fn parse_color_mode() {
-        let reth = Cli::<()>::try_parse_from(["reth", "node", "--color", "always"]).unwrap();
+        let reth = Cli::try_parse_args_from(["reth", "node", "--color", "always"]).unwrap();
         assert_eq!(reth.logs.color, ColorMode::Always);
     }
 
@@ -183,9 +221,9 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
-        let reth = Cli::<()>::command();
+        let reth = Cli::<NoArgs>::command();
         for sub_command in reth.get_subcommands() {
-            let err = Cli::<()>::try_parse_from(["reth", sub_command.get_name(), "--help"])
+            let err = Cli::try_parse_args_from(["reth", sub_command.get_name(), "--help"])
                 .err()
                 .unwrap_or_else(|| {
                     panic!("Failed to parse help message {}", sub_command.get_name())
@@ -201,7 +239,7 @@ mod tests {
     /// name
     #[test]
     fn parse_logs_path() {
-        let mut reth = Cli::<()>::try_parse_from(["reth", "node"]).unwrap();
+        let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
         reth.logs.log_file_directory =
             reth.logs.log_file_directory.join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_file_directory;
@@ -211,7 +249,7 @@ mod tests {
         let mut iter = SUPPORTED_CHAINS.iter();
         iter.next();
         for chain in iter {
-            let mut reth = Cli::<()>::try_parse_from(["reth", "node", "--chain", chain]).unwrap();
+            let mut reth = Cli::try_parse_args_from(["reth", "node", "--chain", chain]).unwrap();
             reth.logs.log_file_directory =
                 reth.logs.log_file_directory.join(reth.chain.chain.to_string());
             let log_dir = reth.logs.log_file_directory;
@@ -221,20 +259,11 @@ mod tests {
     }
 
     #[test]
-    fn override_trusted_setup_file() {
-        // We already have a test that asserts that this has been initialized,
-        // so we cheat a little bit and check that loading a random file errors.
-        let reth = Cli::<()>::try_parse_from(["reth", "node", "--trusted-setup-file", "README.md"])
-            .unwrap();
-        assert!(reth.run().is_err());
-    }
-
-    #[test]
     fn parse_env_filter_directives() {
         let temp_dir = tempfile::tempdir().unwrap();
 
         std::env::set_var("RUST_LOG", "info,evm=debug");
-        let reth = Cli::<()>::try_parse_from([
+        let reth = Cli::try_parse_args_from([
             "reth",
             "init",
             "--datadir",
@@ -243,6 +272,6 @@ mod tests {
             "debug,net=trace",
         ])
         .unwrap();
-        assert!(reth.run().is_ok());
+        assert!(reth.run(|_, _| async move { Ok(()) }).is_ok());
     }
 }

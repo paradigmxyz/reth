@@ -53,6 +53,7 @@ reth-node-optimism = { workspace = true, optional = true, features = [
     "optimism",
 ] }
 reth-node-core.workspace = true
+reth-node-builder.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
@@ -137,8 +138,6 @@ optimism = [
     "reth-blockchain-tree/optimism",
     "reth-payload-builder/optimism",
     "reth-optimism-payload-builder/optimism",
-    "reth-ethereum-payload-builder/optimism",
-    "reth-node-ethereum/optimism",
     "dep:reth-node-optimism",
     "reth-node-core/optimism",
 ]
