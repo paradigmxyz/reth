@@ -183,7 +183,7 @@ impl Command {
     fn generate_static_file<DB: Database>(
         &self,
         factory: Arc<ProviderFactory<DB>>,
-        segment: impl Segment<DB> + Send + Sync,
+        segment: impl Segment<DB>,
         config: SegmentConfig,
     ) -> eyre::Result<()> {
         let dir = PathBuf::default();

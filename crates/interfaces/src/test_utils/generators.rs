@@ -80,7 +80,7 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
         gas_price: rng.gen::<u16>().into(),
         gas_limit: rng.gen::<u16>().into(),
         to: TransactionKind::Call(rng.gen()),
-        value: U256::from(rng.gen::<u16>()).into(),
+        value: U256::from(rng.gen::<u16>()),
         input: Bytes::default(),
     })
 }
@@ -396,7 +396,7 @@ mod tests {
             nonce: 0x42,
             gas_limit: 44386,
             to: TransactionKind::Call(hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
-            value: 0_u64.into(),
+            value: U256::from(0_u64),
             input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
             max_fee_per_gas: 0x4a817c800,
             max_priority_fee_per_gas: 0x3b9aca00,
@@ -428,7 +428,7 @@ mod tests {
             gas_price: 20 * 10_u128.pow(9),
             gas_limit: 21000,
             to: TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
-            value: 10_u128.pow(18).into(),
+            value: U256::from(10_u128.pow(18)),
             input: Bytes::default(),
         });
 
