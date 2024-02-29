@@ -6298,6 +6298,7 @@ name = "reth-network"
 version = "0.1.0-alpha.21"
 dependencies = [
  "alloy-node-bindings",
+ "aquamarine",
  "auto_impl",
  "criterion",
  "derive_more",
@@ -6714,6 +6715,7 @@ dependencies = [
  "alloy-sol-types",
  "assert_matches",
  "async-trait",
+ "bytes",
  "derive_more",
  "futures",
  "http",
@@ -7020,6 +7022,7 @@ dependencies = [
 name = "reth-trie"
 version = "0.1.0-alpha.21"
 dependencies = [
+ "alloy-chains",
  "alloy-rlp",
  "auto_impl",
  "criterion",
@@ -7027,6 +7030,7 @@ dependencies = [
  "once_cell",
  "proptest",
  "reth-db",
+ "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "revm",

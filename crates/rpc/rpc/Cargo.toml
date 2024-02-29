@@ -66,6 +66,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
+bytes.workspace = true
 secp256k1 = { workspace = true, features = [
     "global-context",
     "rand-std",
