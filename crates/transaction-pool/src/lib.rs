@@ -242,8 +242,6 @@ where
     ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
         futures_util::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
             .await
-            .into_iter()
-            .collect()
     }
 
     /// Validates the given transaction
