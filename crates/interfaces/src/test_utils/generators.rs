@@ -80,7 +80,7 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
         gas_price: rng.gen::<u16>().into(),
         gas_limit: rng.gen::<u16>().into(),
         to: TransactionKind::Call(rng.gen()),
-        value: U256::from(U256::from(rng.gen::<u16>())),
+        value: U256::from(rng.gen::<u16>()),
         input: Bytes::default(),
     })
 }
