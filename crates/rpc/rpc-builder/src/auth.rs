@@ -33,6 +33,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(feature = "optimism")]
+use reth_rpc::eth::SequencerClient;
+
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
 pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, EngineT, EvmConfig>(
@@ -44,6 +47,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, EngineT, EvmConfi
     socket_addr: SocketAddr,
     secret: JwtSecret,
     evm_config: EvmConfig,
+    #[cfg(feature = "optimism")] sequencer_client: SequencerClient,
 ) -> Result<AuthServerHandle, RpcError>
 where
     Provider: BlockReaderIdExt
@@ -85,6 +89,8 @@ where
         BlockingTaskPool::build().expect("failed to build tracing pool"),
         fee_history_cache,
         evm_config,
+        #[cfg(feature = "optimism")]
+        sequencer_client,
     );
     let config = EthFilterConfig::default()
         .max_logs_per_response(DEFAULT_MAX_LOGS_PER_RESPONSE)

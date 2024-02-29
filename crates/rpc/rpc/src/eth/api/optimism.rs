@@ -1,6 +1,8 @@
 use reth_primitives::U256;
 use revm::L1BlockInfo;
 
+use reqwest::Client;
+
 /// Optimism Transaction Metadata
 ///
 /// Includes the L1 fee and data gas for the tx along with the L1
@@ -26,5 +28,18 @@ impl OptimismTxMeta {
         l1_data_gas: Option<U256>,
     ) -> Self {
         Self { l1_block_info, l1_fee, l1_data_gas }
+    }
+}
+
+/// Optimism Sequencer Client
+#[derive(Debug, Default, Clone)]
+pub struct SequencerClient {
+    pub sequencer_endpoint: Option<String>,
+    pub http_client: Option<Client>,
+}
+
+impl SequencerClient {
+    pub fn new(sequencer_endpoint: Option<String>, http_client: Option<Client>) -> Self {
+        Self { sequencer_endpoint, http_client }
     }
 }

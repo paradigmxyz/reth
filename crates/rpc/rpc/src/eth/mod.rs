@@ -22,3 +22,6 @@ pub use bundle::EthBundle;
 pub use filter::{EthFilter, EthFilterConfig};
 pub use id_provider::EthSubscriptionIdProvider;
 pub use pubsub::EthPubSub;
+
+#[cfg(feature = "optimism")]
+pub use api::SequencerClient;
