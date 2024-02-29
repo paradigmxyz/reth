@@ -503,7 +503,7 @@ mod builder {
             block_number,
         );
         let receipts_root = bundle
-            .receipts_root_slow(
+            .optimism_receipts_root_slow(
                 block_number,
                 chain_spec.as_ref(),
                 attributes.payload_attributes.timestamp,

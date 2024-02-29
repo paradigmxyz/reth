@@ -29,7 +29,6 @@ use tokio::sync::{mpsc, mpsc::Receiver};
 #[non_exhaustive]
 pub struct NoopTransactionPool;
 
-#[async_trait::async_trait]
 impl TransactionPool for NoopTransactionPool {
     type Transaction = EthPooledTransaction;
 
@@ -135,6 +134,13 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn get_pooled_transaction_element(
+        &self,
+        _tx_hash: TxHash,
+    ) -> Option<PooledTransactionsElement> {
+        None
+    }
+
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
@@ -174,11 +180,10 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
-    fn retain_unknown<A>(&self, _announcement: &mut A) -> Option<A>
+    fn retain_unknown<A>(&self, _announcement: &mut A)
     where
         A: HandleMempoolData,
     {
-        None
     }
 
     fn get(&self, _tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
@@ -247,7 +252,6 @@ pub struct MockTransactionValidator<T> {
     _marker: PhantomData<T>,
 }
 
-#[async_trait::async_trait]
 impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
 

@@ -1,18 +1,38 @@
 use crate::{
-    components::FullNodeComponents,
+    components::{ComponentsBuilder, FullNodeComponents},
+    provider::FullProvider,
     rpc::{RethRpcServerHandles, RpcRegistry},
 };
 use reth_db::database::Database;
 use reth_network::NetworkHandle;
 use reth_node_api::{evm::ConfigureEvm, primitives::NodePrimitives, EngineTypes};
 use reth_node_core::{
-    cli::components::FullProvider,
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
+    rpc::builder::{auth::AuthServerHandle, RpcServerHandle},
 };
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives::ChainSpec;
+use reth_provider::ChainSpecProvider;
 use reth_tasks::TaskExecutor;
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
+
+/// A [Node] is a [NodeTypes] that comes with preconfigured components.
+///
+/// This can be used to configure the builder with a preset of components.
+pub trait Node<N>: NodeTypes + Clone {
+    /// The type that builds the node's pool.
+    type PoolBuilder;
+    /// The type that builds the node's network.
+    type NetworkBuilder;
+    /// The type that builds the node's payload service.
+    type PayloadBuilder;
+
+    /// Returns the [ComponentsBuilder] for the node.
+    fn components(
+        self,
+    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder>;
+}
 
 /// The type that configures stateless node types, the node's primitive types.
 pub trait NodeTypes: Send + Sync + 'static {
@@ -76,20 +96,47 @@ where
 }
 
 /// The launched node with all components including RPC handlers.
+///
+/// This can be used to interact with the launched node.
 #[derive(Debug)]
 pub struct FullNode<Node: FullNodeComponents> {
-    pub(crate) evm_config: Node::Evm,
-    pub(crate) pool: Node::Pool,
-    pub(crate) network: NetworkHandle,
-    pub(crate) provider: Node::Provider,
-    pub(crate) payload_builder: PayloadBuilderHandle<Node::Engine>,
-    pub(crate) executor: TaskExecutor,
-    pub(crate) rpc_server_handles: RethRpcServerHandles,
-    pub(crate) rpc_registry: RpcRegistry<Node>,
+    /// The evm configuration.
+    pub evm_config: Node::Evm,
+    /// The node's transaction pool.
+    pub pool: Node::Pool,
+    /// Handle to the node's network.
+    pub network: NetworkHandle,
+    /// Provider to interact with the node's database
+    pub provider: Node::Provider,
+    /// Handle to the node's payload builder service.
+    pub payload_builder: PayloadBuilderHandle<Node::Engine>,
+    /// Task executor for the node.
+    pub task_executor: TaskExecutor,
+    /// Handles to the node's rpc servers
+    pub rpc_server_handles: RethRpcServerHandles,
+    /// The configured rpc namespaces
+    pub rpc_registry: RpcRegistry<Node>,
     /// The initial node config.
-    pub(crate) config: NodeConfig,
+    pub config: NodeConfig,
     /// The data dir of the node.
-    pub(crate) data_dir: ChainPath<DataDirPath>,
+    pub data_dir: ChainPath<DataDirPath>,
+}
+
+impl<Node: FullNodeComponents> FullNode<Node> {
+    /// Returns the [ChainSpec] of the node.
+    pub fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.provider.chain_spec()
+    }
+
+    /// Returns the [RpcServerHandle] to the started rpc server.
+    pub fn rpc_server_handle(&self) -> &RpcServerHandle {
+        &self.rpc_server_handles.rpc
+    }
+
+    /// Returns the [AuthServerHandle] to the started authenticated engine API server.
+    pub fn auth_server_handle(&self) -> &AuthServerHandle {
+        &self.rpc_server_handles.auth
+    }
 }
 
 impl<Node: FullNodeComponents> Clone for FullNode<Node> {
@@ -100,7 +147,7 @@ impl<Node: FullNodeComponents> Clone for FullNode<Node> {
             network: self.network.clone(),
             provider: self.provider.clone(),
             payload_builder: self.payload_builder.clone(),
-            executor: self.executor.clone(),
+            task_executor: self.task_executor.clone(),
             rpc_server_handles: self.rpc_server_handles.clone(),
             rpc_registry: self.rpc_registry.clone(),
             config: self.config.clone(),

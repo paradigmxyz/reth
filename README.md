@@ -1,4 +1,4 @@
-# reth 
+# reth
 
 [![CI status](https://github.com/paradigmxyz/reth/workflows/ci/badge.svg)][gh-ci]
 [![cargo-deny status](https://github.com/paradigmxyz/reth/workflows/deny/badge.svg)][gh-deny]
@@ -14,7 +14,7 @@
 | [Developer Docs](./docs)
 | [Crate Docs](https://paradigmxyz.github.io/reth/docs)
 
-*The project is still work in progress, see the [disclaimer below](#status).*
+_The project is still work in progress, see the [disclaimer below](#status)._
 
 [codecov]: https://app.codecov.io/gh/paradigmxyz/reth
 [gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/ci.yml
@@ -49,6 +49,14 @@ It has **not been audited for security purposes** and should not be used in prod
 We will be updating the documentation with the completion status of each component, as well as include more contributing guidelines (design docs, architecture diagrams, repository layouts) and "good first issues".
 
 We appreciate your patience until we get there. Until then, we are happy to answer all questions in the Telegram link above.
+
+### Database compatibility
+
+Reth [v0.2.0-beta.1](https://github.com/paradigmxyz/reth/releases/tag/v0.2.0-beta.1) includes
+a [set of breaking database changes](https://github.com/paradigmxyz/reth/pull/5191) that makes it impossible to use database files produced by earlier versions.
+
+If you had a database produced by alpha versions of Reth, you need to drop it with `reth db drop`
+(using the same arguments such as `--config` or `--datadir` that you passed to `reth node`), and resync using the same `reth node` command you've used before.
 
 ## For Users
 
@@ -105,7 +113,7 @@ cargo test --workspace --features geth-tests
 # With Ethereum Foundation tests
 #
 # Note: Requires cloning https://github.com/ethereum/tests
-# 
+#
 #   cd testing/ef-tests && git clone https://github.com/ethereum/tests ethereum-tests
 cargo test -p ef-tests --features ef-tests
 ```
@@ -113,7 +121,7 @@ cargo test -p ef-tests --features ef-tests
 We recommend using [`cargo nextest`](https://nexte.st/) to speed up testing. With nextest installed, simply substitute `cargo test` with `cargo nextest run`.
 
 > **Note**
-> 
+>
 > Some tests use random number generators to generate test data. If you want to use a deterministic seed, you can set the `SEED` environment variable.
 
 ## Getting Help
@@ -135,9 +143,10 @@ See [`SECURITY.md`](./SECURITY.md).
 Reth is a new implementation of the Ethereum protocol. In the process of developing the node we investigated the design decisions other nodes have made to understand what is done well, what is not, and where we can improve the status quo.
 
 None of this would have been possible without them, so big shoutout to the teams below:
-* [Geth](https://github.com/ethereum/go-ethereum/): We would like to express our heartfelt gratitude to the go-ethereum team for their outstanding contributions to Ethereum over the years. Their tireless efforts and dedication have helped to shape the Ethereum ecosystem and make it the vibrant and innovative community it is today. Thank you for your hard work and commitment to the project.
-* [Erigon](https://github.com/ledgerwatch/erigon) (fka Turbo-Geth): Erigon pioneered the ["Staged Sync" architecture](https://erigon.substack.com/p/erigon-stage-sync-and-control-flows) that Reth is using, as well as [introduced MDBX](https://github.com/ledgerwatch/erigon/wiki/Choice-of-storage-engine) as the database of choice. We thank Erigon for pushing the state of the art research on the performance limits of Ethereum nodes.
-* [Akula](https://github.com/akula-bft/akula/): Reth uses forks of the Apache versions of Akula's [MDBX Bindings](https://github.com/paradigmxyz/reth/pull/132), [FastRLP](https://github.com/paradigmxyz/reth/pull/63) and [ECIES](https://github.com/paradigmxyz/reth/pull/80) . Given that these packages were already released under the Apache License, and they implement standardized solutions, we decided not to reimplement them to iterate faster. We thank the Akula team for their contributions to the Rust Ethereum ecosystem and for publishing these packages.
+
+- [Geth](https://github.com/ethereum/go-ethereum/): We would like to express our heartfelt gratitude to the go-ethereum team for their outstanding contributions to Ethereum over the years. Their tireless efforts and dedication have helped to shape the Ethereum ecosystem and make it the vibrant and innovative community it is today. Thank you for your hard work and commitment to the project.
+- [Erigon](https://github.com/ledgerwatch/erigon) (fka Turbo-Geth): Erigon pioneered the ["Staged Sync" architecture](https://erigon.substack.com/p/erigon-stage-sync-and-control-flows) that Reth is using, as well as [introduced MDBX](https://github.com/ledgerwatch/erigon/wiki/Choice-of-storage-engine) as the database of choice. We thank Erigon for pushing the state of the art research on the performance limits of Ethereum nodes.
+- [Akula](https://github.com/akula-bft/akula/): Reth uses forks of the Apache versions of Akula's [MDBX Bindings](https://github.com/paradigmxyz/reth/pull/132), [FastRLP](https://github.com/paradigmxyz/reth/pull/63) and [ECIES](https://github.com/paradigmxyz/reth/pull/80) . Given that these packages were already released under the Apache License, and they implement standardized solutions, we decided not to reimplement them to iterate faster. We thank the Akula team for their contributions to the Rust Ethereum ecosystem and for publishing these packages.
 
 [book]: https://paradigmxyz.github.io/reth/
 [tg-url]: https://t.me/paradigm_reth

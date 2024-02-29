@@ -153,6 +153,12 @@ where
         Ok(EthApi::ommer_by_block_and_index(self, number, index).await?)
     }
 
+    /// Handler for: `eth_getRawTransactionByHash`
+    async fn raw_transaction_by_hash(&self, hash: B256) -> Result<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getRawTransactionByHash");
+        Ok(EthTransactions::raw_transaction_by_hash(self, hash).await?)
+    }
+
     /// Handler for: `eth_getTransactionByHash`
     async fn transaction_by_hash(&self, hash: B256) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");

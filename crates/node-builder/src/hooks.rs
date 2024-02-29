@@ -72,7 +72,7 @@ impl<Node: FullNodeComponents> fmt::Debug for NodeHooks<Node> {
 }
 
 /// A helper trait for the event hook that is run once the node is initialized.
-pub trait OnComponentInitializedHook<Node> {
+pub trait OnComponentInitializedHook<Node>: Send {
     /// Consumes the event hook and runs it.
     ///
     /// If this returns an error, the node launch will be aborted.
@@ -81,7 +81,7 @@ pub trait OnComponentInitializedHook<Node> {
 
 impl<Node, F> OnComponentInitializedHook<Node> for F
 where
-    F: Fn(Node) -> eyre::Result<()>,
+    F: Fn(Node) -> eyre::Result<()> + Send,
 {
     fn on_event(&self, node: Node) -> eyre::Result<()> {
         self(node)
@@ -89,7 +89,7 @@ where
 }
 
 /// A helper trait that is run once the node is started.
-pub trait OnNodeStartedHook<Node: FullNodeComponents> {
+pub trait OnNodeStartedHook<Node: FullNodeComponents>: Send {
     /// Consumes the event hook and runs it.
     ///
     /// If this returns an error, the node launch will be aborted.
@@ -99,7 +99,7 @@ pub trait OnNodeStartedHook<Node: FullNodeComponents> {
 impl<Node, F> OnNodeStartedHook<Node> for F
 where
     Node: FullNodeComponents,
-    F: Fn(FullNode<Node>) -> eyre::Result<()>,
+    F: Fn(FullNode<Node>) -> eyre::Result<()> + Send,
 {
     fn on_event(&self, node: FullNode<Node>) -> eyre::Result<()> {
         self(node)

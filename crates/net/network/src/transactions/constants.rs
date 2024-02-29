@@ -33,6 +33,7 @@ pub const SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST: usize = 25
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
 pub const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 2 * 1024 * 1024;
 
+/// Constants used by [`TransactionsManager`](super::TransactionsManager).
 pub mod tx_manager {
     use super::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
@@ -54,6 +55,7 @@ pub mod tx_manager {
     pub const DEFAULT_CAPACITY_CACHE_BAD_IMPORTS: usize = 100 * 1024;
 }
 
+/// Constants used by [`TransactionFetcher`](super::TransactionFetcher).
 pub mod tx_fetcher {
     use crate::{
         peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND},
@@ -100,7 +102,7 @@ pub mod tx_fetcher {
     /// once from each individual peer.
     ///
     /// Default is 1 peer.
-    const DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS: u8 = 1;
+    pub const DEFAULT_MARGINAL_COUNT_FALLBACK_PEERS: u8 = 1;
 
     /* ==================== CONCURRENCY ==================== */
 

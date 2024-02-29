@@ -1,5 +1,5 @@
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, SnapshotSegment,
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, StaticFileSegment,
     TxHashOrNumber, TxNumber, B256, U256,
 };
 use std::path::PathBuf;
@@ -113,15 +113,18 @@ pub enum ProviderError {
     /// Provider does not support this particular request.
     #[error("this provider does not support this request")]
     UnsupportedProvider,
-    /// Snapshot file is not found at specified path.
-    #[error("not able to find {0} snapshot file at {1}")]
-    MissingSnapshotPath(SnapshotSegment, PathBuf),
-    /// Snapshot file is not found for requested block.
-    #[error("not able to find {0} snapshot file for block number {1}")]
-    MissingSnapshotBlock(SnapshotSegment, BlockNumber),
-    /// Snapshot file is not found for requested transaction.
-    #[error("not able to find {0} snapshot file for transaction id {1}")]
-    MissingSnapshotTx(SnapshotSegment, TxNumber),
+    /// Static File is not found at specified path.
+    #[error("not able to find {0} static file at {1}")]
+    MissingStaticFilePath(StaticFileSegment, PathBuf),
+    /// Static File is not found for requested block.
+    #[error("not able to find {0} static file for block number {1}")]
+    MissingStaticFileBlock(StaticFileSegment, BlockNumber),
+    /// Static File is not found for requested transaction.
+    #[error("unable to find {0} static file for transaction id {1}")]
+    MissingStaticFileTx(StaticFileSegment, TxNumber),
+    /// Static File is finalized and cannot be written to.
+    #[error("unable to write block #{1} to finalized static file {0}")]
+    FinalizedStaticFile(StaticFileSegment, BlockNumber),
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]
     BlockNumberOverflow(U256),
