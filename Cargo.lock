@@ -5997,7 +5997,6 @@ version = "0.1.0-alpha.21"
 dependencies = [
  "alloy-chains",
  "alloy-rlp",
- "async-trait",
  "data-encoding",
  "enr",
  "linked_hash_set",
@@ -6286,7 +6285,6 @@ dependencies = [
  "futures",
  "humantime-serde",
  "itertools 0.12.1",
- "linked-hash-map",
  "linked_hash_set",
  "metrics",
  "parking_lot 0.12.1",
@@ -6328,7 +6326,6 @@ name = "reth-network-api"
 version = "0.1.0-alpha.21"
 dependencies = [
  "alloy-chains",
- "async-trait",
  "reth-discv4",
  "reth-eth-wire",
  "reth-primitives",
