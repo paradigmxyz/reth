@@ -68,10 +68,10 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     network: NetworkArgs,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
     /// The maximum block height.

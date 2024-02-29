@@ -32,7 +32,7 @@ pub use crate::core::cli::*;
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
 pub struct Cli<Ext: RethCliExt = ()> {
     /// The command to run
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Commands<Ext>,
 
     /// The chain this node is running.
@@ -64,7 +64,7 @@ pub struct Cli<Ext: RethCliExt = ()> {
     #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
     instance: u16,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     logs: LogArgs,
 }
 

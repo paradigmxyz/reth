@@ -19,7 +19,7 @@ use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
-#[clap(next_help_heading = "Networking")]
+#[command(next_help_heading = "Networking")]
 pub struct NetworkArgs {
     /// Disable the discovery service.
     #[command(flatten)]
@@ -262,7 +262,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

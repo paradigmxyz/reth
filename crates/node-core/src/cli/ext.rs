@@ -209,7 +209,7 @@ impl<Conf: RethNodeCommandConfig> RethCliExt for NoArgsCliExt<Conf> {
 /// the reth node command.
 #[derive(Debug, Clone, Copy, Default, Args)]
 pub struct NoArgs<T = ()> {
-    #[clap(skip)]
+    #[arg(skip)]
     inner: Option<T>,
 }
 

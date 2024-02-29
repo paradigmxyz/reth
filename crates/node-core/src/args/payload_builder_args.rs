@@ -13,7 +13,7 @@ use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
 #[derive(Debug, Clone, Args, PartialEq)]
-#[clap(next_help_heading = "Builder")]
+#[command(next_help_heading = "Builder")]
 pub struct PayloadBuilderArgs {
     /// Block extra data set by the payload builder.
     #[arg(long = "builder.extradata", value_parser = ExtradataValueParser::default(), default_value_t = default_extradata())]
@@ -124,7 +124,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

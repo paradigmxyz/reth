@@ -24,7 +24,7 @@ pub struct Command {
     pub subkey: Option<String>,
 
     /// Output bytes instead of human-readable decoded value
-    #[clap(long)]
+    #[arg(long)]
     pub raw: bool,
 }
 
@@ -121,7 +121,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

@@ -42,7 +42,7 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
     stage: StageEnum,
