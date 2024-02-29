@@ -676,10 +676,7 @@ where
                 }
 
                 if direction.is_outgoing() {
-                    self.swarm
-                        .state_mut()
-                        .peers_mut()
-                        .on_active_outgoing_established(peer_id);
+                    self.swarm.state_mut().peers_mut().on_active_outgoing_established(peer_id);
                 }
 
                 self.event_listeners.notify(NetworkEvent::SessionEstablished {
