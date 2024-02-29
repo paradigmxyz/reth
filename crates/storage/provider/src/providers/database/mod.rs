@@ -536,7 +536,7 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use rand::Rng;
-    use reth_db::{tables, test_utils::ERROR_TEMPDIR, transaction::DbTxMut, DatabaseEnv};
+    use reth_db::{tables, test_utils::ERROR_TEMPDIR, transaction::DbTxMut};
     use reth_interfaces::{
         provider::ProviderError,
         test_utils::{
