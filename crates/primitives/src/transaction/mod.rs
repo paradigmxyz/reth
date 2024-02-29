@@ -1236,7 +1236,6 @@ impl TransactionSigned {
     ) -> alloy_rlp::Result<TransactionSigned> {
         // keep this around so we can use it to calculate the hash
         let original_encoding = *data;
-
         let tx_type = *data.first().ok_or(RlpError::InputTooShort)?;
         data.advance(1);
 
@@ -1460,7 +1459,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
         #[cfg(feature = "optimism")]
         let signature = if transaction.is_deposit() {
-            Signature { r: crate::U256::ZERO, s: crate::U256::ZERO, odd_y_parity: false }
+            Signature::optimism_deposit_tx_signature()
         } else {
             signature
         };

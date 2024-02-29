@@ -122,6 +122,7 @@ harness = false
 
 [[bench]]
 name = "validate_blob_tx"
+required-features = ["arbitrary"]
 harness = false
 
 [[bench]]
