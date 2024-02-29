@@ -44,7 +44,7 @@ reth-stages.workspace = true
 reth-prune.workspace = true
 reth-blockchain-tree.workspace = true
 revm-inspectors.workspace = true
-reth-snapshot.workspace = true
+reth-static-file.workspace = true
 reth-eth-wire.workspace = true
 
 # `optimism` feature
@@ -69,6 +69,7 @@ thiserror.workspace = true
 const-str = "0.5.6"
 rand.workspace = true
 pin-project.workspace = true
+derive_more.workspace = true
 
 # io
 dirs-next = "2.0.0"

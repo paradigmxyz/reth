@@ -4,11 +4,11 @@ StorageHashing stage
 
 ```bash
 $ reth stage dump storage-hashing --help
-Usage: reth stage dump storage-hashing [OPTIONS] --output-db <OUTPUT_PATH> --from <FROM> --to <TO>
+Usage: reth stage dump storage-hashing [OPTIONS] --output-datadir <OUTPUT_PATH> --from <FROM> --to <TO>
 
 Options:
-      --output-db <OUTPUT_PATH>
-          The path to the new database folder.
+      --output-datadir <OUTPUT_PATH>
+          The path to the new datadir folder.
 
   -f, --from <FROM>
           From which block

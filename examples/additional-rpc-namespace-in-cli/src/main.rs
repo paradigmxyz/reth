@@ -38,7 +38,7 @@ impl RethCliExt for MyRethCliExt {
 #[derive(Debug, Clone, Copy, Default, clap::Args)]
 struct RethCliTxpoolExt {
     /// CLI flag to enable the txpool extension namespace
-    #[clap(long)]
+    #[arg(long)]
     pub enable_ext: bool,
 }
 

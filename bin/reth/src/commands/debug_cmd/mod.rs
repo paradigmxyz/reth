@@ -13,7 +13,7 @@ mod replay_engine;
 /// `reth debug` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Subcommands,
 }
 

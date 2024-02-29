@@ -50,10 +50,11 @@ impl Command {
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, Default::default())?);
 
-        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        init_genesis(db.clone(), self.chain.clone())?;
+        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files_path())?;
 
-        let factory = ProviderFactory::new(&db, self.chain);
+        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
+        init_genesis(factory.clone())?;
+
         let mut provider = factory.provider_rw()?;
         let best_block = provider.best_block_number()?;
         let best_header = provider
@@ -62,7 +63,7 @@ impl Command {
 
         let mut deleted_tries = 0;
         let tx_mut = provider.tx_mut();
-        let mut hashed_account_cursor = tx_mut.cursor_read::<tables::HashedAccount>()?;
+        let mut hashed_account_cursor = tx_mut.cursor_read::<tables::HashedAccounts>()?;
         let mut storage_trie_cursor = tx_mut.cursor_dup_read::<tables::StoragesTrie>()?;
         let mut entry = storage_trie_cursor.first()?;
 
