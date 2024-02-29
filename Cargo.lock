@@ -5716,7 +5716,6 @@ dependencies = [
  "fdlimit",
  "futures",
  "human_bytes",
- "humantime",
  "hyper",
  "itertools 0.12.1",
  "jemallocator",

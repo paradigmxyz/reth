@@ -119,7 +119,6 @@ clap = { workspace = true, features = ["derive"] }
 tempfile.workspace = true
 backon = "0.4"
 similar-asserts.workspace = true
-humantime = "2.1.0"
 itertools.workspace = true
 rayon.workspace = true
 boyer-moore-magiclen = "0.2.16"
