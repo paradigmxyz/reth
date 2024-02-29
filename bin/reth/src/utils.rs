@@ -130,11 +130,21 @@ impl<DB: Database> DbTool<DB> {
             .map_err(|e| eyre::eyre!(e))
     }
 
-    /// Drops the database at the given path.
-    pub fn drop(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        let path = path.as_ref();
-        info!(target: "reth::cli", "Dropping database at {:?}", path);
-        fs::remove_dir_all(path)?;
+    /// Drops the database and the static files at the given path.
+    pub fn drop(
+        &mut self,
+        db_path: impl AsRef<Path>,
+        static_files_path: impl AsRef<Path>,
+    ) -> Result<()> {
+        let db_path = db_path.as_ref();
+        info!(target: "reth::cli", "Dropping database at {:?}", db_path);
+        fs::remove_dir_all(db_path)?;
+
+        let static_files_path = static_files_path.as_ref();
+        info!(target: "reth::cli", "Dropping static files at {:?}", static_files_path);
+        fs::remove_dir_all(static_files_path)?;
+        fs::create_dir_all(static_files_path)?;
+
         Ok(())
     }
 

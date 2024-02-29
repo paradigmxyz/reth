@@ -96,6 +96,7 @@ impl Command {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
+        let static_files_path = data_dir.static_files_path();
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.
@@ -105,7 +106,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(data_dir, &tool)?;
@@ -116,7 +117,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
@@ -127,7 +128,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
@@ -138,7 +139,7 @@ impl Command {
                     DatabaseArguments::default().log_level(self.db.log_level),
                 )?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 command.execute(&tool)?;
@@ -146,7 +147,7 @@ impl Command {
             Subcommands::Drop { force } => {
                 if !force {
                     // Ask for confirmation
-                    print!("Are you sure you want to drop the database at {db_path:?}? This cannot be undone. (y/N): ");
+                    print!("Are you sure you want to drop the database at {data_dir}? This cannot be undone. (y/N): ");
                     // Flush the buffer to ensure the message is printed immediately
                     io::stdout().flush().unwrap();
 
@@ -162,16 +163,16 @@ impl Command {
                 let db =
                     open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), static_files_path.clone())?;
 
                 let mut tool = DbTool::new(provider_factory, self.chain.clone())?;
-                tool.drop(db_path)?;
+                tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {
                 let db =
                     open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
                 let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
+                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
 
                 command.execute(provider_factory)?;
             }
