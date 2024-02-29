@@ -7,11 +7,6 @@ license.workspace = true
 
 [dependencies]
 reth.workspace = true
-reth-revm.workspace = true
 clap = { workspace = true, features = ["derive"] }
 futures-util.workspace = true
 eyre.workspace = true
-log = "0.4.20"
-
-[dev-dependencies]
-tokio.workspace = true

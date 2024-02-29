@@ -1823,10 +1823,7 @@ dependencies = [
  "clap",
  "eyre",
  "futures-util",
- "log",
  "reth",
- "reth-revm",
- "tokio",
 ]
 
 [[package]]
