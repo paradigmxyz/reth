@@ -45,7 +45,6 @@ reth-prune.workspace = true
 reth-blockchain-tree.workspace = true
 revm-inspectors.workspace = true
 reth-static-file.workspace = true
-reth-eth-wire.workspace = true
 
 # `optimism` feature
 reth-optimism-payload-builder = { workspace = true, optional = true }
