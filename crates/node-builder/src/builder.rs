@@ -15,7 +15,7 @@ use crate::{
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
-    hooks::{EngineHooks, PruneHook},
+    hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
@@ -43,9 +43,10 @@ use reth_primitives::{
     format_ether, ChainSpec,
 };
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
-use reth_prune::{PrunerBuilder, PrunerEvent};
+use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
+use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
@@ -381,7 +382,7 @@ where
             >,
         >,
     > {
-        // get config
+        // get config from file
         let reth_config = self.load_config(&data_dir)?;
 
         let Self {
@@ -403,14 +404,8 @@ where
             database.clone(),
             Arc::clone(&config.chain),
             data_dir.static_files_path(),
-        )?;
-
-        // configure static_file_producer
-        let static_file_producer = reth_static_file::StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            config.prune_config()?.unwrap_or_default().segments,
-        );
+        )?
+        .with_static_files_metrics();
 
         debug!(target: "reth::cli", chain=%config.chain.chain, genesis=?config.chain.genesis_hash(), "Initializing genesis");
 
@@ -501,6 +496,16 @@ where
         };
 
         let max_block = config.max_block(&network_client, provider_factory.clone()).await?;
+        let mut hooks = EngineHooks::new();
+
+        let mut static_file_producer = StaticFileProducer::new(
+            provider_factory.clone(),
+            provider_factory.static_file_provider(),
+            prune_config.clone().unwrap_or_default().segments,
+        );
+        let static_file_producer_events = static_file_producer.events();
+        hooks.add(StaticFileHook::new(static_file_producer.clone(), Box::new(executor.clone())));
+        info!(target: "reth::cli", "StaticFileProducer initialized");
 
         // Configure the pipeline
         let (mut pipeline, client) = if config.dev.dev {
@@ -565,22 +570,16 @@ where
         let pipeline_events = pipeline.events();
 
         let initial_target = config.initial_pipeline_target(genesis_hash);
-        let mut hooks = EngineHooks::new();
 
-        let pruner_events = if let Some(prune_config) = prune_config {
-            let mut pruner = PrunerBuilder::new(prune_config.clone())
-                .max_reorg_depth(tree_config.max_reorg_depth() as usize)
-                .prune_delete_limit(config.chain.prune_delete_limit)
-                .build(provider_factory);
+        let prune_config = prune_config.unwrap_or_default();
+        let mut pruner = PrunerBuilder::new(prune_config.clone())
+            .max_reorg_depth(tree_config.max_reorg_depth() as usize)
+            .prune_delete_limit(config.chain.prune_delete_limit)
+            .build(provider_factory.clone());
 
-            let events = pruner.events();
-            hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
-
-            info!(target: "reth::cli", ?prune_config, "Pruner initialized");
-            Either::Left(events)
-        } else {
-            Either::Right(stream::empty::<PrunerEvent>())
-        };
+        let pruner_events = pruner.events();
+        hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
+        info!(target: "reth::cli", ?prune_config, "Pruner initialized");
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
@@ -612,7 +611,8 @@ where
             } else {
                 Either::Right(stream::empty())
             },
-            pruner_events.map(Into::into)
+            pruner_events.map(Into::into),
+            static_file_producer_events.map(Into::into)
         );
         executor.spawn_critical(
             "events task",

@@ -6,7 +6,8 @@ use crate::{
         LogArgs,
     },
     commands::{
-        config_cmd, db, debug_cmd, import,dump_genesis, init_cmd, node, node::NoArgs, p2p, recover, stage, test_vectors,
+        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, node, node::NoArgs, p2p,
+        recover, stage, test_vectors,
     },
     core::cli::runner::CliRunner,
     version::{LONG_VERSION, SHORT_VERSION},
