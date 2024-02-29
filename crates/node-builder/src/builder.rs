@@ -541,7 +541,7 @@ where
             network.event_listener().map(Into::into),
             beacon_engine_handle.event_listener().map(Into::into),
             pipeline_events.map(Into::into),
-            if config.debug.tip.is_none() {
+            if config.debug.tip.is_none() && !config.dev.dev {
                 Either::Left(
                     ConsensusLayerHealthEvents::new(Box::new(blockchain_db.clone()))
                         .map(Into::into),
