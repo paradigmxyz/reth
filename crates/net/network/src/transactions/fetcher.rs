@@ -26,7 +26,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 use validation::FilterOutcome;
 
 use super::{
@@ -949,6 +949,7 @@ impl TransactionFetcher {
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
                 // request channel closed/dropped
                 FetchEvent::FetchError { peer_id, error: RequestError::ChannelClosed }
+            }
         };
 
         if let Err(err) = self.fetch_events_tail.send(event) {
