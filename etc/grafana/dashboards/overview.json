@@ -4983,7 +4983,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Accumulated durations of nested function calls, in one call to poll `TransactionsManager` future (`TransactionsManager` future has a loop, hence accumulated).\n\nNetwork Events - stream peer session updates from `NetworkManager`\nTransaction Events - stream txns gossip fom `NetworkManager`\nImported Transactions - stream hashes of successfully inserted txns from `TransactionPool`\nPending pool imports - flush txns to pool from `TransactionsManager`\nFetch Events - stream fetch txn events (success case wraps a tx) from `TransactionFetcher`\nCommands - stream commands from (?) to fetch/serve/propagate txns\n  ",
+      "description": "Accumulated durations of advancing nested streams/queues, in one call to poll `TransactionsManager` future (`TransactionsManager` future has a loop, hence accumulated).\n\n`NetworkEvent`s - stream peer session updates from `NetworkManager`\n`NetworkTransactionEvent`s - stream transaction related gossip/requests fom `NetworkManager`\nPending Transactions - stream hashes of successfully inserted transactions from `TransactionPool`, these are now pending in context of the pool\nPending pool imports - flush transactions to `TransactionPool`\n`FetchEvent`s - stream fetch transaction events (success case wraps transactions) from `TransactionFetcher`\n`TransactionsCommand`s - stream commands from `TransactionsHandle` (held by `NetworkHandle`) to fetch/serve/propagate transactions (only testnets by default)\n  ",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5296,7 +5296,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Accumulated durations of nested function calls, in one call to poll `NetworkManager` future.\n\n`NetworkHandleMessage` - stream transaction/announcement gossip from `TransactionManager` to propagate via `Swarm`\n`SwarmEvent` - stream transaction/announcement gossip fom `Swarm`",
+      "description": "Durations of advancing nested streams, in one call to poll `NetworkManager` future.\n\n`NetworkHandleMessage` - stream transaction relate gossip from `TransactionManager` to propagate via `Swarm`\n`SwarmEvent` - stream transaction/announcement gossip fom `Swarm`",
       "fieldConfig": {
         "defaults": {
           "color": {
