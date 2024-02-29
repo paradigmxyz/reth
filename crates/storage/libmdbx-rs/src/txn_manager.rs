@@ -265,6 +265,8 @@ mod read_transactions {
                         } else {
                             // Happy path, the transaction has been aborted by us with no errors.
                             warn!(target: "libmdbx", ?open_duration, "Long-lived read transaction has been aborted");
+                            // Add transaction to the list of timeouted transactions that were not
+                            // aborted by the user yet.
                             self.timeouted_not_aborted.insert(ptr as usize);
                         }
                     }
