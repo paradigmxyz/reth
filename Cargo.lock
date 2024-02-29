@@ -1408,7 +1408,6 @@ dependencies = [
  "parity-scale-codec",
  "proc-macro2",
  "quote",
- "serde",
  "similar-asserts",
  "syn 2.0.50",
 ]
@@ -5901,7 +5900,6 @@ dependencies = [
 name = "reth-blockchain-tree"
 version = "0.1.0-alpha.21"
 dependencies = [
- "aquamarine",
  "assert_matches",
  "linked_hash_set",
  "lru",
@@ -5948,7 +5946,6 @@ dependencies = [
  "reth-primitives",
  "secp256k1 0.27.0",
  "serde",
- "tempfile",
  "toml",
 ]
 
@@ -6027,7 +6024,6 @@ dependencies = [
 name = "reth-dns-discovery"
 version = "0.1.0-alpha.21"
 dependencies = [
- "alloy-chains",
  "alloy-rlp",
  "data-encoding",
  "enr",
@@ -6303,8 +6299,6 @@ name = "reth-network"
 version = "0.1.0-alpha.21"
 dependencies = [
  "alloy-node-bindings",
- "alloy-rlp",
- "aquamarine",
  "auto_impl",
  "criterion",
  "derive_more",
@@ -6436,7 +6430,6 @@ dependencies = [
 name = "reth-node-core"
 version = "0.1.0-alpha.21"
 dependencies = [
- "alloy-chains",
  "alloy-rlp",
  "assert_matches",
  "clap",
@@ -6459,7 +6452,6 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "reth-auto-seal-consensus",
- "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-config",
@@ -6467,7 +6459,6 @@ dependencies = [
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
- "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics",
  "reth-net-nat",
@@ -6507,7 +6498,6 @@ dependencies = [
 name = "reth-node-ethereum"
 version = "0.1.0-alpha.21"
 dependencies = [
- "async-trait",
  "eyre",
  "reth-basic-payload-builder",
  "reth-db",
@@ -6521,7 +6511,6 @@ dependencies = [
  "reth-rpc-types",
  "reth-tracing",
  "reth-transaction-pool",
- "revm",
  "serde",
 ]
 
@@ -6726,7 +6715,6 @@ dependencies = [
  "alloy-sol-types",
  "assert_matches",
  "async-trait",
- "bytes",
  "derive_more",
  "futures",
  "http",
@@ -6871,7 +6859,6 @@ dependencies = [
  "alloy-rpc-trace-types",
  "alloy-rpc-types",
  "arbitrary",
- "bytes",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "jsonrpsee-types",
@@ -6895,7 +6882,6 @@ dependencies = [
  "alloy-rpc-types",
  "reth-primitives",
  "reth-rpc-types",
- "serde_json",
 ]
 
 [[package]]
@@ -6903,7 +6889,6 @@ name = "reth-stages"
 version = "0.1.0-alpha.21"
 dependencies = [
  "alloy-rlp",
- "aquamarine",
  "assert_matches",
  "auto_impl",
  "criterion",

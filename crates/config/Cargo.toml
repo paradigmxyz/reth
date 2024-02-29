@@ -1,32 +1,51 @@
 [package]
 name = "reth-config"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-homepage.workspace = true
-repository.workspace = true
 
 [lints]
 workspace = true
 
-[dependencies]
-# reth
-reth-network.workspace = true
-reth-net-nat.workspace = true
-reth-discv4.workspace = true
-reth-primitives.workspace = true
+[package.version]
+workspace = true
 
-# serde
-serde.workspace = true
-humantime-serde.workspace = true
+[package.edition]
+workspace = true
 
-# crypto
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+[package.rust-version]
+workspace = true
 
-# misc
-tempfile.workspace = true
+[package.license]
+workspace = true
 
-[dev-dependencies]
-confy.workspace = true
-toml.workspace = true
+[package.homepage]
+workspace = true
+
+[package.repository]
+workspace = true
+
+[dependencies.reth-network]
+workspace = true
+
+[dependencies.reth-net-nat]
+workspace = true
+
+[dependencies.reth-discv4]
+workspace = true
+
+[dependencies.reth-primitives]
+workspace = true
+
+[dependencies.serde]
+workspace = true
+
+[dependencies.humantime-serde]
+workspace = true
+
+[dependencies.secp256k1]
+workspace = true
+features = [ "global-context", "rand-std", "recovery",]
+
+[dev-dependencies.confy]
+workspace = true
+
+[dev-dependencies.toml]
+workspace = true

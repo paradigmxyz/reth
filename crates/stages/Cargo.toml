@@ -1,83 +1,162 @@
+[[bench]]
+name = "criterion"
+harness = false
+required-features = [ "test-utils",]
+
 [package]
 name = "reth-stages"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-homepage.workspace = true
-repository.workspace = true
 description = "Staged syncing primitives used in reth."
 
 [lints]
 workspace = true
 
 [dependencies]
-# reth
-reth-primitives.workspace = true
-reth-interfaces.workspace = true
-reth-db.workspace = true
-reth-codecs.workspace = true
-reth-provider.workspace = true
-reth-trie.workspace = true
-reth-tokio-util.workspace = true
-reth-etl.workspace = true
-reth-static-file.workspace = true
-
-# async
-tokio = { workspace = true, features = ["sync"] }
-tokio-stream.workspace = true
-futures-util.workspace = true
-
-# observability
-tracing.workspace = true
-
-# io
-tempfile.workspace = true
-
-# metrics
-reth-metrics.workspace = true
-metrics.workspace = true
-
-# misc
-thiserror.workspace = true
-aquamarine.workspace = true
-itertools.workspace = true
-rayon.workspace = true
 num-traits = "0.2.15"
 auto_impl = "1"
 
 [dev-dependencies]
-# reth
-reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
-reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
-reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth-downloaders.workspace = true
-reth-eth-wire.workspace = true # TODO(onbjerg): We only need this for [BlockBody]
-reth-node-ethereum.workspace = true
-reth-node-optimism.workspace = true
-reth-blockchain-tree.workspace = true
-reth-revm.workspace = true
-reth-trie = { workspace = true, features = ["test-utils"] }
-reth-provider = { workspace = true, features = ["test-utils"] }
-
-alloy-rlp.workspace = true
-itertools.workspace = true
-tokio = { workspace = true, features = ["rt", "sync", "macros"] }
-assert_matches.workspace = true
-rand.workspace = true
 paste = "1.0"
 
-# Stage benchmarks
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
-criterion = { workspace = true, features = ["async_futures"] }
-
-# io
-serde_json.workspace = true
-
 [features]
-test-utils = ["reth-interfaces/test-utils", "reth-db/test-utils", "reth-provider/test-utils"]
+test-utils = [ "reth-interfaces/test-utils", "reth-db/test-utils", "reth-provider/test-utils",]
 
-[[bench]]
-name = "criterion"
-harness = false
-required-features = ["test-utils"]
+[package.version]
+workspace = true
+
+[package.edition]
+workspace = true
+
+[package.rust-version]
+workspace = true
+
+[package.license]
+workspace = true
+
+[package.homepage]
+workspace = true
+
+[package.repository]
+workspace = true
+
+[dependencies.reth-primitives]
+workspace = true
+
+[dependencies.reth-interfaces]
+workspace = true
+
+[dependencies.reth-db]
+workspace = true
+
+[dependencies.reth-codecs]
+workspace = true
+
+[dependencies.reth-provider]
+workspace = true
+
+[dependencies.reth-trie]
+workspace = true
+
+[dependencies.reth-tokio-util]
+workspace = true
+
+[dependencies.reth-etl]
+workspace = true
+
+[dependencies.reth-static-file]
+workspace = true
+
+[dependencies.tokio]
+workspace = true
+features = [ "sync",]
+
+[dependencies.tokio-stream]
+workspace = true
+
+[dependencies.futures-util]
+workspace = true
+
+[dependencies.tracing]
+workspace = true
+
+[dependencies.tempfile]
+workspace = true
+
+[dependencies.reth-metrics]
+workspace = true
+
+[dependencies.metrics]
+workspace = true
+
+[dependencies.thiserror]
+workspace = true
+
+[dependencies.itertools]
+workspace = true
+
+[dependencies.rayon]
+workspace = true
+
+[dev-dependencies.reth-primitives]
+workspace = true
+features = [ "test-utils", "arbitrary",]
+
+[dev-dependencies.reth-db]
+workspace = true
+features = [ "test-utils", "mdbx",]
+
+[dev-dependencies.reth-interfaces]
+workspace = true
+features = [ "test-utils",]
+
+[dev-dependencies.reth-downloaders]
+workspace = true
+
+[dev-dependencies.reth-eth-wire]
+workspace = true
+
+[dev-dependencies.reth-node-ethereum]
+workspace = true
+
+[dev-dependencies.reth-node-optimism]
+workspace = true
+
+[dev-dependencies.reth-blockchain-tree]
+workspace = true
+
+[dev-dependencies.reth-revm]
+workspace = true
+
+[dev-dependencies.reth-trie]
+workspace = true
+features = [ "test-utils",]
+
+[dev-dependencies.reth-provider]
+workspace = true
+features = [ "test-utils",]
+
+[dev-dependencies.alloy-rlp]
+workspace = true
+
+[dev-dependencies.itertools]
+workspace = true
+
+[dev-dependencies.tokio]
+workspace = true
+features = [ "rt", "sync", "macros",]
+
+[dev-dependencies.assert_matches]
+workspace = true
+
+[dev-dependencies.rand]
+workspace = true
+
+[dev-dependencies.pprof]
+workspace = true
+features = [ "flamegraph", "frame-pointer", "criterion",]
+
+[dev-dependencies.criterion]
+workspace = true
+features = [ "async_futures",]
+
+[dev-dependencies.serde_json]
+workspace = true
