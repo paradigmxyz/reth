@@ -6890,6 +6890,7 @@ name = "reth-stages"
 version = "0.1.0-alpha.21"
 dependencies = [
  "alloy-rlp",
+ "aquamarine",
  "assert_matches",
  "auto_impl",
  "criterion",
