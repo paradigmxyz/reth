@@ -1,5 +1,3 @@
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 //! Implementation of a tree-like structure for blockchains.
 //!
 //! The [BlockchainTree] can validate, execute, and revert blocks in multiple competing sidechains.

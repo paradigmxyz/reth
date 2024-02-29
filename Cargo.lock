@@ -5899,6 +5899,7 @@ dependencies = [
 name = "reth-blockchain-tree"
 version = "0.1.0-alpha.21"
 dependencies = [
+ "aquamarine",
  "assert_matches",
  "linked_hash_set",
  "lru",
@@ -6299,6 +6300,7 @@ version = "0.1.0-alpha.21"
 dependencies = [
  "alloy-node-bindings",
  "alloy-rlp",
+ "aquamarine",
  "auto_impl",
  "criterion",
  "derive_more",
