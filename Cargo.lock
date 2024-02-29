@@ -5832,7 +5832,6 @@ name = "reth-beacon-consensus"
 version = "0.1.0-alpha.21"
 dependencies = [
  "assert_matches",
- "cfg-if",
  "futures",
  "metrics",
  "reth-beacon-consensus-core",
