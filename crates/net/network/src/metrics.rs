@@ -195,13 +195,15 @@ pub struct TransactionsManagerMetrics {
 /// accumulator value passed as a mutable reference.
 #[macro_export]
 macro_rules! duration_metered_exec {
-    ($code:block, $acc:ident) => {
+    ($code:expr, $acc:ident) => {{
         let start = Instant::now();
 
-        $code;
+        let res = $code;
 
         *$acc += start.elapsed();
-    };
+
+        res
+    }};
 }
 
 /// Metrics for Disconnection types
