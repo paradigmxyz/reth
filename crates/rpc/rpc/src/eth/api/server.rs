@@ -67,7 +67,7 @@ where
     /// Handler for: `eth_accounts`
     async fn accounts(&self) -> Result<Vec<Address>> {
         trace!(target: "rpc::eth", "Serving eth_accounts");
-        Ok(EthApiSpec::accounts(self))
+        Ok(EthApiSpec::accounts(self).await)
     }
 
     /// Handler for: `eth_blockNumber`

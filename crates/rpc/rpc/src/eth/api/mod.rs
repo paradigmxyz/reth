@@ -70,7 +70,7 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
     fn chain_info(&self) -> RethResult<ChainInfo>;
 
     /// Returns a list of addresses owned by provider.
-    fn accounts(&self) -> Vec<Address>;
+    async fn accounts(&self) -> Vec<Address>;
 
     /// Returns `true` if the network is undergoing sync.
     fn is_syncing(&self) -> bool;
@@ -408,8 +408,8 @@ where
         Ok(self.provider().chain_info()?)
     }
 
-    fn accounts(&self) -> Vec<Address> {
-        self.inner.signers.blocking_read().iter().flat_map(|s| s.accounts()).collect()
+    async fn accounts(&self) -> Vec<Address> {
+        self.inner.signers.read().await.iter().flat_map(|s| s.accounts()).collect()
     }
 
     fn is_syncing(&self) -> bool {
