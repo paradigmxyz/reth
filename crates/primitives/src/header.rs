@@ -18,6 +18,7 @@ use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
+
 /// Errors that can occur during header sanity checks.
 #[derive(Debug, PartialEq)]
 pub enum HeaderError {
@@ -574,13 +575,14 @@ pub enum HeaderValidationError {
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[add_arbitrary_tests(rlp)]
+#[main_codec(no_arbitrary)]
+#[add_arbitrary_tests(rlp, compact)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SealedHeader {
-    /// Locked Header fields.
-    header: Header,
     /// Locked Header hash.
     hash: BlockHash,
+    /// Locked Header fields.
+    header: Header,
 }
 
 impl SealedHeader {

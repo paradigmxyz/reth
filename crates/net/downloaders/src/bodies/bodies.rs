@@ -596,7 +596,7 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
-    use reth_db::test_utils::create_test_rw_db;
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
     use reth_primitives::{BlockBody, B256, MAINNET};
     use reth_provider::ProviderFactory;
@@ -618,7 +618,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
@@ -657,7 +657,7 @@ mod tests {
             BodiesDownloaderBuilder::default().with_request_limit(request_limit).build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone()),
+                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
             );
         downloader.set_download_range(0..=199).expect("failed to set download range");
 
@@ -686,7 +686,7 @@ mod tests {
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone()),
+                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
             );
 
         let mut range_start = 0;
@@ -716,7 +716,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().with_stream_batch_size(100).build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
         );
 
         // Set and download the first range
@@ -756,7 +756,7 @@ mod tests {
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone()),
+                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
             );
 
         // Set and download the entire range
@@ -787,7 +787,7 @@ mod tests {
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone()),
+                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
             );
 
         // Download the requested range

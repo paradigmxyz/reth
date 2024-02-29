@@ -81,7 +81,7 @@ tracing.workspace = true
 tracing-futures = "0.2"
 schnellru.workspace = true
 futures.workspace = true
-derive_more = "0.99"
+derive_more.workspace = true
 lazy_static = "*"
 
 [dev-dependencies]

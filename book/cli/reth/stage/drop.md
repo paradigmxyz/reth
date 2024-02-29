@@ -57,18 +57,17 @@ Database:
 
   <STAGE>
           Possible values:
-          - headers:          The headers stage within the pipeline
-          - bodies:           The bodies stage within the pipeline
-          - senders:          The senders stage within the pipeline
-          - execution:        The execution stage within the pipeline
-          - account-hashing:  The account hashing stage within the pipeline
-          - storage-hashing:  The storage hashing stage within the pipeline
-          - hashing:          The hashing stage within the pipeline
-          - merkle:           The Merkle stage within the pipeline
-          - tx-lookup:        The transaction lookup stage within the pipeline
-          - account-history:  The account history stage within the pipeline
-          - storage-history:  The storage history stage within the pipeline
-          - total-difficulty: The total difficulty stage within the pipeline
+          - headers:         The headers stage within the pipeline
+          - bodies:          The bodies stage within the pipeline
+          - senders:         The senders stage within the pipeline
+          - execution:       The execution stage within the pipeline
+          - account-hashing: The account hashing stage within the pipeline
+          - storage-hashing: The storage hashing stage within the pipeline
+          - hashing:         The hashing stage within the pipeline
+          - merkle:          The Merkle stage within the pipeline
+          - tx-lookup:       The transaction lookup stage within the pipeline
+          - account-history: The account history stage within the pipeline
+          - storage-history: The storage history stage within the pipeline
 
 Logging:
       --log.stdout.format <FORMAT>

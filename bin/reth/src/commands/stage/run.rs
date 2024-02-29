@@ -19,16 +19,16 @@ use reth_db::{init_db, mdbx::DatabaseArguments};
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::ChainSpec;
-use reth_provider::{ProviderFactory, StageCheckpointReader};
+use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
 use reth_stages::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    ExecInput, Stage, StageExt, UnwindInput,
+    ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
 use tracing::*;
 
 /// `reth stage` command
@@ -103,6 +103,10 @@ pub struct Command {
     // e.g. query the DB size, or any table data.
     #[arg(long, short)]
     commit: bool,
+
+    /// Save stage checkpoints
+    #[arg(long)]
+    checkpoints: bool,
 }
 
 impl Command {
@@ -127,7 +131,11 @@ impl Command {
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
         info!(target: "reth::cli", "Database opened");
 
-        let factory = ProviderFactory::new(Arc::clone(&db), self.chain.clone());
+        let factory = ProviderFactory::new(
+            Arc::clone(&db),
+            self.chain.clone(),
+            data_dir.static_files_path(),
+        )?;
         let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
@@ -165,8 +173,11 @@ impl Command {
 
                     let default_peers_path = data_dir.known_peers_path();
 
-                    let provider_factory =
-                        Arc::new(ProviderFactory::new(db.clone(), self.chain.clone()));
+                    let provider_factory = Arc::new(ProviderFactory::new(
+                        db.clone(),
+                        self.chain.clone(),
+                        data_dir.static_files_path(),
+                    )?);
 
                     let network = self
                         .network
@@ -250,8 +261,12 @@ impl Command {
 
         if !self.skip_unwind {
             while unwind.checkpoint.block_number > self.from {
-                let unwind_output = unwind_stage.unwind(&provider_rw, unwind)?;
-                unwind.checkpoint = unwind_output.checkpoint;
+                let UnwindOutput { checkpoint } = unwind_stage.unwind(&provider_rw, unwind)?;
+                unwind.checkpoint = checkpoint;
+
+                if self.checkpoints {
+                    provider_rw.save_stage_checkpoint(unwind_stage.id(), checkpoint)?;
+                }
 
                 if self.commit {
                     provider_rw.commit()?;
@@ -265,21 +280,27 @@ impl Command {
             checkpoint: Some(checkpoint.with_block_number(self.from)),
         };
 
+        let start = Instant::now();
+        info!(target: "reth::cli", stage = %self.stage, "Executing stage");
         loop {
             exec_stage.execute_ready(input).await?;
-            let output = exec_stage.execute(&provider_rw, input)?;
+            let ExecOutput { checkpoint, done } = exec_stage.execute(&provider_rw, input)?;
 
-            input.checkpoint = Some(output.checkpoint);
+            input.checkpoint = Some(checkpoint);
 
+            if self.checkpoints {
+                provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
+            }
             if self.commit {
                 provider_rw.commit()?;
                 provider_rw = factory.provider_rw()?;
             }
 
-            if output.done {
+            if done {
                 break
             }
         }
+        info!(target: "reth::cli", stage = %self.stage, time = ?start.elapsed(), "Finished stage");
 
         Ok(())
     }

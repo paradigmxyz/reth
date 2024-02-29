@@ -1,6 +1,6 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
-    keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256,
+    keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256,
 };
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -32,7 +32,6 @@ pub use signature::Signature;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
-pub use tx_value::TxValue;
 pub use variant::TransactionSignedVariant;
 
 mod access_list;
@@ -48,7 +47,6 @@ mod pooled;
 mod sidecar;
 mod signature;
 mod tx_type;
-mod tx_value;
 pub(crate) mod util;
 mod variant;
 
@@ -192,7 +190,7 @@ impl Transaction {
     }
 
     /// Gets the transaction's value field.
-    pub fn value(&self) -> TxValue {
+    pub fn value(&self) -> U256 {
         *match self {
             Transaction::Legacy(TxLegacy { value, .. }) |
             Transaction::Eip2930(TxEip2930 { value, .. }) |
@@ -481,7 +479,7 @@ impl Transaction {
     }
 
     /// This sets the transaction's value.
-    pub fn set_value(&mut self, value: TxValue) {
+    pub fn set_value(&mut self, value: U256) {
         match self {
             Transaction::Legacy(tx) => tx.value = value,
             Transaction::Eip2930(tx) => tx.value = value,
@@ -1691,7 +1689,7 @@ mod tests {
             to: TransactionKind::Call(
                 Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
             ),
-            value: 1000000000000000_u64.into(),
+            value: U256::from(1000000000000000u64),
             input: Bytes::default(),
         });
         let signature = Signature {
@@ -1713,7 +1711,7 @@ mod tests {
             to: TransactionKind::Call(Address::from_slice(
                 &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
             )),
-            value: 693361000000000_u64.into(),
+            value: U256::from(693361000000000u64),
             input: Default::default(),
         });
         let signature = Signature {
@@ -1734,7 +1732,7 @@ mod tests {
             to: TransactionKind::Call(Address::from_slice(
                 &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
             )),
-            value: 1000000000000000_u64.into(),
+            value: U256::from(1000000000000000u64),
             input: Bytes::default(),
         });
         let signature = Signature {
@@ -1756,7 +1754,7 @@ mod tests {
             to: TransactionKind::Call(Address::from_slice(
                 &hex!("61815774383099e24810ab832a5b2a5425c154d5")[..],
             )),
-            value: 3000000000000000000_u64.into(),
+            value: U256::from(3000000000000000000u64),
             input: Default::default(),
             access_list: Default::default(),
         });
@@ -1778,7 +1776,7 @@ mod tests {
             to: TransactionKind::Call(Address::from_slice(
                 &hex!("cf7f9e66af820a19257a2108375b180b0ec49167")[..],
             )),
-            value: 1234_u64.into(),
+            value: U256::from(1234),
             input: Bytes::default(),
         });
         let signature = Signature {
