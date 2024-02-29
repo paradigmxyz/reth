@@ -143,6 +143,7 @@ impl Hardfork {
 
     /// Retrieves the activation block for the specified hardfork on the Sepolia testnet.
     pub fn sepolia_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
         match self {
             Hardfork::Paris => Some(1735371),
             Hardfork::Shanghai => Some(2990908),
@@ -168,6 +169,7 @@ impl Hardfork {
     /// Retrieves the activation block for the specified hardfork on the Base Sepolia testnet.
     #[cfg(feature = "optimism")]
     pub fn base_sepolia_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
         match self {
             Hardfork::Shanghai => Some(2106456),
             Hardfork::Canyon => Some(2106456),
@@ -197,6 +199,7 @@ impl Hardfork {
     /// Retrieves the activation block for the specified hardfork on the Base mainnet.
     #[cfg(feature = "optimism")]
     pub fn base_mainnet_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
         match self {
             Hardfork::Shanghai => Some(9101527),
             Hardfork::Canyon => Some(9101527),
@@ -225,6 +228,7 @@ impl Hardfork {
 
     /// Retrieves the activation block for the specified hardfork on the holesky testnet.
     fn holesky_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
         match self {
             Hardfork::Shanghai => Some(6698),
             Hardfork::Cancun => Some(894733),
@@ -298,6 +302,7 @@ impl Hardfork {
 
     /// Retrieves the activation timestamp for the specified hardfork on the Sepolia testnet.
     pub fn sepolia_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
         match self {
             Hardfork::Shanghai => Some(1677557088),
             Hardfork::Cancun => Some(1706655072),
@@ -322,6 +327,7 @@ impl Hardfork {
 
     /// Retrieves the activation timestamp for the specified hardfork on the Holesky testnet.
     pub fn holesky_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
         match self {
             Hardfork::Shanghai => Some(1696000704),
             Hardfork::Cancun => Some(1707305664),
@@ -340,13 +346,14 @@ impl Hardfork {
             Hardfork::ArrowGlacier => Some(1695902100),
             Hardfork::GrayGlacier => Some(1695902100),
             Hardfork::Paris => Some(1695902100),
-            _ => Some(0),
+            _ => None,
         }
     }
 
     /// Retrieves the activation timestamp for the specified hardfork on the Base Sepolia testnet.
     #[cfg(feature = "optimism")]
     pub fn base_sepolia_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
         match self {
             Hardfork::Shanghai => Some(1699981200),
             Hardfork::Canyon => Some(1699981200),
@@ -376,6 +383,7 @@ impl Hardfork {
     /// Retrieves the activation timestamp for the specified hardfork on the Base mainnet.
     #[cfg(feature = "optimism")]
     pub fn base_mainnet_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
         match self {
             Hardfork::Shanghai => Some(1704992401),
             Hardfork::Canyon => Some(1704992401),
