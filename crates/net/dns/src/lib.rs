@@ -310,7 +310,6 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<DnsDiscoveryEvent> {
         self.update_metrics();
         loop {
-
             // drain buffered events first
             if let Some(event) = self.queued_events.pop_front() {
                 return Poll::Ready(event)
