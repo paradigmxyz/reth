@@ -5948,7 +5948,6 @@ dependencies = [
  "once_cell",
  "page_size",
  "parity-scale-codec",
- "parking_lot 0.12.1",
  "paste",
  "pprof",
  "proptest",
@@ -6592,7 +6591,6 @@ dependencies = [
  "hash-db",
  "itertools 0.12.1",
  "modular-bitfield",
- "num_enum 0.7.2",
  "nybbles",
  "once_cell",
  "plain_hasher",
@@ -6617,7 +6615,6 @@ dependencies = [
  "test-fuzz",
  "thiserror",
  "toml",
- "tracing",
  "triehash",
  "zstd 0.12.4",
 ]
