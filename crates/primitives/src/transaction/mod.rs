@@ -1961,7 +1961,7 @@ mod tests {
         let mut encoded = BytesMut::new();
         signed_tx.encode(&mut encoded);
 
-        assert_eq!(b"\xc9\x80\x80\x80\x80\x80\x80\x1b\x80\x80", &encoded[..]);
+        assert_eq!(hex!("c98080808080801b8080"), &encoded[..]);
         assert_eq!(MIN_LENGTH_LEGACY_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -1980,7 +1980,7 @@ mod tests {
         let mut encoded = BytesMut::new();
         signed_tx.encode(&mut encoded);
 
-        assert_eq!(b"\x8d\x01\xcb\x80\x80\x80\x80\x80\x80\x80\xc0\x80\x80\x80", &encoded[..]);
+        assert_eq!(hex!("8d01cb80808080808080c0808080"), &encoded[..]);
         assert_eq!(MIN_LENGTH_EIP2930_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -1999,7 +1999,7 @@ mod tests {
         let mut encoded = BytesMut::new();
         signed_tx.encode(&mut encoded);
 
-        assert_eq!(b"\x8e\x02\xcc\x80\x80\x80\x80\x80\x80\x80\x80\xc0\x80\x80\x80", &encoded[..]);
+        assert_eq!(hex!("8e02cc8080808080808080c0808080"), &encoded[..]);
         assert_eq!(MIN_LENGTH_EIP1559_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -2018,10 +2018,7 @@ mod tests {
         let mut encoded = BytesMut::new();
         signed_tx.encode(&mut encoded);
 
-        assert_eq!(
-            b"\x90\x03\xce\x80\x80\x80\x80\x80\x80\x80\x80\xc0\x80\xc0\x80\x80\x80",
-            &encoded[..]
-        );
+        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), &encoded[..]);
         assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
