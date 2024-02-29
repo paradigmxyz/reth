@@ -5296,7 +5296,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Accumulated durations of nested function calls, in one call to poll `NetworkManager` future.\n\nNetwork Handle Message - stream network handle messages from (?)\nSwarm Events - stream txns gossip fom `NetworkManager`",
+      "description": "Accumulated durations of nested function calls, in one call to poll `NetworkManager` future.\n\n`NetworkHandleMessage` - stream transaction/announcement gossip from `TransactionManager` to propagate via `Swarm`\n`SwarmEvent` - stream transaction/announcement gossip fom `Swarm`",
       "fieldConfig": {
         "defaults": {
           "color": {
