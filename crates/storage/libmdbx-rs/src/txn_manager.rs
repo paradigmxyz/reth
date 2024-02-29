@@ -104,7 +104,7 @@ mod read_transactions {
         environment::EnvPtr, error::mdbx_result, transaction::TransactionPtr,
         txn_manager::TxnManager,
     };
-    use dashmap::DashMap;
+    use dashmap::{DashMap, DashSet};
     use std::{
         sync::{mpsc::sync_channel, Arc},
         time::{Duration, Instant},
@@ -150,6 +150,13 @@ mod read_transactions {
         ) -> Option<(usize, (TransactionPtr, Instant))> {
             self.read_transactions.as_ref()?.remove_active(ptr)
         }
+
+        /// Returns the number of timeouted transactions that were not aborted by the user yet.
+        pub(crate) fn timeouted_not_aborted_read_transactions(&self) -> Option<usize> {
+            self.read_transactions
+                .as_ref()
+                .map(|read_transactions| read_transactions.timeouted_not_aborted())
+        }
     }
 
     #[derive(Debug, Default)]
@@ -162,6 +169,9 @@ mod read_transactions {
         /// We store `usize` instead of a raw pointer as a key, because pointers are not
         /// comparable. The time of transaction opening is stored as a value.
         active: DashMap<usize, (TransactionPtr, Instant)>,
+        /// List of timeouted transactions that were not aborted by the user yet, hence have a
+        /// dangling read transaction pointer.
+        timeouted_not_aborted: DashSet<usize>,
     }
 
     impl ReadTransactions {
@@ -179,7 +189,13 @@ mod read_transactions {
             &self,
             ptr: *mut ffi::MDBX_txn,
         ) -> Option<(usize, (TransactionPtr, Instant))> {
+            self.timeouted_not_aborted.remove(&(ptr as usize));
             self.active.remove(&(ptr as usize))
+        }
+
+        /// Returns the number of timeouted transactions that were not aborted by the user yet.
+        pub(super) fn timeouted_not_aborted(&self) -> usize {
+            self.timeouted_not_aborted.len()
         }
 
         /// Spawns a new thread with [std::thread::spawn] that monitors the list of active read
@@ -249,6 +265,7 @@ mod read_transactions {
                         } else {
                             // Happy path, the transaction has been aborted by us with no errors.
                             warn!(target: "libmdbx", ?open_duration, "Long-lived read transaction has been aborted");
+                            self.timeouted_not_aborted.insert(ptr as usize);
                         }
                     }
 

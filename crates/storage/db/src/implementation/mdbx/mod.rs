@@ -204,6 +204,12 @@ impl DatabaseMetrics for DatabaseEnv {
             metrics.push(("db.freelist", freelist as f64, vec![]));
         }
 
+        metrics.push((
+            "db.timeouted_not_aborted_transactions",
+            self.timeouted_not_aborted_transactions() as f64,
+            vec![],
+        ));
+
         metrics
     }
 }

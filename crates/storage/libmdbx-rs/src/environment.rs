@@ -87,6 +87,11 @@ impl Environment {
         &self.inner.txn_manager
     }
 
+    #[cfg(feature = "read-tx-timeouts")]
+    pub fn timeouted_not_aborted_transactions(&self) -> usize {
+        self.inner.txn_manager.timeouted_not_aborted_read_transactions().unwrap_or(0)
+    }
+
     /// Create a read-only transaction for use with the environment.
     #[inline]
     pub fn begin_ro_txn(&self) -> Result<Transaction<RO>> {
