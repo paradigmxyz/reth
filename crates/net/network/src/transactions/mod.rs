@@ -1155,7 +1155,7 @@ where
         self.bad_imports.insert(hash);
     }
 
-    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns  
+    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns
     /// `false` if [`TransactionsManager`] is operating close to full capacity.
     fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         self.pending_pool_imports_info
@@ -1905,10 +1905,11 @@ mod tests {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
-        assert_eq!(
-            *handle1.peer_id(),
-            transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
-        );
+        assert!(transactions
+            .transactions_by_peers
+            .get(&signed_tx.hash())
+            .unwrap()
+            .contains(handle1.peer_id()));
 
         // advance the transaction manager future
         poll_fn(|cx| {
