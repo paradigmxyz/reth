@@ -29,6 +29,7 @@
 
 use crate::{
     cache::LruCache,
+    duration_metered_exec,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
@@ -369,7 +370,7 @@ where
 
         // update metrics for whole poll function
         metrics.duration_poll_tx_manager.set(start.elapsed().as_secs_f64());
-        // update poll metrics for nested streams
+        // update metrics for nested expressions
         metrics.acc_duration_poll_network_events.set(acc_network_events.as_secs_f64());
         metrics.acc_duration_poll_pending_pool_imports.set(acc_pending_imports.as_secs_f64());
         metrics.acc_duration_poll_transaction_events.set(acc_tx_events.as_secs_f64());
@@ -1161,18 +1162,6 @@ where
             .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports) &&
             self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
     }
-}
-
-/// Measures the duration of executing the given code block. The duration is added to the given
-/// accumulator value passed as a mutable reference.
-macro_rules! duration_metered_exec {
-    ($code:block, $acc:ident) => {
-        let start = Instant::now();
-
-        $code;
-
-        *$acc += start.elapsed();
-    };
 }
 
 #[derive(Debug, Default)]
