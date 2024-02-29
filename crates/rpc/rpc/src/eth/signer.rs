@@ -49,7 +49,9 @@ pub(crate) struct DevSigner {
 }
 
 impl DevSigner {
-    pub fn new() -> DevSigner {
+    pub fn random() -> DevSigner {
+       Self::random_signers(1)
+    }   
         let (pk, sk) = secp256k1::generate_keypair(&mut rand::thread_rng());
 
         let address = reth_primitives::public_key_to_address(sk);
