@@ -687,6 +687,7 @@
               "MerkleUnwind": 5,
               "SenderRecovery": 3,
               "StorageHashing": 7,
+              "TotalDifficulty": 1,
               "TransactionLookup": 9
             }
           }
@@ -4151,7 +4152,32 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Queued pool transactions"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -5292,12 +5318,256 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Accumulated durations of nested function calls, in one call to poll `NetworkManager` future.\n\nNetwork Handle Message - stream network handle messages from (?)\nSwarm Events - stream txns gossip fom `NetworkManager`",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 178
+      },
+      "id": 202,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_network_handle{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Network Handle Messages",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_swarm{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Swarm Events",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        }
+      ],
+      "title": "Network Manager Poll Duration Nested Function Calls",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Duration spent inside one call to poll the `NetworkManager` future",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Network Manager Future"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 178
+      },
+      "id": 203,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_duration_poll_network_manager{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Network Manager Future",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Network Manager Future Poll Duration",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 178
+        "y": 186
       },
       "id": 79,
       "panels": [],
@@ -5369,7 +5639,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 179
+        "y": 187
       },
       "id": 74,
       "options": {
@@ -5464,7 +5734,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 179
+        "y": 187
       },
       "id": 80,
       "options": {
@@ -5559,7 +5829,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 187
+        "y": 195
       },
       "id": 81,
       "options": {
@@ -5654,7 +5924,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 187
+        "y": 195
       },
       "id": 114,
       "options": {
@@ -5750,7 +6020,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 195
+        "y": 203
       },
       "id": 158,
       "options": {
@@ -5872,7 +6142,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 195
+        "y": 203
       },
       "id": 190,
       "options": {
@@ -5910,7 +6180,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 203
+        "y": 211
       },
       "id": 87,
       "panels": [],
@@ -5982,7 +6252,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 204
+        "y": 212
       },
       "id": 83,
       "options": {
@@ -6076,7 +6346,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 204
+        "y": 212
       },
       "id": 84,
       "options": {
@@ -6182,7 +6452,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 212
+        "y": 220
       },
       "id": 85,
       "options": {
@@ -6219,7 +6489,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 220
+        "y": 228
       },
       "id": 68,
       "panels": [],
@@ -6291,7 +6561,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 221
+        "y": 229
       },
       "id": 60,
       "options": {
@@ -6385,7 +6655,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 221
+        "y": 229
       },
       "id": 62,
       "options": {
@@ -6479,7 +6749,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 229
+        "y": 237
       },
       "id": 64,
       "options": {
@@ -6516,7 +6786,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 237
+        "y": 245
       },
       "id": 97,
       "panels": [],
@@ -6586,7 +6856,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 238
+        "y": 246
       },
       "id": 98,
       "options": {
@@ -6747,7 +7017,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 238
+        "y": 246
       },
       "id": 101,
       "options": {
@@ -6843,7 +7113,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 246
+        "y": 254
       },
       "id": 99,
       "options": {
@@ -6939,7 +7209,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 246
+        "y": 254
       },
       "id": 100,
       "options": {
@@ -6977,7 +7247,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 254
+        "y": 262
       },
       "id": 105,
       "panels": [],
@@ -7048,7 +7318,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 255
+        "y": 263
       },
       "id": 106,
       "options": {
@@ -7144,7 +7414,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 255
+        "y": 263
       },
       "id": 107,
       "options": {
@@ -7182,7 +7452,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 263
+        "y": 271
       },
       "id": 108,
       "panels": [],
@@ -7278,7 +7548,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 264
+        "y": 272
       },
       "id": 109,
       "options": {
@@ -7340,7 +7610,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 264
+        "y": 272
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -7467,7 +7737,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 272
+        "y": 280
       },
       "id": 120,
       "options": {
@@ -7525,7 +7795,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 272
+        "y": 280
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -7676,7 +7946,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 280
+        "y": 288
       },
       "id": 198,
       "options": {
@@ -7798,7 +8068,7 @@
       "type": "timeseries"
     }
   ],
-  "refresh": "30s",
+  "refresh": "5s",
   "revision": 1,
   "schemaVersion": 38,
   "style": "dark",
@@ -7876,13 +8146,13 @@
     ]
   },
   "time": {
-    "from": "now-1h",
+    "from": "now-3h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 4,
+  "version": 7,
   "weekStart": ""
 }
