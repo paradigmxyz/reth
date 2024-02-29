@@ -8,8 +8,6 @@
 //!
 //! If no recipients are specified, all transactions will be inspected.
 
-use clap::Parser;
-use futures_util::StreamExt;
 use reth::{
     cli::{
         components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
@@ -17,9 +15,11 @@ use reth::{
         ext::{RethCliExt, RethNodeCommandConfig},
         Cli,
     },
-    primitives::{Address, BlockId, IntoRecoveredTransaction},
+    primitives::{Address, BlockId},
     revm::{
-        inspector_handle_register, interpreter::Interpreter, revm, Database, EvmContext, Inspector,
+        inspector_handle_register,
+        interpreter::{Interpreter, OpCode},
+        Database, Evm, EvmContext, Inspector,
     },
     rpc::{
         compat::transaction::transaction_to_call_request,
@@ -28,7 +28,6 @@ use reth::{
     tasks::TaskSpawner,
     transaction_pool::TransactionPool,
 };
-use reth_revm::interpreter::OpCode;
 use std::collections::HashSet;
 
 fn main() {
@@ -46,11 +45,13 @@ impl RethCliExt for MyRethCliExt {
 /// Our custom cli args extension that adds one flag to reth default CLI.
 #[derive(Debug, Clone, Default, clap::Args)]
 struct RethCliTxpoolExt {
-    /// recipients addresses that we want to trace
+    /// The addresses of the recipients that we want to trace.
     #[arg(long, value_delimiter = ',')]
     pub recipients: Vec<Address>,
 }
 
+/// A dummy inspector that logs the opcodes and their corresponding program counter for a
+/// transaction
 #[derive(Default, Debug, Clone)]
 struct DummyInspector {
     ret_val: Vec<String>,
@@ -60,6 +61,9 @@ impl<DB> Inspector<DB> for DummyInspector
 where
     DB: Database,
 {
+    /// This method is called at each step of the EVM execution.
+    /// It checks if the current opcode is valid and if so, it stores the opcode and its
+    /// corresponding program counter in the `ret_val` vector.
     fn step(&mut self, interp: &mut Interpreter, _context: &mut EvmContext<DB>) {
         if let Some(opcode) = OpCode::new(interp.current_opcode()) {
             self.ret_val.push(format!("{}: {}", interp.program_counter(), opcode));
@@ -68,6 +72,9 @@ where
 }
 
 impl RethNodeCommandConfig for RethCliTxpoolExt {
+    /// Sets up a subscription to listen for new pending transactions and traces them.
+    /// If the transaction is from one of the specified recipients, it will be traced.
+    /// If no recipients are specified, all transactions will be traced.
     fn on_rpc_server_started<Conf, Reth>(
         &mut self,
         _config: &Conf,
@@ -94,41 +101,41 @@ impl RethNodeCommandConfig for RethCliTxpoolExt {
                 let tx = event.transaction;
                 println!("Transaction received: {tx:?}");
 
-                if let Some(tx_recipient_address) = tx.to() {
-                    if recipients.is_empty() || recipients.contains(&tx_recipient_address) {
-                        // trace the transaction with `trace_call`
-                        let call_request =
-                            transaction_to_call_request(tx.to_recovered_transaction());
+                if recipients.is_empty() {
+                    // convert the pool transaction
+                    let call_request = transaction_to_call_request(tx.to_recovered_transaction());
 
-                        let result = eth_api
-                            .spawn_with_call_at(
-                                call_request,
-                                BlockId::default(),
-                                EvmOverrides::default(),
-                                move |db, env| {
-                                    let mut dummy_inspector = DummyInspector::default();
-                                    {
-                                        let mut evm = revm::Evm::builder()
-                                            .with_db(db)
-                                            .with_external_context(&mut dummy_inspector)
-                                            .with_env_with_handler_cfg(env)
-                                            .append_handler_register(inspector_handle_register)
-                                            .build();
-                                        let _ = evm.transact()?;
-                                    }
-                                    Ok(dummy_inspector)
-                                },
-                            )
-                            .await;
+                    let result = eth_api
+                        .spawn_with_call_at(
+                            call_request,
+                            BlockId::default(),
+                            EvmOverrides::default(),
+                            move |db, env| {
+                                let mut dummy_inspector = DummyInspector::default();
+                                {
+                                    // configure the evm with the custom inspector
+                                    let mut evm = Evm::builder()
+                                        .with_db(db)
+                                        .with_external_context(&mut dummy_inspector)
+                                        .with_env_with_handler_cfg(env)
+                                        .append_handler_register(inspector_handle_register)
+                                        .build();
+                                    // execute the transaction on a blocking task and await the
+                                    // inspector result
+                                    let _ = evm.transact()?;
+                                }
+                                Ok(dummy_inspector)
+                            },
+                        )
+                        .await;
 
-                        if let Ok(ret_val) = result {
-                            let hash = tx.hash();
-                            println!(
-                                "Inspector result for transaction {}: \n {}",
-                                hash,
-                                ret_val.ret_val.join("\n")
-                            );
-                        }
+                    if let Ok(ret_val) = result {
+                        let hash = tx.hash();
+                        println!(
+                            "Inspector result for transaction {}: \n {}",
+                            hash,
+                            ret_val.ret_val.join("\n")
+                        );
                     }
                 }
             }
