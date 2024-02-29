@@ -1,7 +1,7 @@
 use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
-    poll_nested_stream_with_yield_points,
+    metered_poll_nested_stream_with_yield_points,
 };
 use derive_more::Constructor;
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
@@ -80,7 +80,7 @@ impl TransactionFetcher {
 
         // noop context is used since we don't need the inflight requests futures unordered to
         // schedule for wake up here when it's pending
-        let _ = poll_nested_stream_with_yield_points!(
+        let _ = metered_poll_nested_stream_with_yield_points!(
             "net::tx",
             "Inflight requests stream",
             steps,

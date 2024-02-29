@@ -27,7 +27,7 @@ use crate::{
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::{PeersHandle, PeersManager},
-    poll_nested_stream_with_yield_points,
+    metered_poll_nested_stream_with_yield_points,
     protocol::IntoRlpxSubProtocol,
     session::SessionManager,
     state::NetworkState,
@@ -657,7 +657,7 @@ where
         // manual yield point should prevent situations where polling appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
         // poll new block imports (dummy stream)
-        let maybe_more_block_imports = poll_nested_stream_with_yield_points!(
+        let maybe_more_block_imports = metered_poll_nested_stream_with_yield_points!(
             "net",
             "Block imports stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
@@ -669,7 +669,7 @@ where
         //
         // will only be closed if the channel was deliberately closed since we always have an
         // instance of `NetworkHandle`
-        let maybe_more_handle_messages = poll_nested_stream_with_yield_points!(
+        let maybe_more_handle_messages = metered_poll_nested_stream_with_yield_points!(
             "net",
             "Network message channel",
             DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL,
@@ -678,7 +678,7 @@ where
             error!("Network channel closed");
         );
 
-        let maybe_more_swarm_events = poll_nested_stream_with_yield_points!(
+        let maybe_more_swarm_events = metered_poll_nested_stream_with_yield_points!(
             "net",
             "Swarm events stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
