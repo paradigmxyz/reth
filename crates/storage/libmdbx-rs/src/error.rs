@@ -117,7 +117,8 @@ pub enum Error {
     /// [Mode::ReadOnly](crate::flags::Mode::ReadOnly), write transactions can't be opened.
     #[error("write transactions are not supported in read-only mode")]
     WriteTransactionUnsupportedInReadOnlyMode,
-    #[error("read transaction has been timeouted")]
+    /// Read transaction has been timed out.
+    #[error("read transaction has been timed out")]
     ReadTransactionTimeout,
     /// Unknown error code.
     #[error("unknown error code")]

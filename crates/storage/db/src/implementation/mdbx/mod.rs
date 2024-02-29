@@ -205,8 +205,8 @@ impl DatabaseMetrics for DatabaseEnv {
         }
 
         metrics.push((
-            "db.timeouted_not_aborted_transactions",
-            self.timeouted_not_aborted_transactions() as f64,
+            "db.timed_out_not_aborted_transactions",
+            self.timed_out_not_aborted_transactions() as f64,
             vec![],
         ));
 

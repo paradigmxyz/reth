@@ -103,8 +103,8 @@ where
     describe_gauge!("db.table_entries", "The number of entries for a table");
     describe_gauge!("db.freelist", "The number of pages on the freelist");
     describe_gauge!(
-        "db.timeouted_not_aborted_transactions",
-        "Number of timeouted transactions that were not aborted by the user yet"
+        "db.timed_out_not_aborted_transactions",
+        "Number of timed out transactions that were not aborted by the user yet"
     );
     process.describe();
     describe_memory_stats();

@@ -536,7 +536,7 @@ impl TransactionPtr {
     {
         let _lck = self.lock.lock();
 
-        // When transaction is timeouted via `TxnManager`, it's actually reset using
+        // When transaction is timed out via `TxnManager`, it's actually reset using
         // `mdbx_txn_reset` that makes the transaction unusable and sets the
         // `MDBX_TXN_FINISHED` flag.
         //
