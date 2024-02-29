@@ -8,6 +8,8 @@
 //!
 //! If no recipients are specified, all transactions will be inspected.
 
+use clap::Parser;
+use futures_util::stream::StreamExt;
 use reth::{
     cli::{
         components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
@@ -15,7 +17,7 @@ use reth::{
         ext::{RethCliExt, RethNodeCommandConfig},
         Cli,
     },
-    primitives::{Address, BlockId},
+    primitives::{Address, BlockId, IntoRecoveredTransaction},
     revm::{
         inspector_handle_register,
         interpreter::{Interpreter, OpCode},
