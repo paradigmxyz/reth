@@ -1726,8 +1726,8 @@ pub(crate) type InsertResult<T> = Result<InsertOk<T>, InsertErr<T>>;
 pub(crate) enum InsertErr<T: PoolTransaction> {
     /// Attempted to replace existing transaction, but was underpriced
     Underpriced {
-        #[allow(dead_code)]
         transaction: Arc<ValidPoolTransaction<T>>,
+        #[allow(dead_code)]
         existing: TxHash,
     },
     /// Attempted to insert a blob transaction with a nonce gap
