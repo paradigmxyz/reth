@@ -27,8 +27,17 @@ Before running the node, you will need to have a `bitfinity.spec.json` file in t
 To run the node, use the following command:
 
 ```sh
-reth node -vvvvv --chain bitfinity.spec.json --http --http.port 8080 -d -r http://testnet.bitfinity.network -i 30 -b 10
+reth node -vvvvv --chain bitfinity.spec.json --http --http.port 8080 -d -r https://testnet.bitfinity.network -i 30 -b 10
 ```
+
+
+With cargo: 
+
+```sh
+cargo run -p reth -- node -vvvv --chain bitfinity.spec.json --http --http.port 8080 -d -r https://orca-app-5yyst.ondigitalocean.app -i 30 -b 10
+```
+
+evm-block-extractor url: https://orca-app-5yyst.ondigitalocean.app/
 
 ### Querying the node
 
@@ -51,11 +60,11 @@ make docker
 ### To run the docker image
 
 ```sh
-docker run -d -p 8080:8080 bitfinity/reth --chain bitfinity.spec.json --http --http.port 8080 -d -r http://testnet.bitfinity.network -i 30 -b 10
+docker run -d -p 8080:8080 bitfinity/reth node --chain bitfinity.spec.json --http --http.port 8080 -d -r https://testnet.bitfinity.network -i 30 -b 10
 ```
 
 ### To run pre-built docker image
 
 ```sh
-docker run ghcr.io/bitfinity-network/bitfinity-reth:main --chain bitfinity.spec.json --http --http.port 8080 -d -r http://testnet.bitfinity.network -i 30 -b 10
+docker run ghcr.io/bitfinity-network/bitfinity-reth:main node --chain bitfinity.spec.json --http --http.port 8080 -d -r https://testnet.bitfinity.network -i 30 -b 10
 ```
