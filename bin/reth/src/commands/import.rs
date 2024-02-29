@@ -145,7 +145,13 @@ impl ImportCommand {
         );
 
         // override the tip
-        let tip = remote_client.tip().expect("file client has no tip");
+        let tip = if let Some(tip) = remote_client.tip() {
+            tip
+        } else {
+            debug!(target: "reth::cli", "No tip found, skipping import");
+            return Ok(());
+        };
+
         info!(target: "reth::cli", "Chain file imported");
 
         let (mut pipeline, events) = self.build_import_pipeline(
