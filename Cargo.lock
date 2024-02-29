@@ -6430,6 +6430,7 @@ dependencies = [
 name = "reth-node-core"
 version = "0.1.0-alpha.21"
 dependencies = [
+ "alloy-chains",
  "alloy-rlp",
  "assert_matches",
  "clap",
@@ -6452,6 +6453,7 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "reth-auto-seal-consensus",
+ "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-config",
@@ -6459,6 +6461,7 @@ dependencies = [
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
+ "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics",
  "reth-net-nat",
