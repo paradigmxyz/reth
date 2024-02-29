@@ -1817,6 +1817,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom-inspector"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "eyre",
+ "futures-util",
+ "reth",
+]
+
+[[package]]
 name = "custom-node"
 version = "0.0.0"
 dependencies = [
