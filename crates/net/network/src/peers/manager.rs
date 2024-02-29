@@ -2329,7 +2329,7 @@ mod tests {
             .peers
             .iter()
             .filter(|(_, peer)| peer.state == PeerConnectionState::PendingOut)
-            .map(|(peer_id, _)| peer_id.clone())
+            .map(|(peer_id, _)| *peer_id)
             .collect::<Vec<PeerId>>();
         assert_eq!(
             num_pendingout_states.len(),
