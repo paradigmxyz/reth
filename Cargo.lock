@@ -6298,7 +6298,7 @@ name = "reth-network"
 version = "0.1.0-alpha.21"
 dependencies = [
  "alloy-node-bindings",
- "aquamarine",
+ "alloy-rlp",
  "auto_impl",
  "criterion",
  "derive_more",
