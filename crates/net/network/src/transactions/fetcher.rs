@@ -477,7 +477,7 @@ impl TransactionFetcher {
                 }
                 // hash has been seen and is in flight. store peer as fallback peer.
                 //
-                // remove any ended sessions, so that in case of a full cache, alive peers aren't 
+                // remove any ended sessions, so that in case of a full cache, alive peers aren't
                 // removed in favour of lru dead peers
                 let mut ended_sessions = vec!();
                 for &peer_id in fallback_peers.iter() {
@@ -605,7 +605,7 @@ impl TransactionFetcher {
                 true
             }(),
             "`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@buffered_hashes` and `@inflight_requests`,
-`%new_announced_hashes`: {:?}, 
+`%new_announced_hashes`: {:?},
 `@self`: {:?}",
             new_announced_hashes, self
         );
@@ -725,7 +725,7 @@ impl TransactionFetcher {
         }
     }
 
-    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns  
+    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns
     /// `false` if [`TransactionFetcher`] is operating close to full capacity.
     pub fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         let info = &self.info;
