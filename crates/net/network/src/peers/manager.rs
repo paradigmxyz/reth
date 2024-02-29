@@ -1715,7 +1715,7 @@ mod tests {
         })
         .await;
 
-        assert!(peers.peers.get(&peer).is_none());
+        assert!(!peers.peers.contains_key(&peer));
     }
 
     #[tokio::test]
@@ -1770,7 +1770,7 @@ mod tests {
         })
         .await;
 
-        assert!(peers.peers.get(&peer).is_none());
+        assert!(!peers.peers.contains_key(&peer));
     }
 
     #[tokio::test]
@@ -1826,7 +1826,7 @@ mod tests {
         })
         .await;
 
-        assert!(peers.peers.get(&peer).is_none());
+        assert!(!peers.peers.contains_key(&peer));
     }
 
     #[tokio::test]
@@ -1991,7 +1991,7 @@ mod tests {
         assert_eq!(p.state, PeerConnectionState::DisconnectingOut);
 
         peers.on_active_session_gracefully_closed(peer);
-        assert!(peers.peers.get(&peer).is_none());
+        assert!(!peers.peers.contains_key(&peer));
     }
 
     #[tokio::test]
@@ -2240,7 +2240,7 @@ mod tests {
         assert!(peer.remove_after_disconnect);
 
         peers.on_active_session_gracefully_closed(peer_id);
-        assert!(peers.peers.get(&peer_id).is_none())
+        assert!(!peers.peers.contains_key(&peer_id))
     }
 
     #[tokio::test]

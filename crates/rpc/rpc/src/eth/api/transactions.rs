@@ -146,6 +146,15 @@ pub trait EthTransactions: Send + Sync {
         block: BlockId,
     ) -> EthResult<Option<Vec<TransactionSigned>>>;
 
+    /// Returns the EIP-2718 encoded transaction by hash.
+    ///
+    /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
+    ///
+    /// Checks the pool and state.
+    ///
+    /// Returns `Ok(None)` if no matching transaction was found.
+    async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>>;
+
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.
@@ -426,6 +435,20 @@ where
         block: BlockId,
     ) -> EthResult<Option<Vec<TransactionSigned>>> {
         self.block_by_id(block).await.map(|block| block.map(|block| block.body))
+    }
+
+    async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>> {
+        // Note: this is mostly used to fetch pooled transactions so we check the pool first
+        if let Some(tx) =
+            self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
+        {
+            return Ok(Some(tx))
+        }
+
+        self.on_blocking_task(|this| async move {
+            Ok(this.provider().transaction_by_hash(hash)?.map(|tx| tx.envelope_encoded()))
+        })
+        .await
     }
 
     async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>> {

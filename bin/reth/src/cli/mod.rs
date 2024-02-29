@@ -6,8 +6,7 @@ use crate::{
         LogArgs,
     },
     commands::{
-        config_cmd, db, debug_cmd, import, init_cmd, node, node::NoArgs, p2p, recover, stage,
-        test_vectors,
+        config_cmd, db, debug_cmd, import,dump_genesis, init_cmd, node, node::NoArgs, p2p, recover, stage, test_vectors,
     },
     core::cli::runner::CliRunner,
     version::{LONG_VERSION, SHORT_VERSION},
@@ -33,7 +32,7 @@ pub use crate::core::cli::*;
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
 pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Commands<Ext>,
 
     /// The chain this node is running.
@@ -65,7 +64,7 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
     #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
     instance: u16,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     logs: LogArgs,
 }
 
@@ -146,6 +145,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             }
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
@@ -178,6 +178,8 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand),
+    /// Dumps genesis block JSON configuration to stdout.
+    DumpGenesis(dump_genesis::DumpGenesisCommand),
     /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command),

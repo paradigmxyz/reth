@@ -301,7 +301,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// the pool. Returns hashes already known to the pool.
     ///
     /// Consumer: P2P
-    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
+    fn retain_unknown<A>(&self, announcement: &mut A)
     where
         A: HandleMempoolData;
 
@@ -928,7 +928,7 @@ impl EthPooledTransaction {
             #[cfg(feature = "optimism")]
             Transaction::Deposit(_) => U256::ZERO,
         };
-        let mut cost: U256 = transaction.value().into();
+        let mut cost: U256 = transaction.value();
         cost += gas_cost;
 
         if let Some(blob_tx) = transaction.as_eip4844() {

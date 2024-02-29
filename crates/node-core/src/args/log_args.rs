@@ -67,7 +67,7 @@ pub struct LogArgs {
     )]
     pub color: ColorMode,
     /// The verbosity settings for the tracer.
-    #[clap(flatten)]
+    #[command(flatten)]
     pub verbosity: Verbosity,
 }
 
@@ -145,11 +145,11 @@ pub struct Verbosity {
     /// -vvv    Info
     /// -vvvv   Debug
     /// -vvvvv  Traces (warning: very verbose!)
-    #[clap(short, long, action = ArgAction::Count, global = true, default_value_t = 3, verbatim_doc_comment, help_heading = "Display")]
+    #[arg(short, long, action = ArgAction::Count, global = true, default_value_t = 3, verbatim_doc_comment, help_heading = "Display")]
     verbosity: u8,
 
     /// Silence all log output.
-    #[clap(long, alias = "silent", short = 'q', global = true, help_heading = "Display")]
+    #[arg(long, alias = "silent", short = 'q', global = true, help_heading = "Display")]
     quiet: bool,
 }
 

@@ -81,40 +81,39 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     pub trusted_setup_file: Option<PathBuf>,
 
     /// All networking related arguments
-    #[clap(flatten)]
+    #[command(flatten)]
     pub network: NetworkArgs,
 
     /// All rpc related arguments
-    #[clap(flatten)]
+    #[command(flatten)]
     pub rpc: RpcServerArgs,
 
     /// All txpool related arguments with --txpool prefix
-    #[clap(flatten)]
+    #[command(flatten)]
     pub txpool: TxPoolArgs,
 
     /// All payload builder related arguments
-    #[clap(flatten)]
+    #[command(flatten)]
     pub builder: PayloadBuilderArgs,
 
     /// All debug related arguments with --debug prefix
-    #[clap(flatten)]
+    #[command(flatten)]
     pub debug: DebugArgs,
 
     /// All database related arguments
-    #[clap(flatten)]
+    #[command(flatten)]
     pub db: DatabaseArgs,
 
     /// All dev related arguments with --dev prefix
-    #[clap(flatten)]
+    #[command(flatten)]
     pub dev: DevArgs,
 
     /// All pruning related arguments
-    #[clap(flatten)]
+    #[command(flatten)]
     pub pruning: PruningArgs,
 
     /// Additional cli arguments
-    #[clap(flatten)]
-    #[clap(next_help_heading = "Extension")]
+    #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
 }
 

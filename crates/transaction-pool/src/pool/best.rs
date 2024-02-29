@@ -58,7 +58,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
                     max_fee_per_blob_gas < self.base_fee_per_blob_gas as u128
                 }) {
                     crate::traits::BestTransactions::mark_invalid(self, &best);
-                    continue;
+                    continue
                 };
                 return Some(best)
             }
@@ -85,7 +85,7 @@ pub(crate) struct BestTransactions<T: TransactionOrdering> {
     /// There might be the case where a yielded transactions is invalid, this will track it.
     pub(crate) invalid: HashSet<TxHash>,
     /// Used to receive any new pending transactions that have been added to the pool after this
-    /// iterator was snapshotted
+    /// iterator was static fileted
     ///
     /// These new pending transactions are inserted into this iterator's pool before yielding the
     /// next value

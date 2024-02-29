@@ -7,7 +7,7 @@ use humantime::parse_duration;
 
 /// Parameters for Dev testnet configuration
 #[derive(Debug, Args, PartialEq, Default, Clone, Copy)]
-#[clap(next_help_heading = "Dev testnet")]
+#[command(next_help_heading = "Dev testnet")]
 pub struct DevArgs {
     /// Start the node in dev mode
     ///
@@ -49,7 +49,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

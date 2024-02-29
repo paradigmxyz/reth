@@ -65,7 +65,7 @@ impl HashedPostState {
     ) -> Result<Self, DatabaseError> {
         // Iterate over account changesets and record value before first occurring account change.
         let mut accounts = HashMap::<Address, Option<Account>>::default();
-        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSet>()?;
+        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
         for entry in account_changesets_cursor.walk_range(range.clone())? {
             let (_, AccountBeforeTx { address, info }) = entry?;
             if let hash_map::Entry::Vacant(entry) = accounts.entry(address) {
@@ -75,7 +75,7 @@ impl HashedPostState {
 
         // Iterate over storage changesets and record value before first occurring storage change.
         let mut storages = HashMap::<Address, HashMap<B256, U256>>::default();
-        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSet>()?;
+        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
         for entry in storage_changesets_cursor.walk_range(BlockNumberAddress::range(range))? {
             let (BlockNumberAddress((_, address)), storage) = entry?;
             let account_storage = storages.entry(address).or_default();
