@@ -421,8 +421,7 @@ where
             // first decode disconnect reasons, because they can be encoded in a variety of forms
             // over the wire, in both snappy compressed and uncompressed forms.
             //
-            // see:
-            // <https://github.com/paradigmxyz/reth/blob/790bc62e7bd8f940e7b3ff55c98fa6f5a2b197e9/crates/net/eth-wire/src/disconnect.rs#L251-L261>
+            // see: [crate::disconnect::tests::test_decode_known_reasons]
             let id = bytes[0];
             if id == P2PMessageID::Disconnect as u8 {
                 // We can't handle the error here because disconnect reasons are encoded as both:
@@ -486,8 +485,11 @@ where
                     this.pinger.on_pong()?
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
-                    // it's possible we already tried to decode this, but it was snappy compressed,
-                    // so we need to decode it again
+                    // At this point, the `decempres_buf` contains the snappy decompressed
+                    // disconnect message.
+                    //
+                    // It's possible we already tried to RLP decode this, but it was snappy
+                    // compressed, so we need to RLP decode it again.
                     let reason = DisconnectReason::decode(&mut &decompress_buf[1..]).map_err(|err| {
                         debug!(
                             %err, msg=%hex::encode(&decompress_buf[1..]), "Failed to decode disconnect message from peer"
