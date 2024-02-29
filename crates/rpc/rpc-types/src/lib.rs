@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Reth RPC type definitions.
 //!
 //! Provides all relevant types for the various RPC endpoints, grouped by namespace.

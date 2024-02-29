@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Helpers for resolving the external IP.
 //!
 //! ## Feature Flags

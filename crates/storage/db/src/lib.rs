@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! reth's database abstraction layer with concrete implementations.
 //!
 //! The database abstraction assumes that the underlying store is a KV store subdivided into tables.

@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Standalone crate for ethereum-specific Reth configuration and builder types.
 
 #![doc(

@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Reth's transaction pool implementation.
 //!
 //! This crate provides a generic transaction pool implementation.

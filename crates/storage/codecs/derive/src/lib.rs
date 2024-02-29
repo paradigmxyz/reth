@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Derive macros for the Compact codec traits.
 
 #![doc(

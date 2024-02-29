@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Implementation of the `eth` wire protocol.
 //!
 //! ## Feature Flags

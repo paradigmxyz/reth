@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Commonly used types in reth.
 //!
 //! This crate contains Ethereum primitive types and helper functions.

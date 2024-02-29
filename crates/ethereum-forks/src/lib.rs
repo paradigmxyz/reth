@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Ethereum fork types used in reth.
 //!
 //! This crate contains Ethereum fork types and helper functions.

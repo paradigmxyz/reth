@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! The implementation of Engine API.
 //! [Read more](https://github.com/ethereum/execution-apis/tree/main/src/engine).
 

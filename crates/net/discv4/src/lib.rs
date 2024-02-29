@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Discovery v4 implementation: <https://github.com/ethereum/devp2p/blob/master/discv4.md>
 //!
 //! Discv4 employs a kademlia-like routing table to store and manage discovered peers and topics.

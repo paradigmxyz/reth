@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Standalone crate for Optimism-specific Reth configuration and builder types.
 
 #![doc(

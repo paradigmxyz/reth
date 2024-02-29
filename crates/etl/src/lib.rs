@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! ETL data collector.
 //!
 //! This crate is useful for dumping unsorted data into temporary files and iterating on their

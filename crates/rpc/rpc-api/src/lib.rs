@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Reth RPC interface definitions
 //!
 //! Provides all RPC interfaces.

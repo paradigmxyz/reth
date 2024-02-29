@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Configure reth RPC.
 //!
 //! This crate contains several builder and config types that allow to configure the selection of

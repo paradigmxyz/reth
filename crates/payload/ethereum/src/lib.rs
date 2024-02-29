@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! A basic Ethereum payload builder implementation.
 
 #![doc(

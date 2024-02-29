@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! RLPx ECIES framed transport protocol.
 
 #![doc(

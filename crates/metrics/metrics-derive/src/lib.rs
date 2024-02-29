@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! This crate provides [Metrics] derive macro
 
 #![doc(

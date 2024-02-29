@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! A collection of shared traits and error types used in Reth.
 //!
 //! ## Feature Flags

@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Reth IPC transport implementation
 //!
 //! ## Feature Flags

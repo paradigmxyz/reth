@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! This crate defines abstractions to create and update payloads (blocks):
 //! - [`PayloadJobGenerator`]: a type that knows how to create new jobs for creating payloads based
 //!   on [`PayloadAttributes`](reth_rpc_types::engine::PayloadAttributes).

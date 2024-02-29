@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Collection of traits and trait implementations for common database operations.
 //!
 //! ## Feature Flags

@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Staged syncing primitives for reth.
 //!
 //! This crate contains the syncing primitives [`Pipeline`] and [`Stage`], as well as all stages

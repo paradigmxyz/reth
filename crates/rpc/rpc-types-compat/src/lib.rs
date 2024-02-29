@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Reth compatibility and utils for RPC types
 //!
 //! This crate various helper functions to convert between reth primitive types and rpc types.

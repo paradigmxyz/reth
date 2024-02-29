@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! A [Consensus] implementation for local testing purposes
 //! that automatically seals blocks.
 //!

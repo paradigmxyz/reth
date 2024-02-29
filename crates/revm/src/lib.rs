@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //! Revm utils and implementations specific to reth.
 
 #![doc(

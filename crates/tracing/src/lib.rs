@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 //!  The `tracing` module provides functionalities for setting up and configuring logging.
 //!
 //!  It includes structures and functions to create and manage various logging layers: stdout,
