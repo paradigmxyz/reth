@@ -81,7 +81,7 @@ pub struct Command {
     chain: Arc<ChainSpec>,
 
     /// Database arguments.
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
     /// Overrides the KZG trusted setup by reading from the supplied file.

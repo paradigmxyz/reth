@@ -67,10 +67,10 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     network: NetworkArgs,
 
     /// The number of retries per request

@@ -10,7 +10,7 @@ pub mod unwind;
 /// `reth stage` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Subcommands,
 }
 

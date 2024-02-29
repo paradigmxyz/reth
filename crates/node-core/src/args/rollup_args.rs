@@ -2,7 +2,7 @@
 
 /// Parameters for rollup configuration
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
-#[clap(next_help_heading = "Rollup")]
+#[command(next_help_heading = "Rollup")]
 pub struct RollupArgs {
     /// HTTP endpoint for the sequencer mempool
     #[arg(long = "rollup.sequencer-http", value_name = "HTTP_URL")]
@@ -26,7 +26,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

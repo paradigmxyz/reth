@@ -61,7 +61,7 @@ pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
-#[clap(next_help_heading = "RPC")]
+#[command(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
     #[arg(long, default_value_if("dev", "true", "true"))]
@@ -96,7 +96,7 @@ pub struct RpcServerArgs {
     pub ws_port: u16,
 
     /// Origins from which to accept WebSocket requests
-    #[arg(long = "ws.origins", name = "ws.origins")]
+    #[arg(id = "ws.origins", long = "ws.origins")]
     pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for the WS server
@@ -175,11 +175,11 @@ pub struct RpcServerArgs {
     pub rpc_gas_cap: u64,
 
     /// State cache configuration.
-    #[clap(flatten)]
+    #[command(flatten)]
     pub rpc_state_cache: RpcStateCacheArgs,
 
     /// Gas price oracle configuration.
-    #[clap(flatten)]
+    #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
 }
 
@@ -631,7 +631,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

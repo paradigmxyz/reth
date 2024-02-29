@@ -63,7 +63,7 @@ pub struct Command {
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
-    #[clap(long, value_name = "SOCKET")]
+    #[arg(long, value_name = "SOCKET")]
     metrics: Option<SocketAddr>,
 
     /// The name of the stage to run
@@ -90,10 +90,10 @@ pub struct Command {
     #[arg(long, short)]
     skip_unwind: bool,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     network: NetworkArgs,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
     /// Commits the changes in the database. WARNING: potentially destructive.
