@@ -1,39 +1,21 @@
 [package]
 name = "reth-rpc-types-compat"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "Compatibility layer for reth-primitives and ethereum RPC types"
 
 [lints]
 workspace = true
 
+[dependencies]
+reth-primitives.workspace = true
+reth-rpc-types.workspace = true
+alloy-rlp.workspace = true
+alloy-rpc-types.workspace = true
+
 [features]
-optimism = [ "reth-primitives/optimism", "reth-rpc-types/optimism",]
-
-[package.version]
-workspace = true
-
-[package.edition]
-workspace = true
-
-[package.rust-version]
-workspace = true
-
-[package.license]
-workspace = true
-
-[package.homepage]
-workspace = true
-
-[package.repository]
-workspace = true
-
-[dependencies.reth-primitives]
-workspace = true
-
-[dependencies.reth-rpc-types]
-workspace = true
-
-[dependencies.alloy-rlp]
-workspace = true
-
-[dependencies.alloy-rpc-types]
-workspace = true
+optimism = ["reth-primitives/optimism", "reth-rpc-types/optimism"]

@@ -1,97 +1,48 @@
 [package]
 name = "reth-blockchain-tree"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
+# reth
+reth-primitives.workspace = true
+reth-interfaces.workspace = true
+reth-db.workspace = true
+reth-provider.workspace = true
+reth-stages.workspace = true
+reth-trie.workspace = true
+
+# common
+parking_lot.workspace = true
 lru = "0.12"
+tracing.workspace = true
+tokio = { workspace = true, features = ["macros", "sync"] }
+
+# metrics
+reth-metrics = { workspace = true, features = ["common"] }
+metrics.workspace = true
+
+# misc
 linked_hash_set = "0.1.4"
+
+[dev-dependencies]
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-primitives = { workspace = true , features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-revm.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-optimism.workspace = true
+parking_lot.workspace = true
+assert_matches.workspace = true
 
 [features]
 test-utils = []
-optimism = [ "reth-primitives/optimism", "reth-interfaces/optimism", "reth-provider/optimism", "reth-revm/optimism",]
-
-[package.version]
-workspace = true
-
-[package.edition]
-workspace = true
-
-[package.rust-version]
-workspace = true
-
-[package.license]
-workspace = true
-
-[package.homepage]
-workspace = true
-
-[package.repository]
-workspace = true
-
-[dependencies.reth-primitives]
-workspace = true
-
-[dependencies.reth-interfaces]
-workspace = true
-
-[dependencies.reth-db]
-workspace = true
-
-[dependencies.reth-provider]
-workspace = true
-
-[dependencies.reth-stages]
-workspace = true
-
-[dependencies.reth-trie]
-workspace = true
-
-[dependencies.parking_lot]
-workspace = true
-
-[dependencies.tracing]
-workspace = true
-
-[dependencies.tokio]
-workspace = true
-features = [ "macros", "sync",]
-
-[dependencies.reth-metrics]
-workspace = true
-features = [ "common",]
-
-[dependencies.metrics]
-workspace = true
-
-[dev-dependencies.reth-db]
-workspace = true
-features = [ "test-utils",]
-
-[dev-dependencies.reth-interfaces]
-workspace = true
-features = [ "test-utils",]
-
-[dev-dependencies.reth-primitives]
-workspace = true
-features = [ "test-utils",]
-
-[dev-dependencies.reth-provider]
-workspace = true
-features = [ "test-utils",]
-
-[dev-dependencies.reth-revm]
-workspace = true
-
-[dev-dependencies.reth-node-ethereum]
-workspace = true
-
-[dev-dependencies.reth-node-optimism]
-workspace = true
-
-[dev-dependencies.parking_lot]
-workspace = true
-
-[dev-dependencies.assert_matches]
-workspace = true
+optimism = ["reth-primitives/optimism", "reth-interfaces/optimism", "reth-provider/optimism", "reth-revm/optimism"]

@@ -47,9 +47,5 @@ workspace = true
 workspace = true
 features = [ "full", "extra-traits",]
 
-[dependencies.parity-scale-codec]
-version = "3.2.1"
-features = [ "derive", "bytes",]
-
 [dev-dependencies.similar-asserts]
 workspace = true

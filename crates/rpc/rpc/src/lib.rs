@@ -1,5 +1,3 @@
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 //! Reth RPC implementation
 //!
 //! Provides the implementation of all RPC interfaces.

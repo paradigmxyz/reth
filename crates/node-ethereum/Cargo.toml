@@ -1,65 +1,32 @@
 [package]
 name = "reth-node-ethereum"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true
 
-[package.version]
-workspace = true
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-payload-builder.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-ethereum-payload-builder.workspace = true
+reth-rpc-types.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
+reth-tracing.workspace = true
+reth-provider.workspace = true
+reth-transaction-pool.workspace = true
+reth-network.workspace = true
 
-[package.edition]
-workspace = true
+# misc
+eyre.workspace = true
+serde.workspace = true
 
-[package.rust-version]
-workspace = true
-
-[package.license]
-workspace = true
-
-[package.homepage]
-workspace = true
-
-[package.repository]
-workspace = true
-
-[dependencies.reth-primitives]
-workspace = true
-
-[dependencies.reth-payload-builder]
-workspace = true
-
-[dependencies.reth-basic-payload-builder]
-workspace = true
-
-[dependencies.reth-ethereum-payload-builder]
-workspace = true
-
-[dependencies.reth-rpc-types]
-workspace = true
-
-[dependencies.reth-node-api]
-workspace = true
-
-[dependencies.reth-node-builder]
-workspace = true
-
-[dependencies.reth-tracing]
-workspace = true
-
-[dependencies.reth-provider]
-workspace = true
-
-[dependencies.reth-transaction-pool]
-workspace = true
-
-[dependencies.reth-network]
-workspace = true
-
-[dependencies.eyre]
-workspace = true
-
-[dependencies.serde]
-workspace = true
-
-[dev-dependencies.reth-db]
-workspace = true
+[dev-dependencies]
+reth-db.workspace = true

@@ -1,5 +1,3 @@
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 //! The core of the Ethereum node. Collection of utilities and libraries that are used by the node.
 
 #![doc(

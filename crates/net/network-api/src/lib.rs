@@ -1,5 +1,3 @@
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 //! Reth network interface definitions.
 //!
 //! Provides abstractions for the reth-network crate.

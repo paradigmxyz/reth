@@ -1405,7 +1405,6 @@ name = "codecs-derive"
 version = "0.1.0-alpha.21"
 dependencies = [
  "convert_case 0.6.0",
- "parity-scale-codec",
  "proc-macro2",
  "quote",
  "similar-asserts",
@@ -7021,7 +7020,6 @@ dependencies = [
 name = "reth-trie"
 version = "0.1.0-alpha.21"
 dependencies = [
- "alloy-chains",
  "alloy-rlp",
  "auto_impl",
  "criterion",
@@ -7029,7 +7027,6 @@ dependencies = [
  "once_cell",
  "proptest",
  "reth-db",
- "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "revm",
