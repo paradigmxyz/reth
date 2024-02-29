@@ -40,7 +40,7 @@ pub struct InitCommand {
     )]
     chain: Arc<ChainSpec>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 }
 

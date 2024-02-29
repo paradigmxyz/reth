@@ -73,10 +73,10 @@ pub struct Command {
     #[arg(long, default_value = "any")]
     nat: NatResolver,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Subcommands,
 }
 

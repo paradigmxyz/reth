@@ -31,7 +31,7 @@ pub struct Command {
     secondary_datadir: PlatformPath<DataDirPath>,
 
     /// Arguments for the second database
-    #[clap(flatten)]
+    #[command(flatten)]
     second_db: DatabaseArgs,
 
     /// The table name to diff. If not specified, all tables are diffed.

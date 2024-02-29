@@ -61,7 +61,7 @@ pub struct ImportCommand {
     )]
     chain: Arc<ChainSpec>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
     /// The path to a block file for import.

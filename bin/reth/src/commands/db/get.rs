@@ -12,7 +12,7 @@ use tracing::error;
 /// The arguments for the `reth db get` command
 #[derive(Parser, Debug)]
 pub struct Command {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     subcommand: Subcommand,
 }
 
@@ -31,7 +31,7 @@ enum Subcommand {
         subkey: Option<String>,
 
         /// Output bytes instead of human-readable decoded value
-        #[clap(long)]
+        #[arg(long)]
         raw: bool,
     },
     /// Gets the content of a static file segment for the given key
@@ -43,7 +43,7 @@ enum Subcommand {
         key: String,
 
         /// Output bytes instead of human-readable decoded value
-        #[clap(long)]
+        #[arg(long)]
         raw: bool,
     },
 }
@@ -209,7 +209,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 
