@@ -64,20 +64,6 @@ impl<DB> ProviderFactory<DB> {
         Self { db, chain_spec, snapshot_provider: None }
     }
 
-    /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
-    /// instance.
-    pub fn new_with_database_path<P: AsRef<Path>>(
-        path: P,
-        chain_spec: Arc<ChainSpec>,
-        args: DatabaseArguments,
-    ) -> RethResult<ProviderFactory<DatabaseEnv>> {
-        Ok(ProviderFactory::<DatabaseEnv> {
-            db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
-            chain_spec,
-            snapshot_provider: None,
-        })
-    }
-
     /// Database provider that comes with a shared snapshot provider.
     pub fn with_snapshots(
         mut self,
@@ -94,6 +80,22 @@ impl<DB> ProviderFactory<DB> {
     /// Returns reference to the underlying database.
     pub fn db_ref(&self) -> &DB {
         &self.db
+    }
+}
+
+impl ProviderFactory<DatabaseEnv> {
+    /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
+    /// instance.
+    pub fn new_with_database_path<P: AsRef<Path>>(
+        path: P,
+        chain_spec: Arc<ChainSpec>,
+        args: DatabaseArguments,
+    ) -> RethResult<Self> {
+        Ok(ProviderFactory::<DatabaseEnv> {
+            db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
+            chain_spec,
+            snapshot_provider: None,
+        })
     }
 }
 
@@ -534,7 +536,7 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use rand::Rng;
-    use reth_db::{tables, test_utils::ERROR_TEMPDIR, transaction::DbTxMut, DatabaseEnv};
+    use reth_db::{tables, test_utils::ERROR_TEMPDIR, transaction::DbTxMut};
     use reth_interfaces::{
         provider::ProviderError,
         test_utils::{
@@ -578,7 +580,7 @@ mod tests {
     #[test]
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
-        let factory = ProviderFactory::<DatabaseEnv>::new_with_database_path(
+        let factory = ProviderFactory::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             Default::default(),
