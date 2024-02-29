@@ -25,7 +25,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 bytes.workspace = true
-derive_more = "0.99.17"
+derive_more.workspace = true
 thiserror.workspace = true
 serde = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["full"] }
@@ -35,7 +35,6 @@ tokio-stream.workspace = true
 pin-project.workspace = true
 tracing.workspace = true
 snap = "1.0.5"
-async-trait.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }

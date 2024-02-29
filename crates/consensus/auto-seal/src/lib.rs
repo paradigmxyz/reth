@@ -13,13 +13,14 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![warn(unused_crate_dependencies)]
 
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_interfaces::{
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
 };
-use reth_node_api::{ConfigureEvmEnv, EngineTypes};
+use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
@@ -320,7 +321,7 @@ impl StorageInner {
         executor: &mut EVMProcessor<'_, EvmConfig>,
     ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvm,
     {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
         // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
@@ -347,17 +348,13 @@ impl StorageInner {
 
     /// Fills in the post-execution header fields based on the given BundleState and gas used.
     /// In doing this, the state root is calculated and the final header is returned.
-    ///
-    /// This is optimism-specific and contains the `ChainSpec` so the proper state root can be
-    /// calculated.
-    #[cfg(feature = "optimism")]
     pub(crate) fn complete_header<S: StateProviderFactory>(
         &self,
         mut header: Header,
         bundle_state: &BundleStateWithReceipts,
         client: &S,
         gas_used: u64,
-        chain_spec: &ChainSpec,
+        #[cfg(feature = "optimism")] chain_spec: &ChainSpec,
     ) -> Result<Header, BlockExecutionError> {
         let receipts = bundle_state.receipts_by_block(header.number);
         header.receipts_root = if receipts.is_empty() {
@@ -369,46 +366,18 @@ impl StorageInner {
                 .collect::<Vec<ReceiptWithBloom>>();
             header.logs_bloom =
                 receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
-            proofs::calculate_receipt_root_optimism(
-                &receipts_with_bloom,
-                chain_spec,
-                header.timestamp,
-            )
-        };
-
-        header.gas_used = gas_used;
-
-        // calculate the state root
-        let state_root = client
-            .latest()
-            .map_err(|_| BlockExecutionError::ProviderError)?
-            .state_root(bundle_state)
-            .unwrap();
-        header.state_root = state_root;
-        Ok(header)
-    }
-
-    /// Fills in the post-execution header fields based on the given BundleState and gas used.
-    /// In doing this, the state root is calculated and the final header is returned.
-    #[cfg(not(feature = "optimism"))]
-    pub(crate) fn complete_header<S: StateProviderFactory>(
-        &self,
-        mut header: Header,
-        bundle_state: &BundleStateWithReceipts,
-        client: &S,
-        gas_used: u64,
-    ) -> Result<Header, BlockExecutionError> {
-        let receipts = bundle_state.receipts_by_block(header.number);
-        header.receipts_root = if receipts.is_empty() {
-            EMPTY_RECEIPTS
-        } else {
-            let receipts_with_bloom = receipts
-                .iter()
-                .map(|r| (*r).clone().expect("receipts have not been pruned").into())
-                .collect::<Vec<ReceiptWithBloom>>();
-            header.logs_bloom =
-                receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
-            proofs::calculate_receipt_root(&receipts_with_bloom)
+            #[cfg(feature = "optimism")]
+            {
+                proofs::calculate_receipt_root_optimism(
+                    &receipts_with_bloom,
+                    chain_spec,
+                    header.timestamp,
+                )
+            }
+            #[cfg(not(feature = "optimism"))]
+            {
+                proofs::calculate_receipt_root(&receipts_with_bloom)
+            }
         };
 
         header.gas_used = gas_used;
@@ -434,7 +403,7 @@ impl StorageInner {
         evm_config: EvmConfig,
     ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvm,
     {
         let header = self.build_header_template(&transactions, chain_spec.clone());
 

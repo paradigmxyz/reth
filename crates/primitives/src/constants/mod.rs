@@ -79,21 +79,6 @@ pub const OP_MAINNET_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u64 = 250;
 #[cfg(feature = "optimism")]
 pub const OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 6;
 
-/// Base fee max change denominator for Optimism Goerli as defined in the Optimism
-/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
-#[cfg(feature = "optimism")]
-pub const OP_GOERLI_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 50;
-
-/// Base fee max change denominator for Optimism Goerli as defined in the Optimism Canyon
-/// hardfork.
-#[cfg(feature = "optimism")]
-pub const OP_GOERLI_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u64 = 250;
-
-/// Base fee max change denominator for Optimism Goerli as defined in the Optimism
-/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
-#[cfg(feature = "optimism")]
-pub const OP_GOERLI_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 10;
-
 /// Base fee max change denominator for Optimism Sepolia as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
 #[cfg(feature = "optimism")]
@@ -140,14 +125,6 @@ pub const HOLESKY_GENESIS_HASH: B256 =
 /// Testnet genesis hash.
 pub const DEV_GENESIS_HASH: B256 =
     b256!("2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c");
-
-/// Optimism goerli genesis hash.
-pub const GOERLI_OP_GENESIS: B256 =
-    b256!("c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1");
-
-/// Base goerli genesis hash.
-pub const GOERLI_BASE_GENESIS: B256 =
-    b256!("a3ab140f15ea7f7443a4702da64c10314eb04d488e72974e02e2d728096b4f76");
 
 /// Keccak256 over empty array.
 pub const KECCAK_EMPTY: B256 =

@@ -67,7 +67,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
@@ -824,7 +823,7 @@ mod tests {
             from: signer,
             to: TransactionKind::Create,
             mint: None,
-            value: reth_primitives::TxValue::from(U256::ZERO),
+            value: reth_primitives::U256::ZERO,
             gas_limit: 0u64,
             is_system_transaction: false,
             input: Default::default(),

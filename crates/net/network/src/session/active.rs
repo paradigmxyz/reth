@@ -293,7 +293,7 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(msg.into());
             }
             Err(err) => {
-                debug!(target: "net", ?err, "Failed to respond to received request");
+                debug!(target: "net", %err, "Failed to respond to received request");
             }
         }
     }
@@ -408,7 +408,7 @@ impl ActiveSession {
                 self.poll_disconnect(cx)
             }
             Err(err) => {
-                debug!(target: "net::session", ?err, remote_peer_id=?self.remote_peer_id, "could not send disconnect");
+                debug!(target: "net::session", %err, remote_peer_id=?self.remote_peer_id, "could not send disconnect");
                 self.close_on_error(err, cx)
             }
         }
@@ -557,7 +557,7 @@ impl Future for ActiveSession {
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
                     };
                     if let Err(err) = res {
-                        debug!(target: "net::session", ?err,  remote_peer_id=?this.remote_peer_id, "failed to send message");
+                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
                         // notify the manager
                         return this.close_on_error(err, cx)
                     }
@@ -614,7 +614,7 @@ impl Future for ActiveSession {
                                         progress = true;
                                     }
                                     OnIncomingMessageOutcome::BadMessage { error, message } => {
-                                        debug!(target: "net::session", ?error, msg=?message,  remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
+                                        debug!(target: "net::session", %error, msg=?message, remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
                                         return this.close_on_error(error, cx)
                                     }
                                     OnIncomingMessageOutcome::NoCapacity(msg) => {
@@ -625,7 +625,7 @@ impl Future for ActiveSession {
                                 }
                             }
                             Err(err) => {
-                                debug!(target: "net::session", ?err, remote_peer_id=?this.remote_peer_id, "failed to receive message");
+                                debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to receive message");
                                 return this.close_on_error(err, cx)
                             }
                         }

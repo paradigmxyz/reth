@@ -5,18 +5,17 @@ use crate::{
             inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
             EvmOverrides,
         },
-        EthTransactions, TransactionSource,
+        EthTransactions,
     },
     result::{internal_rpc_err, ToRpcResult},
     BlockingTaskGuard, EthApiSpec,
 };
-use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
     revm::env::tx_env_with_recovered, Address, Block, BlockId, BlockNumberOrTag, Bytes,
-    TransactionSignedEcRecovered, Withdrawals, B256,
+    TransactionSignedEcRecovered, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
@@ -635,13 +634,12 @@ where
     }
 
     /// Handler for `debug_getRawTransaction`
+    ///
+    /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
+    ///
     /// Returns the bytes of the transaction for the given hash.
-    async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes> {
-        let tx = self.inner.eth_api.transaction_by_hash(hash).await?;
-        Ok(tx
-            .map(TransactionSource::into_recovered)
-            .map(|tx| tx.envelope_encoded())
-            .unwrap_or_default())
+    async fn raw_transaction(&self, hash: B256) -> RpcResult<Option<Bytes>> {
+        Ok(self.inner.eth_api.raw_transaction_by_hash(hash).await?)
     }
 
     /// Handler for `debug_getRawTransactions`

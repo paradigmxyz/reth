@@ -153,6 +153,12 @@ where
         Ok(EthApi::ommer_by_block_and_index(self, number, index).await?)
     }
 
+    /// Handler for: `eth_getRawTransactionByHash`
+    async fn raw_transaction_by_hash(&self, hash: B256) -> Result<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getRawTransactionByHash");
+        Ok(EthTransactions::raw_transaction_by_hash(self, hash).await?)
+    }
+
     /// Handler for: `eth_getTransactionByHash`
     async fn transaction_by_hash(&self, hash: B256) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
@@ -298,10 +304,10 @@ where
         return Ok(EthApi::gas_price(self).await?)
     }
 
-    /// Handler for: `eth_blobGasPrice`
-    async fn blob_gas_price(&self) -> Result<U256> {
-        trace!(target: "rpc::eth", "Serving eth_blobGasPrice");
-        return Ok(EthApi::blob_gas_price(self).await?)
+    /// Handler for: `eth_blobBaseFee`
+    async fn blob_base_fee(&self) -> Result<U256> {
+        trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
+        return Ok(EthApi::blob_base_fee(self).await?)
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`

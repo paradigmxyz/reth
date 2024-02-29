@@ -1,15 +1,15 @@
 use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
+    transactions::{validation, PartiallyFilterMessage},
 };
-
-use derive_more::Constructor;
+use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 
 use pin_project::pin_project;
 use reth_eth_wire::{
-    EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
-    RequestTxHashes, ValidAnnouncementData,
+    DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
+    PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_metrics::common::mpsc::{
@@ -17,19 +17,22 @@ use reth_metrics::common::mpsc::{
 };
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::{ByLength, Unlimited};
+#[cfg(debug_assertions)]
+use smallvec::{smallvec, SmallVec};
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
-use tracing::{debug, error, trace};
+use tracing::{debug, trace};
+use validation::FilterOutcome;
 
 use super::{
     config::TransactionFetcherConfig,
     constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
-    AnnouncementFilter, PeerMetadata, PooledTransactions,
+    MessageFilter, PeerMetadata, PooledTransactions,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 
@@ -41,31 +44,31 @@ use super::{
 #[pin_project]
 pub struct TransactionFetcher {
     /// All peers with to which a [`GetPooledTransactions`] request is inflight.
-    pub active_peers: LruMap<PeerId, u8, ByLength>,
+    pub(super) active_peers: LruMap<PeerId, u8, ByLength>,
     /// All currently active [`GetPooledTransactions`] requests.
     ///
     /// The set of hashes encompassed by these requests are a subset of all hashes in the fetcher.
     /// It's disjoint from the set of hashes which are awaiting an idle fallback peer in order to
     /// be fetched.
     #[pin]
-    pub inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
+    pub(super) inflight_requests: FuturesUnordered<GetPooledTxRequestFut>,
     /// Hashes that are awaiting an idle fallback peer so they can be fetched.
     ///
     /// This is a subset of all hashes in the fetcher, and is disjoint from the set of hashes for
     /// which a [`GetPooledTransactions`] request is inflight.
-    pub hashes_pending_fetch: LruCache<TxHash>,
+    pub(super) hashes_pending_fetch: LruCache<TxHash>,
     /// Tracks all hashes in the transaction fetcher.
-    pub hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, Unlimited>,
-    /// Filter for valid eth68 announcements.
-    pub filter_valid_hashes: AnnouncementFilter,
+    pub(super) hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, Unlimited>,
+    /// Filter for valid announcement and response data.
+    pub(super) filter_valid_message: MessageFilter,
     /// Info on capacity of the transaction fetcher.
-    pub info: TransactionFetcherInfo,
+    pub(super) info: TransactionFetcherInfo,
     /// [`FetchEvent`]s as a result of advancing inflight requests. This is an intermediary ¨
     /// storage, before [`TransactionsManager`](super::TransactionsManager) streams them.
     #[pin]
-    pub fetch_events_head: UnboundedMeteredReceiver<FetchEvent>,
+    pub(super) fetch_events_head: UnboundedMeteredReceiver<FetchEvent>,
     /// Handle for queueing [`FetchEvent`]s as a result of advancing inflight requests.
-    pub fetch_events_tail: UnboundedMeteredSender<FetchEvent>,
+    pub(super) fetch_events_tail: UnboundedMeteredSender<FetchEvent>,
 }
 
 // === impl TransactionFetcher ===
@@ -247,7 +250,7 @@ impl TransactionFetcher {
 
             // tx is really big, pack request with single tx
             if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
-                return hashes_from_announcement_iter.collect::<RequestTxHashes>();
+                return hashes_from_announcement_iter.collect::<RequestTxHashes>()
             } else {
                 acc_size_response = size;
             }
@@ -373,7 +376,7 @@ impl TransactionFetcher {
                     );
 
                     max_retried_and_evicted_hashes.push(hash);
-                    continue;
+                    continue
                 }
                 *retries += 1;
             }
@@ -490,7 +493,7 @@ impl TransactionFetcher {
                     if let Some(prev_size) = previously_seen_size {
                         // check if this peer is announcing a different size than a previous peer
                         if size != prev_size {
-                            debug!(target: "net::tx",
+                            trace!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
                                 hash=%hash,
                                 size=size,
@@ -510,7 +513,7 @@ impl TransactionFetcher {
                 }
                 // hash has been seen and is in flight. store peer as fallback peer.
                 //
-                // remove any ended sessions, so that in case of a full cache, alive peers aren't 
+                // remove any ended sessions, so that in case of a full cache, alive peers aren't
                 // removed in favour of lru dead peers
                 let mut ended_sessions = vec!();
                 for &peer_id in fallback_peers.iter() {
@@ -548,7 +551,7 @@ impl TransactionFetcher {
                 debug!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     hash=%hash,
-                    msg_version=%msg_version,
+                    msg_version=?msg_version,
                     client_version=%client_version,
                     "failed to cache new announced hash from peer in schnellru::LruMap, dropping hash"
                 );
@@ -562,7 +565,7 @@ impl TransactionFetcher {
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
             previously_unseen_hashes_count=previously_unseen_hashes_count,
-            msg_version=%msg_version,
+            msg_version=?msg_version,
             client_version=%client_version,
             "received previously unseen hashes in announcement from peer"
         );
@@ -570,7 +573,7 @@ impl TransactionFetcher {
         #[cfg(debug_assertions)]
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
-            msg_version=%msg_version,
+            msg_version=?msg_version,
             client_version=%client_version,
             previously_unseen_hashes_len=?previously_unseen_hashes.len(),
             previously_unseen_hashes=?previously_unseen_hashes,
@@ -638,7 +641,7 @@ impl TransactionFetcher {
                 true
             }(),
             "`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@buffered_hashes` and `@inflight_requests`,
-`%new_announced_hashes`: {:?}, 
+`%new_announced_hashes`: {:?},
 `@self`: {:?}",
             new_announced_hashes, self
         );
@@ -758,7 +761,7 @@ impl TransactionFetcher {
         }
     }
 
-    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns  
+    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns
     /// `false` if [`TransactionFetcher`] is operating close to full capacity.
     pub fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         let info = &self.info;
@@ -884,10 +887,43 @@ impl TransactionFetcher {
 
         let event = match result {
             Ok(Ok(transactions)) => {
+                let payload = UnverifiedPooledTransactions::new(transactions);
+
+                let unverified_len = payload.len();
+                let (verification_outcome, verified_payload) =
+                    payload.verify(&requested_hashes, &peer_id);
+
+                if let VerificationOutcome::ReportPeer = verification_outcome {
+                    // todo: report peer for sending hashes that weren't requested
+                    trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        unverified_len=unverified_len,
+                        verified_payload_len=verified_payload.len(),
+                        "received `PooledTransactions` response from peer with entries that didn't verify against request, filtered out transactions"
+                    );
+                }
+
+                let unvalidated_payload_len = verified_payload.len();
+
+                // todo: report peer for sending invalid response
+                // <https://github.com/paradigmxyz/reth/issues/6529>
+
+                let (validation_outcome, valid_payload) =
+                    self.filter_valid_message.partially_filter_valid_entries(verified_payload);
+
+                if let FilterOutcome::ReportPeer = validation_outcome {
+                    trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        unvalidated_payload_len=unvalidated_payload_len,
+                        valid_payload_len=valid_payload.len(),
+                        "received invalid `PooledTransactions` response from peer, filtered out invalid entries"
+                    );
+                }
+
                 // clear received hashes
-                let mut fetched = Vec::with_capacity(transactions.len());
+                let mut fetched = Vec::with_capacity(valid_payload.len());
                 requested_hashes.retain(|requested_hash| {
-                    if transactions.hashes().any(|hash| hash == requested_hash) {
+                    if valid_payload.contains_key(requested_hash) {
                         // hash is now known, stop tracking
                         fetched.push(*requested_hash);
                         return false
@@ -895,12 +931,15 @@ impl TransactionFetcher {
                     true
                 });
                 fetched.shrink_to_fit();
-
                 self.remove_hashes_from_transaction_fetcher(fetched);
+
                 // buffer left over hashes
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
 
-                FetchEvent::TransactionsFetched { peer_id, transactions: transactions.0 }
+                let transactions =
+                    valid_payload.into_data().into_values().collect::<PooledTransactions>();
+
+                FetchEvent::TransactionsFetched { peer_id, transactions }
             }
             Ok(Err(req_err)) => {
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
@@ -910,7 +949,6 @@ impl TransactionFetcher {
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
                 // request channel closed/dropped
                 FetchEvent::FetchError { peer_id, error: RequestError::ChannelClosed }
-            }
         };
 
         if let Err(err) = self.fetch_events_tail.send(event) {
@@ -944,7 +982,7 @@ impl Default for TransactionFetcher {
                     .expect("buffered cache limit should be non-zero"),
             ),
             hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
-            filter_valid_hashes: Default::default(),
+            filter_valid_message: Default::default(),
             info: TransactionFetcherInfo::default(),
             fetch_events_head,
             fetch_events_tail,
@@ -989,7 +1027,7 @@ pub enum FetchEvent {
         /// The ID of the peer from which transactions were fetched.
         peer_id: PeerId,
         /// The transactions that were fetched, if available.
-        transactions: Vec<PooledTransactionsElement>,
+        transactions: PooledTransactions,
     },
     /// Triggered when there is an error in fetching transactions.
     FetchError {
@@ -1060,6 +1098,95 @@ impl Future for GetPooledTxRequestFut {
     }
 }
 
+/// Wrapper of unverified [`PooledTransactions`].
+#[derive(Debug, Constructor, Deref)]
+pub struct UnverifiedPooledTransactions {
+    txns: PooledTransactions,
+}
+
+/// [`PooledTransactions`] that have been successfully verified.
+#[derive(Debug, Constructor)]
+pub struct VerifiedPooledTransactions {
+    txns: PooledTransactions,
+}
+
+impl DedupPayload for VerifiedPooledTransactions {
+    type Value = PooledTransactionsElement;
+
+    fn is_empty(&self) -> bool {
+        self.txns.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.txns.len()
+    }
+
+    fn dedup(self) -> PartiallyValidData<Self::Value> {
+        let Self { txns } = self;
+        let unique_fetched = txns
+            .into_iter()
+            .map(|tx| (*tx.hash(), tx))
+            .collect::<HashMap<TxHash, PooledTransactionsElement>>();
+
+        PartiallyValidData::from_raw_data(unique_fetched, None)
+    }
+}
+
+trait VerifyPooledTransactionsResponse {
+    fn verify(
+        self,
+        requested_hashes: &[TxHash],
+        peer_id: &PeerId,
+    ) -> (VerificationOutcome, VerifiedPooledTransactions);
+}
+
+impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
+    fn verify(
+        self,
+        requested_hashes: &[TxHash],
+        _peer_id: &PeerId,
+    ) -> (VerificationOutcome, VerifiedPooledTransactions) {
+        let mut verification_outcome = VerificationOutcome::Ok;
+
+        let Self { mut txns } = self;
+
+        #[cfg(debug_assertions)]
+        let mut tx_hashes_not_requested: SmallVec<[TxHash; 16]> = smallvec!();
+
+        txns.0.retain(|tx| {
+            if !requested_hashes.contains(tx.hash()) {
+                verification_outcome = VerificationOutcome::ReportPeer;
+
+                #[cfg(debug_assertions)]
+                tx_hashes_not_requested.push(*tx.hash());
+
+                return false
+            }
+            true
+        });
+
+        #[cfg(debug_assertions)]
+        trace!(target: "net::tx",
+            peer_id=format!("{_peer_id:#}"),
+            tx_hashes_not_requested=?tx_hashes_not_requested,
+            "transactions in `PooledTransactions` response from peer were not requested"
+        );
+
+        (verification_outcome, VerifiedPooledTransactions::new(txns))
+    }
+}
+
+/// Outcome from verifying a [`PooledTransactions`] response. Signals to caller whether to penalize
+/// the sender of the response or not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerificationOutcome {
+    /// Peer behaves appropriately.
+    Ok,
+    /// A penalty should be flagged for the peer. Peer sent a response with unacceptably
+    /// invalid entries.
+    ReportPeer,
+}
+
 /// Tracks stats about the [`TransactionFetcher`].
 #[derive(Debug)]
 pub struct TransactionFetcherInfo {
@@ -1124,22 +1251,8 @@ mod test {
             self.0.len()
         }
 
-        fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
-            let mut indices_to_remove = vec![];
-            for (i, (hash, _)) in self.0.iter().enumerate() {
-                if !f(hash) {
-                    indices_to_remove.push(i);
-                }
-            }
-
-            let mut removed_hashes = Vec::with_capacity(indices_to_remove.len());
-
-            for index in indices_to_remove.into_iter().rev() {
-                let entry = self.0.remove(index);
-                removed_hashes.push(entry);
-            }
-
-            TestValidAnnouncementData(removed_hashes)
+        fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
+            self.0.retain(|(hash, _)| f(hash))
         }
     }
 
@@ -1177,6 +1290,7 @@ mod test {
         let expected_surplus_hashes = [eth68_hashes[1], eth68_hashes[3], eth68_hashes[4]];
 
         let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
+
         let valid_announcement_data = TestValidAnnouncementData(
             eth68_hashes
                 .into_iter()

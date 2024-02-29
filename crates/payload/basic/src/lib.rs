@@ -428,7 +428,7 @@ where
                 }
                 Poll::Ready(Err(error)) => {
                     // job failed, but we simply try again next interval
-                    debug!(target: "payload_builder", ?error, "payload build attempt failed");
+                    debug!(target: "payload_builder", %error, "payload build attempt failed");
                     this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
@@ -568,7 +568,7 @@ where
         match empty_payload.poll_unpin(cx) {
             Poll::Ready(Ok(res)) => {
                 if let Err(err) = &res {
-                    warn!(target: "payload_builder", ?err, "failed to resolve empty payload");
+                    warn!(target: "payload_builder", %err, "failed to resolve empty payload");
                 } else {
                     debug!(target: "payload_builder", "resolving empty payload");
                 }

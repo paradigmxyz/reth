@@ -19,12 +19,14 @@ use crate::{
     ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
+use itertools::Itertools;
 use reth_primitives::{
     constants::{
         eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
     },
     Address, TxHash, B256,
 };
+use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
@@ -366,7 +368,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn queued_and_pending_txs_by_sender(
         &self,
         sender: SenderId,
-    ) -> (Vec<TransactionId>, Vec<TransactionId>) {
+    ) -> (SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]>, Vec<TransactionId>) {
         (self.queued_pool.get_txs_by_sender(sender), self.pending_pool.get_txs_by_sender(sender))
     }
 
@@ -544,9 +546,10 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // Update invalid transactions metric
                 self.metrics.invalid_transactions.increment(1);
                 match err {
-                    InsertErr::Underpriced { existing, transaction: _ } => {
-                        Err(PoolError::new(existing, PoolErrorKind::ReplacementUnderpriced))
-                    }
+                    InsertErr::Underpriced { existing: _, transaction } => Err(PoolError::new(
+                        *transaction.hash(),
+                        PoolErrorKind::ReplacementUnderpriced,
+                    )),
                     InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap } => {
                         Err(PoolError::new(
                             *transaction.hash(),
@@ -865,7 +868,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn assert_invariants(&self) {
         let size = self.size();
         let actual = size.basefee + size.pending + size.queued + size.blob;
-        assert_eq!(size.total, actual,  "total size must be equal to the sum of all sub-pools, basefee:{}, pending:{}, queued:{}, blob:{}", size.basefee, size.pending, size.queued, size.blob);
+        assert_eq!(size.total, actual, "total size must be equal to the sum of all sub-pools, basefee:{}, pending:{}, queued:{}, blob:{}", size.basefee, size.pending, size.queued, size.blob);
         self.all_transactions.assert_invariants();
         self.pending_pool.assert_invariants();
         self.basefee_pool.assert_invariants();
@@ -1723,8 +1726,8 @@ pub(crate) type InsertResult<T> = Result<InsertOk<T>, InsertErr<T>>;
 pub(crate) enum InsertErr<T: PoolTransaction> {
     /// Attempted to replace existing transaction, but was underpriced
     Underpriced {
-        #[allow(dead_code)]
         transaction: Arc<ValidPoolTransaction<T>>,
+        #[allow(dead_code)]
         existing: TxHash,
     },
     /// Attempted to insert a blob transaction with a nonce gap
@@ -1818,21 +1821,21 @@ pub struct PruneResult<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(fmt, "PruneResult {{ ")?;
-        write!(
-            fmt,
-            "promoted: {:?}, ",
-            self.promoted.iter().map(|tx| *tx.hash()).collect::<Vec<_>>()
-        )?;
-        write!(fmt, "failed: {:?}, ", self.failed)?;
-        write!(
-            fmt,
-            "pruned: {:?}, ",
-            self.pruned.iter().map(|tx| *tx.transaction.hash()).collect::<Vec<_>>()
-        )?;
-        write!(fmt, "}}")?;
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PruneResult")
+            .field(
+                "promoted",
+                &format_args!("[{}]", self.promoted.iter().map(|tx| tx.hash()).format(", ")),
+            )
+            .field("failed", &self.failed)
+            .field(
+                "pruned",
+                &format_args!(
+                    "[{}]",
+                    self.pruned.iter().map(|tx| tx.transaction.hash()).format(", ")
+                ),
+            )
+            .finish()
     }
 }
 
