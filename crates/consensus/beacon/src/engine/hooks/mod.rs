@@ -11,8 +11,8 @@ pub(crate) use controller::{EngineHooksController, PolledHook};
 mod prune;
 pub use prune::PruneHook;
 
-mod snapshot;
-pub use snapshot::SnapshotHook;
+mod static_file;
+pub use static_file::StaticFileHook;
 
 /// Collection of [engine hooks][`EngineHook`].
 #[derive(Default)]

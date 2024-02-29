@@ -10,13 +10,12 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
     BlockingTaskGuard, EthApiSpec,
 };
-use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
     revm::env::tx_env_with_recovered, Address, Block, BlockId, BlockNumberOrTag, Bytes,
-    TransactionSignedEcRecovered, Withdrawals, B256,
+    TransactionSignedEcRecovered, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,

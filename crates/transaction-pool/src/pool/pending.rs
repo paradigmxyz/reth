@@ -51,7 +51,7 @@ pub struct PendingPool<T: TransactionOrdering> {
     /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
     size_of: SizeTracker,
     /// Used to broadcast new transactions that have been added to the PendingPool to existing
-    /// snapshots of this pool.
+    /// static_files of this pool.
     new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
 }
 
@@ -309,7 +309,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.update_independents_and_highest_nonces(&tx, &tx_id);
         self.all.insert(tx.clone());
 
-        // send the new transaction to any existing pendingpool snapshot iterators
+        // send the new transaction to any existing pendingpool static file iterators
         if self.new_transaction_notifier.receiver_count() > 0 {
             let _ = self.new_transaction_notifier.send(tx.clone());
         }

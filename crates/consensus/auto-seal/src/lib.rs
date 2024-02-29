@@ -347,17 +347,13 @@ impl StorageInner {
 
     /// Fills in the post-execution header fields based on the given BundleState and gas used.
     /// In doing this, the state root is calculated and the final header is returned.
-    ///
-    /// This is optimism-specific and contains the `ChainSpec` so the proper state root can be
-    /// calculated.
-    #[cfg(feature = "optimism")]
     pub(crate) fn complete_header<S: StateProviderFactory>(
         &self,
         mut header: Header,
         bundle_state: &BundleStateWithReceipts,
         client: &S,
         gas_used: u64,
-        chain_spec: &ChainSpec,
+        #[cfg(feature = "optimism")] chain_spec: &ChainSpec,
     ) -> Result<Header, BlockExecutionError> {
         let receipts = bundle_state.receipts_by_block(header.number);
         header.receipts_root = if receipts.is_empty() {
@@ -369,46 +365,18 @@ impl StorageInner {
                 .collect::<Vec<ReceiptWithBloom>>();
             header.logs_bloom =
                 receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
-            proofs::calculate_receipt_root_optimism(
-                &receipts_with_bloom,
-                chain_spec,
-                header.timestamp,
-            )
-        };
-
-        header.gas_used = gas_used;
-
-        // calculate the state root
-        let state_root = client
-            .latest()
-            .map_err(|_| BlockExecutionError::ProviderError)?
-            .state_root(bundle_state)
-            .unwrap();
-        header.state_root = state_root;
-        Ok(header)
-    }
-
-    /// Fills in the post-execution header fields based on the given BundleState and gas used.
-    /// In doing this, the state root is calculated and the final header is returned.
-    #[cfg(not(feature = "optimism"))]
-    pub(crate) fn complete_header<S: StateProviderFactory>(
-        &self,
-        mut header: Header,
-        bundle_state: &BundleStateWithReceipts,
-        client: &S,
-        gas_used: u64,
-    ) -> Result<Header, BlockExecutionError> {
-        let receipts = bundle_state.receipts_by_block(header.number);
-        header.receipts_root = if receipts.is_empty() {
-            EMPTY_RECEIPTS
-        } else {
-            let receipts_with_bloom = receipts
-                .iter()
-                .map(|r| (*r).clone().expect("receipts have not been pruned").into())
-                .collect::<Vec<ReceiptWithBloom>>();
-            header.logs_bloom =
-                receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
-            proofs::calculate_receipt_root(&receipts_with_bloom)
+            #[cfg(feature = "optimism")]
+            {
+                proofs::calculate_receipt_root_optimism(
+                    &receipts_with_bloom,
+                    chain_spec,
+                    header.timestamp,
+                )
+            }
+            #[cfg(not(feature = "optimism"))]
+            {
+                proofs::calculate_receipt_root(&receipts_with_bloom)
+            }
         };
 
         header.gas_used = gas_used;

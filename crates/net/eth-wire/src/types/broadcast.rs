@@ -68,9 +68,9 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 
 /// A new block with the current total difficulty, which includes the difficulty of the returned
 /// block.
-#[derive_arbitrary(rlp, 25)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive_arbitrary(rlp, 25)]
 pub struct NewBlock {
     /// A new block.
     pub block: Block,

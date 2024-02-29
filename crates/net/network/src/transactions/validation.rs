@@ -11,7 +11,7 @@ use reth_eth_wire::{
     MAX_MESSAGE_SIZE,
 };
 use reth_primitives::{Signature, TxHash, TxType};
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// The size of a decoded signature in bytes.
 pub const SIGNATURE_DECODED_SIZE_BYTES: usize = mem::size_of::<Signature>();
@@ -76,7 +76,7 @@ pub trait PartiallyFilterMessage {
     ) -> (FilterOutcome, PartiallyValidData<V>) {
         // 1. checks if the announcement is empty
         if msg.is_empty() {
-            debug!(target: "net::tx",
+            trace!(target: "net::tx",
                 msg=?msg,
                 "empty payload"
             );
@@ -171,7 +171,7 @@ impl ValidateTx68 for EthMessageFilter {
         let tx_type = match TxType::try_from(ty) {
             Ok(ty) => ty,
             Err(_) => {
-                debug!(target: "net::eth-wire",
+                trace!(target: "net::eth-wire",
                     ty=ty,
                     size=size,
                     hash=%hash,
@@ -192,7 +192,7 @@ impl ValidateTx68 for EthMessageFilter {
         //
         if let Some(strict_min_encoded_tx_length) = self.strict_min_encoded_tx_length(tx_type) {
             if size < strict_min_encoded_tx_length {
-                debug!(target: "net::eth-wire",
+                trace!(target: "net::eth-wire",
                     ty=ty,
                     size=size,
                     hash=%hash,
@@ -206,7 +206,7 @@ impl ValidateTx68 for EthMessageFilter {
         }
         if let Some(reasonable_min_encoded_tx_length) = self.min_encoded_tx_length(tx_type) {
             if size < reasonable_min_encoded_tx_length {
-                debug!(target: "net::eth-wire",
+                trace!(target: "net::eth-wire",
                     ty=ty,
                     size=size,
                     hash=%hash,
@@ -223,7 +223,7 @@ impl ValidateTx68 for EthMessageFilter {
         // this network has no strict max encoded tx length for any tx type
         if let Some(reasonable_max_encoded_tx_length) = self.max_encoded_tx_length(tx_type) {
             if size > reasonable_max_encoded_tx_length {
-                debug!(target: "net::eth-wire",
+                trace!(target: "net::eth-wire",
                     ty=ty,
                     size=size,
                     hash=%hash,

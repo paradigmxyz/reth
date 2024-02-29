@@ -95,10 +95,18 @@ impl PruneInput {
             .unwrap_or(0);
 
         let to_tx_number = match provider.block_body_indices(self.to_block)? {
-            Some(body) => body,
+            Some(body) => {
+                let last_tx = body.last_tx_num();
+                if last_tx + body.tx_count() == 0 {
+                    // Prevents a scenario where the pruner correctly starts at a finalized block,
+                    // but the first transaction (tx_num = 0) only appears on an unfinalized one.
+                    // Should only happen on a test/hive scenario.
+                    return Ok(None)
+                }
+                last_tx
+            }
             None => return Ok(None),
-        }
-        .last_tx_num();
+        };
 
         let range = from_tx_number..=to_tx_number;
         if range.is_empty() {
