@@ -119,9 +119,10 @@ impl<R: Resolver, N> DnsDiscoveryService<R, N> {
     ///
     /// ```
     /// use reth_dns_discovery::{DnsDiscoveryService, DnsResolver};
+    /// use reth_primitives::NodeRecord;
     /// use std::sync::Arc;
     /// # fn t() {
-    /// let service = DnsDiscoveryService::new(
+    /// let service: DnsDiscoveryService<DnsResolver, NodeRecord> = DnsDiscoveryService::new(
     ///     Arc::new(DnsResolver::from_system_conf().unwrap()),
     ///     Default::default(),
     /// );
