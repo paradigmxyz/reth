@@ -50,8 +50,10 @@ pub(crate) struct DevSigner {
 
 impl DevSigner {
     pub fn random() -> DevSigner {
-       Self::random_signers(1)
+       Self::random_signers()
     }   
+
+    fn random_signers() -> DevSigner {
         let (pk, sk) = secp256k1::generate_keypair(&mut rand::thread_rng());
 
         let address = reth_primitives::public_key_to_address(sk);
