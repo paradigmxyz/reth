@@ -38,6 +38,16 @@ impl SenderIdentifiers {
         })
     }
 
+    /// Remove the sender address via its `SenderId`.
+    pub(crate) fn remove_sender_address(&mut self, id: &SenderId) -> Option<Address> {
+        self.sender_to_address.remove(id)
+    }
+
+    /// Remove the `SenderId` via its address.
+    pub(crate) fn remove_sender_id(&mut self, addr: &Address) -> Option<SenderId> {
+        self.address_to_id.remove(addr)
+    }
+
     /// Returns a new address
     fn next_id(&mut self) -> SenderId {
         let id = self.id;

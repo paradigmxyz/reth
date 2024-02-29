@@ -366,6 +366,21 @@ where
 
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
 
+        // Prune known senders
+        for tx_hash in mined_transactions.iter() {
+            if let Some(tx) = self.get(tx_hash) {
+                let sender_address = tx.sender();
+                let sender_id = self.get_sender_id(sender_address);
+                if self.unique_senders().contains(&sender_address) {
+                    let mut pool = self.pool.write();
+                    pool.get_sender_info().remove(&sender_id);
+                    let mut identifiers_lock = self.identifiers.write();
+                    identifiers_lock.remove_sender_address(&sender_id);
+                    identifiers_lock.remove_sender_id(&sender_address);
+                }
+            }
+        }
+
         // update the pool
         let outcome = self.pool.write().on_canonical_state_change(
             block_info,
