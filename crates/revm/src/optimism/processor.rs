@@ -365,7 +365,7 @@ mod tests {
                 gas_limit: 21_000,
                 ..Default::default()
             }),
-            Signature::default(),
+            Signature::optimism_deposit_tx_signature(),
         );
 
         let mut executor = create_op_evm_processor(chain_spec, db);

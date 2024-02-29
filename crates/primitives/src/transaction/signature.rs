@@ -32,7 +32,7 @@ impl Signature {
     /// Returns the signature for the optimism deposit transactions, which don't include a
     /// signature.
     #[cfg(feature = "optimism")]
-    pub(crate) const fn optimism_deposit_tx_signature() -> Self {
+    pub const fn optimism_deposit_tx_signature() -> Self {
         Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
     }
 }
