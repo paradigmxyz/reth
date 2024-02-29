@@ -5934,9 +5934,7 @@ dependencies = [
 name = "reth-consensus-common"
 version = "0.1.0-alpha.21"
 dependencies = [
- "alloy-chains",
  "assert_matches",
- "cfg-if",
  "mockall",
  "reth-interfaces",
  "reth-primitives",
