@@ -748,7 +748,7 @@ where
                                 this.swarm
                                     .state_mut()
                                     .peers_mut()
-                                    .on_active_session_established(peer_id);
+                                    .on_active_outgoing_established(peer_id);
                             }
 
                             this.event_listeners.notify(NetworkEvent::SessionEstablished {

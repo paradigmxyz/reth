@@ -430,7 +430,7 @@ impl PeersManager {
     }
 
     /// Called when a _pending_ outbound connection is successful.
-    pub(crate) fn on_active_session_established(&mut self, peer_id: PeerId) {
+    pub(crate) fn on_active_outgoing_established(&mut self, peer_id: PeerId) {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             self.connection_info.decr_state(peer.state);
             self.connection_info.inc_out();
@@ -825,6 +825,9 @@ pub struct ConnectionInfo {
     /// Counter for currently occupied slots for active outbound connections.
     #[cfg_attr(feature = "serde", serde(skip))]
     num_outbound: usize,
+    /// Counter for pending outbound connections.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    num_pendingout: usize,
     /// Counter for currently occupied slots for active inbound connections.
     #[cfg_attr(feature = "serde", serde(skip))]
     num_inbound: usize,
@@ -835,8 +838,6 @@ pub struct ConnectionInfo {
     /// Maximum allowed concurrent outbound dials.
     #[cfg_attr(feature = "serde", serde(default))]
     max_concurrent_outbound_dials: usize,
-    /// Counter for pending outbound connections.
-    num_pendingout: usize,
 }
 
 // === impl ConnectionInfo ===
@@ -2303,5 +2304,46 @@ mod tests {
             .filter(|ev| matches!(ev, PeerAction::Connect { .. }))
             .count();
         assert_eq!(dials, peer_manager.connection_info.max_concurrent_outbound_dials);
+    }
+
+    #[tokio::test]
+    async fn test_max_num_of_pending_dials() {
+        let config = PeersConfig::default();
+        let mut peer_manager = PeersManager::new(config);
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
+        let socket_addr = SocketAddr::new(ip, 8008);
+
+        // add more peers than allowed
+        for _ in 0..peer_manager.connection_info.max_concurrent_outbound_dials * 2 {
+            peer_manager.add_peer(PeerId::random(), socket_addr, None);
+        }
+
+        // generate 'Connect' actions
+        peer_manager.fill_outbound_slots();
+
+        // all dialed connections should be in 'PendingOut' state
+        let dials = peer_manager.connection_info.num_pendingout;
+        assert_eq!(dials, peer_manager.connection_info.max_concurrent_outbound_dials);
+
+        let num_pendingout_states = peer_manager
+            .peers
+            .iter()
+            .filter(|(_, peer)| peer.state == PeerConnectionState::PendingOut)
+            .map(|(peer_id, _)| peer_id.clone())
+            .collect::<Vec<PeerId>>();
+        assert_eq!(
+            num_pendingout_states.len(),
+            peer_manager.connection_info.max_concurrent_outbound_dials
+        );
+
+        // establish dialed connections
+        for peer_id in num_pendingout_states.iter() {
+            peer_manager.on_active_outgoing_established(*peer_id);
+        }
+
+        // all dialed connections should now be in 'Out' state
+        for peer_id in num_pendingout_states.iter() {
+            assert_eq!(peer_manager.peers.get(peer_id).unwrap().state, PeerConnectionState::Out);
+        }
     }
 }
