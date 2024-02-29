@@ -6,7 +6,7 @@ use crate::{
     txn_manager::{TxnManagerMessage, TxnPtr},
     Cursor, Error, Stat, TableObject,
 };
-use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
+use ffi::{mdbx_txn_renew, MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use indexmap::IndexSet;
 use libc::{c_uint, c_void};
 use parking_lot::Mutex;
@@ -320,7 +320,7 @@ where
     where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
-        self.txn.txn_execute(f)
+        self.txn.txn_execute_fail_on_timeout(f)
     }
 }
 
@@ -329,7 +329,9 @@ where
     K: TransactionKind,
 {
     fn drop(&mut self) {
-        let _ = self.txn_execute(|txn| {
+        // To be able to abort a timed out transaction, we need to renew it first.
+        // Hence the usage of `txn_execute_renew_on_timeout` here.
+        let _ = self.txn.txn_execute_renew_on_timeout(|txn| {
             if !self.has_committed() {
                 if K::IS_READ_ONLY {
                     #[cfg(feature = "read-tx-timeouts")]
@@ -528,23 +530,49 @@ impl TransactionPtr {
         Self { txn, lock: Arc::new(Mutex::new(())) }
     }
 
+    // Returns `true` if the transaction is timed out.
+    //
+    // When transaction is timed out via `TxnManager`, it's actually reset using
+    // `mdbx_txn_reset`. It makes the transaction unusable (MDBX fails on any usages of such
+    // transactions), and sets the `MDBX_TXN_FINISHED` flag.
+    fn is_timed_out(&self) -> bool {
+        (unsafe { ffi::mdbx_txn_flags(self.txn) } & ffi::MDBX_TXN_FINISHED) != 0
+    }
+
     /// Executes the given closure once the lock on the transaction is acquired.
+    ///
+    /// Returns the result of the closure or an error if the transaction is timed out.
     #[inline]
-    pub(crate) fn txn_execute<F, T>(&self, f: F) -> Result<T>
+    pub(crate) fn txn_execute_fail_on_timeout<F, T>(&self, f: F) -> Result<T>
     where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
         let _lck = self.lock.lock();
 
-        // When transaction is timed out via `TxnManager`, it's actually reset using
-        // `mdbx_txn_reset` that makes the transaction unusable and sets the
-        // `MDBX_TXN_FINISHED` flag.
-        //
-        // No race condition with the `TxnManager` timeouting our transaction is possible here,
+        // No race condition with the `TxnManager` timing out the transaction is possible here,
         // because we're taking a lock for any actions on the transaction pointer, including a call
         // to the `mdbx_txn_reset`.
-        if unsafe { ffi::mdbx_txn_flags(self.txn) } & ffi::MDBX_TXN_FINISHED != 0 {
+        if self.is_timed_out() {
             return Err(Error::ReadTransactionTimeout)
+        }
+
+        Ok((f)(self.txn))
+    }
+
+    /// Executes the given closure once the lock on the transaction is acquired. If the tranasction
+    /// is timed out, it will be renewed first.
+    ///
+    /// Returns the result of the closure or an error if the transaction renewal fails.
+    #[inline]
+    fn txn_execute_renew_on_timeout<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        let _lck = self.lock.lock();
+
+        // To be able to do any operations on the transaction, we need to renew it first.
+        if self.is_timed_out() {
+            mdbx_result(unsafe { mdbx_txn_renew(self.txn) })?;
         }
 
         Ok((f)(self.txn))

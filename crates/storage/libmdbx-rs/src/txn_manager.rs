@@ -216,7 +216,7 @@ mod read_transactions {
                         let duration = now - *start;
 
                         if duration > self.max_duration {
-                            let result = tx.txn_execute(|txn_ptr| {
+                            let result = tx.txn_execute_fail_on_timeout(|txn_ptr| {
                                 (
                                     txn_ptr,
                                     duration,
@@ -344,29 +344,41 @@ mod read_transactions {
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
             }
 
-            // Create a read-only transaction, wait until `MAX_DURATION` time is elapsed so the
-            // manager kills it, use it two times and observe the `Error::ReadTransactionTimeout`
-            // error. Also, ensure that the transaction pointer is not reused when opening a new
-            // read-only transaction.
             {
+                // Create a read-only transaction and observe it's in the liist of active
+                // transactions.
                 let tx = env.begin_ro_txn().unwrap();
                 let tx_ptr = tx.txn() as usize;
                 assert!(read_transactions.active.contains_key(&tx_ptr));
 
+                // Wait until the transaction is timed out by the manager.
                 sleep(MAX_DURATION + READ_TRANSACTIONS_CHECK_INTERVAL);
 
+                // Ensure that the transaction is not in the list of active transactions anymore,
+                // and is in the list of timed out but not aborted transactions.
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
+                assert!(read_transactions.timed_out_not_aborted.contains(&tx_ptr));
 
+                // Use the timed out transaction and observe the `Error::ReadTransactionTimeout`
                 assert_eq!(tx.open_db(None).err(), Some(Error::ReadTransactionTimeout));
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
+                assert!(read_transactions.timed_out_not_aborted.contains(&tx_ptr));
 
                 assert_eq!(tx.id().err(), Some(Error::ReadTransactionTimeout));
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
+                assert!(read_transactions.timed_out_not_aborted.contains(&tx_ptr));
 
-                let tx = env.begin_ro_txn().unwrap();
-                let new_tx_ptr = tx.txn() as usize;
+                // Ensure that the transaction pointer is not reused when opening a new read-only
+                // transaction.
+                let new_tx = env.begin_ro_txn().unwrap();
+                let new_tx_ptr = new_tx.txn() as usize;
                 assert!(read_transactions.active.contains_key(&new_tx_ptr));
                 assert_ne!(tx_ptr, new_tx_ptr);
+
+                // Drop the transaction and ensure that it's not in the list of timed out but not
+                // aborted transactions anymore.
+                drop(tx);
+                assert!(!read_transactions.timed_out_not_aborted.contains(&tx_ptr));
             }
         }
 
