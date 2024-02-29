@@ -99,19 +99,15 @@ impl Hardfork {
         if chain == Chain::holesky() {
             return self.holesky_activation_block();
         }
-        if chain == Chain::base_sepolia() {
-            #[cfg(feature = "optimism")]
-            {
+
+        #[cfg(feature = "optimism")]
+        {
+            if chain == Chain::base_sepolia() {
                 return self.base_sepolia_activation_block();
             }
-            #[cfg(not(feature = "optimism"))]
-            {
-                return None;
+            if chain == Chain::base_mainnet() {
+                return self.base_mainnet_activation_block();
             }
-        }
-        #[cfg(feature = "optimism")]
-        if chain == Chain::base_mainnet() {
-            return self.base_mainnet_activation_block();
         }
 
         None
@@ -151,9 +147,21 @@ impl Hardfork {
             Hardfork::Paris => Some(1735371),
             Hardfork::Shanghai => Some(2990908),
             Hardfork::Cancun => Some(5187023),
-            _ => Some(0), /* todo: potential dangerous if forget to add a new fork number here,
-                           * might refactor to have list of fork happen before chain initialized
-                           * for each chain */
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(0),
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            _ => None,
         }
     }
 
@@ -165,7 +173,24 @@ impl Hardfork {
             Hardfork::Canyon => Some(2106456),
             Hardfork::Cancun => Some(6383256),
             Hardfork::Ecotone => Some(6383256),
-            _ => Some(0),
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(0),
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            Hardfork::Paris => Some(0),
+            Hardfork::Bedrock => Some(0),
+            Hardfork::Regolith => Some(0),
+            _ => None,
         }
     }
 
@@ -177,7 +202,24 @@ impl Hardfork {
             Hardfork::Canyon => Some(9101527),
             Hardfork::Cancun => Some(11188936),
             Hardfork::Ecotone => Some(11188936),
-            _ => Some(0),
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(0),
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            Hardfork::Paris => Some(0),
+            Hardfork::Bedrock => Some(0),
+            Hardfork::Regolith => Some(0),
+            _ => None,
         }
     }
 
@@ -186,7 +228,20 @@ impl Hardfork {
         match self {
             Hardfork::Shanghai => Some(6698),
             Hardfork::Cancun => Some(894733),
-            _ => Some(0),
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            Hardfork::Paris => Some(0),
+            _ => None,
         }
     }
 
@@ -201,19 +256,14 @@ impl Hardfork {
         if chain == Chain::holesky() {
             return self.holesky_activation_timestamp();
         }
-        if chain == Chain::base_sepolia() {
-            #[cfg(feature = "optimism")]
-            {
+        #[cfg(feature = "optimism")]
+        {
+            if chain == Chain::base_sepolia() {
                 return self.base_sepolia_activation_timestamp();
             }
-            #[cfg(not(feature = "optimism"))]
-            {
-                return None;
+            if chain == Chain::base_mainnet() {
+                return self.base_mainnet_activation_timestamp();
             }
-        }
-        #[cfg(feature = "optimism")]
-        if chain == Chain::base_mainnet() {
-            return self.base_mainnet_activation_timestamp();
         }
 
         None
@@ -251,7 +301,22 @@ impl Hardfork {
         match self {
             Hardfork::Shanghai => Some(1677557088),
             Hardfork::Cancun => Some(1706655072),
-            _ => Some(0),
+            Hardfork::Frontier => Some(1633267481),
+            Hardfork::Homestead => Some(1633267481),
+            Hardfork::Dao => Some(1633267481),
+            Hardfork::Tangerine => Some(1633267481),
+            Hardfork::SpuriousDragon => Some(1633267481),
+            Hardfork::Byzantium => Some(1633267481),
+            Hardfork::Constantinople => Some(1633267481),
+            Hardfork::Petersburg => Some(1633267481),
+            Hardfork::Istanbul => Some(1633267481),
+            Hardfork::MuirGlacier => Some(1633267481),
+            Hardfork::Berlin => Some(1633267481),
+            Hardfork::London => Some(1633267481),
+            Hardfork::ArrowGlacier => Some(1633267481),
+            Hardfork::GrayGlacier => Some(1633267481),
+            Hardfork::Paris => Some(1633267481),
+            _ => None,
         }
     }
 
@@ -260,6 +325,21 @@ impl Hardfork {
         match self {
             Hardfork::Shanghai => Some(1696000704),
             Hardfork::Cancun => Some(1707305664),
+            Hardfork::Frontier => Some(1695902100),
+            Hardfork::Homestead => Some(1695902100),
+            Hardfork::Dao => Some(1695902100),
+            Hardfork::Tangerine => Some(1695902100),
+            Hardfork::SpuriousDragon => Some(1695902100),
+            Hardfork::Byzantium => Some(1695902100),
+            Hardfork::Constantinople => Some(1695902100),
+            Hardfork::Petersburg => Some(1695902100),
+            Hardfork::Istanbul => Some(1695902100),
+            Hardfork::MuirGlacier => Some(1695902100),
+            Hardfork::Berlin => Some(1695902100),
+            Hardfork::London => Some(1695902100),
+            Hardfork::ArrowGlacier => Some(1695902100),
+            Hardfork::GrayGlacier => Some(1695902100),
+            Hardfork::Paris => Some(1695902100),
             _ => Some(0),
         }
     }
@@ -272,7 +352,24 @@ impl Hardfork {
             Hardfork::Canyon => Some(1699981200),
             Hardfork::Cancun => Some(1708534800),
             Hardfork::Ecotone => Some(1708534800),
-            _ => Some(0),
+            Hardfork::Frontier => Some(1695768288),
+            Hardfork::Homestead => Some(1695768288),
+            Hardfork::Dao => Some(1695768288),
+            Hardfork::Tangerine => Some(1695768288),
+            Hardfork::SpuriousDragon => Some(1695768288),
+            Hardfork::Byzantium => Some(1695768288),
+            Hardfork::Constantinople => Some(1695768288),
+            Hardfork::Petersburg => Some(1695768288),
+            Hardfork::Istanbul => Some(1695768288),
+            Hardfork::MuirGlacier => Some(1695768288),
+            Hardfork::Berlin => Some(1695768288),
+            Hardfork::London => Some(1695768288),
+            Hardfork::ArrowGlacier => Some(1695768288),
+            Hardfork::GrayGlacier => Some(1695768288),
+            Hardfork::Paris => Some(1695768288),
+            Hardfork::Bedrock => Some(1695768288),
+            Hardfork::Regolith => Some(1695768288),
+            _ => None,
         }
     }
 
@@ -284,7 +381,24 @@ impl Hardfork {
             Hardfork::Canyon => Some(1704992401),
             Hardfork::Cancun => Some(1710374401),
             Hardfork::Ecotone => Some(1710374401),
-            _ => Some(0),
+            Hardfork::Frontier => Some(1686789347),
+            Hardfork::Homestead => Some(1686789347),
+            Hardfork::Dao => Some(1686789347),
+            Hardfork::Tangerine => Some(1686789347),
+            Hardfork::SpuriousDragon => Some(1686789347),
+            Hardfork::Byzantium => Some(1686789347),
+            Hardfork::Constantinople => Some(1686789347),
+            Hardfork::Petersburg => Some(1686789347),
+            Hardfork::Istanbul => Some(1686789347),
+            Hardfork::MuirGlacier => Some(1686789347),
+            Hardfork::Berlin => Some(1686789347),
+            Hardfork::London => Some(1686789347),
+            Hardfork::ArrowGlacier => Some(1686789347),
+            Hardfork::GrayGlacier => Some(1686789347),
+            Hardfork::Paris => Some(1686789347),
+            Hardfork::Bedrock => Some(1686789347),
+            Hardfork::Regolith => Some(1686789347),
+            _ => None,
         }
     }
 }
