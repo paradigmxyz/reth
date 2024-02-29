@@ -11,7 +11,7 @@ use reth_discv4::{
     DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscovery, NodeFromExternalSource,
     PublicKey, SecretKey,
 };
-use reth_discv5::{self, DiscoveryUpdateV5, Discv5WithDiscv4Downgrade, MergedUpdateStream};
+use reth_discv5::{DiscoveryUpdateV5, Discv5WithDiscv4Downgrade, MergedUpdateStream};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
     Update,

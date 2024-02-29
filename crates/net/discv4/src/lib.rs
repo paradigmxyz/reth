@@ -676,19 +676,19 @@ where
     }
 
     /// Returns the [PeerId] that identifies this node
-    pub const fn local_peer_id(&self) -> &PeerId {
+    pub fn local_peer_id(&self) -> &PeerId {
         &self.local_node_record.id
     }
 
     /// Returns the address of the UDP socket
-    pub const fn local_addr(&self) -> SocketAddr {
+    pub fn local_addr(&self) -> SocketAddr {
         self.local_address
     }
 
     /// Returns the ENR of this service.
     ///
     /// Note: this will include the external address if resolved.
-    pub const fn local_enr(&self) -> NodeRecord {
+    pub fn local_enr(&self) -> NodeRecord {
         self.local_node_record
     }
 
@@ -1624,9 +1624,10 @@ where
             }
 
             // trigger self lookup
+            let local_node_id = self.local_node_record.id;
             if self.config.enable_lookup {
                 while self.lookup_interval.poll_tick(cx).is_ready() {
-                    let target = self.lookup_rotator.next(&self.local_node_record.id);
+                    let target = self.lookup_rotator.next(&local_node_id);
                     self.lookup_with(target, None);
                 }
             }
@@ -1838,6 +1839,8 @@ where
         ));
 
         discv4
+    }
+}
 
 impl fmt::Debug for Discv4Service {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
