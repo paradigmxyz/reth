@@ -6,11 +6,11 @@ This guide uses [Kurtosis' ethereum-package](https://github.com/kurtosis-tech/et
 * Go [here](https://docs.kurtosis.com/install/) to install Kurtosis
 * Go [here](https://docs.docker.com/get-docker/) to install Docker
 
-The [`ethereum-package`](https://github.com/kurtosis-tech/ethereum-package) is a [package](https://docs.kurtosis.com/concepts-reference/packages) for a general purpose Ethereum testnet definition used for instantiating private testnets at any scale over Docker or Kubernetes, locally or in the cloud. This guide will go through how to spin up a local private testnet with Reth various CL clients locally. Specifically, you will instantiate a 2-node network over Docker with Reth/Lighthouse and Reth/Teku client combinations.
+The [`ethereum-package`](https://github.com/kurtosis-tech/ethereum-package) is a [package](https://docs.kurtosis.com/advanced-concepts/packages) for a general purpose Ethereum testnet definition used for instantiating private testnets at any scale over Docker or Kubernetes, locally or in the cloud. This guide will go through how to spin up a local private testnet with Reth various CL clients locally. Specifically, you will instantiate a 2-node network over Docker with Reth/Lighthouse and Reth/Teku client combinations.
 
 To see all possible configurations and flags you can use, including metrics and observability tools (e.g. Grafana, Prometheus, etc), go [here](https://github.com/kurtosis-tech/ethereum-package#configuration).
 
-Genesis data will be generated using this [genesis-generator](https://github.com/ethpandaops/ethereum-genesis-generator) to be used to bootstrap the EL and CL clients for each node. The end result will be a private testnet with nodes deployed as Docker containers in an ephemeral, isolated environment on your machine called an [enclave](https://docs.kurtosis.com/concepts-reference/enclaves/). Read more about how the `ethereum-package` works by going [here](https://github.com/kurtosis-tech/ethereum-package/).
+Genesis data will be generated using this [genesis-generator](https://github.com/ethpandaops/ethereum-genesis-generator) to be used to bootstrap the EL and CL clients for each node. The end result will be a private testnet with nodes deployed as Docker containers in an ephemeral, isolated environment on your machine called an [enclave](https://docs.kurtosis.com/advanced-concepts/enclaves/). Read more about how the `ethereum-package` works by going [here](https://github.com/kurtosis-tech/ethereum-package/).
 
 ### Step 1: Define the parameters and shape of your private network
 First, in your home directory, create a file with the name `network_params.json` with the following contents:
@@ -41,7 +41,7 @@ Next, run the following command from your command line:
 ```bash
 kurtosis run github.com/kurtosis-tech/ethereum-package --args-file ~/network_params.json
 ```
-Kurtosis will spin up an [enclave](https://docs.kurtosis.com/concepts-reference/enclaves) (i.e an ephemeral, isolated environment) and begin to configure and instantiate the nodes in your network. In the end, Kurtosis will print the services running in your enclave that form your private testnet alongside all the container ports and files that were generated & used to start up the private testnet. Here is a sample output:
+Kurtosis will spin up an [enclave](https://docs.kurtosis.com/advanced-concepts/enclaves/) (i.e an ephemeral, isolated environment) and begin to configure and instantiate the nodes in your network. In the end, Kurtosis will print the services running in your enclave that form your private testnet alongside all the container ports and files that were generated & used to start up the private testnet. Here is a sample output:
 ```console
 INFO[2023-08-21T18:22:18-04:00] ====================================================
 INFO[2023-08-21T18:22:18-04:00] ||          Created enclave: silky-swamp          ||

@@ -11,7 +11,7 @@ use crate::{
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
@@ -20,7 +20,7 @@ use reth_primitives::{
     SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
     Withdrawal, Withdrawals, B256, U256,
 };
-use revm::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
@@ -137,10 +137,9 @@ impl<DB: Database> ProviderFactory<DB> {
     /// Storage provider for state at that given block
     fn state_provider_by_block_number(
         &self,
+        provider: DatabaseProviderRO<DB>,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        let provider = self.provider()?;
-
         if block_number == provider.best_block_number().unwrap_or_default() &&
             block_number == provider.last_block_number().unwrap_or_default()
         {
@@ -182,19 +181,21 @@ impl<DB: Database> ProviderFactory<DB> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider = self.state_provider_by_block_number(block_number)?;
+        let provider = self.provider()?;
+        let state_provider = self.state_provider_by_block_number(provider, block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
         Ok(state_provider)
     }
 
     /// Storage provider for state at that given block hash
     pub fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
-        let block_number = self
-            .provider()?
+        let provider = self.provider()?;
+
+        let block_number = provider
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
-        let state_provider = self.state_provider_by_block_number(block_number)?;
+        let state_provider = self.state_provider_by_block_number(provider, block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block hash");
         Ok(state_provider)
     }
@@ -440,26 +441,26 @@ impl<DB: Database> StageCheckpointReader for ProviderFactory<DB> {
 impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
     fn fill_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
 
     fn fill_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         header: &Header,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
@@ -482,24 +483,24 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 
     fn fill_cfg_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
 
     fn fill_cfg_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         header: &Header,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: EvmEnvConfig,
+        EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }

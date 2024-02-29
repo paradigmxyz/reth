@@ -11,13 +11,14 @@ use core::fmt;
 
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{IntoRecoveredTransaction, TxHash};
+use reth_primitives::{ChainInfo, IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
 };
+
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
@@ -81,7 +82,7 @@ where
         let eth_filter = Self { inner: Arc::new(inner) };
 
         let this = eth_filter.clone();
-        eth_filter.inner.task_spawner.clone().spawn_critical(
+        eth_filter.inner.task_spawner.spawn_critical(
             "eth-filters_stale-filters-clean",
             Box::pin(async move {
                 this.watch_and_clear_stale_filters().await;
@@ -187,10 +188,9 @@ where
                         (start_block, best_number)
                     }
                 };
-
                 let logs = self
                     .inner
-                    .get_logs_in_block_range(&filter, from_block_number, to_block_number)
+                    .get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
                     .await?;
                 Ok(FilterChanges::Logs(logs))
             }
@@ -382,7 +382,8 @@ where
                     .flatten();
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
-                self.get_logs_in_block_range(&filter, from_block_number, to_block_number).await
+                self.get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
+                    .await
             }
         }
     }
@@ -413,8 +414,10 @@ where
         filter: &Filter,
         from_block: u64,
         to_block: u64,
+        chain_info: ChainInfo,
     ) -> Result<Vec<Log>, FilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
+        let best_number = chain_info.best_number;
 
         if to_block - from_block > self.max_blocks_per_filter {
             return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
@@ -423,7 +426,24 @@ where
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
-        // derive bloom filters from filter input
+        if (to_block == best_number) && (from_block == best_number) {
+            // only one block to check and it's the current best block which we can fetch directly
+            // Note: In case of a reorg, the best block's hash might have changed, hence we only
+            // return early of we were able to fetch the best block's receipts
+            if let Some(receipts) = self.eth_cache.get_receipts(chain_info.best_hash).await? {
+                logs_utils::append_matching_block_logs(
+                    &mut all_logs,
+                    &self.provider,
+                    &filter_params,
+                    chain_info.into(),
+                    &receipts,
+                    false,
+                )?;
+            }
+            return Ok(all_logs)
+        }
+
+        // derive bloom filters from filter input, so we can check headers for matching logs
         let address_filter = FilteredParams::address_filter(&filter.address);
         let topics_filter = FilteredParams::topics_filter(&filter.topics);
 
@@ -639,6 +659,7 @@ enum FilterKind {
     Block,
     PendingTransaction(PendingTransactionKind),
 }
+
 /// Errors that can occur in the handler implementation
 #[derive(Debug, thiserror::Error)]
 pub enum FilterError {

@@ -3,6 +3,7 @@
 use crate::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    metrics::DatabaseEnvMetrics,
     tables::{TableType, Tables},
     utils::default_page_size,
     DatabaseError,
@@ -16,7 +17,7 @@ use reth_libmdbx::{
     PageSize, SyncMode, RO, RW,
 };
 use reth_tracing::tracing::error;
-use std::{ops::Deref, path::Path};
+use std::{ops::Deref, path::Path, sync::Arc};
 use tx::Tx;
 
 pub mod cursor;
@@ -62,6 +63,27 @@ pub struct DatabaseArguments {
     log_level: Option<LogLevel>,
     /// Maximum duration of a read transaction. If [None], the default value is used.
     max_read_transaction_duration: Option<MaxReadTransactionDuration>,
+    /// Open environment in exclusive/monopolistic mode. If [None], the default value is used.
+    ///
+    /// This can be used as a replacement for `MDB_NOLOCK`, which don't supported by MDBX. In this
+    /// way, you can get the minimal overhead, but with the correct multi-process and multi-thread
+    /// locking.
+    ///
+    /// If `true` = open environment in exclusive/monopolistic mode or return `MDBX_BUSY` if
+    /// environment already used by other process. The main feature of the exclusive mode is the
+    /// ability to open the environment placed on a network share.
+    ///
+    /// If `false` = open environment in cooperative mode, i.e. for multi-process
+    /// access/interaction/cooperation. The main requirements of the cooperative mode are:
+    /// - Data files MUST be placed in the LOCAL file system, but NOT on a network share.
+    /// - Environment MUST be opened only by LOCAL processes, but NOT over a network.
+    /// - OS kernel (i.e. file system and memory mapping implementation) and all processes that
+    ///   open the given environment MUST be running in the physically single RAM with
+    ///   cache-coherency. The only exception for cache-consistency requirement is Linux on MIPS
+    ///   architecture, but this case has not been tested for a long time).
+    ///
+    /// This flag affects only at environment opening but can't be changed after.
+    exclusive: Option<bool>,
 }
 
 impl DatabaseArguments {
@@ -79,6 +101,12 @@ impl DatabaseArguments {
         self.max_read_transaction_duration = max_read_transaction_duration;
         self
     }
+
+    /// Set the mdbx exclusive flag.
+    pub fn exclusive(mut self, exclusive: Option<bool>) -> Self {
+        self.exclusive = exclusive;
+        self
+    }
 }
 
 /// Wrapper for the libmdbx environment: [Environment]
@@ -86,8 +114,8 @@ impl DatabaseArguments {
 pub struct DatabaseEnv {
     /// Libmdbx-sys environment.
     inner: Environment,
-    /// Whether to record metrics or not.
-    with_metrics: bool,
+    /// Cache for metric handles. If `None`, metrics are not recorded.
+    metrics: Option<Arc<DatabaseEnvMetrics>>,
 }
 
 impl Database for DatabaseEnv {
@@ -97,14 +125,14 @@ impl Database for DatabaseEnv {
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Ok(Tx::new_with_metrics(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.with_metrics,
+            self.metrics.as_ref().cloned(),
         ))
     }
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Ok(Tx::new_with_metrics(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.with_metrics,
+            self.metrics.as_ref().cloned(),
         ))
     }
 }
@@ -121,7 +149,7 @@ impl DatabaseMetrics for DatabaseEnv {
 
         let _ = self
             .view(|tx| {
-                for table in Tables::ALL.iter().map(|table| table.name()) {
+                for table in Tables::ALL.iter().map(Tables::name) {
                     let table_db = tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
 
                     let stats = tx
@@ -166,10 +194,10 @@ impl DatabaseMetrics for DatabaseEnv {
 
                 Ok::<(), eyre::Report>(())
             })
-            .map_err(|error| error!(?error, "Failed to read db table stats"));
+            .map_err(|error| error!(%error, "Failed to read db table stats"));
 
         if let Ok(freelist) =
-            self.freelist().map_err(|error| error!(?error, "Failed to read db.freelist"))
+            self.freelist().map_err(|error| error!(%error, "Failed to read db.freelist"))
         {
             metrics.push(("db.freelist", freelist as f64, vec![]));
         }
@@ -246,6 +274,7 @@ impl DatabaseEnv {
             // worsens it for random access (which is our access pattern outside of sync)
             no_rdahead: true,
             coalesce: true,
+            exclusive: args.exclusive.unwrap_or_default(),
             ..Default::default()
         });
         // Configure more readers
@@ -309,7 +338,7 @@ impl DatabaseEnv {
 
         let env = DatabaseEnv {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
-            with_metrics: false,
+            metrics: None,
         };
 
         Ok(env)
@@ -317,7 +346,7 @@ impl DatabaseEnv {
 
     /// Enables metrics on the database.
     pub fn with_metrics(mut self) -> Self {
-        self.with_metrics = true;
+        self.metrics = Some(DatabaseEnvMetrics::new().into());
         self
     }
 
@@ -355,7 +384,6 @@ mod tests {
     use crate::{
         abstraction::table::{Encode, Table},
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
-        database::Database,
         models::{AccountBeforeTx, ShardedKey},
         tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
         test_utils::*,
@@ -365,7 +393,7 @@ mod tests {
     use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
     use reth_libmdbx::Error;
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
-    use std::{path::Path, str::FromStr, sync::Arc};
+    use std::str::FromStr;
     use tempfile::TempDir;
 
     /// Create database for testing

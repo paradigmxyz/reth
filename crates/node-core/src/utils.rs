@@ -54,7 +54,7 @@ where
                     info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
                 }
                 Err(err) => {
-                    warn!(target: "reth::cli", ?err, peers_file=?file_path, "Failed to write network peers to file");
+                    warn!(target: "reth::cli", %err, peers_file=?file_path, "Failed to write network peers to file");
                 }
             }
         }
@@ -107,7 +107,7 @@ pub async fn get_single_body<Client>(
 where
     Client: BodiesClient,
 {
-    let (peer_id, response) = client.get_block_body(header.hash).await?.split();
+    let (peer_id, response) = client.get_block_body(header.hash()).await?.split();
 
     if response.is_none() {
         client.report_bad_message(peer_id);

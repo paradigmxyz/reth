@@ -1,4 +1,7 @@
-use reth_metrics::{metrics, metrics::Histogram, Metrics};
+use reth_metrics::{
+    metrics::{Gauge, Histogram},
+    Metrics,
+};
 use reth_primitives::PruneSegment;
 use std::collections::HashMap;
 
@@ -29,4 +32,6 @@ impl Metrics {
 pub(crate) struct PrunerSegmentMetrics {
     /// Pruning duration for this segment
     pub(crate) duration_seconds: Histogram,
+    /// Highest pruned block per segment
+    pub(crate) highest_pruned_block: Gauge,
 }

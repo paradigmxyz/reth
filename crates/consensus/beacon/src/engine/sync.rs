@@ -397,8 +397,8 @@ mod tests {
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
     use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpec,
-        ChainSpecBuilder, Header, SealedHeader, MAINNET,
+        constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
+        Header, SealedHeader, MAINNET,
     };
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
@@ -406,7 +406,7 @@ mod tests {
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_tasks::TokioTaskExecutor;
-    use std::{collections::VecDeque, future::poll_fn, sync::Arc};
+    use std::{collections::VecDeque, future::poll_fn, ops::Range};
     use tokio::sync::watch;
 
     struct TestPipelineBuilder {
@@ -452,7 +452,7 @@ mod tests {
         fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
             reth_tracing::init_test_tracing();
 
-            let executor_factory = TestExecutorFactory::new(chain_spec.clone());
+            let executor_factory = TestExecutorFactory::default();
             executor_factory.extend(self.executor_results);
 
             // Setup pipeline
@@ -531,16 +531,7 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        let mut header = SealedHeader::default();
-        let body = BlockBody::default();
-        client.insert(header.clone(), body.clone());
-        for _ in 0..10 {
-            header.parent_hash = header.hash_slow();
-            header.number += 1;
-            header = header.header.seal_slow();
-            client.insert(header.clone(), body.clone());
-        }
-
+        insert_headers_into_client(&client, SealedHeader::default(), 0..10);
         // force the pipeline to be "done" after 5 blocks
         let pipeline = TestPipelineBuilder::new()
             .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
@@ -554,7 +545,7 @@ mod tests {
             .build(pipeline, chain_spec);
 
         let tip = client.highest_block().expect("there should be blocks here");
-        sync_controller.set_pipeline_sync_target(tip.hash);
+        sync_controller.set_pipeline_sync_target(tip.hash());
 
         let sync_future = poll_fn(|cx| sync_controller.poll(cx));
         let next_event = poll!(sync_future);
@@ -562,7 +553,7 @@ mod tests {
         // can assert that the first event here is PipelineStarted because we set the sync target,
         // and we should get Ready because the pipeline should be spawned immediately
         assert_matches!(next_event, Poll::Ready(EngineSyncEvent::PipelineStarted(Some(target))) => {
-            assert_eq!(target, tip.hash);
+            assert_eq!(target, tip.hash());
         });
 
         // the next event should be the pipeline finishing in a good state
@@ -573,6 +564,24 @@ mod tests {
             // no max block configured
             assert!(!reached_max_block);
         });
+    }
+
+    fn insert_headers_into_client(
+        client: &TestFullBlockClient,
+        genesis_header: SealedHeader,
+        range: Range<usize>,
+    ) {
+        let mut sealed_header = genesis_header;
+        let body = BlockBody::default();
+        for _ in range {
+            let (mut header, hash) = sealed_header.split();
+            // update to the next header
+            header.parent_hash = hash;
+            header.number += 1;
+            header.timestamp += 1;
+            sealed_header = header.seal_slow();
+            client.insert(sealed_header.clone(), body.clone());
+        }
     }
 
     #[tokio::test]
@@ -586,20 +595,13 @@ mod tests {
         );
 
         let client = TestFullBlockClient::default();
-        let mut header = Header {
+        let header = Header {
             base_fee_per_gas: Some(7),
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             ..Default::default()
         }
         .seal_slow();
-        let body = BlockBody::default();
-        for _ in 0..10 {
-            header.parent_hash = header.hash_slow();
-            header.number += 1;
-            header.timestamp += 1;
-            header = header.header.seal_slow();
-            client.insert(header.clone(), body.clone());
-        }
+        insert_headers_into_client(&client, header, 0..10);
 
         // set up a pipeline
         let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
@@ -611,14 +613,14 @@ mod tests {
         let tip = client.highest_block().expect("there should be blocks here");
 
         // call the download range method
-        sync_controller.download_block_range(tip.hash, tip.number);
+        sync_controller.download_block_range(tip.hash(), tip.number);
 
         // ensure we have one in flight range request
         assert_eq!(sync_controller.inflight_block_range_requests.len(), 1);
 
         // ensure the range request is made correctly
         let first_req = sync_controller.inflight_block_range_requests.first().unwrap();
-        assert_eq!(first_req.start_hash(), tip.hash);
+        assert_eq!(first_req.start_hash(), tip.hash());
         assert_eq!(first_req.count(), tip.number);
 
         // ensure they are in ascending order

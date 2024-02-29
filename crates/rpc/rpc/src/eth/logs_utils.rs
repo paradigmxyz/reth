@@ -167,7 +167,7 @@ mod tests {
         let from = 15000001u64;
         let to = 15000002u64;
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
-        let range = get_filter_block_range(Some(from), Some(to), info.best_number, info.clone());
+        let range = get_filter_block_range(Some(from), Some(to), info.best_number, info);
         assert_eq!(range, (info.best_number, info.best_number));
     }
 
@@ -175,7 +175,7 @@ mod tests {
     fn test_log_range_from() {
         let from = 14000000u64;
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
-        let range = get_filter_block_range(Some(from), None, info.best_number, info.clone());
+        let range = get_filter_block_range(Some(from), None, info.best_number, info);
         assert_eq!(range, (from, info.best_number));
     }
 
@@ -183,14 +183,14 @@ mod tests {
     fn test_log_range_to() {
         let to = 14000000u64;
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
-        let range = get_filter_block_range(None, Some(to), info.best_number, info.clone());
+        let range = get_filter_block_range(None, Some(to), info.best_number, info);
         assert_eq!(range, (info.best_number, to));
     }
 
     #[test]
     fn test_log_range_empty() {
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
-        let range = get_filter_block_range(None, None, info.best_number, info.clone());
+        let range = get_filter_block_range(None, None, info.best_number, info);
 
         // no range given -> head
         assert_eq!(range, (info.best_number, info.best_number));

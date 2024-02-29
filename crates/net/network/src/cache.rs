@@ -2,7 +2,7 @@ use core::hash::BuildHasher;
 use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
 use linked_hash_set::LinkedHashSet;
-use schnellru::{self, ByLength, Limiter, RandomState, Unlimited};
+use schnellru::{ByLength, Limiter, RandomState, Unlimited};
 use std::{borrow::Borrow, fmt, hash::Hash, num::NonZeroUsize};
 
 /// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
@@ -62,10 +62,10 @@ impl<T: Hash + Eq> LruCache<T> {
     }
 
     /// Returns `true` if the set contains a value.
-    pub fn contains<Q: ?Sized>(&self, value: &Q) -> bool
+    pub fn contains<Q>(&self, value: &Q) -> bool
     where
         T: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Hash + Eq + ?Sized,
     {
         self.inner.contains(value)
     }
@@ -118,7 +118,7 @@ where
 }
 
 /// Wrapper of [`schnellru::LruMap`] that implements [`fmt::Debug`].
-#[derive(Deref, DerefMut)]
+#[derive(Deref, DerefMut, Default)]
 pub struct LruMap<K, V, L = ByLength, S = RandomState>(schnellru::LruMap<K, V, L, S>)
 where
     K: Hash + PartialEq,

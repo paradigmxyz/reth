@@ -139,14 +139,14 @@ impl TxEip4844 {
             // convert to KzgCommitment
             let commitment = KzgCommitment::from(*commitment.deref());
 
-            // Calculate the versioned hash
-            //
-            // TODO: should this method distinguish the type of validation failure? For example
-            // whether a certain versioned hash does not match, or whether the blob proof
-            // validation failed?
+            // calculate & verify the versioned hash
+            // https://eips.ethereum.org/EIPS/eip-4844#execution-layer-validation
             let calculated_versioned_hash = kzg_to_versioned_hash(commitment);
             if *versioned_hash != calculated_versioned_hash {
-                return Err(BlobTransactionValidationError::InvalidProof)
+                return Err(BlobTransactionValidationError::WrongVersionedHash {
+                    have: *versioned_hash,
+                    expected: calculated_versioned_hash,
+                })
             }
         }
 
@@ -169,7 +169,7 @@ impl TxEip4844 {
     /// Returns the total gas for all blobs in this transaction.
     #[inline]
     pub fn blob_gas(&self) -> u64 {
-        // SAFETY: we don't expect u64::MAX / DATA_GAS_PER_BLOB hashes in a single transaction
+        // NOTE: we don't expect u64::MAX / DATA_GAS_PER_BLOB hashes in a single transaction
         self.blob_versioned_hashes.len() as u64 * DATA_GAS_PER_BLOB
     }
 

@@ -12,11 +12,11 @@ use reth_primitives::constants::{
 use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
-#[derive(Debug, Args, PartialEq)]
+#[derive(Debug, Clone, Args, PartialEq)]
 #[clap(next_help_heading = "Builder")]
 pub struct PayloadBuilderArgs {
     /// Block extra data set by the payload builder.
-    #[arg(long = "builder.extradata", value_parser=ExtradataValueParser::default(),  default_value_t = default_extradata())]
+    #[arg(long = "builder.extradata", value_parser = ExtradataValueParser::default(), default_value_t = default_extradata())]
     pub extradata: String,
 
     /// Target gas ceiling for built blocks.
@@ -119,7 +119,7 @@ impl TypedValueParser for ExtradataValueParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::{Args, Parser};
+    use clap::Parser;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]

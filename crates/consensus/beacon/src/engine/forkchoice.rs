@@ -121,13 +121,12 @@ impl ForkchoiceStatus {
     /// Converts the general purpose [PayloadStatusEnum] into a [ForkchoiceStatus].
     pub(crate) fn from_payload_status(status: &PayloadStatusEnum) -> Self {
         match status {
-            PayloadStatusEnum::Valid => ForkchoiceStatus::Valid,
-            PayloadStatusEnum::Invalid { .. } => ForkchoiceStatus::Invalid,
-            PayloadStatusEnum::Syncing => ForkchoiceStatus::Syncing,
-            PayloadStatusEnum::Accepted => {
-                // This is only returned on `newPayload` accepted would be a valid state here.
+            PayloadStatusEnum::Valid | PayloadStatusEnum::Accepted => {
+                // `Accepted` is only returned on `newPayload`. It would be a valid state here.
                 ForkchoiceStatus::Valid
             }
+            PayloadStatusEnum::Invalid { .. } => ForkchoiceStatus::Invalid,
+            PayloadStatusEnum::Syncing => ForkchoiceStatus::Syncing,
         }
     }
 }
@@ -169,8 +168,8 @@ impl ForkchoiceStateHash {
 impl AsRef<B256> for ForkchoiceStateHash {
     fn as_ref(&self) -> &B256 {
         match self {
-            ForkchoiceStateHash::Head(h) => h,
-            ForkchoiceStateHash::Safe(h) => h,
+            ForkchoiceStateHash::Head(h) |
+            ForkchoiceStateHash::Safe(h) |
             ForkchoiceStateHash::Finalized(h) => h,
         }
     }

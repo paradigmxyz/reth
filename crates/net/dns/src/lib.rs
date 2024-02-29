@@ -163,7 +163,7 @@ impl<R: Resolver, N> DnsDiscoveryService<R, N> {
             self.bootstrap();
 
             while let Some(event) = self.next().await {
-                trace!(target: "disc::dns", ?event,  "processed");
+                trace!(target: "disc::dns", ?event, "processed");
             }
         })
     }
@@ -255,7 +255,7 @@ impl<R: Resolver, N> DnsDiscoveryService<R, N> {
                 }
             },
             Err((err, link)) => {
-                debug!(target: "disc::dns",?err, ?link, "Failed to lookup root")
+                debug!(target: "disc::dns",%err, ?link, "Failed to lookup root")
             }
         }
     }
@@ -271,7 +271,7 @@ impl<R: Resolver, N> DnsDiscoveryService<R, N> {
 
         match entry {
             Some(Err(err)) => {
-                debug!(target: "disc::dns",?err, domain=%link.domain, ?hash, "Failed to lookup entry")
+                debug!(target: "disc::dns",%err, domain=%link.domain, ?hash, "Failed to lookup entry")
             }
             None => {
                 debug!(target: "disc::dns",domain=%link.domain, ?hash, "No dns entry")

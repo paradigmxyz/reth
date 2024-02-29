@@ -360,7 +360,7 @@ where
                         this.buffer_bodies_response(response);
                     }
                     Err(error) => {
-                        tracing::debug!(target: "downloaders::bodies", ?error, "Request failed");
+                        tracing::debug!(target: "downloaders::bodies", %error, "Request failed");
                         this.clear();
                         return Poll::Ready(Some(Err(error)))
                     }
@@ -386,7 +386,7 @@ where
                     }
                     Ok(None) => break 'inner,
                     Err(error) => {
-                        tracing::error!(target: "downloaders::bodies", ?error, "Failed to download from next request");
+                        tracing::error!(target: "downloaders::bodies", %error, "Failed to download from next request");
                         this.clear();
                         return Poll::Ready(Some(Err(error)))
                     }
@@ -596,12 +596,11 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
-    use futures_util::stream::StreamExt;
     use reth_db::test_utils::create_test_rw_db;
     use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
     use reth_primitives::{BlockBody, B256, MAINNET};
     use reth_provider::ProviderFactory;
-    use std::{collections::HashMap, sync::Arc};
+    use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of
     // first-downloaded

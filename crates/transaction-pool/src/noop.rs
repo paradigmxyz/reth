@@ -16,8 +16,8 @@ use crate::{
     PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
     TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use reth_eth_wire::HandleAnnouncement;
-use reth_primitives::{Address, BlobTransactionSidecar, TxHash};
+use reth_eth_wire::HandleMempoolData;
+use reth_primitives::{Address, BlobTransactionSidecar, TxHash, U256};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -29,7 +29,6 @@ use tokio::sync::{mpsc, mpsc::Receiver};
 #[non_exhaustive]
 pub struct NoopTransactionPool;
 
-#[async_trait::async_trait]
 impl TransactionPool for NoopTransactionPool {
     type Transaction = EthPooledTransaction;
 
@@ -135,6 +134,13 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn get_pooled_transaction_element(
+        &self,
+        _tx_hash: TxHash,
+    ) -> Option<PooledTransactionsElement> {
+        None
+    }
+
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
@@ -176,7 +182,7 @@ impl TransactionPool for NoopTransactionPool {
 
     fn retain_unknown<A>(&self, _announcement: &mut A)
     where
-        A: HandleAnnouncement,
+        A: HandleMempoolData,
     {
     }
 
@@ -246,7 +252,6 @@ pub struct MockTransactionValidator<T> {
     _marker: PhantomData<T>,
 }
 
-#[async_trait::async_trait]
 impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
 
@@ -263,8 +268,10 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
             )
         }
 
+        // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
+        // overdraft
         TransactionValidationOutcome::Valid {
-            balance: Default::default(),
+            balance: U256::MAX,
             state_nonce: 0,
             transaction: ValidTransaction::Valid(transaction),
             propagate: match origin {

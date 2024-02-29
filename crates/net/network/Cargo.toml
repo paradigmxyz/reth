@@ -50,7 +50,7 @@ tokio-util = { workspace = true, features = ["codec"] }
 
 # io
 serde = { workspace = true, optional = true }
-humantime-serde = { version = "1.1", optional = true }
+humantime-serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 # metrics
@@ -64,7 +64,6 @@ tracing.workspace = true
 fnv = "1.0"
 thiserror.workspace = true
 parking_lot.workspace = true
-async-trait.workspace = true
 linked_hash_set = "0.1"
 linked-hash-map = "0.5.6"
 rand.workspace = true

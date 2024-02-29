@@ -10,7 +10,7 @@ use crate::{
     EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
-use bytes::Buf;
+use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
@@ -317,6 +317,52 @@ impl PooledTransactionsElement {
             Self::Deposit { transaction, .. } => transaction.payload_len_without_header(),
         }
     }
+
+    /// Returns the enveloped encoded transactions.
+    ///
+    /// See also [TransactionSigned::encode_enveloped]
+    pub fn envelope_encoded(&self) -> Bytes {
+        let mut buf = BytesMut::new();
+        self.encode_enveloped(&mut buf);
+        buf.freeze().into()
+    }
+
+    /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).
+    /// This format is also referred to as "binary" encoding.
+    ///
+    /// For legacy transactions, it encodes the RLP of the transaction into the buffer:
+    /// `rlp(tx-data)`
+    /// For EIP-2718 typed it encodes the type of the transaction followed by the rlp of the
+    /// transaction: `tx-type || rlp(tx-data)`
+    pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
+        // The encoding of `tx-data` depends on the transaction type. Refer to these docs for more
+        // information on the exact format:
+        // - Legacy: TxLegacy::encode_with_signature
+        // - EIP-2930: TxEip2930::encode_with_signature
+        // - EIP-1559: TxEip1559::encode_with_signature
+        // - EIP-4844: BlobTransaction::encode_with_type_inner
+        match self {
+            Self::Legacy { transaction, signature, .. } => {
+                transaction.encode_with_signature(signature, out)
+            }
+            Self::Eip2930 { transaction, signature, .. } => {
+                transaction.encode_with_signature(signature, out, false)
+            }
+            Self::Eip1559 { transaction, signature, .. } => {
+                transaction.encode_with_signature(signature, out, false)
+            }
+            Self::BlobTransaction(blob_tx) => {
+                // The inner encoding is used with `with_header` set to true, making the final
+                // encoding:
+                // `tx_type || rlp([transaction_payload_body, blobs, commitments, proofs]))`
+                blob_tx.encode_with_type_inner(out, false);
+            }
+            #[cfg(feature = "optimism")]
+            Self::Deposit { transaction, .. } => {
+                transaction.encode(out, false);
+            }
+        }
+    }
 }
 
 impl Encodable for PooledTransactionsElement {
@@ -324,7 +370,8 @@ impl Encodable for PooledTransactionsElement {
     ///
     /// For legacy transactions, this encodes the transaction as `rlp(tx-data)`.
     ///
-    /// For EIP-2718 transactions, this encodes the transaction as `rlp(tx_type || rlp(tx-data)))`.
+    /// For EIP-2718 transactions, this encodes the transaction as `rlp(tx_type || rlp(tx-data)))`,
+    /// ___including__ the RLP-header for the entire transaction.
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         // The encoding of `tx-data` depends on the transaction type. Refer to these docs for more
         // information on the exact format:
@@ -428,7 +475,7 @@ impl Decodable for PooledTransactionsElement {
             let remaining_len = buf.len();
 
             if tx_type == EIP4844_TX_TYPE_ID {
-                // Recall that the blob transaction response `TranactionPayload` is encoded like
+                // Recall that the blob transaction response `TransactionPayload` is encoded like
                 // this: `rlp([tx_payload_body, blobs, commitments, proofs])`
                 //
                 // Note that `tx_payload_body` is a list:
@@ -646,7 +693,7 @@ impl From<TransactionSignedEcRecovered> for PooledTransactionsElementEcRecovered
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::hex;
+    use alloy_primitives::{address, hex};
     use assert_matches::assert_matches;
 
     #[test]
@@ -688,6 +735,19 @@ mod tests {
                 Bytes::copy_from_slice(hex_data)
             );
         }
+    }
+
+    // <https://holesky.etherscan.io/tx/0x7f60faf8a410a80d95f7ffda301d5ab983545913d3d789615df3346579f6c849>
+    #[test]
+    fn decode_eip1559_enveloped() {
+        let data = hex!("02f903d382426882ba09832dc6c0848674742682ed9694714b6a4ea9b94a8a7d9fd362ed72630688c8898c80b90364492d24749189822d8512430d3f3ff7a2ede675ac08265c08e2c56ff6fdaa66dae1cdbe4a5d1d7809f3e99272d067364e597542ac0c369d69e22a6399c3e9bee5da4b07e3f3fdc34c32c3d88aa2268785f3e3f8086df0934b10ef92cfffc2e7f3d90f5e83302e31382e302d64657600000000000000000000000000000000000000000000569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd000000000000000000000000e1e210594771824dad216568b91c9cb4ceed361c00000000000000000000000000000000000000000000000000000000000546e00000000000000000000000000000000000000000000000000000000000e4e1c00000000000000000000000000000000000000000000000000000000065d6750c00000000000000000000000000000000000000000000000000000000000f288000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002cf600000000000000000000000000000000000000000000000000000000000000640000000000000000000000000000000000000000000000000000000000000000f1628e56fa6d8c50e5b984a58c0df14de31c7b857ce7ba499945b99252976a93d06dcda6776fc42167fbe71cb59f978f5ef5b12577a90b132d14d9c6efa528076f0161d7bf03643cfc5490ec5084f4a041db7f06c50bd97efa08907ba79ddcac8b890f24d12d8db31abbaaf18985d54f400449ee0559a4452afe53de5853ce090000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000003e800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000064ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000c080a01428023fc54a27544abc421d5d017b9a7c5936ad501cbdecd0d9d12d04c1a033a0753104bbf1c87634d6ff3f0ffa0982710612306003eb022363b57994bdef445a"
+);
+
+        let res = PooledTransactionsElement::decode_enveloped(data.into()).unwrap();
+        assert_eq!(
+            res.into_transaction().to(),
+            Some(address!("714b6a4ea9b94a8a7d9fd362ed72630688c8898c"))
+        );
     }
 
     #[test]

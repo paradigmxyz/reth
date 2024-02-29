@@ -5,13 +5,20 @@ use clap::Args;
 use reth_config::Config;
 use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_net_nat::NatResolver;
-use reth_network::{HelloMessageWithProtocols, NetworkConfigBuilder};
+use reth_network::{
+    transactions::{
+        TransactionFetcherConfig, TransactionsManagerConfig,
+        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+        SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    },
+    HelloMessageWithProtocols, NetworkConfigBuilder,
+};
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
 use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
-#[derive(Debug, Args, PartialEq, Eq)]
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[clap(next_help_heading = "Networking")]
 pub struct NetworkArgs {
     /// Disable the discovery service.
@@ -73,6 +80,23 @@ pub struct NetworkArgs {
     /// Maximum number of inbound requests. default: 30
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
+
+    /// Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions)
+    /// response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
+    /// request. Spec'd at 2 MiB.
+    ///
+    /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
+    #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, help = "Sets the soft limit for the byte size of pooled transactions response. Specified at 2 MiB by default. This is a spec'd value that should only be set for experimental purposes on a testnet.")]
+    pub soft_limit_byte_size_pooled_transactions_response: usize,
+
+    /// Default soft limit for the byte size of a
+    /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a
+    /// [`GetPooledTransactions`](reth_eth_wire::PooledTransactions) request. This defaults to less
+    /// than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when
+    /// assembling a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response. Default
+    /// is 128 KiB.
+    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ)]
+    pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 }
 
 impl NetworkArgs {
@@ -98,12 +122,21 @@ impl NetworkArgs {
             .with_max_inbound_opt(self.max_inbound_peers)
             .with_max_outbound_opt(self.max_outbound_peers);
 
+        // Configure transactions manager
+        let transactions_manager_config = TransactionsManagerConfig {
+            transaction_fetcher_config: TransactionFetcherConfig::new(
+                self.soft_limit_byte_size_pooled_transactions_response,
+                self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+            ),
+        };
+
         // Configure basic network stack
         let mut network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
             .peer_config(peer_config)
             .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
-            .chain_spec(chain_spec);
+            .chain_spec(chain_spec)
+            .transactions_manager_config(transactions_manager_config);
 
         // Configure node identity
         let peer_id = network_config_builder.get_peer_id();
@@ -155,12 +188,15 @@ impl Default for NetworkArgs {
             port: DEFAULT_DISCOVERY_PORT,
             max_outbound_peers: None,
             max_inbound_peers: None,
+            soft_limit_byte_size_pooled_transactions_response:
+                SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         }
     }
 }
 
 /// Arguments to setup discovery
-#[derive(Debug, Args, PartialEq, Eq)]
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
 pub struct DiscoveryArgs {
     /// Disable the discovery service.
     #[arg(short, long, default_value_if("dev", "true", "true"))]

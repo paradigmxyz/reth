@@ -19,8 +19,8 @@
 //!  fn main() -> eyre::Result<()> {
 //!      let tracer = RethTracer::new().with_stdout(LayerInfo::new(
 //!          LogFormat::Json,
+//!          LevelFilter::INFO.to_string(),
 //!          "debug".to_string(),
-//!          LevelFilter::INFO.into(),
 //!          None,
 //!      ));
 //!
@@ -41,8 +41,6 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-
-use tracing_subscriber::filter::Directive;
 
 // Re-export tracing crates
 pub use tracing;
@@ -125,8 +123,8 @@ impl Default for RethTracer {
 #[derive(Debug, Clone)]
 pub struct LayerInfo {
     format: LogFormat,
+    default_directive: String,
     filters: String,
-    directive: Directive,
     color: Option<String>,
 }
 
@@ -138,16 +136,16 @@ impl LayerInfo {
     ///      - `LogFormat::Json` for JSON formatting.
     ///      - `LogFormat::LogFmt` for logfmt (key=value) formatting.
     ///      - `LogFormat::Terminal` for human-readable, terminal-friendly formatting.
+    ///  * `default_directive` - Directive for filtering log messages.
     ///  * `filters` - Additional filtering parameters as a string.
-    ///  * `directive` - Directive for filtering log messages.
     ///  * `color` - Optional color configuration for the log messages.
     pub fn new(
         format: LogFormat,
+        default_directive: String,
         filters: String,
-        directive: Directive,
         color: Option<String>,
     ) -> Self {
-        Self { format, directive, filters, color }
+        Self { format, default_directive, filters, color }
     }
 }
 
@@ -159,8 +157,8 @@ impl Default for LayerInfo {
     fn default() -> Self {
         Self {
             format: LogFormat::Terminal,
-            directive: LevelFilter::INFO.into(),
-            filters: "debug".to_string(),
+            default_directive: LevelFilter::INFO.to_string(),
+            filters: "".to_string(),
             color: Some("always".to_string()),
         }
     }
@@ -196,7 +194,7 @@ impl Tracer for RethTracer {
 
         layers.stdout(
             self.stdout.format,
-            self.stdout.directive,
+            self.stdout.default_directive.parse()?,
             &self.stdout.filters,
             self.stdout.color,
         )?;

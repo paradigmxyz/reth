@@ -10,7 +10,7 @@ use reth_interfaces::p2p::{
 use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256,
 };
-use std::{self, collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
@@ -315,7 +315,6 @@ mod tests {
     async fn test_download_headers_from_file() {
         // Generate some random blocks
         let (file, headers, _) = generate_bodies_file(0..=19).await;
-
         // now try to read them back
         let client = Arc::new(FileClient::from_file(file).await.unwrap());
 

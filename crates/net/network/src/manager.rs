@@ -41,7 +41,7 @@ use reth_eth_wire::{
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{ForkId, NodeRecord, PeerId, B256};
+use reth_primitives::{ForkId, NodeRecord, PeerId};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use reth_tasks::shutdown::GracefulShutdown;
@@ -180,6 +180,7 @@ where
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
                 optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
+            ..
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -228,13 +229,8 @@ where
             bandwidth_meter.clone(),
         );
 
-        let state = NetworkState::new(
-            client,
-            discovery,
-            peers_manager,
-            chain_spec.genesis_hash(),
-            Arc::clone(&num_active_peers),
-        );
+        let state =
+            NetworkState::new(client, discovery, peers_manager, Arc::clone(&num_active_peers));
 
         let swarm = Swarm::new(incoming, sessions, state);
 
@@ -286,12 +282,13 @@ where
     ///
     ///     let config =
     ///         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+    ///     let transactions_manager_config = config.transactions_manager_config.clone();
     ///
     ///     // create the network instance
     ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
     ///         .await
     ///         .unwrap()
-    ///         .transactions(pool)
+    ///         .transactions(pool, transactions_manager_config)
     ///         .request_handler(client)
     ///         .split_with_handle();
     /// }
@@ -311,11 +308,6 @@ where
     /// Returns the [`SocketAddr`] that listens for incoming connections.
     pub fn local_addr(&self) -> SocketAddr {
         self.swarm.listener().local_address()
-    }
-
-    /// Returns the configured genesis hash
-    pub fn genesis_hash(&self) -> B256 {
-        self.swarm.state().genesis_hash()
     }
 
     /// How many peers we're currently connected to.
@@ -372,7 +364,7 @@ where
         _capabilities: Arc<Capabilities>,
         _message: CapabilityMessage,
     ) {
-        trace!(target: "net", ?peer_id,  "received unexpected message");
+        trace!(target: "net", ?peer_id, "received unexpected message");
         self.swarm
             .state_mut()
             .peers_mut()
@@ -613,6 +605,13 @@ where
                 let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peers));
             }
             NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
+            NetworkHandleMessage::GetTransactionsHandle(tx) => {
+                if let Some(ref tx_inner) = self.to_transactions_manager {
+                    let _ = tx_inner.send(NetworkTransactionEvent::GetTransactionsHandle(tx));
+                } else {
+                    let _ = tx.send(None);
+                }
+            }
         }
     }
 }
@@ -685,7 +684,12 @@ where
         // If the budget is exhausted we manually yield back control to the (coop) scheduler. This
         // manual yield point should prevent situations where polling appears to be frozen. See also <https://tokio.rs/blog/2020-04-preemption>
         // And tokio's docs on cooperative scheduling <https://docs.rs/tokio/latest/tokio/task/#cooperative-scheduling>
-        let mut budget = 1024;
+        //
+        // Testing has shown that this loop naturally reaches the pending state within 1-5
+        // iterations in << 100µs in most cases. On average it requires ~50µs, which is inside
+        // the range of what's recommended as rule of thumb.
+        // <https://ryhl.io/blog/async-what-is-blocking/>
+        let mut budget = 10;
 
         loop {
             // advance the swarm
@@ -705,7 +709,7 @@ where
                             trace!(target: "net", ?remote_addr, "TCP listener closed.");
                         }
                         SwarmEvent::TcpListenerError(err) => {
-                            trace!(target: "net", ?err, "TCP connection error.");
+                            trace!(target: "net", %err, "TCP connection error.");
                         }
                         SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
                             trace!(target: "net", ?session_id, ?remote_addr, "Incoming connection");
@@ -898,7 +902,7 @@ where
                                 target: "net",
                                 ?remote_addr,
                                 ?peer_id,
-                                ?error,
+                                %error,
                                 "Outgoing connection error"
                             );
 
@@ -936,6 +940,7 @@ where
             // ensure we still have enough budget for another iteration
             budget -= 1;
             if budget == 0 {
+                trace!(target: "net", budget=10, "exhausted network manager budget");
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
                 break

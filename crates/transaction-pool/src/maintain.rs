@@ -106,7 +106,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         let latest = latest.seal_slow();
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
-            last_seen_block_hash: latest.hash,
+            last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number,
             pending_basefee: latest
                 .next_block_base_fee(chain_spec.base_fee_params(latest.timestamp + 12))
@@ -194,6 +194,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     pool.delete_blobs(blobs);
                 }
             }
+            // also do periodic cleanup of the blob store
+            let pool = pool.clone();
+            task_spawner.spawn_blocking(Box::pin(async move {
+                debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
+                pool.cleanup_blobs();
+            }));
         }
 
         // outcomes of the futures we are waiting on
@@ -227,7 +233,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             Some(Ok(Err(res))) => {
                 // Failed to load accounts from state
                 let (accs, err) = *res;
-                debug!(target: "txpool", ?err, "failed to load accounts");
+                debug!(target: "txpool", %err, "failed to load accounts");
                 dirty_addresses.extend(accs);
             }
             Some(Err(_)) => {
@@ -275,7 +281,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // for these we need to fetch the nonce+balance from the db at the new tip
                 let mut changed_accounts =
-                    match load_accounts(client.clone(), new_tip.hash, missing_changed_acc) {
+                    match load_accounts(client.clone(), new_tip.hash(), missing_changed_acc) {
                         Ok(LoadedAccounts { accounts, failed_to_load }) => {
                             // extend accounts we failed to load from database
                             dirty_addresses.extend(failed_to_load);
@@ -286,9 +292,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                             let (addresses, err) = *err;
                             debug!(
                                 target: "txpool",
-                                ?err,
+                                %err,
                                 "failed to load missing changed accounts at new tip: {:?}",
-                                new_tip.hash
+                                new_tip.hash()
                             );
                             dirty_addresses.extend(addresses);
                             vec![]
@@ -341,7 +347,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     pending_block_blob_fee,
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
-                    mined_transactions: new_mined_transactions.into_iter().collect(),
+                    mined_transactions: new_blocks.transaction_hashes().collect(),
                 };
                 pool.on_canonical_state_change(update);
 
@@ -384,7 +390,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
-                        last_seen_block_hash: tip.hash,
+                        last_seen_block_hash: tip.hash(),
                         last_seen_block_number: tip.number,
                         pending_basefee: pending_block_base_fee,
                         pending_blob_fee: pending_block_blob_fee,
@@ -665,9 +671,7 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
     };
-    use reth_primitives::{
-        fs, hex, FromRecoveredPooledTransaction, PooledTransactionsElement, MAINNET, U256,
-    };
+    use reth_primitives::{fs, hex, PooledTransactionsElement, MAINNET, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 

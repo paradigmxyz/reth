@@ -102,6 +102,7 @@
 
 pub mod database;
 pub mod error;
+mod events;
 mod metrics;
 mod optimism;
 mod payload;

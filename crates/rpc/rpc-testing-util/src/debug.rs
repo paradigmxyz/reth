@@ -5,56 +5,75 @@ use jsonrpsee::core::Error as RpcError;
 use reth_primitives::{BlockId, TxHash, B256};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 use reth_rpc_types::{
-    trace::geth::{GethDebugTracerType, GethDebugTracingOptions},
-    CallRequest,
+    trace::{
+        common::TraceResult,
+        geth::{GethDebugTracerType, GethDebugTracingOptions, GethTrace},
+    },
+    TransactionRequest,
 };
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
+
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
 const JS_TRACER_TEMPLATE: &str = include_str!("../assets/tracer-template.js");
 
 /// A result type for the `debug_trace_transaction` method that also captures the requested hash.
 pub type TraceTransactionResult = Result<(serde_json::Value, TxHash), (RpcError, TxHash)>;
 
+/// A result type for the `debug_trace_block` method that also captures the requested block.
+pub type DebugTraceBlockResult =
+    Result<(Vec<TraceResult<GethTrace, String>>, BlockId), (RpcError, BlockId)>;
+
 /// An extension trait for the Trace API.
-#[async_trait::async_trait]
 pub trait DebugApiExt {
     /// The provider type that is used to make the requests.
     type Provider;
 
     /// Same as [DebugApiClient::debug_trace_transaction] but returns the result as json.
-    async fn debug_trace_transaction_json(
+    fn debug_trace_transaction_json(
         &self,
         hash: B256,
         opts: GethDebugTracingOptions,
-    ) -> Result<serde_json::Value, jsonrpsee::core::Error>;
+    ) -> impl Future<Output = Result<serde_json::Value, jsonrpsee::core::Error>> + Send;
 
     /// Trace all transactions in a block individually with the given tracing opts.
-    async fn debug_trace_transactions_in_block<B>(
+    fn debug_trace_transactions_in_block<B>(
         &self,
         block: B,
         opts: GethDebugTracingOptions,
-    ) -> Result<DebugTraceTransactionsStream<'_>, jsonrpsee::core::Error>
+    ) -> impl Future<Output = Result<DebugTraceTransactionsStream<'_>, jsonrpsee::core::Error>> + Send
     where
         B: Into<BlockId> + Send;
-    ///  method  for debug_traceCall
-    async fn debug_trace_call_json(
+
+    /// Trace all given blocks with the given tracing opts, returning a stream.
+    fn debug_trace_block_buffered_unordered<I, B>(
         &self,
-        request: CallRequest,
+        params: I,
+        opts: Option<GethDebugTracingOptions>,
+        n: usize,
+    ) -> DebugTraceBlockStream<'_>
+    where
+        I: IntoIterator<Item = B>,
+        B: Into<BlockId> + Send;
+
+    ///  method  for debug_traceCall
+    fn debug_trace_call_json(
+        &self,
+        request: TransactionRequest,
         opts: GethDebugTracingOptions,
-    ) -> Result<serde_json::Value, jsonrpsee::core::Error>;
+    ) -> impl Future<Output = Result<serde_json::Value, jsonrpsee::core::Error>> + Send;
 
     ///  method for debug_traceCall using raw JSON strings for the request and options.
-    async fn debug_trace_call_raw_json(
+    fn debug_trace_call_raw_json(
         &self,
         request_json: String,
         opts_json: String,
-    ) -> Result<serde_json::Value, RpcError>;
+    ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send;
 }
 
-#[async_trait::async_trait]
 impl<T: DebugApiClient + Sync> DebugApiExt for T
 where
     T: EthApiClient,
@@ -96,9 +115,40 @@ where
 
         Ok(DebugTraceTransactionsStream { stream: Box::pin(stream) })
     }
+
+    fn debug_trace_block_buffered_unordered<I, B>(
+        &self,
+        params: I,
+        opts: Option<GethDebugTracingOptions>,
+        n: usize,
+    ) -> DebugTraceBlockStream<'_>
+    where
+        I: IntoIterator<Item = B>,
+        B: Into<BlockId> + Send,
+    {
+        let blocks =
+            params.into_iter().map(|block| (block.into(), opts.clone())).collect::<Vec<_>>();
+        let stream =
+            futures::stream::iter(blocks.into_iter().map(move |(block, opts)| async move {
+                let trace_future = match block {
+                    BlockId::Hash(hash) => {
+                        self.debug_trace_block_by_hash(hash.block_hash, opts.clone())
+                    }
+                    BlockId::Number(tag) => self.debug_trace_block_by_number(tag, opts.clone()),
+                };
+
+                match trace_future.await {
+                    Ok(result) => Ok((result, block)),
+                    Err(err) => Err((err, block)),
+                }
+            }))
+            .buffer_unordered(n);
+        DebugTraceBlockStream { stream: Box::pin(stream) }
+    }
+
     async fn debug_trace_call_json(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         opts: GethDebugTracingOptions,
     ) -> Result<serde_json::Value, jsonrpsee::core::Error> {
         let mut params = jsonrpsee::core::params::ArrayParams::new();
@@ -112,7 +162,7 @@ where
         request_json: String,
         opts_json: String,
     ) -> Result<serde_json::Value, RpcError> {
-        let request = serde_json::from_str::<CallRequest>(&request_json)
+        let request = serde_json::from_str::<TransactionRequest>(&request_json)
             .map_err(|e| RpcError::Custom(e.to_string()))?;
         let opts = serde_json::from_str::<GethDebugTracingOptions>(&opts_json)
             .map_err(|e| RpcError::Custom(e.to_string()))?;
@@ -127,16 +177,21 @@ pub struct JsTracerBuilder {
     /// `setup_body` is invoked once at the beginning, during the construction of a given
     /// transaction.
     setup_body: Option<String>,
+
     /// `fault_body` is invoked when an error happens during the execution of an opcode which
     /// wasn't reported in step.
     fault_body: Option<String>,
+
     /// `result_body` returns a JSON-serializable value to the RPC caller.
     result_body: Option<String>,
+
     /// `enter_body` is invoked on stepping in of an internal call.
     enter_body: Option<String>,
+
     /// `step_body` is called for each step of the EVM, or when an error occurs, as the specified
     /// transaction is traced.
     step_body: Option<String>,
+
     /// `exit_body` is invoked on stepping out of an internal call.
     exit_body: Option<String>,
 }
@@ -259,6 +314,38 @@ impl<'a> Stream for DebugTraceTransactionsStream<'a> {
 impl<'a> std::fmt::Debug for DebugTraceTransactionsStream<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugTraceTransactionsStream").finish_non_exhaustive()
+    }
+}
+
+/// A stream that yields the `debug_` traces for the requested blocks.
+#[must_use = "streams do nothing unless polled"]
+pub struct DebugTraceBlockStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = DebugTraceBlockResult> + 'a>>,
+}
+
+impl<'a> DebugTraceBlockStream<'a> {
+    /// Returns the next error result of the stream.
+    pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
+        loop {
+            match self.next().await? {
+                Ok(_) => continue,
+                Err(err) => return Some(err),
+            }
+        }
+    }
+}
+
+impl<'a> Stream for DebugTraceBlockStream<'a> {
+    type Item = DebugTraceBlockResult;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream.as_mut().poll_next(cx)
+    }
+}
+
+impl<'a> std::fmt::Debug for DebugTraceBlockStream<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DebugTraceBlockStream").finish_non_exhaustive()
     }
 }
 

@@ -3,7 +3,8 @@ use crate::{
     processor::EVMProcessor,
     stack::{InspectorStack, InspectorStackConfig},
 };
-use reth_node_api::EvmEnvConfig;
+use reth_interfaces::executor::BlockExecutionError;
+use reth_node_api::ConfigureEvm;
 use reth_primitives::ChainSpec;
 use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
 use std::sync::Arc;
@@ -38,26 +39,21 @@ impl<EvmConfig> EvmProcessorFactory<EvmConfig> {
 
 impl<EvmConfig> ExecutorFactory for EvmProcessorFactory<EvmConfig>
 where
-    EvmConfig: EvmEnvConfig + Send + Sync + Clone + 'static,
+    EvmConfig: ConfigureEvm + Send + Sync + Clone + 'static,
 {
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
         sp: SP,
-    ) -> Box<dyn PrunableBlockExecutor + 'a> {
+    ) -> Box<dyn PrunableBlockExecutor<Error = BlockExecutionError> + 'a> {
         let database_state = StateProviderDatabase::new(sp);
-        let mut evm = Box::new(EVMProcessor::new_with_db(
+        let mut evm = EVMProcessor::new_with_db(
             self.chain_spec.clone(),
             database_state,
             self.evm_config.clone(),
-        ));
-        if let Some(ref stack) = self.stack {
+        );
+        if let Some(stack) = &self.stack {
             evm.set_stack(stack.clone());
         }
-        evm
-    }
-
-    /// Return internal chainspec
-    fn chain_spec(&self) -> &ChainSpec {
-        self.chain_spec.as_ref()
+        Box::new(evm)
     }
 }

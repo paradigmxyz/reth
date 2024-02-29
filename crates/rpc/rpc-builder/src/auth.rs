@@ -12,7 +12,7 @@ use jsonrpsee::{
     Methods,
 };
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::{EngineTypes, EvmEnvConfig};
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
     StateProviderFactory,
@@ -25,7 +25,7 @@ use reth_rpc::{
     AuthLayer, BlockingTaskPool, Claims, EngineEthApi, EthApi, EthFilter,
     EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret,
 };
-use reth_rpc_api::{servers::*, EngineApiServer};
+use reth_rpc_api::servers::*;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -60,7 +60,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     EngineT: EngineTypes + 'static,
     EngineApi: EngineApiServer<EngineT>,
-    EvmConfig: EvmEnvConfig + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     // spawn a new cache task
     let eth_cache = EthStateCache::spawn_with(
@@ -115,7 +115,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     EngineT: EngineTypes + 'static,
     EngineApi: EngineApiServer<EngineT>,
-    EvmConfig: EvmEnvConfig + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     // Configure the module and start the server.
     let mut module = RpcModule::new(());
@@ -248,7 +248,7 @@ impl AuthServerConfigBuilder {
                     .max_connections(500)
                     // bump the default request size slightly, there aren't any methods exposed with
                     // dynamic request params that can exceed this
-                    .max_request_body_size(25 * 1024 * 1024)
+                    .max_request_body_size(128 * 1024 * 1024)
                     .set_id_provider(EthSubscriptionIdProvider::default())
             }),
         }

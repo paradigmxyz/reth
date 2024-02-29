@@ -13,7 +13,7 @@ use reth_rpc_types::{
         ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
-    BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
+    BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
 };
 
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
@@ -165,7 +165,6 @@ pub trait EngineApi<Engine: EngineTypes> {
 /// Specifically for the engine auth server: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#underlying-protocol>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-#[async_trait]
 pub trait EngineEthApi {
     /// Returns an object with data about the sync status or false.
     #[method(name = "syncing")]
@@ -183,7 +182,7 @@ pub trait EngineEthApi {
     #[method(name = "call")]
     async fn call(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,

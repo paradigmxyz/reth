@@ -84,12 +84,13 @@
 //!
 //!     let config =
 //!         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+//!     let transactions_manager_config = config.transactions_manager_config.clone();
 //!
 //!     // create the network instance
 //!     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
 //!         .await
 //!         .unwrap()
-//!         .transactions(pool)
+//!         .transactions(pool, transactions_manager_config)
 //!         .request_handler(client)
 //!         .split_with_handle();
 //! }
@@ -150,7 +151,7 @@ pub use session::{
     PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
     SessionLimits, SessionManager, SessionsConfig,
 };
-pub use transactions::{AnnouncementFilter, FilterAnnouncement, ValidateTx68};
+pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
 
 /// Discovery using [`Discv4`].
 #[cfg(not(feature = "discv5"))]

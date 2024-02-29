@@ -34,13 +34,13 @@ pub struct Discv4Config {
     pub ping_interval: Duration,
     /// The duration of we consider a ping timed out.
     pub ping_expiration: Duration,
-    /// The rate at which lookups should be triggered.
+    /// The rate at which new random lookups should be triggered.
     pub lookup_interval: Duration,
     /// The duration of we consider a FindNode request timed out.
     pub request_timeout: Duration,
     /// The duration after which we consider an enr request timed out.
     pub enr_expiration: Duration,
-    /// The duration we set for neighbours responses
+    /// The duration we set for neighbours responses.
     pub neighbours_expiration: Duration,
     /// Provides a way to ban peers and ips.
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -57,9 +57,9 @@ pub struct Discv4Config {
     pub enable_dht_random_walk: bool,
     /// Whether to automatically lookup peers.
     pub enable_lookup: bool,
-    /// Whether to enforce EIP-868 extension
+    /// Whether to enforce EIP-868 extension.
     pub enable_eip868: bool,
-    /// Whether to respect expiration timestamps in messages
+    /// Whether to respect expiration timestamps in messages.
     pub enforce_expiration_timestamps: bool,
     /// Additional pairs to include in The [`Enr`](enr::Enr) if EIP-868 extension is enabled <https://eips.ethereum.org/EIPS/eip-868>
     pub additional_eip868_rlp_pairs: HashMap<Vec<u8>, Bytes>,

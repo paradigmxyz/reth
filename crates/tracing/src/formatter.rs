@@ -48,7 +48,14 @@ impl LogFormat {
         } else {
             false
         };
-        let target = std::env::var("RUST_LOG_TARGET").map(|val| val != "0").unwrap_or(true);
+        let target = std::env::var("RUST_LOG_TARGET")
+            // `RUST_LOG_TARGET` always overrides default behaviour
+            .map(|val| val != "0")
+            .unwrap_or(
+                // If `RUST_LOG_TARGET` is not set, show target in logs only if the max enabled
+                // level is higher than INFO (DEBUG, TRACE)
+                filter.max_level_hint().map_or(true, |max_level| max_level > tracing::Level::INFO),
+            );
 
         match self {
             LogFormat::Json => {

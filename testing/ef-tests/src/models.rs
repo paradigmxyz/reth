@@ -11,7 +11,7 @@ use reth_primitives::{
     ChainSpecBuilder, Header as RethHeader, SealedHeader, StorageEntry, Withdrawals, B256, B64,
     U256,
 };
-use serde::{self, Deserialize};
+use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
 
 /// The definition of a blockchain test.
@@ -305,6 +305,8 @@ pub enum ForkSpec {
     /// After Merge plus new PUSH0 opcode
     #[serde(alias = "Merge+3855")]
     MergePush0,
+    /// Cancun
+    Cancun,
     /// Fork Spec which is unknown to us
     #[serde(other)]
     Unknown,
@@ -335,6 +337,7 @@ impl From<ForkSpec> for ChainSpec {
             ForkSpec::MergeMeterInitCode => spec_builder.paris_activated(),
             ForkSpec::MergePush0 => spec_builder.paris_activated(),
             ForkSpec::Shanghai => spec_builder.shanghai_activated(),
+            ForkSpec::Cancun => spec_builder.cancun_activated(),
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overridden with PETERSBURG")
             }
@@ -405,7 +408,6 @@ pub type AccessList = Vec<AccessListItem>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
 
     #[test]
     fn header_deserialize() {

@@ -7,10 +7,22 @@
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
+    },
+    {
+      "name": "DS_EXPRESSION",
+      "label": "Expression",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "__expr__"
     }
   ],
   "__elements": {},
   "__requires": [
+    {
+      "type": "datasource",
+      "id": "__expr__",
+      "version": "1.0.0"
+    },
     {
       "type": "panel",
       "id": "bargauge",
@@ -46,6 +58,12 @@
       "id": "prometheus",
       "name": "Prometheus",
       "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
     },
     {
       "type": "panel",
@@ -115,6 +133,408 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 0,
+        "y": 1
+      },
+      "id": 22,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{version}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Version",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 6,
+        "x": 3,
+        "y": 1
+      },
+      "id": 192,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{build_timestamp}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Build Timestamp",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 9,
+        "y": 1
+      },
+      "id": 193,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{git_sha}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Git SHA",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 2,
+        "x": 12,
+        "y": 1
+      },
+      "id": 195,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{build_profile}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Build Profile",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 14,
+        "y": 1
+      },
+      "id": 196,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{target_triple}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Target Triple",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 19,
+        "y": 1
+      },
+      "id": 197,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name"
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{cargo_features}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Cargo Features",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
           "max": 100,
           "min": 0,
           "thresholds": {
@@ -145,9 +565,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 1
+        "y": 4
       },
-      "id": 22,
+      "id": 194,
       "options": {
         "orientation": "auto",
         "reduceOptions": {
@@ -197,7 +617,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           }
@@ -208,7 +629,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 1
+        "y": 4
       },
       "id": 20,
       "options": {
@@ -336,7 +757,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 12
       },
       "id": 69,
       "options": {
@@ -429,7 +850,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 12
       },
       "id": 12,
       "options": {
@@ -466,7 +887,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 20
       },
       "id": 38,
       "panels": [],
@@ -536,7 +957,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 21
       },
       "id": 40,
       "options": {
@@ -596,7 +1017,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 21
       },
       "id": 42,
       "maxDataPoints": 25,
@@ -708,7 +1129,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
@@ -720,7 +1142,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 26
+        "y": 29
       },
       "id": 117,
       "options": {
@@ -802,7 +1224,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
@@ -814,7 +1237,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 26
+        "y": 29
       },
       "id": 116,
       "options": {
@@ -896,7 +1319,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -912,7 +1336,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 34
+        "y": 37
       },
       "id": 119,
       "options": {
@@ -994,7 +1418,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1010,7 +1435,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 34
+        "y": 37
       },
       "id": 118,
       "options": {
@@ -1072,7 +1497,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 42
+        "y": 45
       },
       "id": 48,
       "options": {
@@ -1165,7 +1590,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1181,7 +1607,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 42
+        "y": 45
       },
       "id": 52,
       "options": {
@@ -1239,7 +1665,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 50
+        "y": 53
       },
       "id": 50,
       "options": {
@@ -1302,7 +1728,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1406,7 +1833,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 50
+        "y": 53
       },
       "id": 58,
       "options": {
@@ -1488,7 +1915,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1504,7 +1932,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 58
+        "y": 61
       },
       "id": 113,
       "options": {
@@ -1582,7 +2010,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1598,7 +2027,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 58
+        "y": 61
       },
       "id": 189,
       "options": {
@@ -1663,7 +2092,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 69
       },
       "id": 46,
       "panels": [],
@@ -1719,7 +2148,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
@@ -1731,7 +2161,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 67
+        "y": 70
       },
       "id": 56,
       "options": {
@@ -1804,7 +2234,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 78
       },
       "id": 6,
       "panels": [],
@@ -1860,7 +2290,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1875,7 +2306,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 76
+        "y": 79
       },
       "id": 18,
       "options": {
@@ -1953,7 +2384,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1968,7 +2400,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 76
+        "y": 79
       },
       "id": 16,
       "options": {
@@ -2071,7 +2503,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2087,7 +2520,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 76
+        "y": 79
       },
       "id": 8,
       "options": {
@@ -2170,7 +2603,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 84
+        "y": 87
       },
       "id": 54,
       "options": {
@@ -2375,7 +2808,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2390,7 +2824,7 @@
         "h": 8,
         "w": 14,
         "x": 8,
-        "y": 84
+        "y": 87
       },
       "id": 103,
       "options": {
@@ -2427,7 +2861,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 92
+        "y": 95
       },
       "id": 24,
       "panels": [],
@@ -2482,7 +2916,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2522,7 +2957,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 93
+        "y": 96
       },
       "id": 26,
       "options": {
@@ -2637,7 +3072,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2653,7 +3089,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 93
+        "y": 96
       },
       "id": 33,
       "options": {
@@ -2755,7 +3191,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2770,7 +3207,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 101
+        "y": 104
       },
       "id": 36,
       "options": {
@@ -2819,7 +3256,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 109
+        "y": 112
       },
       "id": 32,
       "panels": [],
@@ -2875,7 +3312,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2924,7 +3362,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 110
+        "y": 113
       },
       "id": 30,
       "options": {
@@ -3075,7 +3513,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
@@ -3087,7 +3526,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 110
+        "y": 113
       },
       "id": 28,
       "options": {
@@ -3189,7 +3628,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3204,7 +3644,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 118
+        "y": 121
       },
       "id": 35,
       "options": {
@@ -3294,7 +3734,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3327,7 +3768,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 118
+        "y": 121
       },
       "id": 73,
       "options": {
@@ -3372,12 +3813,150 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "The number of blocks in a request and size in bytes of those block responses",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "blocks"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 129
+      },
+      "id": 102,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_downloaders_bodies_response_response_size_bytes{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Response size",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_downloaders_bodies_response_response_length{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Individual response length (number of bodies in response)",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_downloaders_bodies_response_response_size_bytes / reth_downloaders_bodies_response_response_length{instance=~\"$instance\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Mean body size in response",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Block body response sizes",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 126
+        "y": 137
       },
       "id": 89,
       "panels": [],
@@ -3433,7 +4012,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3449,7 +4029,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 127
+        "y": 138
       },
       "id": 91,
       "options": {
@@ -3500,7 +4080,7 @@
           "range": true,
           "refId": "C"
         },
-	{
+        {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -3562,7 +4142,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3577,7 +4158,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 127
+        "y": 138
       },
       "id": 92,
       "options": {
@@ -3648,7 +4229,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "The number of blocks in a request and size in bytes of those block responses",
+      "description": "Currently active outgoing GetPooledTransactions requests.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3690,42 +4271,25 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
                 "value": 80
               }
             ]
-          },
-          "unit": "bytes"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "B"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "blocks"
-              }
-            ]
           }
-        ]
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 135
+        "y": 146
       },
-      "id": 102,
+      "id": 104,
       "options": {
         "legend": {
           "calcs": [],
@@ -3734,7 +4298,7 @@
           "showLegend": true
         },
         "tooltip": {
-          "mode": "multi",
+          "mode": "single",
           "sort": "none"
         }
       },
@@ -3745,39 +4309,14 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_response_response_size_bytes{instance=~\"$instance\"}",
+          "expr": "reth_network_inflight_transaction_requests{instance=~\"$instance\"}",
           "hide": false,
-          "legendFormat": "Response size",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_response_response_length{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Individual response length",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_response_response_size_bytes / reth_downloaders_bodies_response_response_length",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "Mean body size in response",
+          "legendFormat": "Inflight Transaction Requests",
           "range": true,
           "refId": "C"
         }
       ],
-      "title": "Block body response sizes",
+      "title": "Inflight Transaction Requests",
       "type": "timeseries"
     },
     {
@@ -3827,7 +4366,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3842,7 +4382,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 135
+        "y": 146
       },
       "id": 94,
       "options": {
@@ -3879,7 +4419,6 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Currently active outgoing GetPooledTransactions requests.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3921,7 +4460,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3936,9 +4476,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 143
+        "y": 154
       },
-      "id": 104,
+      "id": 199,
       "options": {
         "legend": {
           "calcs": [],
@@ -3957,15 +4497,46 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_network_inflight_transaction_requests{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Inflight Transaction Requests",
+          "expr": "reth_network_hashes_pending_fetch{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Hashes in Pending Fetch Cache",
           "range": true,
-          "refId": "C"
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Hashes in Inflight Requests",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "__expr__",
+            "uid": "${DS_EXPRESSION}"
+          },
+          "expression": "$A + $B",
+          "hide": false,
+          "refId": "Total Hashes in Transaction Fetcher",
+          "type": "math"
         }
       ],
-      "title": "Inflight Transaction Requests",
+      "title": "Transaction Fetcher Hashes",
       "type": "timeseries"
     },
     {
@@ -3973,7 +4544,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Tracks the number of transactions inserted and removed from the transaction pool, as well as the number of invalid transactions",
+      "description": "Tracks the number of transactions per second that are inserted and removed from the transaction pool, as well as the number of invalid transactions per second.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4015,7 +4586,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4037,22 +4609,6 @@
                 "value": "negative-Y"
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "C"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "unit",
-                "value": "cps"
-              }
-            ]
           }
         ]
       },
@@ -4060,7 +4616,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 143
+        "y": 154
       },
       "id": 93,
       "options": {
@@ -4081,35 +4637,47 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "increase(reth_transaction_pool_inserted_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_transaction_pool_inserted_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
           "legendFormat": "Inserted transactions",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "increase(reth_transaction_pool_removed_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_transaction_pool_removed_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
           "hide": false,
+          "includeNullMetadata": true,
           "legendFormat": "Removed transactions",
           "range": true,
-          "refId": "B"
+          "refId": "B",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "increase(reth_transaction_pool_invalid_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_transaction_pool_invalid_transactions{instance=~\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
           "hide": false,
+          "includeNullMetadata": true,
           "legendFormat": "Invalid transactions",
           "range": true,
-          "refId": "C"
+          "refId": "C",
+          "useBackend": false
         }
       ],
       "title": "Inserted transactions",
@@ -4162,7 +4730,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4170,7 +4739,7 @@
               }
             ]
           },
-          "unit": "cps"
+          "unit": "reqps"
         },
         "overrides": [
           {
@@ -4203,7 +4772,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 151
+        "y": 162
       },
       "id": 95,
       "options": {
@@ -4225,7 +4794,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "increase(reth_network_pool_transactions_messages_sent{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_network_pool_transactions_messages_sent{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "instant": false,
           "legendFormat": "Tx",
@@ -4238,7 +4807,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "increase(reth_network_pool_transactions_messages_received{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_network_pool_transactions_messages_received{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Rx",
           "range": true,
@@ -4307,7 +4876,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4322,7 +4892,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 151
+        "y": 162
       },
       "id": 115,
       "options": {
@@ -4410,12 +4980,325 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Accumulated durations of nested function calls, in one call to poll `TransactionsManager` future (`TransactionsManager` future has a loop, hence accumulated).\n\nNetwork Events - stream peer session updates from `NetworkManager`\nTransaction Events - stream txns gossip fom `NetworkManager`\nImported Transactions - stream hashes of successfully inserted txns from `TransactionPool`\nPending pool imports - flush txns to pool from `TransactionsManager`\nFetch Events - stream fetch txn events (success case wraps a tx) from `TransactionFetcher`\nCommands - stream commands from (?) to fetch/serve/propagate txns\n  ",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 170
+      },
+      "id": 200,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_network_events{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Network Events",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_transaction_events{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Transaction Events",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_network_acc_duration_poll_imported_transactions{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Imported Transactions",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_pending_pool_imports{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Pending Pool Imports",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_fetch_events{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Fetch Events",
+          "range": true,
+          "refId": "F",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_commands{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Commands",
+          "range": true,
+          "refId": "G",
+          "useBackend": false
+        }
+      ],
+      "title": "Transactions Manager Poll Duration Nested Function Calls",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Duration spent insdie one call to poll the `TransactionsManager` future",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Transactions Manager Future"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 170
+      },
+      "id": 201,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_duration_poll_tx_manager{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Transactions Manager Future",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Transactions Manager Future Poll Duration",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 159
+        "y": 178
       },
       "id": 79,
       "panels": [],
@@ -4471,7 +5354,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4486,7 +5370,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 160
+        "y": 179
       },
       "id": 74,
       "options": {
@@ -4565,7 +5449,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4580,7 +5465,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 160
+        "y": 179
       },
       "id": 80,
       "options": {
@@ -4659,7 +5544,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4674,7 +5560,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 168
+        "y": 187
       },
       "id": 81,
       "options": {
@@ -4752,7 +5638,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4768,7 +5655,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 168
+        "y": 187
       },
       "id": 114,
       "options": {
@@ -4847,7 +5734,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4863,7 +5751,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 176
+        "y": 195
       },
       "id": 158,
       "options": {
@@ -4968,7 +5856,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4984,7 +5873,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 176
+        "y": 195
       },
       "id": 190,
       "options": {
@@ -5022,7 +5911,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 184
+        "y": 203
       },
       "id": 87,
       "panels": [],
@@ -5078,7 +5967,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5093,7 +5983,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 185
+        "y": 204
       },
       "id": 83,
       "options": {
@@ -5171,7 +6061,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5186,7 +6077,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 185
+        "y": 204
       },
       "id": 84,
       "options": {
@@ -5276,7 +6167,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5291,7 +6183,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 193
+        "y": 212
       },
       "id": 85,
       "options": {
@@ -5328,7 +6220,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 201
+        "y": 220
       },
       "id": 68,
       "panels": [],
@@ -5384,7 +6276,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5399,7 +6292,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 202
+        "y": 221
       },
       "id": 60,
       "options": {
@@ -5477,7 +6370,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5492,7 +6386,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 202
+        "y": 221
       },
       "id": 62,
       "options": {
@@ -5570,7 +6464,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5585,7 +6480,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 210
+        "y": 229
       },
       "id": 64,
       "options": {
@@ -5622,7 +6517,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 218
+        "y": 237
       },
       "id": 97,
       "panels": [],
@@ -5675,7 +6570,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5691,7 +6587,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 219
+        "y": 238
       },
       "id": 98,
       "options": {
@@ -5835,7 +6731,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5851,7 +6748,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 219
+        "y": 238
       },
       "id": 101,
       "options": {
@@ -5930,7 +6827,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5946,7 +6844,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 227
+        "y": 246
       },
       "id": 99,
       "options": {
@@ -6025,7 +6923,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6041,7 +6940,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 227
+        "y": 246
       },
       "id": 100,
       "options": {
@@ -6079,7 +6978,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 235
+        "y": 254
       },
       "id": 105,
       "panels": [],
@@ -6133,7 +7032,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6149,7 +7049,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 236
+        "y": 255
       },
       "id": 106,
       "options": {
@@ -6228,7 +7128,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6244,7 +7145,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 236
+        "y": 255
       },
       "id": 107,
       "options": {
@@ -6282,7 +7183,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 244
+        "y": 263
       },
       "id": 108,
       "panels": [],
@@ -6336,7 +7237,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6377,7 +7279,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 245
+        "y": 264
       },
       "id": 109,
       "options": {
@@ -6439,7 +7341,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 245
+        "y": 264
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -6549,7 +7451,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6565,7 +7468,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 253
+        "y": 272
       },
       "id": 120,
       "options": {
@@ -6623,7 +7526,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 253
+        "y": 272
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -6686,6 +7589,214 @@
       ],
       "title": "Call Latency time",
       "type": "heatmap"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/.*cached items.*/"
+            },
+            "properties": [
+              {
+                "id": "custom.axisLabel",
+                "value": "Items"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/.*consumers.*/"
+            },
+            "properties": [
+              {
+                "id": "custom.axisLabel",
+                "value": "Queued consumers"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 280
+      },
+      "id": 198,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_cached_count{cache=\"evm_env\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "EVM environment cache cached items",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{cache=\"receipts\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Receipts cache queued consumers",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{cache=\"evm_env\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "EVM environment cache queued consumers",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{cache=\"blocks\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Block cache queued consumers",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_cached_count{cache=\"blocks\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Block cache cached items",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_cached_count{cache=\"receipts\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Receipts cache cached items",
+          "range": true,
+          "refId": "F",
+          "useBackend": false
+        }
+      ],
+      "title": "RPC Cache Metrics",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -6701,14 +7812,14 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "query_result(up)",
+        "definition": "query_result(reth_info)",
         "hide": 0,
         "includeAll": false,
         "multi": false,
         "name": "instance",
         "options": [],
         "query": {
-          "query": "query_result(up)",
+          "query": "query_result(reth_info)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
@@ -6773,6 +7884,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 13,
+  "version": 4,
   "weekStart": ""
 }

@@ -1,8 +1,23 @@
-use reth_primitives::trie::Nibbles;
-use std::rc::Rc;
+use reth_primitives::{trie::Nibbles, B256};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 mod loader;
-pub use loader::{LoadedPrefixSets, PrefixSetLoader};
+pub use loader::PrefixSetLoader;
+
+/// Collection of trie prefix sets.
+#[derive(Default, Debug)]
+pub struct TriePrefixSets {
+    /// A set of account prefixes that have changed.
+    pub account_prefix_set: PrefixSet,
+    /// A map containing storage changes with the hashed address as key and a set of storage key
+    /// prefixes as the value.
+    pub storage_prefix_sets: HashMap<B256, PrefixSet>,
+    /// A set of hashed addresses of destroyed accounts.
+    pub destroyed_accounts: HashSet<B256>,
+}
 
 /// A container for efficiently storing and checking for the presence of key prefixes.
 ///
@@ -48,6 +63,11 @@ where
 }
 
 impl PrefixSetMut {
+    /// Create [PrefixSetMut] with pre-allocated capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { keys: Vec::with_capacity(capacity), ..Default::default() }
+    }
+
     /// Returns `true` if any of the keys in the set has the given prefix or
     /// if the given prefix is a prefix of any key in the set.
     pub fn contains(&mut self, prefix: &[u8]) -> bool {
@@ -101,7 +121,7 @@ impl PrefixSetMut {
             self.keys.dedup();
         }
 
-        PrefixSet { keys: Rc::new(self.keys), index: self.index }
+        PrefixSet { keys: Arc::new(self.keys), index: self.index }
     }
 }
 
@@ -110,7 +130,7 @@ impl PrefixSetMut {
 /// See also [PrefixSetMut::freeze].
 #[derive(Debug, Default, Clone)]
 pub struct PrefixSet {
-    keys: Rc<Vec<Nibbles>>,
+    keys: Arc<Vec<Nibbles>>,
     index: usize,
 }
 
@@ -156,14 +176,14 @@ mod tests {
     #[test]
     fn test_contains_with_multiple_inserts_and_duplicates() {
         let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"123"));
-        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"124"));
-        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"456"));
-        prefix_set.insert(Nibbles::from_nibbles_unchecked(b"123")); // Duplicate
+        prefix_set.insert(Nibbles::from_nibbles([1, 2, 3]));
+        prefix_set.insert(Nibbles::from_nibbles([1, 2, 4]));
+        prefix_set.insert(Nibbles::from_nibbles([4, 5, 6]));
+        prefix_set.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
-        assert!(prefix_set.contains(b"12"));
-        assert!(prefix_set.contains(b"45"));
-        assert!(!prefix_set.contains(b"78"));
+        assert!(prefix_set.contains(&[1, 2]));
+        assert!(prefix_set.contains(&[4, 5]));
+        assert!(!prefix_set.contains(&[7, 8]));
         assert_eq!(prefix_set.len(), 3); // Length should be 3 (excluding duplicate)
     }
 }

@@ -34,7 +34,7 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
         _validation_kind: BlockValidationKind,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         Err(InsertBlockError::tree_error(
-            BlockchainTreeError::BlockHashNotFoundInChain { block_hash: block.hash },
+            BlockchainTreeError::BlockHashNotFoundInChain { block_hash: block.hash() },
             block.block,
         ))
     }

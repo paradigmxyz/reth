@@ -4,12 +4,15 @@ Reth
 
 ```bash
 $ reth --help
+Reth
+
 Usage: reth [OPTIONS] <COMMAND>
 
 Commands:
   node          Start the node
   init          Initialize the database from a genesis file
   import        This syncs RLP encoded blocks from a file
+  dump-genesis  Dumps genesis block JSON configuration to stdout
   db            Database debugging utilities
   stage         Manipulate individual stages
   p2p           P2P Debugging utilities
@@ -60,7 +63,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
           
-          [default: info]
+          [default: ]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file

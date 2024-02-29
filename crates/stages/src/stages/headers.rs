@@ -164,7 +164,7 @@ where
                 Ok(())
             }
             Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
-                error!(target: "sync::stages::headers", ?error, "Cannot attach header to head");
+                error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
                 Err(StageError::DetachedHead { local_head, header, error })
             }
             None => Err(StageError::ChannelClosed),
@@ -195,7 +195,7 @@ where
             // the block number of this header as tip.
             BlockHashOrNumber::Hash(hash) => downloaded_headers
                 .first()
-                .and_then(|header| (header.hash == hash).then_some(header.number)),
+                .and_then(|header| (header.hash() == hash).then_some(header.number)),
             // If tip is number, we can just grab it and not resolve using downloaded headers.
             BlockHashOrNumber::Number(number) => Some(number),
         };
@@ -382,7 +382,6 @@ mod tests {
             }
         }
 
-        #[async_trait::async_trait]
         impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
             type Seed = Vec<SealedHeader>;
 
@@ -512,7 +511,7 @@ mod tests {
         runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
-        assert_matches!( result, Ok(ExecOutput { checkpoint: StageCheckpoint {
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint {
             block_number,
             stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
                 block_range: CheckpointBlockRange {

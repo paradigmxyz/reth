@@ -45,6 +45,9 @@ reth-prune.workspace = true
 reth-blockchain-tree.workspace = true
 revm-inspectors.workspace = true
 reth-snapshot.workspace = true
+reth-eth-wire.workspace = true
+
+# `optimism` feature
 reth-optimism-payload-builder = { workspace = true, optional = true }
 
 # async
@@ -82,7 +85,11 @@ tracing.workspace = true
 # crypto
 alloy-rlp.workspace = true
 alloy-chains.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # async
 futures.workspace = true
@@ -123,4 +130,4 @@ optimism = [
 jemalloc = ["dep:jemalloc-ctl"]
 
 [build-dependencies]
-vergen = { version = "8.0.0", features = ["build", "cargo", "git", "git2"] }
+vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

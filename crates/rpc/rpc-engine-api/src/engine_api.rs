@@ -265,13 +265,25 @@ where
         )?;
 
         // Now resolve the payload
-        Ok(self
+        let mut resolved_payload = self
             .inner
             .payload_store
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| payload.into_v3_payload())?)
+            .map(|payload| payload.into_v3_payload())?;
+
+        // After `Cancun` is enabled on optimism, an extra field `parent_beacon_block_root` is
+        // included in the enveloped V3 payload. On ethereum, this field is not included.
+        if self.inner.chain_spec.is_optimism() &&
+            self.inner
+                .chain_spec
+                .is_fork_active_at_timestamp(Hardfork::Cancun, attributes.timestamp())
+        {
+            resolved_payload.parent_beacon_block_root = attributes.parent_beacon_block_root();
+        }
+
+        Ok(resolved_payload)
     }
 
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
@@ -295,12 +307,12 @@ where
         self.inner.task_spawner.spawn_blocking(Box::pin(async move {
             if count > MAX_PAYLOAD_BODIES_LIMIT {
                 tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
-                return
+                return;
             }
 
             if start == 0 || count == 0 {
                 tx.send(Err(EngineApiError::InvalidBodiesRange { start, count })).ok();
-                return
+                return;
             }
 
             let mut result = Vec::with_capacity(count as usize);
@@ -324,7 +336,7 @@ where
                     }
                     Err(err) => {
                         tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
-                        return
+                        return;
                     }
                 };
             }
@@ -693,7 +705,6 @@ mod tests {
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
-    use std::sync::Arc;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes>)

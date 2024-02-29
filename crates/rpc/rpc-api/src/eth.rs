@@ -4,15 +4,14 @@ use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_rpc_types::{
-    state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, CallRequest,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
-    SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
+    state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
+    StateContext, SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-#[async_trait]
 pub trait EthApi {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
@@ -93,6 +92,12 @@ pub trait EthApi {
         index: Index,
     ) -> RpcResult<Option<RichBlock>>;
 
+    /// Returns the EIP-2718 encoded transaction if it exists.
+    ///
+    /// If this is a EIP-4844 transaction that is in the pool it will include the sidecar.
+    #[method(name = "getRawTransactionByHash")]
+    async fn raw_transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Bytes>>;
+
     /// Returns the information about a transaction requested by transaction hash.
     #[method(name = "getTransactionByHash")]
     async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction>>;
@@ -142,11 +147,19 @@ pub trait EthApi {
     #[method(name = "getCode")]
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<Bytes>;
 
+    /// Returns the block's header at given number.
+    #[method(name = "getHeaderByNumber")]
+    async fn header_by_number(&self, hash: BlockNumberOrTag) -> RpcResult<Option<Header>>;
+
+    /// Returns the block's header at given hash.
+    #[method(name = "getHeaderByHash")]
+    async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<Header>>;
+
     /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "call")]
     async fn call(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
@@ -179,7 +192,7 @@ pub trait EthApi {
     #[method(name = "createAccessList")]
     async fn create_access_list(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
     ) -> RpcResult<AccessListWithGasUsed>;
 
@@ -188,7 +201,7 @@ pub trait EthApi {
     #[method(name = "estimateGas")]
     async fn estimate_gas(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<U256>;
@@ -201,9 +214,9 @@ pub trait EthApi {
     #[method(name = "maxPriorityFeePerGas")]
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
 
-    /// Introduced in EIP-4844, returns the current blob gas price in wei.
-    #[method(name = "blobGasPrice")]
-    async fn blob_gas_price(&self) -> RpcResult<U256>;
+    /// Introduced in EIP-4844, returns the current blob base fee in wei.
+    #[method(name = "blobBaseFee")]
+    async fn blob_base_fee(&self) -> RpcResult<U256>;
 
     /// Returns the Transaction fee history
     ///
@@ -262,7 +275,7 @@ pub trait EthApi {
     /// Signs a transaction that can be submitted to the network at a later time using with
     /// `sendRawTransaction.`
     #[method(name = "signTransaction")]
-    async fn sign_transaction(&self, transaction: CallRequest) -> RpcResult<Bytes>;
+    async fn sign_transaction(&self, transaction: TransactionRequest) -> RpcResult<Bytes>;
 
     /// Signs data via [EIP-712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md).
     #[method(name = "signTypedData")]

@@ -1,19 +1,13 @@
 //! Contains types and methods that can be used to launch a node based off of a [NodeConfig].
 
-use crate::{
-    commands::{
-        debug_cmd::engine_api_store::EngineApiStore,
-        node::{cl_events::ConsensusLayerHealthEvents, events},
-    },
-    init::init_genesis,
-};
+use crate::commands::debug_cmd::engine_api_store::EngineApiStore;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::AutoSealBuilder;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook},
-    BeaconConsensusEngine, BeaconConsensusEngineError, MIN_BLOCKS_FOR_PIPELINE_RUN,
+    BeaconConsensusEngine, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{config::BlockchainTreeConfig, ShareableBlockchainTree};
 use reth_config::Config;
@@ -32,6 +26,9 @@ use reth_node_core::{
         ext::{DefaultRethNodeCommandConfig, RethCliExt, RethNodeCommandConfig},
     },
     dirs::{ChainPath, DataDirPath},
+    events::cl::ConsensusLayerHealthEvents,
+    exit::NodeExitFuture,
+    init::init_genesis,
     version::SHORT_VERSION,
 };
 #[cfg(not(feature = "optimism"))]
@@ -39,7 +36,7 @@ use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]
 use reth_node_optimism::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives::DisplayHardforks;
+use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_rpc_engine_api::EngineApi;
@@ -80,8 +77,13 @@ pub async fn launch_from_config<E: RethCliExt>(
 ) -> eyre::Result<NodeHandle> {
     info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
+    // Register the prometheus recorder before creating the database,
+    // because database init needs it to register metrics.
+    config.install_prometheus_recorder()?;
+
     let database = std::mem::take(&mut config.database);
     let db_instance = database.init_db(config.db.log_level, config.chain.chain)?;
+    info!(target: "reth::cli", "Database opened");
 
     match db_instance {
         DatabaseInstance::Real { db, data_dir } => {
@@ -124,7 +126,6 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         let config = self.load_config()?;
 
         let prometheus_handle = self.config.install_prometheus_recorder()?;
-        info!(target: "reth::cli", "Database opened");
 
         let mut provider_factory =
             ProviderFactory::new(Arc::clone(&self.db), Arc::clone(&self.config.chain));
@@ -147,7 +148,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
 
         let genesis_hash = init_genesis(Arc::clone(&self.db), self.config.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", DisplayHardforks::new(self.config.chain.hardforks()));
+        info!(target: "reth::cli", "{}", self.config.chain.display_hardforks());
 
         let consensus = self.config.consensus();
 
@@ -199,7 +200,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             self.config.build_and_spawn_txpool(&blockchain_db, head, &executor, &self.data_dir)?;
 
         // build network
-        let (network_client, mut network_builder) = self
+        let mut network_builder = self
             .config
             .build_network(
                 &config,
@@ -227,7 +228,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
             network_builder,
             &executor,
             transaction_pool.clone(),
-            network_client,
+            provider_factory.clone(),
             &self.data_dir,
         );
 
@@ -272,6 +273,9 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         // Configure the pipeline
         let (mut pipeline, client) = if self.config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
+            for (idx, (address, alloc)) in self.config.chain.genesis.alloc.iter().enumerate() {
+                info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
+            }
             let mining_mode =
                 self.config.mining_mode(transaction_pool.pending_transactions_listener());
 
@@ -380,7 +384,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         );
         executor.spawn_critical(
             "events task",
-            events::handle_events(
+            reth_node_core::events::node::handle_events(
                 Some(network.clone()),
                 Some(head.number),
                 events,
@@ -442,8 +446,7 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         // construct node handle and return
         let node_handle = NodeHandle {
             rpc_server_handles,
-            consensus_engine_rx: rx,
-            terminate: self.config.debug.terminate,
+            node_exit_future: NodeExitFuture::new(rx, self.config.debug.terminate),
         };
         Ok(node_handle)
     }
@@ -483,12 +486,9 @@ pub struct NodeHandle {
     /// The handles to the RPC servers
     rpc_server_handles: RethRpcServerHandles,
 
-    /// The receiver half of the channel for the consensus engine.
-    /// This can be used to wait for the consensus engine to exit.
-    consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
-
-    /// Flag indicating whether the node should be terminated after the pipeline sync.
-    terminate: bool,
+    /// A Future which waits node exit
+    /// See [`NodeExitFuture`]
+    node_exit_future: NodeExitFuture,
 }
 
 impl NodeHandle {
@@ -499,15 +499,7 @@ impl NodeHandle {
 
     /// Waits for the node to exit, if it was configured to exit.
     pub async fn wait_for_node_exit(self) -> eyre::Result<()> {
-        self.consensus_engine_rx.await??;
-
-        if self.terminate {
-            Ok(())
-        } else {
-            // The pipeline has finished downloading blocks up to `--debug.tip` or
-            // `--debug.max-block`. Keep other node components alive for further usage.
-            futures::future::pending().await
-        }
+        self.node_exit_future.await
     }
 }
 

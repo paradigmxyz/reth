@@ -151,7 +151,7 @@
 
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
-use reth_eth_wire::HandleAnnouncement;
+use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
@@ -268,6 +268,11 @@ where
     pub fn is_empty(&self) -> bool {
         self.pool.is_empty()
     }
+
+    /// Returns whether or not the pool is over its configured size and transaction count limits.
+    pub fn is_exceeded(&self) -> bool {
+        self.pool.is_exceeded()
+    }
 }
 
 impl<Client, S> EthTransactionPool<Client, S>
@@ -313,7 +318,6 @@ where
 }
 
 /// implements the `TransactionPool` interface for various transaction pool API consumers.
-#[async_trait::async_trait]
 impl<V, T, S> TransactionPool for Pool<V, T, S>
 where
     V: TransactionValidator,
@@ -345,7 +349,8 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
-        self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
+        let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
+        results.pop().expect("result length is the same as the input")
     }
 
     async fn add_transactions(
@@ -354,7 +359,7 @@ where
         transactions: Vec<Self::Transaction>,
     ) -> Vec<PoolResult<TxHash>> {
         if transactions.is_empty() {
-            return Vec::new();
+            return Vec::new()
         }
         let validated = self.validate_all(origin, transactions).await;
 
@@ -411,6 +416,10 @@ where
         self.pool.get_pooled_transaction_elements(tx_hashes, limit)
     }
 
+    fn get_pooled_transaction_element(&self, tx_hash: TxHash) -> Option<PooledTransactionsElement> {
+        self.pool.get_pooled_transaction_element(tx_hash)
+    }
+
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
@@ -421,7 +430,7 @@ where
         &self,
         base_fee: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        self.pool.best_transactions_with_base_fee(base_fee)
+        self.pool.best_transactions_with_attributes(BestTransactionsAttributes::base_fee(base_fee))
     }
 
     fn best_transactions_with_attributes(
@@ -452,7 +461,7 @@ where
 
     fn retain_unknown<A>(&self, announcement: &mut A)
     where
-        A: HandleAnnouncement,
+        A: HandleMempoolData,
     {
         self.pool.retain_unknown(announcement)
     }
@@ -542,6 +551,10 @@ where
 
     fn delete_blobs(&self, txs: Vec<TxHash>) {
         self.pool.delete_blobs(txs)
+    }
+
+    fn cleanup_blobs(&self) {
+        self.pool.cleanup_blobs()
     }
 }
 

@@ -68,11 +68,13 @@ impl CursorSubNode {
     }
 
     /// Returns the full key of the current node.
+    #[inline]
     pub fn full_key(&self) -> &Nibbles {
         &self.full_key
     }
 
     /// Returns `true` if the state flag is set for the current nibble.
+    #[inline]
     pub fn state_flag(&self) -> bool {
         self.node
             .as_ref()
@@ -80,6 +82,7 @@ impl CursorSubNode {
     }
 
     /// Returns `true` if the tree flag is set for the current nibble.
+    #[inline]
     pub fn tree_flag(&self) -> bool {
         self.node
             .as_ref()

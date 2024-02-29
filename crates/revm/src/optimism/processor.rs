@@ -1,21 +1,49 @@
-use crate::processor::{verify_receipt, EVMProcessor};
+use crate::processor::{compare_receipts_root_and_logs_bloom, EVMProcessor};
 use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
-use reth_node_api::EvmEnvConfig;
+use reth_node_api::ConfigureEvm;
 use reth_primitives::{
-    revm::compat::into_reth_log, revm_primitives::ResultAndState, BlockWithSenders, Hardfork,
-    Receipt, U256,
+    proofs::calculate_receipt_root_optimism, revm_primitives::ResultAndState, BlockWithSenders,
+    Bloom, ChainSpec, Hardfork, Receipt, ReceiptWithBloom, TxType, B256, U256,
 };
-use reth_provider::{BlockExecutor, BlockExecutorStats, BundleStateWithReceipts};
+use reth_provider::{BlockExecutor, BundleStateWithReceipts};
 use revm::DatabaseCommit;
 use std::time::Instant;
 use tracing::{debug, trace};
 
+/// Verify the calculated receipts root against the expected receipts root.
+pub fn verify_receipt_optimism<'a>(
+    expected_receipts_root: B256,
+    expected_logs_bloom: Bloom,
+    receipts: impl Iterator<Item = &'a Receipt> + Clone,
+    chain_spec: &ChainSpec,
+    timestamp: u64,
+) -> Result<(), BlockExecutionError> {
+    // Calculate receipts root.
+    let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
+    let receipts_root =
+        calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
+
+    // Create header log bloom.
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
+
+    compare_receipts_root_and_logs_bloom(
+        receipts_root,
+        logs_bloom,
+        expected_receipts_root,
+        expected_logs_bloom,
+    )?;
+
+    Ok(())
+}
+
 impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: EvmEnvConfig,
+    EvmConfig: ConfigureEvm,
 {
+    type Error = BlockExecutionError;
+
     fn execute(
         &mut self,
         block: &BlockWithSenders,
@@ -39,14 +67,14 @@ where
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
             let time = Instant::now();
-            if let Err(error) = verify_receipt(
+            if let Err(error) = verify_receipt_optimism(
                 block.header.receipts_root,
                 block.header.logs_bloom,
                 receipts.iter(),
                 self.chain_spec.as_ref(),
                 block.timestamp,
             ) {
-                debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
+                debug!(target: "evm", %error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
             self.stats.receipt_root_duration += time.elapsed();
@@ -98,6 +126,13 @@ where
                 .into())
             }
 
+            // An optimism block should never contain blob transactions.
+            if matches!(transaction.tx_type(), TxType::EIP4844) {
+                return Err(BlockExecutionError::OptimismBlockExecution(
+                    OptimismBlockExecutionError::BlobTransactionRejected,
+                ))
+            }
+
             // Cache the depositor account prior to the state transition for the deposit nonce.
             //
             // Note that this *only* needs to be done post-regolith hardfork, as deposit nonces
@@ -137,7 +172,7 @@ where
                 success: result.is_success(),
                 cumulative_gas_used,
                 // convert to reth log
-                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
+                logs: result.into_logs().into_iter().map(Into::into).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
@@ -157,17 +192,13 @@ where
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
-            self.evm.db().unwrap().take_bundle(),
+            self.evm.context.evm.db.take_bundle(),
             receipts,
             self.first_block.unwrap_or_default(),
         )
     }
 
-    fn stats(&self) -> BlockExecutorStats {
-        self.stats.clone()
-    }
-
     fn size_hint(&self) -> Option<usize> {
-        self.evm.db.as_ref().map(|db| db.bundle_size_hint())
+        Some(self.evm.context.evm.db.bundle_size_hint())
     }
 }

@@ -41,6 +41,11 @@ Options:
           
           [default: 1]
 
+      --with-unused-ports
+          Sets all ports to unused, allowing the OS to choose random unused ports when sockets are bound.
+          
+          Mutually exclusive with `--instance`.
+
       --trusted-setup-file <PATH>
           Overrides the KZG trusted setup by reading from the supplied file
 
@@ -124,6 +129,18 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
 
+      --pooled-tx-response-soft-limit <BYTES>
+          Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request. Spec'd at 2 MiB.
+
+          <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
+
+          [default: 2097152]
+
+      --pooled-tx-pack-soft-limit <BYTES>
+          Default soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::PooledTransactions) request. This defaults to less than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when assembling a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response. Default is 128 KiB
+
+          [default: 131072]
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -205,7 +222,7 @@ RPC:
       --rpc-max-response-size <RPC_MAX_RESPONSE_SIZE>
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
           
-          [default: 150]
+          [default: 160]
           [aliases: --rpc.returndata.limit]
 
       --rpc-max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
@@ -326,11 +343,24 @@ TxPool:
           
           [default: 100]
 
+      --txpool.max_tx_input_bytes <MAX_TX_INPUT_BYTES>
+          Maximum size a single transaction can have
+
+          [default: 131072]
+
+      --txpool.max_cached_entries <MAX_CACHED_ENTRIES>
+          The maximum number of blobs to keep in the in memory blob cache
+
+          [default: 100]
+
       --txpool.nolocals
           Flag to disable local transaction exemptions
 
       --txpool.locals <LOCALS>
           Flag to allow certain addresses as local
+
+      --txpool.no-local-transactions-propagation
+          Flag to toggle local transaction propagation
 
 Builder:
       --builder.extradata <EXTRADATA>
@@ -441,7 +471,7 @@ Logging:
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
           
-          [default: info]
+          [default: ]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file

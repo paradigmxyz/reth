@@ -8,7 +8,7 @@ use reth_primitives::{
 use std::sync::Arc;
 
 /// Parameters for pruning and full node
-#[derive(Debug, Args, PartialEq, Default)]
+#[derive(Debug, Clone, Args, PartialEq, Default)]
 #[clap(next_help_heading = "Pruning")]
 pub struct PruningArgs {
     /// Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored.
@@ -51,7 +51,7 @@ impl PruningArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::{Args, Parser};
+    use clap::Parser;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]

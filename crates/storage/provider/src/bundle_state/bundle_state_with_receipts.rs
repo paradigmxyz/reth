@@ -285,10 +285,10 @@ impl BundleStateWithReceipts {
         std::mem::swap(&mut self.bundle, &mut other)
     }
 
-    /// Write bundle state to database.
+    /// Write the [BundleStateWithReceipts] to the database.
     ///
-    /// `omit_changed_check` should be set to true of bundle has some of it data
-    /// detached, This would make some original values not known.
+    /// `is_value_known` should be set to `Not` if the [BundleStateWithReceipts] has some of its
+    /// state detached, This would make some original values not known.
     pub fn write_to_db<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
@@ -329,28 +329,21 @@ impl BundleStateWithReceipts {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::create_test_provider_factory, AccountReader, BundleStateWithReceipts};
+    use crate::{test_utils::create_test_provider_factory, AccountReader};
     use reth_db::{
-        cursor::{DbCursorRO, DbDupCursorRO},
+        cursor::DbDupCursorRO,
         database::Database,
         models::{AccountBeforeTx, BlockNumberAddress},
-        tables,
         test_utils::create_test_rw_db,
-        transaction::DbTx,
     };
-    use reth_primitives::{
-        keccak256, revm::compat::into_reth_acc, Address, Receipt, Receipts, StorageEntry, B256,
-        U256,
-    };
+    use reth_primitives::keccak256;
     use reth_trie::{test_utils::state_root, StateRoot};
     use revm::{
         db::{
             states::{
-                bundle_state::{BundleRetention, OriginalValuesKnown},
-                changes::PlainStorageRevert,
-                PlainStorageChangeset,
+                bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
             },
-            BundleState, EmptyDB,
+            EmptyDB,
         },
         primitives::{
             Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, HashMap,

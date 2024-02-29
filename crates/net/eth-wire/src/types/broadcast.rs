@@ -4,16 +4,17 @@ use crate::{EthMessage, EthVersion};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
+
+use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Block, Bytes, TransactionSigned, TxHash, B256, U128};
+use reth_primitives::{
+    Block, Bytes, PooledTransactionsElement, TransactionSigned, TxHash, B256, U128,
+};
 
 use std::{collections::HashMap, mem, sync::Arc};
 
 #[cfg(feature = "arbitrary")]
-use proptest::prelude::*;
-
-#[cfg(feature = "arbitrary")]
-use proptest::{arbitrary::Arbitrary, collection::vec};
+use proptest::{collection::vec, prelude::*};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -67,9 +68,9 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 
 /// A new block with the current total difficulty, which includes the difficulty of the returned
 /// block.
-#[derive_arbitrary(rlp, 25)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive_arbitrary(rlp, 25)]
 pub struct NewBlock {
     /// A new block.
     pub block: Block,
@@ -440,103 +441,282 @@ impl Decodable for NewPooledTransactionHashes68 {
     }
 }
 
-/// Interface for handling announcement data in filters in the transaction manager and transaction
-/// pool. Note: this trait may disappear when distinction between eth66 and eth68 hashes is more
-/// clearly defined, see <https://github.com/paradigmxyz/reth/issues/6148>.
-pub trait HandleAnnouncement {
-    /// The announcement contains no entries.
+/// Validation pass that checks for unique transaction hashes.
+pub trait DedupPayload {
+    /// Value type in [`PartiallyValidData`] map.
+    type Value;
+
+    /// The payload contains no entries.
     fn is_empty(&self) -> bool;
 
-    /// Retain only entries for which the hash in the entry, satisfies a given predicate.
-    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool);
+    /// Returns the number of entries.
+    fn len(&self) -> usize;
+
+    /// Consumes self, returning an iterator over hashes in payload.
+    fn dedup(self) -> PartiallyValidData<Self::Value>;
 }
 
-impl HandleAnnouncement for NewPooledTransactionHashes {
+/// Value in [`PartiallyValidData`] map obtained from an announcement.
+pub type Eth68TxMetadata = Option<(u8, usize)>;
+
+impl DedupPayload for NewPooledTransactionHashes {
+    type Value = Eth68TxMetadata;
+
     fn is_empty(&self) -> bool {
         self.is_empty()
     }
 
-    fn retain_by_hash(&mut self, f: impl FnMut(TxHash) -> bool) {
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn dedup(self) -> PartiallyValidData<Self::Value> {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => msg.retain_by_hash(f),
-            NewPooledTransactionHashes::Eth68(msg) => msg.retain_by_hash(f),
+            NewPooledTransactionHashes::Eth66(msg) => msg.dedup(),
+            NewPooledTransactionHashes::Eth68(msg) => msg.dedup(),
         }
     }
 }
 
-impl HandleAnnouncement for NewPooledTransactionHashes68 {
+impl DedupPayload for NewPooledTransactionHashes68 {
+    type Value = Eth68TxMetadata;
+
     fn is_empty(&self) -> bool {
         self.hashes.is_empty()
     }
 
-    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
-        let mut indices_to_remove = vec![];
-        for (i, &hash) in self.hashes.iter().enumerate() {
-            if !f(hash) {
-                indices_to_remove.push(i);
+    fn len(&self) -> usize {
+        self.hashes.len()
+    }
+
+    fn dedup(self) -> PartiallyValidData<Self::Value> {
+        let Self { hashes, mut sizes, mut types } = self;
+
+        let mut deduped_data = HashMap::with_capacity(hashes.len());
+
+        for hash in hashes.into_iter().rev() {
+            if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
+                deduped_data.insert(hash, Some((ty, size)));
             }
         }
 
-        for index in indices_to_remove.into_iter().rev() {
-            self.hashes.remove(index);
-            self.types.remove(index);
-            self.sizes.remove(index);
-        }
+        PartiallyValidData::from_raw_data_eth68(deduped_data)
     }
 }
 
-impl HandleAnnouncement for NewPooledTransactionHashes66 {
+impl DedupPayload for NewPooledTransactionHashes66 {
+    type Value = Eth68TxMetadata;
+
     fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
-        let mut indices_to_remove = vec![];
-        for (i, &hash) in self.0.iter().enumerate() {
-            if !f(hash) {
-                indices_to_remove.push(i);
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn dedup(self) -> PartiallyValidData<Self::Value> {
+        let Self(hashes) = self;
+
+        let mut deduped_data = HashMap::with_capacity(hashes.len());
+
+        let noop_value: Eth68TxMetadata = None;
+
+        for hash in hashes.into_iter().rev() {
+            deduped_data.insert(hash, noop_value);
+        }
+
+        PartiallyValidData::from_raw_data_eth66(deduped_data)
+    }
+}
+
+/// Interface for handling mempool message data. Used in various filters in pipelines in
+/// `TransactionsManager` and in queries to `TransactionPool`.
+pub trait HandleMempoolData {
+    /// The announcement contains no entries.
+    fn is_empty(&self) -> bool;
+
+    /// Returns the number of entries.
+    fn len(&self) -> usize;
+
+    /// Retain only entries for which the hash in the entry satisfies a given predicate.
+    fn retain_by_hash(&mut self, f: impl FnMut(&TxHash) -> bool);
+}
+
+/// Extension of [`HandleMempoolData`] interface, for mempool messages that are versioned.
+pub trait HandleVersionedMempoolData {
+    /// Returns the announcement version, either [`Eth66`](EthVersion::Eth66) or
+    /// [`Eth68`](EthVersion::Eth68).
+    fn msg_version(&self) -> EthVersion;
+}
+
+impl HandleMempoolData for Vec<PooledTransactionsElement> {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
+        self.retain(|tx| f(tx.hash()))
+    }
+}
+
+macro_rules! handle_mempool_data_map_impl {
+    ($data_ty:ty, $(<$generic:ident>)?) => {
+        impl$(<$generic>)? HandleMempoolData for $data_ty {
+            fn is_empty(&self) -> bool {
+                self.data.is_empty()
+            }
+
+            fn len(&self) -> usize {
+                self.data.len()
+            }
+
+            fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
+                self.data.retain(|hash, _| f(hash));
             }
         }
+    };
+}
 
-        for index in indices_to_remove.into_iter().rev() {
-            self.0.remove(index);
+/// Data that has passed an initial validation pass that is not specific to any mempool message
+/// type.
+#[derive(Debug, Deref, DerefMut, IntoIterator)]
+pub struct PartiallyValidData<V> {
+    #[deref]
+    #[deref_mut]
+    #[into_iterator]
+    data: HashMap<TxHash, V>,
+    version: Option<EthVersion>,
+}
+
+handle_mempool_data_map_impl!(PartiallyValidData<V>, <V>);
+
+impl<V> PartiallyValidData<V> {
+    /// Wraps raw data.
+    pub fn from_raw_data(data: HashMap<TxHash, V>, version: Option<EthVersion>) -> Self {
+        Self { data, version }
+    }
+
+    /// Wraps raw data with version [`EthVersion::Eth68`].
+    pub fn from_raw_data_eth68(data: HashMap<TxHash, V>) -> Self {
+        Self::from_raw_data(data, Some(EthVersion::Eth68))
+    }
+
+    /// Wraps raw data with version [`EthVersion::Eth66`].
+    pub fn from_raw_data_eth66(data: HashMap<TxHash, V>) -> Self {
+        Self::from_raw_data(data, Some(EthVersion::Eth66))
+    }
+
+    /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth68`](EthVersion::Eth68)
+    /// announcement.
+    pub fn empty_eth68() -> Self {
+        Self::from_raw_data_eth68(HashMap::new())
+    }
+
+    /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth66`](EthVersion::Eth66)
+    /// announcement.
+    pub fn empty_eth66() -> Self {
+        Self::from_raw_data_eth66(HashMap::new())
+    }
+
+    /// Returns the version of the message this data was received in if different versions of the
+    /// message exists, either [`Eth66`](EthVersion::Eth66) or [`Eth68`](EthVersion::Eth68).
+    pub fn msg_version(&self) -> Option<EthVersion> {
+        self.version
+    }
+
+    /// Destructs returning the validated data.
+    pub fn into_data(self) -> HashMap<TxHash, V> {
+        self.data
+    }
+}
+
+/// Partially validated data from an announcement or a
+/// [`PooledTransactions`](crate::PooledTransactions) response.
+#[derive(Debug, Deref, DerefMut, IntoIterator, From)]
+#[from(PartiallyValidData<Eth68TxMetadata>)]
+pub struct ValidAnnouncementData {
+    #[deref]
+    #[deref_mut]
+    #[into_iterator]
+    data: HashMap<TxHash, Eth68TxMetadata>,
+    version: EthVersion,
+}
+
+handle_mempool_data_map_impl!(ValidAnnouncementData,);
+
+impl ValidAnnouncementData {
+    /// Destructs returning only the valid hashes and the announcement message version. Caution! If
+    /// this is [`Eth68`](EthVersion::Eth68) announcement data, this drops the metadata.
+    pub fn into_request_hashes(self) -> (RequestTxHashes, EthVersion) {
+        let hashes = self.data.into_keys().collect::<Vec<_>>();
+
+        (RequestTxHashes::new(hashes), self.version)
+    }
+
+    /// Conversion from [`PartiallyValidData`] from an announcement. Note! [`PartiallyValidData`]
+    /// from an announcement, should have some [`EthVersion`]. Panics if [`PartiallyValidData`] has
+    /// version set to `None`.
+    pub fn from_partially_valid_data(data: PartiallyValidData<Eth68TxMetadata>) -> Self {
+        let PartiallyValidData { data, version } = data;
+
+        let version = version.expect("should have eth version for conversion");
+
+        Self { data, version }
+    }
+
+    /// Destructs returning the validated data.
+    pub fn into_data(self) -> HashMap<TxHash, Eth68TxMetadata> {
+        self.data
+    }
+}
+
+impl HandleVersionedMempoolData for ValidAnnouncementData {
+    fn msg_version(&self) -> EthVersion {
+        self.version
+    }
+}
+
+/// Hashes to request from a peer.
+#[derive(Debug, Default, Deref, DerefMut, IntoIterator, Constructor)]
+pub struct RequestTxHashes {
+    #[deref]
+    #[deref_mut]
+    #[into_iterator(owned, ref)]
+    hashes: Vec<TxHash>,
+}
+
+impl RequestTxHashes {
+    /// Returns a new [`RequestTxHashes`] with given capacity for hashes. Caution! Make sure to
+    /// call [`Vec::shrink_to_fit`] on [`RequestTxHashes`] when full, especially where it will be
+    /// stored in its entirety like in the future waiting for a
+    /// [`GetPooledTransactions`](crate::GetPooledTransactions) request to resolve.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self::new(Vec::with_capacity(capacity))
+    }
+}
+
+impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
+    fn from_iter<I: IntoIterator<Item = (TxHash, Eth68TxMetadata)>>(iter: I) -> Self {
+        let mut hashes = Vec::with_capacity(32);
+
+        for (hash, _) in iter {
+            hashes.push(hash);
         }
-    }
-}
 
-/// Announcement data that has been validated according to the configured network. For an eth68
-/// announcement, values of the map are `Some((u8, usize))` - the tx metadata. For an eth66
-/// announcement, values of the map are `None`.
-pub type ValidAnnouncementData = HashMap<TxHash, Option<(u8, usize)>>;
+        hashes.shrink_to_fit();
 
-impl HandleAnnouncement for ValidAnnouncementData {
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-
-    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
-        self.retain(|&hash, _| f(hash))
-    }
-}
-
-/// Hashes extracted from valid announcement data. For an eth68 announcement, this means the eth68
-/// metadata should have been cached already.
-pub type ValidTxHashes = Vec<TxHash>;
-
-impl HandleAnnouncement for ValidTxHashes {
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-
-    fn retain_by_hash(&mut self, mut f: impl FnMut(TxHash) -> bool) {
-        self.retain(|&hash| f(hash))
+        RequestTxHashes::new(hashes)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rlp::{Decodable, Encodable};
     use bytes::BytesMut;
     use reth_primitives::hex;
     use std::str::FromStr;

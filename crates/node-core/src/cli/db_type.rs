@@ -13,7 +13,7 @@ use std::{str::FromStr, sync::Arc};
 
 /// A type that represents either a _real_ (represented by a path), or _test_ database, which will
 /// use a [TempDatabase].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DatabaseBuilder {
     /// The real database type, with a specified data dir
     Real(MaybePlatformPath<DataDirPath>),
@@ -105,7 +105,6 @@ impl DatabaseInstance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_chains::Chain;
 
     #[test]
     fn test_database_db_dir() {
