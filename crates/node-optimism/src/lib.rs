@@ -19,5 +19,6 @@ pub use engine::OptimismEngineTypes;
 pub mod evm;
 pub use evm::OptimismEvmConfig;
 
+pub mod args;
 pub mod node;
 pub use node::OptimismNode;

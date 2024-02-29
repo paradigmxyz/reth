@@ -4,7 +4,6 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
-    commands::debug_cmd::engine_api_store::{EngineApiStore, StoredEngineApiMessage},
     core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
 };
@@ -20,6 +19,7 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_interfaces::consensus::Consensus;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
+use reth_node_core::engine_api_store::{EngineApiStore, StoredEngineApiMessage};
 #[cfg(not(feature = "optimism"))]
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 #[cfg(feature = "optimism")]

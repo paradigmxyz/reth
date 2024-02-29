@@ -7,6 +7,6 @@ license.workspace = true
 
 [dependencies]
 reth.workspace = true
+reth-node-ethereum.workspace = true
 clap = { workspace = true, features = ["derive"] }
 futures-util.workspace = true
-eyre.workspace = true

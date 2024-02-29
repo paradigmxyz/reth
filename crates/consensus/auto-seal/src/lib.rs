@@ -13,6 +13,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![warn(unused_crate_dependencies)]
 
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_interfaces::{

@@ -1,7 +1,4 @@
-//! Types for the CLI.
+//! Additional CLI configuration support.
 
-pub mod components;
 pub mod config;
-pub mod db_type;
-pub mod ext;
 pub mod runner;
