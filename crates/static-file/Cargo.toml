@@ -21,11 +21,9 @@ reth-nippy-jar.workspace = true
 reth-tokio-util.workspace = true
 
 # async
-tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 
 # misc
-thiserror.workspace = true
 tracing.workspace = true
 clap = { workspace = true, features = ["derive"], optional = true }
 rayon.workspace = true

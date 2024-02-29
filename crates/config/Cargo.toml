@@ -19,7 +19,6 @@ reth-primitives.workspace = true
 
 # serde
 serde.workspace = true
-serde_json.workspace = true
 humantime-serde.workspace = true
 
 # crypto

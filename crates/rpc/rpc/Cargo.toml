@@ -58,7 +58,6 @@ async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tower = "0.4"
 tokio-stream = { workspace = true, features = ["sync"] }
-tokio-util = "0.7"
 pin-project.workspace = true
 rayon.workspace = true
 
@@ -82,7 +81,6 @@ tracing-futures = "0.2"
 schnellru.workspace = true
 futures.workspace = true
 derive_more.workspace = true
-lazy_static = "*"
 
 [dev-dependencies]
 jsonrpsee = { workspace = true, features = ["client"] }
