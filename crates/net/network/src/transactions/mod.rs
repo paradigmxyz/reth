@@ -225,7 +225,7 @@ pub struct TransactionsManager<Pool> {
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
+    transactions_by_peers: HashMap<TxHash, HashSet<PeerId>>,
     /// Transactions that are currently imported into the `Pool`.
     ///
     /// The import process includes:
@@ -1038,7 +1038,7 @@ where
                 match self.transactions_by_peers.entry(*tx.hash()) {
                     Entry::Occupied(mut entry) => {
                         // transaction was already inserted
-                        entry.get_mut().push(peer_id);
+                        entry.get_mut().insert(peer_id);
                     }
                     Entry::Vacant(entry) => {
                         if !self.bad_imports.contains(tx.hash()) {
@@ -1046,7 +1046,7 @@ where
                             let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
                             new_txs.push(pool_transaction);
 
-                            entry.insert(vec![peer_id]);
+                            entry.insert(HashSet::from([peer_id]));
                         } else {
                             trace!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
@@ -1155,7 +1155,7 @@ where
         self.bad_imports.insert(hash);
     }
 
-    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns  
+    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns
     /// `false` if [`TransactionsManager`] is operating close to full capacity.
     fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         self.pending_pool_imports_info
@@ -1905,10 +1905,11 @@ mod tests {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
-        assert_eq!(
-            *handle1.peer_id(),
-            transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
-        );
+        assert!(transactions
+            .transactions_by_peers
+            .get(&signed_tx.hash())
+            .unwrap()
+            .contains(handle1.peer_id()));
 
         // advance the transaction manager future
         poll_fn(|cx| {
