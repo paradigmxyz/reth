@@ -34,9 +34,6 @@ secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
-# tracing
-tracing.workspace = true
-
 # misc
 bytes.workspace = true
 byteorder = "1"
@@ -44,7 +41,6 @@ clap = { workspace = true, features = ["derive"], optional = true }
 derive_more.workspace = true
 itertools.workspace = true
 modular-bitfield = "0.11.2"
-num_enum = "0.7"
 once_cell.workspace = true
 rayon.workspace = true
 serde.workspace = true
