@@ -11,6 +11,7 @@ use dyn_clone::DynClone;
 use reth_rpc_types_compat::transaction::to_primitive_transaction;
 use secp256k1::SecretKey;
 use std::collections::HashMap;
+use tokio::sync::RwLock;
 
 type Result<T> = std::result::Result<T, SignError>;
 
@@ -49,17 +50,22 @@ pub(crate) struct DevSigner {
 }
 
 impl DevSigner {
-    pub fn random() -> DevSigner {
-       Self::random_signers()
-    }   
+    pub fn random() -> Box<dyn EthSigner> {
+        let mut signers = Self::random_signers(1);
+        signers.pop().expect("expect to generate at leas one signer")
+    }
 
-    fn random_signers() -> DevSigner {
-        let (pk, sk) = secp256k1::generate_keypair(&mut rand::thread_rng());
+    pub fn random_signers(num: u32) -> Vec<Box<dyn EthSigner + 'static>> {
+        let mut signers = Vec::new();
+        for _ in 0..num {
+            let (pk, sk) = secp256k1::generate_keypair(&mut rand::thread_rng());
 
-        let address = reth_primitives::public_key_to_address(sk);
-        let addresses = vec![address];
-        let accounts = HashMap::from([(address, pk)]);
-        DevSigner { addresses, accounts }
+            let address = reth_primitives::public_key_to_address(sk);
+            let addresses = vec![address];
+            let accounts = HashMap::from([(address, pk)]);
+            signers.push(Box::new(DevSigner { addresses, accounts }) as Box<dyn EthSigner>);
+        }
+        signers
     }
 
     fn get_key(&self, account: Address) -> Result<&SecretKey> {

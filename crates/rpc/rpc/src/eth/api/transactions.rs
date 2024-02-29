@@ -1252,7 +1252,7 @@ where
         from: &Address,
         request: TypedTransactionRequest,
     ) -> EthResult<TransactionSigned> {
-        for signer in self.inner.signers.read().iter() {
+        for signer in self.inner.signers.read().await.iter() {
             if signer.is_signer_for(from) {
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
