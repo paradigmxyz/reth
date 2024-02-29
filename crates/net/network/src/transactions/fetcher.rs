@@ -17,6 +17,7 @@ use reth_metrics::common::mpsc::{
 };
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::{ByLength, Unlimited};
+#[cfg(debug_assertions)]
 use smallvec::{smallvec, SmallVec};
 use std::{
     collections::HashMap,
@@ -477,7 +478,7 @@ impl TransactionFetcher {
                 }
                 // hash has been seen and is in flight. store peer as fallback peer.
                 //
-                // remove any ended sessions, so that in case of a full cache, alive peers aren't 
+                // remove any ended sessions, so that in case of a full cache, alive peers aren't
                 // removed in favour of lru dead peers
                 let mut ended_sessions = vec!();
                 for &peer_id in fallback_peers.iter() {
@@ -605,7 +606,7 @@ impl TransactionFetcher {
                 true
             }(),
             "`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@buffered_hashes` and `@inflight_requests`,
-`%new_announced_hashes`: {:?}, 
+`%new_announced_hashes`: {:?},
 `@self`: {:?}",
             new_announced_hashes, self
         );
@@ -725,7 +726,7 @@ impl TransactionFetcher {
         }
     }
 
-    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns  
+    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns
     /// `false` if [`TransactionFetcher`] is operating close to full capacity.
     pub fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         let info = &self.info;
@@ -1111,7 +1112,7 @@ impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
     fn verify(
         self,
         requested_hashes: &[TxHash],
-        peer_id: &PeerId,
+        _peer_id: &PeerId,
     ) -> (VerificationOutcome, VerifiedPooledTransactions) {
         let mut verification_outcome = VerificationOutcome::Ok;
 
@@ -1134,7 +1135,7 @@ impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
 
         #[cfg(debug_assertions)]
         trace!(target: "net::tx",
-            peer_id=format!("{peer_id:#}"),
+            peer_id=format!("{_peer_id:#}"),
             tx_hashes_not_requested=?tx_hashes_not_requested,
             "transactions in `PooledTransactions` response from peer were not requested"
         );
