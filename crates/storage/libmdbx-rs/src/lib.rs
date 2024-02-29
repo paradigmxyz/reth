@@ -1,5 +1,4 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 #![doc = include_str!("../README.md")]
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
