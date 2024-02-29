@@ -31,7 +31,6 @@ trust-dns-resolver = "0.23"
 
 # misc
 data-encoding = "2"
-async-trait.workspace = true
 linked_hash_set = "0.1"
 schnellru.workspace = true
 thiserror.workspace = true

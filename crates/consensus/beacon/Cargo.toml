@@ -40,7 +40,6 @@ metrics.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 schnellru.workspace = true
-cfg-if = "1.0.0"
 
 [dev-dependencies]
 # reth
