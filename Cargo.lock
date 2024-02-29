@@ -5946,6 +5946,7 @@ dependencies = [
  "reth-primitives",
  "secp256k1 0.27.0",
  "serde",
+ "tempfile",
  "toml",
 ]
 
