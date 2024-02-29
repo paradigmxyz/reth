@@ -225,7 +225,7 @@ pub struct TransactionsManager<Pool> {
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
+    transactions_by_peers: HashMap<TxHash, HashSet<PeerId>>,
     /// Transactions that are currently imported into the `Pool`.
     ///
     /// The import process includes:
@@ -1038,7 +1038,7 @@ where
                 match self.transactions_by_peers.entry(*tx.hash()) {
                     Entry::Occupied(mut entry) => {
                         // transaction was already inserted
-                        entry.get_mut().push(peer_id);
+                        entry.get_mut().insert(peer_id);
                     }
                     Entry::Vacant(entry) => {
                         if !self.bad_imports.contains(tx.hash()) {
@@ -1046,7 +1046,7 @@ where
                             let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
                             new_txs.push(pool_transaction);
 
-                            entry.insert(vec![peer_id]);
+                            entry.insert(HashSet::from([peer_id]));
                         } else {
                             trace!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
