@@ -345,7 +345,7 @@ mod read_transactions {
             }
 
             {
-                // Create a read-only transaction and observe it's in the liist of active
+                // Create a read-only transaction and observe it's in the list of active
                 // transactions.
                 let tx = env.begin_ro_txn().unwrap();
                 let tx_ptr = tx.txn() as usize;
