@@ -1123,7 +1123,9 @@ where
         let kind = match req_err {
             RequestError::UnsupportedCapability => ReputationChangeKind::BadProtocol,
             RequestError::Timeout => ReputationChangeKind::Timeout,
-            RequestError::ChannelClosed | RequestError::ConnectionDropped => {
+            RequestError::ChannelClosed |
+            RequestError::ConnectionDropped |
+            RequestError::EmptyResponse => {
                 // peer is already disconnected
                 return
             }
