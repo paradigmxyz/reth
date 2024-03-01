@@ -17,8 +17,8 @@ use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
-    Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header, Receipt,
-    SealedBlock, SealedBlockWithSenders,
+    Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
+    IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionKind::{Call, Create},
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U128, U256, U64,
 };
@@ -480,13 +480,10 @@ where
 
         if resp.is_none() {
             // tx not found on disk, check pool
-            if let Some(Some(tx)) = self
-                .pool()
-                .get_pooled_transaction_element(hash)
-                .map(|tx| tx.into_transaction().into_ecrecovered())
+            if let Some(tx) =
+                self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
             {
-                let tx = TransactionSource::Pool(tx);
-                resp = Some(tx);
+                resp = Some(TransactionSource::Pool(tx));
             }
         }
 
