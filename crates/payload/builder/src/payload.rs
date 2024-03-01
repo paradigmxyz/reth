@@ -74,6 +74,16 @@ impl BuiltPayload for EthBuiltPayload {
     }
 }
 
+impl<'a> BuiltPayload for &'a EthBuiltPayload {
+    fn block(&self) -> &SealedBlock {
+        (**self).block()
+    }
+
+    fn fees(&self) -> U256 {
+        (**self).fees()
+    }
+}
+
 // V1 engine_getPayloadV1 response
 impl From<EthBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: EthBuiltPayload) -> Self {

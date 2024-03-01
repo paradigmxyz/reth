@@ -173,7 +173,8 @@ where
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
         let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
-            .set_compute_pending_block(self.compute_pending_block);
+            .set_compute_pending_block(self.compute_pending_block)
+            .set_chain_spec(ctx.chain_spec());
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()

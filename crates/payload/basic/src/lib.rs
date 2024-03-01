@@ -15,8 +15,8 @@ use futures_util::FutureExt;
 use reth_interfaces::RethResult;
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, EthBuiltPayload, KeepPayloadJobAlive,
-    PayloadId, PayloadJob, PayloadJobGenerator,
+    database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
+    PayloadJobGenerator,
 };
 use reth_primitives::{
     bytes::BytesMut,
@@ -890,7 +890,7 @@ where
 ///
 /// This compares the total fees of the blocks, higher is better.
 #[inline(always)]
-pub fn is_better_payload(best_payload: Option<&EthBuiltPayload>, new_fees: U256) -> bool {
+pub fn is_better_payload(best_payload: Option<impl BuiltPayload>, new_fees: U256) -> bool {
     if let Some(best_payload) = best_payload {
         new_fees > best_payload.fees()
     } else {

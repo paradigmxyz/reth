@@ -2,7 +2,7 @@ use reth_node_api::{
     engine::validate_parent_beacon_block_root_presence, AttributesValidationError,
     EngineApiMessageVersion, EngineTypes, PayloadOrAttributes,
 };
-use reth_payload_builder::{EthBuiltPayload, OptimismPayloadBuilderAttributes};
+use reth_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
 use reth_primitives::{ChainSpec, Hardfork};
 use reth_rpc_types::{
     engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, OptimismPayloadAttributes},
@@ -17,7 +17,7 @@ pub struct OptimismEngineTypes;
 impl EngineTypes for OptimismEngineTypes {
     type PayloadAttributes = OptimismPayloadAttributes;
     type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
-    type BuiltPayload = EthBuiltPayload;
+    type BuiltPayload = OptimismBuiltPayload;
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
