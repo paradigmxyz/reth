@@ -39,17 +39,15 @@ where
 
     fn new_at_position(other: &Self) -> Result<Self> {
         unsafe {
-            other.txn.txn_execute(|_| {
-                let cursor = ffi::mdbx_cursor_create(ptr::null_mut());
+            let cursor = ffi::mdbx_cursor_create(ptr::null_mut());
 
-                let res = ffi::mdbx_cursor_copy(other.cursor(), cursor);
+            let res = ffi::mdbx_cursor_copy(other.cursor(), cursor);
 
-                let s = Self { txn: other.txn.clone(), cursor };
+            let s = Self { txn: other.txn.clone(), cursor };
 
-                mdbx_result(res)?;
+            mdbx_result(res)?;
 
-                Ok(s)
-            })?
+            Ok(s)
         }
     }
 
@@ -761,16 +759,23 @@ where
                 let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
                 let op = mem::replace(op, ffi::MDBX_NEXT_NODUP);
 
-                let err_code =
-                    unsafe { ffi::mdbx_cursor_get(cursor.cursor(), &mut key, &mut data, op) };
+                let result = cursor.txn.txn_execute(|_| {
+                    let err_code =
+                        unsafe { ffi::mdbx_cursor_get(cursor.cursor(), &mut key, &mut data, op) };
 
-                (err_code == ffi::MDBX_SUCCESS).then(|| {
-                    IntoIter::new(
-                        Cursor::new_at_position(&**cursor).unwrap(),
-                        ffi::MDBX_GET_CURRENT,
-                        ffi::MDBX_NEXT_DUP,
-                    )
-                })
+                    (err_code == ffi::MDBX_SUCCESS).then(|| {
+                        IntoIter::new(
+                            Cursor::new_at_position(&**cursor).unwrap(),
+                            ffi::MDBX_GET_CURRENT,
+                            ffi::MDBX_NEXT_DUP,
+                        )
+                    })
+                });
+
+                match result {
+                    Ok(result) => result,
+                    Err(err) => Some(IntoIter::Err(Some(err))),
+                }
             }
             IterDup::Err(err) => err.take().map(|e| IntoIter::Err(Some(e))),
         }
