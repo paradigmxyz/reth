@@ -9,7 +9,7 @@
 //!
 //! This launch the regular reth node overriding the engine api payload builder with our custom.
 
-#![warn(unused_crate_dependencies)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use generator::EmptyBlockPayloadJobGenerator;
 use reth::{

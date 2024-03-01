@@ -15,7 +15,7 @@
 //!
 //! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api-bn.html#beacon-node-api>
 
-#![warn(unused_crate_dependencies)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use clap::Parser;
 use futures_util::stream::StreamExt;
