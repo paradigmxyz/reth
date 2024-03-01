@@ -132,6 +132,15 @@ pub mod tx_fetcher {
     pub const DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH: usize =
         100 * SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST;
 
+    /// Default max size for cache of inflight and pending transactions fetch.
+    ///
+    /// Default is [`DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH`] +
+    /// [`DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES`], which is 25600 hashes and
+    /// 65 requests, so it is 25665 hashes.
+    pub const DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH: usize =
+        DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH +
+            DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES;
+
     /// Default maximum number of hashes pending fetch to tolerate at any time.
     ///
     /// Default is half of [`DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH`], which defaults to 25 600

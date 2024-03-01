@@ -16,7 +16,8 @@ use reth_metrics::common::mpsc::{
     metered_unbounded_channel, UnboundedMeteredReceiver, UnboundedMeteredSender,
 };
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
-use schnellru::{ByLength, Unlimited};
+use schnellru::ByLength;
+#[cfg(debug_assertions)]
 use smallvec::{smallvec, SmallVec};
 use std::{
     collections::HashMap,
@@ -57,7 +58,7 @@ pub struct TransactionFetcher {
     /// which a [`GetPooledTransactions`] request is inflight.
     pub hashes_pending_fetch: LruCache<TxHash>,
     /// Tracks all hashes in the transaction fetcher.
-    pub(super) hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, Unlimited>,
+    pub(super) hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, ByLength>,
     /// Filter for valid announcement and response data.
     pub(super) filter_valid_message: MessageFilter,
     /// Info on capacity of the transaction fetcher.
@@ -477,7 +478,7 @@ impl TransactionFetcher {
                 }
                 // hash has been seen and is in flight. store peer as fallback peer.
                 //
-                // remove any ended sessions, so that in case of a full cache, alive peers aren't 
+                // remove any ended sessions, so that in case of a full cache, alive peers aren't
                 // removed in favour of lru dead peers
                 let mut ended_sessions = vec!();
                 for &peer_id in fallback_peers.iter() {
@@ -605,7 +606,7 @@ impl TransactionFetcher {
                 true
             }(),
             "`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@buffered_hashes` and `@inflight_requests`,
-`%new_announced_hashes`: {:?}, 
+`%new_announced_hashes`: {:?},
 `@self`: {:?}",
             new_announced_hashes, self
         );
@@ -725,7 +726,7 @@ impl TransactionFetcher {
         }
     }
 
-    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns  
+    /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns
     /// `false` if [`TransactionFetcher`] is operating close to full capacity.
     pub fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         let info = &self.info;
@@ -948,7 +949,11 @@ impl Default for TransactionFetcher {
                 NonZeroUsize::new(DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH)
                     .expect("buffered cache limit should be non-zero"),
             ),
-            hashes_fetch_inflight_and_pending_fetch: LruMap::new_unlimited(),
+            hashes_fetch_inflight_and_pending_fetch: LruMap::new(
+                DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH
+                    .try_into()
+                    .expect("proper size for inflight and pending fetch cache"),
+            ),
             filter_valid_message: Default::default(),
             info: TransactionFetcherInfo::default(),
             fetch_events_head,
@@ -1111,7 +1116,7 @@ impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
     fn verify(
         self,
         requested_hashes: &[TxHash],
-        peer_id: &PeerId,
+        _peer_id: &PeerId,
     ) -> (VerificationOutcome, VerifiedPooledTransactions) {
         let mut verification_outcome = VerificationOutcome::Ok;
 
@@ -1134,7 +1139,7 @@ impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
 
         #[cfg(debug_assertions)]
         trace!(target: "net::tx",
-            peer_id=format!("{peer_id:#}"),
+            peer_id=format!("{_peer_id:#}"),
             tx_hashes_not_requested=?tx_hashes_not_requested,
             "transactions in `PooledTransactions` response from peer were not requested"
         );

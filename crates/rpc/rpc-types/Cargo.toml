@@ -23,7 +23,6 @@ ethereum_ssz = { version = "0.5", optional = true }
 
 # misc
 thiserror.workspace = true
-itertools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_with = "3.3"
 serde_json.workspace = true
@@ -32,7 +31,6 @@ url = "2.3"
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
 secp256k1.workspace = true
-bytes.workspace = true
 
 # arbitrary
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -54,3 +52,5 @@ proptest.workspace = true
 proptest-derive.workspace = true
 rand.workspace = true
 similar-asserts.workspace = true
+bytes.workspace = true
+

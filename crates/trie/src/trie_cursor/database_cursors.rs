@@ -41,7 +41,7 @@ impl<C> DatabaseAccountTrieCursor<C> {
 
 impl<C> TrieCursor for DatabaseAccountTrieCursor<C>
 where
-    C: DbCursorRO<tables::AccountsTrie>,
+    C: DbCursorRO<tables::AccountsTrie> + Send + Sync,
 {
     /// Seeks an exact match for the provided key in the account trie.
     fn seek_exact(
@@ -83,7 +83,7 @@ impl<C> DatabaseStorageTrieCursor<C> {
 
 impl<C> TrieCursor for DatabaseStorageTrieCursor<C>
 where
-    C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie>,
+    C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie> + Send + Sync,
 {
     /// Seeks an exact match for the given key in the storage trie.
     fn seek_exact(

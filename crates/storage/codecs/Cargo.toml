@@ -11,7 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-codecs-derive = { path = "./derive", default-features = false }
+reth-codecs-derive = { path = "./derive", default-features = false }
 
 alloy-primitives.workspace = true
 bytes.workspace = true
@@ -28,12 +28,9 @@ proptest-derive.workspace = true
 
 [features]
 default = ["compact", "std"]
-std = [
-    "alloy-primitives/std",
-    "bytes/std",
-]
-compact = ["codecs-derive/compact"]
-scale = ["codecs-derive/scale"]
-postcard = ["codecs-derive/postcard"]
-no_codec = ["codecs-derive/no_codec"]
-optimism = ["codecs-derive/optimism"]
+std = ["alloy-primitives/std", "bytes/std"]
+compact = ["reth-codecs-derive/compact"]
+scale = ["reth-codecs-derive/scale"]
+postcard = ["reth-codecs-derive/postcard"]
+no_codec = ["reth-codecs-derive/no_codec"]
+optimism = ["reth-codecs-derive/optimism"]

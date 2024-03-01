@@ -146,18 +146,21 @@ pub trait EthTransactions: Send + Sync {
         block: BlockId,
     ) -> EthResult<Option<Vec<TransactionSigned>>>;
 
-    /// Returns the transaction by hash, converted to a specified type.
+    /// Returns the EIP-2718 encoded transaction by hash.
     ///
-    /// Checks the pool and state for a transaction matching the given hash. Utilizes the generic
-    /// type `T`, which must implement `IntoRpcTransaction`, to allow flexible return types.
+    /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
+    ///
+    /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
+    async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>>;
+
+    /// Returns the transaction by hash.
     ///
-    /// Consumers: `eth_getTransactionByHash` and `eth_getRawTransactionByHash`
-    async fn transaction_by_hash<T: IntoRpcTransaction + Sync + Send + 'static>(
-        &self,
-        hash: B256,
-    ) -> EthResult<Option<T>>;
+    /// Checks the pool and state.
+    ///
+    /// Returns `Ok(None)` if no matching transaction was found.
+    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>>;
 
     /// Returns the transaction by including its corresponding [BlockId]
     ///
@@ -434,10 +437,21 @@ where
         self.block_by_id(block).await.map(|block| block.map(|block| block.body))
     }
 
-    async fn transaction_by_hash<T: IntoRpcTransaction + Sync + Send + 'static>(
-        &self,
-        hash: B256,
-    ) -> EthResult<Option<T>> {
+    async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>> {
+        // Note: this is mostly used to fetch pooled transactions so we check the pool first
+        if let Some(tx) =
+            self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
+        {
+            return Ok(Some(tx))
+        }
+
+        self.on_blocking_task(|this| async move {
+            Ok(this.provider().transaction_by_hash(hash)?.map(|tx| tx.envelope_encoded()))
+        })
+        .await
+    }
+
+    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>> {
         // Try to find the transaction on disk
         let mut resp = self
             .on_blocking_task(|this| async move {
@@ -458,7 +472,7 @@ where
                             block_number: meta.block_number,
                             base_fee: meta.base_fee,
                         };
-                        Ok(Some(T::into_rpc_transaction(tx)))
+                        Ok(Some(tx))
                     }
                 }
             })
@@ -472,7 +486,7 @@ where
                 .map(|tx| tx.into_transaction().into_ecrecovered())
             {
                 let tx = TransactionSource::Pool(tx);
-                resp = Some(T::into_rpc_transaction(tx));
+                resp = Some(tx);
             }
         }
 
@@ -1277,6 +1291,20 @@ where
 
         Ok(None)
     }
+
+    pub(crate) async fn raw_transaction_by_block_and_tx_index(
+        &self,
+        block_id: impl Into<BlockId>,
+        index: Index,
+    ) -> EthResult<Option<Bytes>> {
+        if let Some(block) = self.block_with_senders(block_id.into()).await? {
+            if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {
+                return Ok(Some(tx.envelope_encoded()))
+            }
+        }
+
+        Ok(None)
+    }
 }
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1364,26 +1392,6 @@ impl From<TransactionSource> for Transaction {
                 )
             }
         }
-    }
-}
-
-/// Converts a `TransactionSource` into a type suitable for RPC transaction responses.
-///
-/// Used by
-/// `eth_getTransactionByHash` or the raw bytes form used by `eth_getRawTransactionByHash`.
-pub trait IntoRpcTransaction {
-    fn into_rpc_transaction(source: TransactionSource) -> Self;
-}
-
-impl IntoRpcTransaction for TransactionSource {
-    fn into_rpc_transaction(source: TransactionSource) -> Self {
-        source
-    }
-}
-
-impl IntoRpcTransaction for Bytes {
-    fn into_rpc_transaction(source: TransactionSource) -> Self {
-        source.into_recovered().envelope_encoded()
     }
 }
 

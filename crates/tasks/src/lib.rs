@@ -5,6 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{
@@ -296,12 +297,6 @@ impl TaskExecutor {
     /// Returns the receiver of the shutdown signal.
     pub fn on_shutdown_signal(&self) -> &Shutdown {
         &self.on_shutdown
-    }
-
-    /// Runs a future to completion on this Handle's associated Runtime.
-    #[track_caller]
-    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
-        self.handle.block_on(future)
     }
 
     /// Spawns a future on the tokio runtime depending on the [TaskKind]

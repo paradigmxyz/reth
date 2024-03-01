@@ -11,18 +11,17 @@ Arguments:
           The name of the stage to run
 
           Possible values:
-          - headers:          The headers stage within the pipeline
-          - bodies:           The bodies stage within the pipeline
-          - senders:          The senders stage within the pipeline
-          - execution:        The execution stage within the pipeline
-          - account-hashing:  The account hashing stage within the pipeline
-          - storage-hashing:  The storage hashing stage within the pipeline
-          - hashing:          The hashing stage within the pipeline
-          - merkle:           The Merkle stage within the pipeline
-          - tx-lookup:        The transaction lookup stage within the pipeline
-          - account-history:  The account history stage within the pipeline
-          - storage-history:  The storage history stage within the pipeline
-          - total-difficulty: The total difficulty stage within the pipeline
+          - headers:         The headers stage within the pipeline
+          - bodies:          The bodies stage within the pipeline
+          - senders:         The senders stage within the pipeline
+          - execution:       The execution stage within the pipeline
+          - account-hashing: The account hashing stage within the pipeline
+          - storage-hashing: The storage hashing stage within the pipeline
+          - hashing:         The hashing stage within the pipeline
+          - merkle:          The Merkle stage within the pipeline
+          - tx-lookup:       The transaction lookup stage within the pipeline
+          - account-history: The account history stage within the pipeline
+          - storage-history: The storage history stage within the pipeline
 
 Options:
       --config <FILE>
@@ -151,6 +150,18 @@ Networking:
 
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
+
+      --pooled-tx-response-soft-limit <BYTES>
+          Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request. Spec'd at 2 MiB.
+          
+          <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
+          
+          [default: 2097152]
+
+      --pooled-tx-pack-soft-limit <BYTES>
+          Default soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::PooledTransactions) request. This defaults to less than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when assembling a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response. Default is 128 KiB
+          
+          [default: 131072]
 
 Database:
       --db.log-level <LOG_LEVEL>

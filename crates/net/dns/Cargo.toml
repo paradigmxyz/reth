@@ -18,7 +18,6 @@ reth-net-common.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
-alloy-chains.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
 
@@ -31,7 +30,6 @@ trust-dns-resolver = "0.23"
 
 # misc
 data-encoding = "2"
-async-trait.workspace = true
 linked_hash_set = "0.1"
 schnellru.workspace = true
 thiserror.workspace = true
@@ -43,6 +41,7 @@ serde_with = { version = "3.3.0", optional = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 reth-tracing.workspace = true
+alloy-chains.workspace = true
 
 [features]
 default = ["serde"]

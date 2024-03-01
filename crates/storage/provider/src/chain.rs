@@ -110,7 +110,7 @@ impl Chain {
             return Some(self.state.clone())
         }
 
-        if self.blocks.get(&block_number).is_some() {
+        if self.blocks.contains_key(&block_number) {
             let mut state = self.state.clone();
             state.revert_to(block_number);
             return Some(state)

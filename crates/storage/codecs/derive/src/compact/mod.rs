@@ -143,7 +143,7 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                 if let (Some(path), 1) =
                     (arg_path.path.segments.first(), arg_path.path.segments.len())
                 {
-                    if ["B256", "Address", "Address", "Bloom", "TxHash"]
+                    if ["B256", "Address", "Address", "Bloom", "TxHash", "BlockHash"]
                         .contains(&path.ident.to_string().as_str())
                     {
                         return true
@@ -164,11 +164,6 @@ pub fn get_bit_size(ftype: &str) -> u8 {
         "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "NumTransactions" => 4,
         "u128" => 5,
         "U256" => 6,
-        #[cfg(not(feature = "optimism"))]
-        "TxValue" => 5, // u128 for ethereum chains assuming high order bits are not used
-        #[cfg(feature = "optimism")]
-        // for fuzz/prop testing and chains that may require full 256 bits
-        "TxValue" => 6,
         _ => 0,
     }
 }
