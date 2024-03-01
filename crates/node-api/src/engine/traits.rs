@@ -27,7 +27,7 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
     /// Converts the type into the response expected by `engine_getPayloadV2`
     fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2;
 
-    /// Converts the type into the response expected by `engine_getPayloadV2`
+    /// Converts the type into the response expected by `engine_getPayloadV3`
     fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3;
 }
 
@@ -159,7 +159,7 @@ impl PayloadAttributes for OptimismPayloadAttributes {
         if self.gas_limit.is_none() && chain_spec.is_optimism() {
             return Err(AttributesValidationError::InvalidParams(
                 "MissingGasLimitInPayloadAttributes".to_string().into(),
-            ));
+            ))
         }
 
         Ok(())

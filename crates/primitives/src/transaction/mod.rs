@@ -1,6 +1,6 @@
 use crate::{
     compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
-    keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256,
+    keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256,
 };
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -32,7 +32,6 @@ pub use signature::Signature;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
-pub use tx_value::TxValue;
 pub use variant::TransactionSignedVariant;
 
 mod access_list;
@@ -48,7 +47,6 @@ mod pooled;
 mod sidecar;
 mod signature;
 mod tx_type;
-mod tx_value;
 pub(crate) mod util;
 mod variant;
 
@@ -70,6 +68,18 @@ pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
         2..=8 => 10,
         _ => 5,
     });
+
+/// Minimum length of a rlp-encoded legacy transaction.
+pub const MIN_LENGTH_LEGACY_TX_ENCODED: usize = 10;
+/// Minimum length of a rlp-encoded eip2930 transaction.
+pub const MIN_LENGTH_EIP2930_TX_ENCODED: usize = 14;
+/// Minimum length of a rlp-encoded eip1559 transaction.
+pub const MIN_LENGTH_EIP1559_TX_ENCODED: usize = 15;
+/// Minimum length of a rlp-encoded eip4844 transaction.
+pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 17;
+/// Minimum length of a rlp-encoded deposit transaction.
+#[cfg(feature = "optimism")]
+pub const MIN_LENGTH_DEPOSIT_TX_ENCODED: usize = 65;
 
 /// A raw transaction.
 ///
@@ -192,7 +202,7 @@ impl Transaction {
     }
 
     /// Gets the transaction's value field.
-    pub fn value(&self) -> TxValue {
+    pub fn value(&self) -> U256 {
         *match self {
             Transaction::Legacy(TxLegacy { value, .. }) |
             Transaction::Eip2930(TxEip2930 { value, .. }) |
@@ -481,7 +491,7 @@ impl Transaction {
     }
 
     /// This sets the transaction's value.
-    pub fn set_value(&mut self, value: TxValue) {
+    pub fn set_value(&mut self, value: U256) {
         match self {
             Transaction::Legacy(tx) => tx.value = value,
             Transaction::Eip2930(tx) => tx.value = value,
@@ -1031,7 +1041,7 @@ impl TransactionSigned {
     /// [Self::recover_signer_unchecked].
     pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
+        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self>,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
@@ -1235,7 +1245,7 @@ impl TransactionSigned {
         data: &mut &[u8],
     ) -> alloy_rlp::Result<TransactionSigned> {
         // keep this around so we can use it to calculate the hash
-        let original_encoding = *data;
+        let original_encoding_without_header = *data;
 
         let tx_type = *data.first().ok_or(RlpError::InputTooShort)?;
         data.advance(1);
@@ -1252,20 +1262,23 @@ impl TransactionSigned {
         let tx_length = 1 + header.length() + header.payload_length;
 
         // decode common fields
+        let Ok(tx_type) = TxType::try_from(tx_type) else {
+            return Err(RlpError::Custom("unsupported typed transaction type"))
+        };
         let transaction = match tx_type {
-            1 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
-            2 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
-            3 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
+            TxType::EIP2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
+            TxType::EIP1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
+            TxType::EIP4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             #[cfg(feature = "optimism")]
-            0x7E => Transaction::Deposit(TxDeposit::decode_inner(data)?),
-            _ => return Err(RlpError::Custom("unsupported typed transaction type")),
+            TxType::DEPOSIT => Transaction::Deposit(TxDeposit::decode_inner(data)?),
+            TxType::Legacy => unreachable!("path for legacy tx has diverged before this method"),
         };
 
         #[cfg(not(feature = "optimism"))]
         let signature = Signature::decode(data)?;
 
         #[cfg(feature = "optimism")]
-        let signature = if tx_type == DEPOSIT_TX_TYPE_ID {
+        let signature = if let TxType::DEPOSIT = tx_type {
             Signature::optimism_deposit_tx_signature()
         } else {
             Signature::decode(data)?
@@ -1276,7 +1289,7 @@ impl TransactionSigned {
             return Err(RlpError::UnexpectedLength)
         }
 
-        let hash = keccak256(&original_encoding[..tx_length]);
+        let hash = keccak256(&original_encoding_without_header[..tx_length]);
         let signed = TransactionSigned { transaction, hash, signature };
         Ok(signed)
     }
@@ -1460,7 +1473,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
         #[cfg(feature = "optimism")]
         let signature = if transaction.is_deposit() {
-            Signature { r: crate::U256::ZERO, s: crate::U256::ZERO, odd_y_parity: false }
+            Signature::optimism_deposit_tx_signature()
         } else {
             signature
         };
@@ -1582,9 +1595,12 @@ mod tests {
         hex, sign_message,
         transaction::{
             signature::Signature, TransactionKind, TxEip1559, TxLegacy,
+            MIN_LENGTH_EIP1559_TX_ENCODED, MIN_LENGTH_EIP2930_TX_ENCODED,
+            MIN_LENGTH_EIP4844_TX_ENCODED, MIN_LENGTH_LEGACY_TX_ENCODED,
             PARALLEL_SENDER_RECOVERY_THRESHOLD,
         },
-        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
+        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip2930,
+        TxEip4844, B256, U256,
     };
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
@@ -1692,7 +1708,7 @@ mod tests {
             to: TransactionKind::Call(
                 Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
             ),
-            value: 1000000000000000_u64.into(),
+            value: U256::from(1000000000000000u64),
             input: Bytes::default(),
         });
         let signature = Signature {
@@ -1714,7 +1730,7 @@ mod tests {
             to: TransactionKind::Call(Address::from_slice(
                 &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
             )),
-            value: 693361000000000_u64.into(),
+            value: U256::from(693361000000000u64),
             input: Default::default(),
         });
         let signature = Signature {
@@ -1735,7 +1751,7 @@ mod tests {
             to: TransactionKind::Call(Address::from_slice(
                 &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
             )),
-            value: 1000000000000000_u64.into(),
+            value: U256::from(1000000000000000u64),
             input: Bytes::default(),
         });
         let signature = Signature {
@@ -1757,7 +1773,7 @@ mod tests {
             to: TransactionKind::Call(Address::from_slice(
                 &hex!("61815774383099e24810ab832a5b2a5425c154d5")[..],
             )),
-            value: 3000000000000000000_u64.into(),
+            value: U256::from(3000000000000000000u64),
             input: Default::default(),
             access_list: Default::default(),
         });
@@ -1779,7 +1795,7 @@ mod tests {
             to: TransactionKind::Call(Address::from_slice(
                 &hex!("cf7f9e66af820a19257a2108375b180b0ec49167")[..],
             )),
-            value: 1234_u64.into(),
+            value: U256::from(1234),
             input: Bytes::default(),
         });
         let signature = Signature {
@@ -1928,5 +1944,104 @@ mod tests {
         assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
         let encoded = tx.envelope_encoded();
         assert_eq!(encoded.as_ref(), data.as_slice());
+    }
+
+    #[test]
+    fn min_length_encoded_legacy_transaction() {
+        let transaction = TxLegacy::default();
+        let signature = Signature::default();
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Legacy(transaction),
+            signature,
+        );
+
+        let mut encoded = BytesMut::new();
+        signed_tx.encode(&mut encoded);
+
+        assert_eq!(hex!("c98080808080801b8080"), &encoded[..]);
+        assert_eq!(MIN_LENGTH_LEGACY_TX_ENCODED, encoded.len());
+
+        TransactionSigned::decode(&mut &encoded[..]).unwrap();
+    }
+
+    #[test]
+    fn min_length_encoded_eip2930_transaction() {
+        let transaction = TxEip2930::default();
+        let signature = Signature::default();
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Eip2930(transaction),
+            signature,
+        );
+
+        let mut encoded = BytesMut::new();
+        signed_tx.encode(&mut encoded);
+
+        assert_eq!(hex!("8d01cb80808080808080c0808080"), &encoded[..]);
+        assert_eq!(MIN_LENGTH_EIP2930_TX_ENCODED, encoded.len());
+
+        TransactionSigned::decode(&mut &encoded[..]).unwrap();
+    }
+
+    #[test]
+    fn min_length_encoded_eip1559_transaction() {
+        let transaction = TxEip1559::default();
+        let signature = Signature::default();
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Eip1559(transaction),
+            signature,
+        );
+
+        let mut encoded = BytesMut::new();
+        signed_tx.encode(&mut encoded);
+
+        assert_eq!(hex!("8e02cc8080808080808080c0808080"), &encoded[..]);
+        assert_eq!(MIN_LENGTH_EIP1559_TX_ENCODED, encoded.len());
+
+        TransactionSigned::decode(&mut &encoded[..]).unwrap();
+    }
+
+    #[test]
+    fn min_length_encoded_eip4844_transaction() {
+        let transaction = TxEip4844::default();
+        let signature = Signature::default();
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Eip4844(transaction),
+            signature,
+        );
+
+        let mut encoded = BytesMut::new();
+        signed_tx.encode(&mut encoded);
+
+        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), &encoded[..]);
+        assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
+
+        TransactionSigned::decode(&mut &encoded[..]).unwrap();
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn min_length_encoded_deposit_transaction() {
+        use super::MIN_LENGTH_DEPOSIT_TX_ENCODED;
+        use crate::TxDeposit;
+
+        let transaction = TxDeposit::default();
+        let signature = Signature::default();
+
+        let signed_tx = TransactionSigned::from_transaction_and_signature(
+            Transaction::Deposit(transaction),
+            signature,
+        );
+
+        let mut encoded = BytesMut::new();
+        signed_tx.encode(&mut encoded);
+
+        assert_eq!(b"\xb8?~\xf8<\xa0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x94\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\x80\x80\x80\x80\x80", &encoded[..]);
+        assert_eq!(MIN_LENGTH_DEPOSIT_TX_ENCODED, encoded.len());
+
+        TransactionSigned::decode(&mut &encoded[..]).unwrap();
     }
 }

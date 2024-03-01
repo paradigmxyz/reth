@@ -1,6 +1,7 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{PooledTransactionsElement, TransactionSigned, B256};
 
@@ -33,7 +34,18 @@ where
 /// corresponds to a requested hash. Hashes may need to be re-requested if the bodies are not
 /// included in the response.
 // #[derive_arbitrary(rlp, 10)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+    Default,
+    IntoIterator,
+    Deref,
+    Constructor,
+)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PooledTransactions(
     /// The transaction bodies, each of which should correspond to a requested hash.
@@ -50,6 +62,12 @@ impl PooledTransactions {
 impl From<Vec<TransactionSigned>> for PooledTransactions {
     fn from(txs: Vec<TransactionSigned>) -> Self {
         PooledTransactions(txs.into_iter().map(Into::into).collect())
+    }
+}
+
+impl FromIterator<PooledTransactionsElement> for PooledTransactions {
+    fn from_iter<I: IntoIterator<Item = PooledTransactionsElement>>(iter: I) -> Self {
+        PooledTransactions(iter.into_iter().collect())
     }
 }
 
@@ -112,7 +130,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("3535353535353535353535353535353535353535").into(),
                         ),
-                        value: 0x200u64.into(),
+                        value: U256::from(0x200u64),
                         input: Default::default(),
                     }),
                     Signature {
@@ -136,7 +154,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("3535353535353535353535353535353535353535").into(),
                         ),
-                        value: 0x2d9u64.into(),
+                        value: U256::from(0x2d9u64),
                         input: Default::default(),
                     }),
                     Signature {
@@ -174,7 +192,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("3535353535353535353535353535353535353535").into(),
                         ),
-                        value: 0x200u64.into(),
+                        value: U256::from(0x200u64),
                         input: Default::default(),
                     }),
                     Signature {
@@ -198,7 +216,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("3535353535353535353535353535353535353535").into(),
                         ),
-                        value: 0x2d9u64.into(),
+                        value: U256::from(0x2d9u64),
                         input: Default::default(),
                     }),
                     Signature {
@@ -239,7 +257,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into(),
                         ),
-                        value: 1234u64.into(),
+                        value: U256::from(1234u64),
                         input: Default::default(),
                     }),
                     Signature {
@@ -264,7 +282,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("61815774383099e24810ab832a5b2a5425c154d5").into(),
                         ),
-                        value: 3000000000000000000u64.into(),
+                        value: U256::from(3000000000000000000u64),
                         input: Default::default(),
                         access_list: Default::default(),
                     }),
@@ -289,7 +307,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
                         ),
-                        value: 1000000000000000u64.into(),
+                        value: U256::from(1000000000000000u64),
                         input: Default::default(),
                     }),
                     Signature {
@@ -313,7 +331,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
                         ),
-                        value: 693361000000000u64.into(),
+                        value: U256::from(693361000000000u64),
                         input: Default::default(),
                     }),
                     Signature {
@@ -337,7 +355,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
                         ),
-                        value: 1000000000000000u64.into(),
+                        value: U256::from(1000000000000000u64),
                         input: Default::default(),
                     }),
                     Signature {
@@ -382,7 +400,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into(),
                         ),
-                        value: 1234u64.into(),
+                        value: U256::from(1234u64),
                         input: Default::default(),
                     }),
                     Signature {
@@ -407,7 +425,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("61815774383099e24810ab832a5b2a5425c154d5").into(),
                         ),
-                        value: 3000000000000000000u64.into(),
+                        value: U256::from(3000000000000000000u64),
                         input: Default::default(),
                         access_list: Default::default(),
                     }),
@@ -432,7 +450,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
                         ),
-                        value: 1000000000000000u64.into(),
+                        value: U256::from(1000000000000000u64),
                         input: Default::default(),
                     }),
                     Signature {
@@ -456,7 +474,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
                         ),
-                        value: 693361000000000u64.into(),
+                        value: U256::from(693361000000000u64),
                         input: Default::default(),
                     }),
                     Signature {
@@ -480,7 +498,7 @@ mod tests {
                         to: TransactionKind::Call(
                             hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
                         ),
-                        value: 1000000000000000u64.into(),
+                        value: U256::from(1000000000000000u64),
                         input: Default::default(),
                     }),
                     Signature {

@@ -1,0 +1,12 @@
+[package]
+name = "custom-inspector"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-node-ethereum.workspace = true
+clap = { workspace = true, features = ["derive"] }
+futures-util.workspace = true

@@ -5,7 +5,7 @@ use crate::{
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
-use reth_node_api::ConfigureEvmEnv;
+use reth_node_api::ConfigureEvm;
 use reth_primitives::{
     Address, Block, BlockNumber, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
     PruneMode, PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts,
@@ -50,8 +50,6 @@ use tracing::{debug, trace};
 ///
 /// InspectorStack are used for optional inspecting execution. And it contains
 /// various duration of parts of execution.
-// TODO: https://github.com/bluealloy/revm/pull/745
-// #[derive(Debug)]
 #[allow(missing_debug_implementations)]
 pub struct EVMProcessor<'a, EvmConfig> {
     /// The configured chain-spec
@@ -83,7 +81,7 @@ pub struct EVMProcessor<'a, EvmConfig> {
 
 impl<'a, EvmConfig> EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: ConfigureEvm,
 {
     /// Return chain spec.
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
@@ -93,17 +91,14 @@ where
     /// Create a new pocessor with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         // create evm with boxed empty db that is going to be set later.
-        let evm = Evm::builder()
-            .with_db(
-                Box::new(
-                    StateBuilder::new()
-                        .with_database_boxed(Box::new(EmptyDBTyped::<ProviderError>::new())),
-                )
-                .build(),
-            )
-            // Hook and inspector stack that we want to invoke on that hook.
-            .with_external_context(InspectorStack::new(InspectorStackConfig::default()))
-            .build();
+        let db = Box::new(
+            StateBuilder::new().with_database_boxed(Box::new(EmptyDBTyped::<ProviderError>::new())),
+        )
+        .build();
+
+        // Hook and inspector stack that we want to invoke on that hook.
+        let stack = InspectorStack::new(InspectorStackConfig::default());
+        let evm = evm_config.evm_with_inspector(db, stack);
         EVMProcessor {
             chain_spec,
             evm,
@@ -137,10 +132,8 @@ where
         revm_state: StateDBBox<'a, ProviderError>,
         evm_config: EvmConfig,
     ) -> Self {
-        let evm = Evm::builder()
-            .with_db(revm_state)
-            .with_external_context(InspectorStack::new(InspectorStackConfig::default()))
-            .build();
+        let stack = InspectorStack::new(InspectorStackConfig::default());
+        let evm = evm_config.evm_with_inspector(revm_state, stack);
         EVMProcessor {
             chain_spec,
             evm,
@@ -409,8 +402,10 @@ where
 #[cfg(not(feature = "optimism"))]
 impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: ConfigureEvm,
 {
+    type Error = BlockExecutionError;
+
     fn execute(
         &mut self,
         block: &BlockWithSenders,
@@ -437,7 +432,7 @@ where
             if let Err(error) =
                 verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
             {
-                debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
+                debug!(target: "evm", %error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
             self.stats.receipt_root_duration += time.elapsed();
@@ -505,16 +500,13 @@ where
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
+        self.stats.log_debug();
         let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
             self.evm.context.evm.db.take_bundle(),
             receipts,
             self.first_block.unwrap_or_default(),
         )
-    }
-
-    fn stats(&self) -> BlockExecutorStats {
-        self.stats.clone()
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -524,7 +516,7 @@ where
 
 impl<'a, EvmConfig> PrunableBlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: ConfigureEvm,
 {
     fn set_tip(&mut self, tip: BlockNumber) {
         self.tip = Some(tip);

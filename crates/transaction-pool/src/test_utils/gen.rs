@@ -3,7 +3,7 @@ use rand::Rng;
 use reth_primitives::{
     constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Address, Bytes,
     FromRecoveredTransaction, Transaction, TransactionKind, TransactionSigned, TxEip1559,
-    TxEip4844, TxLegacy, TxValue, B256, MAINNET,
+    TxEip4844, TxLegacy, B256, MAINNET, U256,
 };
 
 /// A generator for transactions for testing purposes.
@@ -129,7 +129,7 @@ pub struct TransactionBuilder {
     /// The recipient or contract address of the transaction.
     pub to: TransactionKind,
     /// The value to be transferred in the transaction.
-    pub value: TxValue,
+    pub value: U256,
     /// The list of addresses and storage keys that the transaction can access.
     pub access_list: AccessList,
     /// The input data for the transaction, typically containing function parameters for contract
@@ -250,7 +250,7 @@ impl TransactionBuilder {
 
     /// Sets the value to be transferred in the transaction.
     pub fn value(mut self, value: u128) -> Self {
-        self.value = value.into();
+        self.value = U256::from(value);
         self
     }
 
@@ -310,7 +310,7 @@ impl TransactionBuilder {
 
     /// Sets the value to be transferred in the transaction, mutable reference version.
     pub fn set_value(&mut self, value: u128) -> &mut Self {
-        self.value = value.into();
+        self.value = U256::from(value);
         self
     }
 

@@ -1,7 +1,3 @@
-#[cfg(not(feature = "optimism"))]
-use crate::proofs::calculate_receipt_root_ref;
-#[cfg(feature = "optimism")]
-use crate::proofs::calculate_receipt_root_ref_optimism;
 use crate::{
     compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
     logs_bloom, Bloom, Log, PruneSegmentError, TxType, B256,
@@ -97,22 +93,21 @@ impl Receipts {
     }
 
     /// Retrieves the receipt root for all recorded receipts from index.
-    #[cfg(not(feature = "optimism"))]
     pub fn root_slow(&self, index: usize) -> Option<B256> {
-        Some(calculate_receipt_root_ref(
+        Some(crate::proofs::calculate_receipt_root_ref(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
         ))
     }
 
     /// Retrieves the receipt root for all recorded receipts from index.
     #[cfg(feature = "optimism")]
-    pub fn root_slow(
+    pub fn optimism_root_slow(
         &self,
         index: usize,
         chain_spec: &crate::ChainSpec,
         timestamp: u64,
     ) -> Option<B256> {
-        Some(calculate_receipt_root_ref_optimism(
+        Some(crate::proofs::calculate_receipt_root_ref_optimism(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
             chain_spec,
             timestamp,
@@ -500,6 +495,8 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         }
 
         match self.receipt.tx_type {
+            TxType::Legacy => unreachable!("legacy already handled"),
+
             TxType::EIP2930 => {
                 out.put_u8(0x01);
             }
@@ -513,7 +510,6 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
             TxType::DEPOSIT => {
                 out.put_u8(0x7E);
             }
-            _ => unreachable!("legacy handled; qed."),
         }
         out.put_slice(payload.as_ref());
     }

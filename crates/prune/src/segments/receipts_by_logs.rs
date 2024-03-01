@@ -4,7 +4,8 @@ use crate::{
 };
 use reth_db::{database::Database, tables};
 use reth_primitives::{
-    PruneCheckpoint, PruneMode, PruneSegment, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
+    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
+    MINIMUM_PRUNING_DISTANCE,
 };
 use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
 use tracing::{instrument, trace};
@@ -39,7 +40,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
         // for the other receipts it's as if they had a `PruneMode::Distance()` of
         // `MINIMUM_PRUNING_DISTANCE`.
         let to_block = PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
-            .prune_target_block(input.to_block, PruneSegment::ContractLogs)?
+            .prune_target_block(input.to_block, PruneSegment::ContractLogs, PrunePurpose::User)?
             .map(|(bn, _)| bn)
             .unwrap_or_default();
 
@@ -158,11 +159,12 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             // For accurate checkpoints we need to know that we have checked every transaction.
             // Example: we reached the end of the range, and the last receipt is supposed to skip
             // its deletion.
-            last_pruned_transaction =
-                Some(last_pruned_transaction.unwrap_or_default().max(last_skipped_transaction));
+            let last_pruned_transaction = *last_pruned_transaction
+                .insert(last_pruned_transaction.unwrap_or_default().max(last_skipped_transaction));
+
             last_pruned_block = Some(
                 provider
-                    .transaction_block(last_pruned_transaction.expect("qed"))?
+                    .transaction_block(last_pruned_transaction)?
                     .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
                     // If there's more receipts to prune, set the checkpoint block number to
                     // previous, so we could finish pruning its receipts on the
@@ -175,7 +177,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                 break
             }
 
-            from_tx_number = last_pruned_transaction.expect("qed") + 1;
+            from_tx_number = last_pruned_transaction + 1;
         }
 
         // If there are contracts using `PruneMode::Distance(_)` there will be receipts before
@@ -216,7 +218,7 @@ mod tests {
     };
     use reth_primitives::{PruneMode, PruneSegment, ReceiptsLogPruneConfig, B256};
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
-    use reth_stages::test_utils::TestStageDB;
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::collections::BTreeMap;
 
     #[test]
@@ -231,7 +233,7 @@ mod tests {
             random_block_range(&mut rng, (tip - 100 + 1)..=tip, B256::ZERO, 1..5),
         ]
         .concat();
-        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let mut receipts = Vec::new();
 

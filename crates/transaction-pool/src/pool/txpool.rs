@@ -19,12 +19,14 @@ use crate::{
     ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
+use itertools::Itertools;
 use reth_primitives::{
     constants::{
         eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
     },
     Address, TxHash, B256,
 };
+use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
@@ -287,38 +289,67 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Returns an iterator that yields transactions that are ready to be included in the block.
+    /// Returns an iterator that yields transactions that are ready to be included in the block with
+    /// the tracked fees.
     pub(crate) fn best_transactions(&self) -> BestTransactions<T> {
         self.pending_pool.best()
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
     /// the given base fee and optional blob fee.
+    ///
+    /// If the provided attributes differ from the currently tracked fees, this will also include
+    /// transactions that are unlocked by the new fees, or exclude transactions that are no longer
+    /// valid with the new fees.
     pub(crate) fn best_transactions_with_attributes(
         &self,
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
     {
+        // First we need to check if the given base fee is different than what's currently being
+        // tracked
         match best_transactions_attributes.basefee.cmp(&self.all_transactions.pending_fees.base_fee)
         {
             Ordering::Equal => {
-                // fee unchanged, nothing to shift
-                Box::new(self.best_transactions())
+                // for EIP-4844 transactions we also need to check if the blob fee is now lower than
+                // what's currently being tracked, if so we need to include transactions from the
+                // blob pool that are valid with the lower blob fee
+                if best_transactions_attributes
+                    .blob_fee
+                    .map_or(false, |fee| fee < self.all_transactions.pending_fees.blob_fee as u64)
+                {
+                    let unlocked_by_blob_fee =
+                        self.blob_pool.satisfy_attributes(best_transactions_attributes);
+
+                    Box::new(self.pending_pool.best_with_unlocked(
+                        unlocked_by_blob_fee,
+                        self.all_transactions.pending_fees.base_fee,
+                    ))
+                } else {
+                    Box::new(self.pending_pool.best())
+                }
             }
             Ordering::Greater => {
                 // base fee increased, we only need to enforce this on the pending pool
-                Box::new(self.pending_pool.best_with_basefee(best_transactions_attributes.basefee))
+                Box::new(self.pending_pool.best_with_basefee_and_blobfee(
+                    best_transactions_attributes.basefee,
+                    best_transactions_attributes.blob_fee.unwrap_or_default(),
+                ))
             }
             Ordering::Less => {
-                // base fee decreased, we need to move transactions from the basefee pool to the
-                // pending pool and satisfy blob fee transactions as well
-                let unlocked_with_blob =
-                    self.blob_pool.satisfy_attributes(best_transactions_attributes);
+                // base fee decreased, we need to move transactions from the basefee + blob pool to
+                // the pending pool that might be unlocked by the lower base fee
+                let mut unlocked = self
+                    .basefee_pool
+                    .satisfy_base_fee_transactions(best_transactions_attributes.basefee);
 
-                Box::new(self.pending_pool.best_with_unlocked(
-                    unlocked_with_blob,
-                    self.all_transactions.pending_fees.base_fee,
-                ))
+                // also include blob pool transactions that are now unlocked
+                unlocked.extend(self.blob_pool.satisfy_attributes(best_transactions_attributes));
+
+                Box::new(
+                    self.pending_pool
+                        .best_with_unlocked(unlocked, self.all_transactions.pending_fees.base_fee),
+                )
             }
         }
     }
@@ -337,7 +368,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn queued_and_pending_txs_by_sender(
         &self,
         sender: SenderId,
-    ) -> (Vec<TransactionId>, Vec<TransactionId>) {
+    ) -> (SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]>, Vec<TransactionId>) {
         (self.queued_pool.get_txs_by_sender(sender), self.pending_pool.get_txs_by_sender(sender))
     }
 
@@ -515,9 +546,10 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // Update invalid transactions metric
                 self.metrics.invalid_transactions.increment(1);
                 match err {
-                    InsertErr::Underpriced { existing, transaction: _ } => {
-                        Err(PoolError::new(existing, PoolErrorKind::ReplacementUnderpriced))
-                    }
+                    InsertErr::Underpriced { existing: _, transaction } => Err(PoolError::new(
+                        *transaction.hash(),
+                        PoolErrorKind::ReplacementUnderpriced,
+                    )),
                     InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap } => {
                         Err(PoolError::new(
                             *transaction.hash(),
@@ -761,12 +793,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         macro_rules! discard_worst {
             ($this:ident, $removed:ident, [$($limit:ident => $pool:ident),* $(,)*]) => {
                 $ (
-                while $this
-                        .config
-                        .$limit
-                        .is_exceeded($this.$pool.len(), $this.$pool.size())
+                while $this.$pool.exceeds(&$this.config.$limit)
                     {
                         trace!(
+                            target: "txpool",
                             "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             stringify!($pool),
                             $this.config.$limit,
@@ -778,6 +808,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         let removed_from_subpool = $this.$pool.truncate_pool($this.config.$limit.clone());
 
                         trace!(
+                            target: "txpool",
                             "removed {} transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
                             removed_from_subpool.len(),
                             stringify!($pool),
@@ -837,7 +868,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn assert_invariants(&self) {
         let size = self.size();
         let actual = size.basefee + size.pending + size.queued + size.blob;
-        assert_eq!(size.total, actual,  "total size must be equal to the sum of all sub-pools, basefee:{}, pending:{}, queued:{}, blob:{}", size.basefee, size.pending, size.queued, size.blob);
+        assert_eq!(size.total, actual, "total size must be equal to the sum of all sub-pools, basefee:{}, pending:{}, queued:{}, blob:{}", size.basefee, size.pending, size.queued, size.blob);
         self.all_transactions.assert_invariants();
         self.pending_pool.assert_invariants();
         self.basefee_pool.assert_invariants();
@@ -1553,9 +1584,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 // the new transaction is the next one
                 false
             } else {
-                // SAFETY: the transaction was added above so the _inclusive_ descendants iterator
+                // The transaction was added above so the _inclusive_ descendants iterator
                 // returns at least 1 tx.
-                let (id, tx) = descendants.peek().expect("Includes >= 1; qed.");
+                let (id, tx) = descendants.peek().expect("includes >= 1");
                 if id.nonce < inserted_tx_id.nonce {
                     !tx.state.is_pending()
                 } else {
@@ -1695,8 +1726,8 @@ pub(crate) type InsertResult<T> = Result<InsertOk<T>, InsertErr<T>>;
 pub(crate) enum InsertErr<T: PoolTransaction> {
     /// Attempted to replace existing transaction, but was underpriced
     Underpriced {
-        #[allow(dead_code)]
         transaction: Arc<ValidPoolTransaction<T>>,
+        #[allow(dead_code)]
         existing: TxHash,
     },
     /// Attempted to insert a blob transaction with a nonce gap
@@ -1790,21 +1821,21 @@ pub struct PruneResult<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(fmt, "PruneResult {{ ")?;
-        write!(
-            fmt,
-            "promoted: {:?}, ",
-            self.promoted.iter().map(|tx| *tx.hash()).collect::<Vec<_>>()
-        )?;
-        write!(fmt, "failed: {:?}, ", self.failed)?;
-        write!(
-            fmt,
-            "pruned: {:?}, ",
-            self.pruned.iter().map(|tx| *tx.transaction.hash()).collect::<Vec<_>>()
-        )?;
-        write!(fmt, "}}")?;
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PruneResult")
+            .field(
+                "promoted",
+                &format_args!("[{}]", self.promoted.iter().map(|tx| tx.hash()).format(", ")),
+            )
+            .field("failed", &self.failed)
+            .field(
+                "pruned",
+                &format_args!(
+                    "[{}]",
+                    self.pruned.iter().map(|tx| tx.transaction.hash()).format(", ")
+                ),
+            )
+            .finish()
     }
 }
 

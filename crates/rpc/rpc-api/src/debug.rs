@@ -21,8 +21,10 @@ pub trait DebugApi {
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
 
     /// Returns a EIP-2718 binary-encoded transaction.
+    ///
+    /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
     #[method(name = "getRawTransaction")]
-    async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes>;
+    async fn raw_transaction(&self, hash: B256) -> RpcResult<Option<Bytes>>;
 
     /// Returns an array of EIP-2718 binary-encoded transactions for the given [BlockId].
     #[method(name = "getRawTransactions")]
@@ -131,7 +133,7 @@ pub trait DebugApi {
     ) -> RpcResult<Vec<Vec<GethTrace>>>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
-    /// emitted at that location,  the stack of the goroutine executing the log statement will
+    /// emitted at that location, the stack of the goroutine executing the log statement will
     /// be printed to stderr.
     #[method(name = "backtraceAt")]
     async fn debug_backtrace_at(&self, location: &str) -> RpcResult<()>;

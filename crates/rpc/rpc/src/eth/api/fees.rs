@@ -34,11 +34,11 @@ where
         Ok(suggested_tip + U256::from(base_fee))
     }
 
-    /// Returns a suggestion for a gas price for blob transactions.
-    pub(crate) async fn blob_gas_price(&self) -> EthResult<U256> {
+    /// Returns a suggestion for a base fee for blob transactions.
+    pub(crate) async fn blob_base_fee(&self) -> EthResult<U256> {
         self.block(BlockNumberOrTag::Latest)
             .await?
-            .and_then(|h| h.next_block_blob_fee())
+            .and_then(|h: reth_primitives::SealedBlock| h.next_block_blob_fee())
             .ok_or(EthApiError::ExcessBlobGasNotSet)
             .map(U256::from)
     }
@@ -103,7 +103,7 @@ where
         //
         // Treat a request for 1 block as a request for `newest_block..=newest_block`,
         // otherwise `newest_block - 2
-        // SAFETY: We ensured that block count is capped
+        // NOTE: We ensured that block count is capped
         let start_block = end_block_plus - block_count;
 
         // Collect base fees, gas usage ratios and (optionally) reward percentile data

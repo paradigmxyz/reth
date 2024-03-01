@@ -114,7 +114,7 @@ pub struct PeersManager {
     /// Timestamp of the last time [Self::tick] was called.
     last_tick: Instant,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
-    max_backoff_count: u32,
+    max_backoff_count: u8,
     /// Tracks the connection state of the node
     net_connection_state: NetworkConnectionState,
 }
@@ -460,10 +460,10 @@ impl PeersManager {
         err: impl SessionError,
         reputation_change: ReputationChangeKind,
     ) {
-        trace!(target: "net::peers", ?remote_addr, ?peer_id, ?err, "handling failed connection");
+        trace!(target: "net::peers", ?remote_addr, ?peer_id, %err, "handling failed connection");
 
         if err.is_fatal_protocol_error() {
-            trace!(target: "net::peers", ?remote_addr, ?peer_id, ?err, "fatal connection error");
+            trace!(target: "net::peers", ?remote_addr, ?peer_id, %err, "fatal connection error");
             // remove the peer to which we can't establish a connection due to protocol related
             // issues.
             if let Some((peer_id, peer)) = self.peers.remove_entry(peer_id) {
@@ -489,7 +489,7 @@ impl PeersManager {
                 if let Some(kind) = err.should_backoff() {
                     // Increment peer.backoff_counter
                     if kind.is_severe() {
-                        peer.severe_backoff_counter += 1;
+                        peer.severe_backoff_counter = peer.severe_backoff_counter.saturating_add(1);
                     }
 
                     let backoff_time =
@@ -615,11 +615,11 @@ impl PeersManager {
         }
         let mut peer = entry.remove();
 
-        trace!(target: "net::peers",  ?peer_id, "remove discovered node");
+        trace!(target: "net::peers", ?peer_id, "remove discovered node");
         self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
 
         if peer.state.is_connected() {
-            trace!(target: "net::peers",  ?peer_id, "disconnecting on remove from discovery");
+            trace!(target: "net::peers", ?peer_id, "disconnecting on remove from discovery");
             // we terminate the active session here, but only remove the peer after the session
             // was disconnected, this prevents the case where the session is scheduled for
             // disconnect but the node is immediately rediscovered, See also
@@ -711,7 +711,7 @@ impl PeersManager {
                     break
                 }
 
-                trace!(target: "net::peers",  ?peer_id, addr=?peer.addr, "schedule outbound connection");
+                trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
                 peer.state = PeerConnectionState::Out;
                 PeerAction::Connect { peer_id, remote_addr: peer.addr }
@@ -902,7 +902,7 @@ pub struct Peer {
     /// Whether the peer is currently backed off.
     backed_off: bool,
     /// Counts number of times the peer was backed off due to a severe [BackoffKind].
-    severe_backoff_counter: u32,
+    severe_backoff_counter: u8,
 }
 
 // === impl Peer ===
@@ -1143,7 +1143,7 @@ pub struct PeersConfig {
     /// peer in the table is the sum of all backoffs (1h + 2h + 3h + 4h + 5h = 15h).
     ///
     /// Note: this does not apply to trusted peers.
-    pub max_backoff_count: u32,
+    pub max_backoff_count: u8,
     /// Basic nodes to connect to.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub basic_nodes: HashSet<NodeRecord>,
@@ -1260,7 +1260,7 @@ impl PeersConfig {
     }
 
     /// Configures the max allowed backoff count.
-    pub fn with_max_backoff_count(mut self, max_backoff_count: u32) -> Self {
+    pub fn with_max_backoff_count(mut self, max_backoff_count: u8) -> Self {
         self.max_backoff_count = max_backoff_count;
         self
     }
@@ -1329,9 +1329,9 @@ impl PeerBackoffDurations {
     /// Returns the timestamp until which we should backoff.
     ///
     /// The Backoff duration is capped by the configured maximum backoff duration.
-    pub fn backoff_until(&self, kind: BackoffKind, backoff_counter: u32) -> std::time::Instant {
+    pub fn backoff_until(&self, kind: BackoffKind, backoff_counter: u8) -> std::time::Instant {
         let backoff_time = self.backoff(kind);
-        let backoff_time = backoff_time + backoff_time * backoff_counter;
+        let backoff_time = backoff_time + backoff_time * backoff_counter as u32;
         let now = std::time::Instant::now();
         now + backoff_time.min(self.max)
     }
@@ -1715,7 +1715,7 @@ mod tests {
         })
         .await;
 
-        assert!(peers.peers.get(&peer).is_none());
+        assert!(!peers.peers.contains_key(&peer));
     }
 
     #[tokio::test]
@@ -1770,7 +1770,7 @@ mod tests {
         })
         .await;
 
-        assert!(peers.peers.get(&peer).is_none());
+        assert!(!peers.peers.contains_key(&peer));
     }
 
     #[tokio::test]
@@ -1826,7 +1826,7 @@ mod tests {
         })
         .await;
 
-        assert!(peers.peers.get(&peer).is_none());
+        assert!(!peers.peers.contains_key(&peer));
     }
 
     #[tokio::test]
@@ -1991,7 +1991,7 @@ mod tests {
         assert_eq!(p.state, PeerConnectionState::DisconnectingOut);
 
         peers.on_active_session_gracefully_closed(peer);
-        assert!(peers.peers.get(&peer).is_none());
+        assert!(!peers.peers.contains_key(&peer));
     }
 
     #[tokio::test]
@@ -2240,7 +2240,7 @@ mod tests {
         assert!(peer.remove_after_disconnect);
 
         peers.on_active_session_gracefully_closed(peer_id);
-        assert!(peers.peers.get(&peer_id).is_none())
+        assert!(!peers.peers.contains_key(&peer_id))
     }
 
     #[tokio::test]

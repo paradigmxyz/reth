@@ -342,7 +342,7 @@ pub enum RpcInvalidTransactionError {
     /// hardfork.
     #[error("blob_versioned_hashes is not supported for blocks before the Cancun hardfork")]
     BlobVersionedHashesNotSupported,
-    /// Block `blob_gas_price` is greater than tx-specified `max_fee_per_blob_gas` after Cancun.
+    /// Block `blob_base_fee` is greater than tx-specified `max_fee_per_blob_gas` after Cancun.
     #[error("max fee per blob gas less than block blob gas fee")]
     BlobFeeCapTooLow,
     /// Blob transaction has a versioned hash with an invalid blob

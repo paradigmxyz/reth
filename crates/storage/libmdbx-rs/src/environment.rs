@@ -20,6 +20,7 @@ use std::{
     thread::sleep,
     time::Duration,
 };
+use tracing::warn;
 
 /// The default maximum duration of a read transaction.
 #[cfg(feature = "read-tx-timeouts")]
@@ -87,6 +88,12 @@ impl Environment {
         &self.inner.txn_manager
     }
 
+    /// Returns the number of timed out transactions that were not aborted by the user yet.
+    #[cfg(feature = "read-tx-timeouts")]
+    pub fn timed_out_not_aborted_transactions(&self) -> usize {
+        self.inner.txn_manager.timed_out_not_aborted_read_transactions().unwrap_or(0)
+    }
+
     /// Create a read-only transaction for use with the environment.
     #[inline]
     pub fn begin_ro_txn(&self) -> Result<Transaction<RO>> {
@@ -96,6 +103,7 @@ impl Environment {
     /// Create a read-write transaction for use with the environment. This method will block while
     /// there are any other read-write transactions open on the environment.
     pub fn begin_rw_txn(&self) -> Result<Transaction<RW>> {
+        let mut warned = false;
         let txn = loop {
             let (tx, rx) = sync_channel(0);
             self.txn_manager().send_message(TxnManagerMessage::Begin {
@@ -105,6 +113,10 @@ impl Environment {
             });
             let res = rx.recv().unwrap();
             if let Err(Error::Busy) = &res {
+                if !warned {
+                    warned = true;
+                    warn!(target: "libmdbx", "Process stalled, awaiting read-write transaction lock.");
+                }
                 sleep(Duration::from_millis(250));
                 continue
             }
@@ -700,21 +712,23 @@ impl EnvironmentBuilder {
             }
         }
 
+        let env_ptr = EnvPtr(env);
+
         #[cfg(not(feature = "read-tx-timeouts"))]
-        let txn_manager = TxnManager::new(EnvPtr(env));
+        let txn_manager = TxnManager::new(env_ptr);
 
         #[cfg(feature = "read-tx-timeouts")]
         let txn_manager = {
-            let mut txn_manager = TxnManager::new(EnvPtr(env));
             if let crate::MaxReadTransactionDuration::Set(duration) = self
                 .max_read_transaction_duration
                 .unwrap_or(read_transactions::MaxReadTransactionDuration::Set(
                     DEFAULT_MAX_READ_TRANSACTION_DURATION,
                 ))
             {
-                txn_manager = txn_manager.with_max_read_transaction_duration(duration);
-            };
-            txn_manager
+                TxnManager::new_with_max_read_transaction_duration(env_ptr, duration)
+            } else {
+                TxnManager::new(env_ptr)
+            }
         };
 
         let env = EnvironmentInner { env, txn_manager, env_kind: self.kind };
@@ -935,7 +949,8 @@ mod tests {
             .open(tempdir.path())
             .unwrap();
 
-        // Insert some data in the database, so the read transaction can lock on the snapshot of it
+        // Insert some data in the database, so the read transaction can lock on the static file of
+        // it
         {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();
@@ -948,7 +963,8 @@ mod tests {
         // Create a read transaction
         let _tx_ro = env.begin_ro_txn().unwrap();
 
-        // Change previously inserted data, so the read transaction would use the previous snapshot
+        // Change previously inserted data, so the read transaction would use the previous static
+        // file
         {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();
@@ -959,7 +975,7 @@ mod tests {
         }
 
         // Insert more data in the database, so we hit the DB size limit error, and MDBX tries to
-        // kick long-lived readers and delete their snapshots
+        // kick long-lived readers and delete their static_files
         {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();

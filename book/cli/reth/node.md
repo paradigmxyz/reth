@@ -131,14 +131,14 @@ Networking:
 
       --pooled-tx-response-soft-limit <BYTES>
           Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request. Spec'd at 2 MiB.
-
+          
           <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-
+          
           [default: 2097152]
 
       --pooled-tx-pack-soft-limit <BYTES>
           Default soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::PooledTransactions) request. This defaults to less than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when assembling a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response. Default is 128 KiB
-
+          
           [default: 131072]
 
 RPC:
@@ -344,9 +344,14 @@ TxPool:
           [default: 100]
 
       --txpool.max_tx_input_bytes <MAX_TX_INPUT_BYTES>
-        Maximum size a single transaction can have
+          Maximum size a single transaction can have
 
           [default: 131072]
+
+      --txpool.max_cached_entries <MAX_CACHED_ENTRIES>
+          The maximum number of blobs to keep in the in memory blob cache
+
+          [default: 100]
 
       --txpool.nolocals
           Flag to disable local transaction exemptions
@@ -528,4 +533,3 @@ Display:
 
   -q, --quiet
           Silence all log output
-```

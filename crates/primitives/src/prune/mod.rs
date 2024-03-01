@@ -6,7 +6,7 @@ mod target;
 use crate::{Address, BlockNumber};
 pub use checkpoint::PruneCheckpoint;
 pub use mode::PruneMode;
-pub use segment::{PruneSegment, PruneSegmentError};
+pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
@@ -53,7 +53,7 @@ impl ReceiptsLogPruneConfig {
             // Reminder, that we increment because the [`BlockNumber`] key of the new map should be
             // viewed as `PruneMode::Before(block)`
             let block = (pruned_block + 1).max(
-                mode.prune_target_block(tip, PruneSegment::ContractLogs)?
+                mode.prune_target_block(tip, PruneSegment::ContractLogs, PrunePurpose::User)?
                     .map(|(block, _)| block)
                     .unwrap_or_default() +
                     1,
@@ -76,7 +76,7 @@ impl ReceiptsLogPruneConfig {
         for (_, mode) in self.0.iter() {
             if let PruneMode::Distance(_) = mode {
                 if let Some((block, _)) =
-                    mode.prune_target_block(tip, PruneSegment::ContractLogs)?
+                    mode.prune_target_block(tip, PruneSegment::ContractLogs, PrunePurpose::User)?
                 {
                     lowest = Some(lowest.unwrap_or(u64::MAX).min(block));
                 }
