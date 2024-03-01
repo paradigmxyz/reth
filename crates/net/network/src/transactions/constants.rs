@@ -136,7 +136,7 @@ pub mod tx_fetcher {
     ///
     /// Default is [`DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH`] +
     /// [`DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES`], which is 25600 hashes and
-    /// 65 requests, so it is 25665.
+    /// 65 requests, so it is 25665 hashes.
     pub const DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH: usize =
         DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH +
             DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES;

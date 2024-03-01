@@ -950,7 +950,9 @@ impl Default for TransactionFetcher {
                     .expect("buffered cache limit should be non-zero"),
             ),
             hashes_fetch_inflight_and_pending_fetch: LruMap::new(
-                DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH.try_into().unwrap(),
+                DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH
+                    .try_into()
+                    .expect("proper size for inflight and pending fetch cache"),
             ),
             filter_valid_message: Default::default(),
             info: TransactionFetcherInfo::default(),
