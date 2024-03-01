@@ -394,8 +394,36 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         Ok(())
     }
 
+    #[cfg(feature = "test-utils")]
+    pub fn commit_without_fsync(&mut self) -> Result<(), NippyJarError> {
+        self.data_file.flush()?;
+
+        self.commit_offsets_without_fsync()?;
+
+        // Flushes `max_row_size` and total `rows` to disk.
+        self.jar.freeze_config()?;
+
+        Ok(())
+    }
+
     /// Flushes offsets to disk.
     pub(crate) fn commit_offsets(&mut self) -> Result<(), NippyJarError> {
+        self.commit_offsets_inner()?;
+        self.offsets_file.get_ref().sync_all()?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-utils")]
+    fn commit_offsets_without_fsync(&mut self) -> Result<(), NippyJarError> {
+        self.commit_offsets_inner()
+    }
+
+    /// Flushes offsets to disk.
+    ///
+    /// CAUTION: Does not call `fsync` on the offsets file and requires a manual call to
+    /// `self.offsets_file.get_ref().sync_all()`.
+    fn commit_offsets_inner(&mut self) -> Result<(), NippyJarError> {
         // The last offset on disk can be the first offset of `self.offsets` given how
         // `append_column()` works alongside commit. So we need to skip it.
         let mut last_offset_ondisk = None;
@@ -420,7 +448,6 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             self.offsets_file.write_all(&offset.to_le_bytes())?;
         }
         self.offsets_file.flush()?;
-        self.offsets_file.get_ref().sync_all()?;
 
         Ok(())
     }
