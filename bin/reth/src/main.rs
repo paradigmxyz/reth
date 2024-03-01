@@ -16,7 +16,7 @@ fn main() {
     reth::sigsegv_handler::install();
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
-    if std::env::var("RUST_BACKTRACE").is_err() {
+    if std::env::var_os("RUST_BACKTRACE").is_none() {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
