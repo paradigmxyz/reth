@@ -113,7 +113,6 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         // First byte of the offset file is the size of one offset in bytes
         offsets_file.write_all(&[OFFSET_SIZE_BYTES as u8])?;
-        offsets_file.sync_all()?;
         offsets_file.seek(SeekFrom::End(0))?;
 
         Ok((data_file, offsets_file, is_created))
