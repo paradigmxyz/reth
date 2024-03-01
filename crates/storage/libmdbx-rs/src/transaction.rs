@@ -330,24 +330,26 @@ where
     fn drop(&mut self) {
         // To be able to abort a timed out transaction, we need to renew it first.
         // Hence the usage of `txn_execute_renew_on_timeout` here.
-        let _ = self.txn.txn_execute_renew_on_timeout(|txn| {
-            if !self.has_committed() {
-                if K::IS_READ_ONLY {
-                    #[cfg(feature = "read-tx-timeouts")]
-                    self.env.txn_manager().remove_active_read_transaction(txn);
+        self.txn
+            .txn_execute_renew_on_timeout(|txn| {
+                if !self.has_committed() {
+                    if K::IS_READ_ONLY {
+                        #[cfg(feature = "read-tx-timeouts")]
+                        self.env.txn_manager().remove_active_read_transaction(txn);
 
-                    unsafe {
-                        ffi::mdbx_txn_abort(txn);
+                        unsafe {
+                            ffi::mdbx_txn_abort(txn);
+                        }
+                    } else {
+                        let (sender, rx) = sync_channel(0);
+                        self.env
+                            .txn_manager()
+                            .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
+                        rx.recv().unwrap().unwrap();
                     }
-                } else {
-                    let (sender, rx) = sync_channel(0);
-                    self.env
-                        .txn_manager()
-                        .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
-                    rx.recv().unwrap().unwrap();
                 }
-            }
-        });
+            })
+            .unwrap();
     }
 }
 
@@ -521,21 +523,26 @@ impl Transaction<RW> {
 #[derive(Debug, Clone)]
 pub(crate) struct TransactionPtr {
     txn: *mut ffi::MDBX_txn,
+    timed_out: Arc<AtomicBool>,
     lock: Arc<Mutex<()>>,
 }
 
 impl TransactionPtr {
     fn new(txn: *mut ffi::MDBX_txn) -> Self {
-        Self { txn, lock: Arc::new(Mutex::new(())) }
+        Self { txn, timed_out: Arc::new(AtomicBool::new(false)), lock: Arc::new(Mutex::new(())) }
     }
 
     // Returns `true` if the transaction is timed out.
     //
     // When transaction is timed out via `TxnManager`, it's actually reset using
     // `mdbx_txn_reset`. It makes the transaction unusable (MDBX fails on any usages of such
-    // transactions), and sets the `MDBX_TXN_FINISHED` flag.
+    // transactions),
     fn is_timed_out(&self) -> bool {
-        (unsafe { ffi::mdbx_txn_flags(self.txn) } & ffi::MDBX_TXN_FINISHED) != 0
+        self.timed_out.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub(crate) fn set_timed_out(&self) {
+        self.timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn lock(&self) -> MutexGuard<'_, ()> {

@@ -469,7 +469,7 @@ where
     K: TransactionKind,
 {
     fn clone(&self) -> Self {
-        Self::new_at_position(self).unwrap()
+        self.txn.txn_execute(|_| Self::new_at_position(self).unwrap()).unwrap()
     }
 }
 
@@ -487,7 +487,7 @@ where
     K: TransactionKind,
 {
     fn drop(&mut self) {
-        let _ = self.txn.txn_execute(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
+        self.txn.txn_execute(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) }).unwrap()
     }
 }
 
