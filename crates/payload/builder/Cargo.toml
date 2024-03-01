@@ -39,6 +39,9 @@ thiserror.workspace = true
 sha2 = { version = "0.10", default-features = false }
 tracing.workspace = true
 
+[dev-dependencies]
+revm.workspace = true
+
 [features]
 test-utils = []
 optimism = [
