@@ -366,21 +366,6 @@ where
 
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
 
-        // Prune known senders
-        for tx_hash in mined_transactions.iter() {
-            if let Some(tx) = self.get(tx_hash) {
-                let sender_address = tx.sender();
-                let sender_id = self.get_sender_id(sender_address);
-                if self.unique_senders().contains(&sender_address) {
-                    let mut pool = self.pool.write();
-                    pool.get_sender_info().remove(&sender_id);
-                    let mut identifiers_lock = self.identifiers.write();
-                    identifiers_lock.remove_sender_address(&sender_id);
-                    identifiers_lock.remove_sender_id(&sender_address);
-                }
-            }
-        }
-
         // update the pool
         let outcome = self.pool.write().on_canonical_state_change(
             block_info,
@@ -388,9 +373,11 @@ where
             changed_senders,
         );
 
+        
         // This will discard outdated transactions based on the account's nonce
         self.delete_discarded_blobs(outcome.discarded.iter());
 
+        self.prune_sender_info(&outcome);
         // notify listeners about updates
         self.notify_on_new_state(outcome);
     }
@@ -697,6 +684,25 @@ where
         removed.iter().for_each(|tx| listener.discarded(tx.hash()));
 
         removed
+    }
+
+    /// Prune known senders which do not exist in any subpool
+    pub(crate) fn prune_sender_info(
+        &self,
+        outcome: &OnNewCanonicalStateOutcome<T::Transaction>
+    ) {
+        for sender_address in self.unique_senders().iter() {
+            for tx in self.get_transactions_by_sender(*sender_address) {
+                let sender_id = self.get_sender_id(*sender_address);
+                if outcome.mined.contains(tx.hash()) || outcome.discarded.iter().any(|d| d.sender_id() == sender_id) {
+                    let mut pool = self.pool.write();
+                    pool.remove_sender_info(&sender_id);
+                    let mut identifiers = self.identifiers.write();
+                    identifiers.remove_sender_address(&sender_id);
+                    identifiers.remove_sender_id(sender_address);
+                }
+            }
+        }
     }
 
     /// Removes and returns all transactions that are present in the pool.

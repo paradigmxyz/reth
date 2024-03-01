@@ -117,9 +117,9 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.txs.values().map(|tx| tx.transaction.sender()).collect()
     }
 
-    /// Returns the currently known information about the senders in the pool.
-    pub(crate) fn get_sender_info(&mut self) -> &mut FnvHashMap<SenderId, SenderInfo> {
-        &mut self.sender_info
+    /// Removes known senders information.
+    pub(crate) fn remove_sender_info(&mut self, id: &SenderId) -> Option<SenderInfo> {
+        self.sender_info.remove(id)
     }
 
     /// Returns stats about the size of pool.
