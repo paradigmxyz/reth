@@ -119,6 +119,15 @@ pub enum FsPathError {
         /// The path related to the operation.
         path: PathBuf,
     },
+
+    /// Error variant for failed file metadata operation with additional path context.
+    #[error("failed to get metadata for {path:?}: {source}")]
+    Metadata {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
 }
 
 impl FsPathError {
@@ -170,6 +179,11 @@ impl FsPathError {
     /// Returns the complementary error variant for [`std::fs::rename`].
     pub fn rename(source: io::Error, from: impl Into<PathBuf>, to: impl Into<PathBuf>) -> Self {
         FsPathError::Rename { source, from: from.into(), to: to.into() }
+    }
+
+    /// Returns the complementary error variant for [`std::fs::File::metadata`].
+    pub fn metadata(source: io::Error, path: impl Into<PathBuf>) -> Self {
+        FsPathError::Metadata { source, path: path.into() }
     }
 }
 
@@ -224,4 +238,10 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
     let from = from.as_ref();
     let to = to.as_ref();
     fs::rename(from, to).map_err(|err| FsPathError::rename(err, from, to))
+}
+
+/// Wrapper for `std::fs::metadata`
+pub fn metadata(path: impl AsRef<Path>) -> Result<fs::Metadata> {
+    let path = path.as_ref();
+    fs::metadata(path).map_err(|err| FsPathError::metadata(err, path))
 }

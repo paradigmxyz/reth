@@ -28,7 +28,6 @@ use reth_primitives::{
 };
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
-    fs::File,
     ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::{mpsc, Arc},
@@ -132,20 +131,16 @@ impl StaticFileProvider {
 
                 entries += jar_provider.rows();
 
-                let data_size = File::open(jar_provider.data_path())
-                    .and_then(|file| file.metadata())
+                let data_size = reth_primitives::fs::metadata(jar_provider.data_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let index_size = File::open(jar_provider.index_path())
-                    .and_then(|file| file.metadata())
+                let index_size = reth_primitives::fs::metadata(jar_provider.index_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let offsets_size = File::open(jar_provider.offsets_path())
-                    .and_then(|file| file.metadata())
+                let offsets_size = reth_primitives::fs::metadata(jar_provider.offsets_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let config_size = File::open(jar_provider.config_path())
-                    .and_then(|file| file.metadata())
+                let config_size = reth_primitives::fs::metadata(jar_provider.config_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
 
