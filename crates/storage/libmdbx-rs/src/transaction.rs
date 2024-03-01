@@ -9,10 +9,9 @@ use crate::{
 use ffi::{mdbx_txn_renew, MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use indexmap::IndexSet;
 use libc::{c_uint, c_void};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 use std::{
-    fmt,
-    fmt::Debug,
+    fmt::{self, Debug},
     mem::size_of,
     ptr, slice,
     sync::{atomic::AtomicBool, mpsc::sync_channel, Arc},
@@ -539,15 +538,8 @@ impl TransactionPtr {
         (unsafe { ffi::mdbx_txn_flags(self.txn) } & ffi::MDBX_TXN_FINISHED) != 0
     }
 
-    /// Executes the given closure once the lock on the transaction is acquired.
-    ///
-    /// Returns the result of the closure or an error if the transaction is timed out.
-    #[inline]
-    pub(crate) fn txn_execute_fail_on_timeout<F, T>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(*mut ffi::MDBX_txn) -> T,
-    {
-        let _lck = if let Some(lock) = self.lock.try_lock() {
+    fn lock(&self) -> MutexGuard<'_, ()> {
+        if let Some(lock) = self.lock.try_lock() {
             lock
         } else {
             tracing::warn!(
@@ -557,7 +549,18 @@ impl TransactionPtr {
                 "Transaction lock is already acquired, blocking..."
             );
             self.lock.lock()
-        };
+        }
+    }
+
+    /// Executes the given closure once the lock on the transaction is acquired.
+    ///
+    /// Returns the result of the closure or an error if the transaction is timed out.
+    #[inline]
+    pub(crate) fn txn_execute_fail_on_timeout<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        let _lck = self.lock();
 
         // No race condition with the `TxnManager` timing out the transaction is possible here,
         // because we're taking a lock for any actions on the transaction pointer, including a call
@@ -578,7 +581,7 @@ impl TransactionPtr {
     where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
-        let _lck = self.lock.lock();
+        let _lck = self.lock();
 
         // To be able to do any operations on the transaction, we need to renew it first.
         if self.is_timed_out() {
