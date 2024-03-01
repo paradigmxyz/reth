@@ -1295,7 +1295,7 @@ where
         index: Index,
     ) -> EthResult<Option<Bytes>> {
         if let Some(block) = self.block_with_senders(block_id.into()).await? {
-            if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {
+            if let Some(tx) = block.transactions().nth(index.into()) {
                 return Ok(Some(tx.envelope_encoded()))
             }
         }
