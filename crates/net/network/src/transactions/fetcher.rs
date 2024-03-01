@@ -871,6 +871,7 @@ impl TransactionFetcher {
                     );
                 }
 
+                // peer has only sent hashes that we didn't request
                 if verified_payload.is_empty() {
                     return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
                 }
