@@ -3,14 +3,14 @@
 /// Default is 1 024 iterations.
 pub const DEFAULT_BUDGET_TRY_DRAIN_STREAM: u32 = 1024;
 
-/// Default budget to try and drain [`Swarm`](crate::Swarm).
+/// Default budget to try and drain `crate::Swarm`.
 ///
-/// Default is 10 [`SwarmEvent`](crate::SwarmEvent)s.
+/// Default is 10 `crate::SwarmEvent`s.
 pub const DEFAULT_BUDGET_TRY_DRAIN_SWARM: u32 = 10;
 
 /// Default budget to try and drain pending messages from [`NetworkHandle`](crate::NetworkHandle)
-/// channel. Polling the [`TransactionsManager`](crate::TransactionsManager) future sends these
-/// types of messages.
+/// channel. Polling the [`TransactionsManager`](crate::transactions::TransactionsManager) future
+/// sends these types of messages.
 //
 // Default is 4 096 outgoing transaction messages.
 pub const DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL: u32 = 4 * 1024;
@@ -24,7 +24,7 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS: u32 = 4 * 1024;
 
 /// Default budget to try and flush pending pool imports to pool. This number reflects the number
 /// of transactions that can be queued for import to pool in each iteration of the loop in the
-/// [`TransactionsManager`](crate::TransactionsManager) future.
+/// [`TransactionsManager`](crate::transactions::TransactionsManager) future.
 //
 // Default is 3k million pending pool imports.
 pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 3 * 100000000;
