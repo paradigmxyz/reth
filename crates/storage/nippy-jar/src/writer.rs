@@ -394,10 +394,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     }
 
     #[cfg(feature = "test-utils")]
-    pub fn commit_without_fsync(&mut self) -> Result<(), NippyJarError> {
+    pub fn commit_without_sync_all(&mut self) -> Result<(), NippyJarError> {
         self.data_file.flush()?;
 
-        self.commit_offsets_without_fsync()?;
+        self.commit_offsets_without_sync_all()?;
 
         // Flushes `max_row_size` and total `rows` to disk.
         self.jar.freeze_config()?;
@@ -414,7 +414,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     }
 
     #[cfg(feature = "test-utils")]
-    fn commit_offsets_without_fsync(&mut self) -> Result<(), NippyJarError> {
+    fn commit_offsets_without_sync_all(&mut self) -> Result<(), NippyJarError> {
         self.commit_offsets_inner()
     }
 

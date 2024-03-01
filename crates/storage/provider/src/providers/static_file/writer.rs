@@ -124,11 +124,11 @@ impl StaticFileProviderRW {
     ///
     /// CAUTION: does not call `sync_all` on the files.
     #[cfg(feature = "test-utils")]
-    pub fn commit_without_fsync(&mut self) -> ProviderResult<()> {
+    pub fn commit_without_sync_all(&mut self) -> ProviderResult<()> {
         let start = Instant::now();
 
         // Commits offsets and new user_header to disk
-        self.writer.commit_without_fsync()?;
+        self.writer.commit_without_sync_all()?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
