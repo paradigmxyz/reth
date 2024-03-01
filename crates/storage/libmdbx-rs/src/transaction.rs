@@ -547,7 +547,17 @@ impl TransactionPtr {
     where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
-        let _lck = self.lock.lock();
+        let _lck = if let Some(lock) = self.lock.try_lock() {
+            lock
+        } else {
+            tracing::warn!(
+                target: "libmdbx",
+                txn = %self.txn as usize,
+                backtrace = %std::backtrace::Backtrace::force_capture(),
+                "Transaction lock is already acquired, blocking..."
+            );
+            self.lock.lock()
+        };
 
         // No race condition with the `TxnManager` timing out the transaction is possible here,
         // because we're taking a lock for any actions on the transaction pointer, including a call
