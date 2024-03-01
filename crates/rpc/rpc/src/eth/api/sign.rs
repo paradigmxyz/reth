@@ -3,7 +3,7 @@
 use crate::{
     eth::{
         error::{EthResult, SignError},
-        signer::EthSigner,
+        signer::{DevSigner, EthSigner},
     },
     EthApi,
 };
@@ -42,8 +42,10 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
             .ok_or(SignError::NoAccount)
     }
 
-    pub(crate) async fn add_signer<S: EthSigner + 'static>(&self, s: S) -> EthResult<()> {
-        self.inner.signers.write().await.push(std::boxed::Box::new(s));
-        Ok(())
+    /// Generates 20 developer accounts.
+    /// Used in DEV mode.
+    pub async fn with_dev_accounts(&mut self) {
+        let mut signers = self.inner.signers.write().await;
+        *signers = DevSigner::random_signers(20);
     }
 }

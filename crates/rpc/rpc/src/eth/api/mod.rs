@@ -53,8 +53,6 @@ mod transactions;
 use crate::BlockingTaskPool;
 pub use transactions::{EthTransactions, TransactionSource};
 
-use super::signer::DevSigner;
-
 /// `Eth` API trait.
 ///
 /// Defines core functionality of the `eth` API implementation.
@@ -149,7 +147,7 @@ where
             provider,
             pool,
             network,
-            signers: RwLock::new(DevSigner::random_signers(20)),
+            signers: RwLock::new(Default::default()),
             eth_cache,
             gas_oracle,
             gas_cap,
