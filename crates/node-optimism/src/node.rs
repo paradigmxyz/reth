@@ -16,8 +16,8 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::{InMemoryBlobStore},
-    CoinbaseTipOrdering, TransactionPool, TransactionValidationTaskExecutor,
+    blobstore::InMemoryBlobStore, CoinbaseTipOrdering, TransactionPool,
+    TransactionValidationTaskExecutor,
 };
 
 /// Type configuration for a regular Optimism node.

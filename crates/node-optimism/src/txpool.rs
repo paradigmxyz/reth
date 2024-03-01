@@ -30,7 +30,6 @@ pub struct OpTransactionValidator<Client, Tx> {
 }
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx> {
-
     /// Returns the configured chain spec
     pub fn chain_spec(&self) -> Arc<ChainSpec> {
         self.inner.chain_spec()
