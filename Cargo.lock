@@ -1401,17 +1401,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 
 [[package]]
-name = "codecs-derive"
-version = "0.1.0-alpha.21"
-dependencies = [
- "convert_case 0.6.0",
- "proc-macro2",
- "quote",
- "similar-asserts",
- "syn 2.0.50",
-]
-
-[[package]]
 name = "coins-bip32"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5926,12 +5915,23 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "bytes",
- "codecs-derive",
  "modular-bitfield",
  "proptest",
  "proptest-derive",
+ "reth-codecs-derive",
  "serde",
  "test-fuzz",
+]
+
+[[package]]
+name = "reth-codecs-derive"
+version = "0.1.0-alpha.21"
+dependencies = [
+ "convert_case 0.6.0",
+ "proc-macro2",
+ "quote",
+ "similar-asserts",
+ "syn 2.0.50",
 ]
 
 [[package]]

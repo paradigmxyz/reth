@@ -11,7 +11,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub use codecs_derive::*;
+pub use reth_codecs_derive::*;
 
 use alloy_primitives::{Address, Bloom, Bytes, B256, B512, U256};
 use bytes::Buf;

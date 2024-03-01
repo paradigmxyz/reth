@@ -1,5 +1,11 @@
 [package]
-name = "codecs-derive"
+name = "reth-codecs-derive"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 readme = "../README.md"
 
 [lints]
@@ -10,42 +16,18 @@ proc-macro = true
 
 [dependencies]
 convert_case = "0.6.0"
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
+
+[dev-dependencies]
+similar-asserts.workspace = true
+syn = { workspace = true, features = ["full", "extra-traits"] }
 
 [features]
-default = [ "compact",]
+default = ["compact"]
 compact = []
 scale = []
 postcard = []
 no_codec = []
 optimism = []
-
-[package.version]
-workspace = true
-
-[package.edition]
-workspace = true
-
-[package.rust-version]
-workspace = true
-
-[package.license]
-workspace = true
-
-[package.homepage]
-workspace = true
-
-[package.repository]
-workspace = true
-
-[dependencies.proc-macro2]
-workspace = true
-
-[dependencies.quote]
-workspace = true
-
-[dependencies.syn]
-workspace = true
-features = [ "full", "extra-traits",]
-
-[dev-dependencies.similar-asserts]
-workspace = true
