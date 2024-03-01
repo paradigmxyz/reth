@@ -171,10 +171,6 @@ impl Hardfork {
     pub fn base_sepolia_activation_block(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Hardfork::Shanghai => Some(2106456),
-            Hardfork::Canyon => Some(2106456),
-            Hardfork::Cancun => Some(6383256),
-            Hardfork::Ecotone => Some(6383256),
             Hardfork::Frontier => Some(0),
             Hardfork::Homestead => Some(0),
             Hardfork::Dao => Some(0),
@@ -192,6 +188,10 @@ impl Hardfork {
             Hardfork::Paris => Some(0),
             Hardfork::Bedrock => Some(0),
             Hardfork::Regolith => Some(0),
+            Hardfork::Shanghai => Some(2106456),
+            Hardfork::Canyon => Some(2106456),
+            Hardfork::Cancun => Some(6383256),
+            Hardfork::Ecotone => Some(6383256),
             _ => None,
         }
     }
@@ -201,10 +201,6 @@ impl Hardfork {
     pub fn base_mainnet_activation_block(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Hardfork::Shanghai => Some(9101527),
-            Hardfork::Canyon => Some(9101527),
-            Hardfork::Cancun => Some(11188936),
-            Hardfork::Ecotone => Some(11188936),
             Hardfork::Frontier => Some(0),
             Hardfork::Homestead => Some(0),
             Hardfork::Dao => Some(0),
@@ -222,6 +218,10 @@ impl Hardfork {
             Hardfork::Paris => Some(0),
             Hardfork::Bedrock => Some(0),
             Hardfork::Regolith => Some(0),
+            Hardfork::Shanghai => Some(9101527),
+            Hardfork::Canyon => Some(9101527),
+            Hardfork::Cancun => Some(11188936),
+            Hardfork::Ecotone => Some(11188936),
             _ => None,
         }
     }
@@ -230,8 +230,6 @@ impl Hardfork {
     fn holesky_activation_block(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Hardfork::Shanghai => Some(6698),
-            Hardfork::Cancun => Some(894733),
             Hardfork::Dao => Some(0),
             Hardfork::Tangerine => Some(0),
             Hardfork::SpuriousDragon => Some(0),
@@ -245,6 +243,8 @@ impl Hardfork {
             Hardfork::ArrowGlacier => Some(0),
             Hardfork::GrayGlacier => Some(0),
             Hardfork::Paris => Some(0),
+            Hardfork::Shanghai => Some(6698),
+            Hardfork::Cancun => Some(894733),
             _ => None,
         }
     }
@@ -304,8 +304,6 @@ impl Hardfork {
     pub fn sepolia_activation_timestamp(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Hardfork::Shanghai => Some(1677557088),
-            Hardfork::Cancun => Some(1706655072),
             Hardfork::Frontier => Some(1633267481),
             Hardfork::Homestead => Some(1633267481),
             Hardfork::Dao => Some(1633267481),
@@ -321,6 +319,8 @@ impl Hardfork {
             Hardfork::ArrowGlacier => Some(1633267481),
             Hardfork::GrayGlacier => Some(1633267481),
             Hardfork::Paris => Some(1633267481),
+            Hardfork::Shanghai => Some(1677557088),
+            Hardfork::Cancun => Some(1706655072),
             _ => None,
         }
     }
@@ -355,10 +355,6 @@ impl Hardfork {
     pub fn base_sepolia_activation_timestamp(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Hardfork::Shanghai => Some(1699981200),
-            Hardfork::Canyon => Some(1699981200),
-            Hardfork::Cancun => Some(1708534800),
-            Hardfork::Ecotone => Some(1708534800),
             Hardfork::Frontier => Some(1695768288),
             Hardfork::Homestead => Some(1695768288),
             Hardfork::Dao => Some(1695768288),
@@ -376,6 +372,10 @@ impl Hardfork {
             Hardfork::Paris => Some(1695768288),
             Hardfork::Bedrock => Some(1695768288),
             Hardfork::Regolith => Some(1695768288),
+            Hardfork::Shanghai => Some(1699981200),
+            Hardfork::Canyon => Some(1699981200),
+            Hardfork::Cancun => Some(1708534800),
+            Hardfork::Ecotone => Some(1708534800),
             _ => None,
         }
     }
@@ -385,10 +385,6 @@ impl Hardfork {
     pub fn base_mainnet_activation_timestamp(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Hardfork::Shanghai => Some(1704992401),
-            Hardfork::Canyon => Some(1704992401),
-            Hardfork::Cancun => Some(1710374401),
-            Hardfork::Ecotone => Some(1710374401),
             Hardfork::Frontier => Some(1686789347),
             Hardfork::Homestead => Some(1686789347),
             Hardfork::Dao => Some(1686789347),
@@ -406,6 +402,10 @@ impl Hardfork {
             Hardfork::Paris => Some(1686789347),
             Hardfork::Bedrock => Some(1686789347),
             Hardfork::Regolith => Some(1686789347),
+            Hardfork::Shanghai => Some(1704992401),
+            Hardfork::Canyon => Some(1704992401),
+            Hardfork::Cancun => Some(1710374401),
+            Hardfork::Ecotone => Some(1710374401),
             _ => None,
         }
     }
