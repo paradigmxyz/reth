@@ -23,7 +23,7 @@ use std::{
     collections::HashMap,
     num::NonZeroUsize,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::{debug, error, trace};
