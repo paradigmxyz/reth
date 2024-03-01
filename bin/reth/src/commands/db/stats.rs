@@ -8,7 +8,6 @@ use reth_db::{database::Database, mdbx, static_file::iter_static_files, Database
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
 use reth_provider::providers::StaticFileProvider;
-use std::fs::File;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
@@ -174,20 +173,17 @@ impl Command {
 
                 let columns = jar_provider.columns();
                 let rows = jar_provider.rows();
-                let data_size = File::open(jar_provider.data_path())
-                    .and_then(|file| file.metadata())
+
+                let data_size = reth_primitives::fs::metadata(jar_provider.data_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let index_size = File::open(jar_provider.index_path())
-                    .and_then(|file| file.metadata())
+                let index_size = reth_primitives::fs::metadata(jar_provider.index_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let offsets_size = File::open(jar_provider.offsets_path())
-                    .and_then(|file| file.metadata())
+                let offsets_size = reth_primitives::fs::metadata(jar_provider.offsets_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let config_size = File::open(jar_provider.config_path())
-                    .and_then(|file| file.metadata())
+                let config_size = reth_primitives::fs::metadata(jar_provider.config_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
 
