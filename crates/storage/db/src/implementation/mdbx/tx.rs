@@ -53,16 +53,14 @@ impl<K: TransactionKind> Tx<K> {
     pub fn new_with_metrics(
         inner: Transaction<K>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
-    ) -> reth_libmdbx::Result<Self> {
-        let metrics_handler = env_metrics
-            .map(|env_metrics| {
-                let handler = MetricsHandler::<K>::new(inner.id()?, env_metrics);
-                handler.env_metrics.record_opened_transaction(handler.transaction_mode());
-                handler.log_transaction_opened();
-                Ok(handler)
-            })
-            .transpose()?;
-        Ok(Self::new_inner(inner, metrics_handler))
+    ) -> Self {
+        let metrics_handler = env_metrics.map(|env_metrics| {
+            let handler = MetricsHandler::<K>::new(inner.id(), env_metrics);
+            handler.env_metrics.record_opened_transaction(handler.transaction_mode());
+            handler.log_transaction_opened();
+            handler
+        });
+        Self::new_inner(inner, metrics_handler)
     }
 
     #[inline]
@@ -78,8 +76,8 @@ impl<K: TransactionKind> Tx<K> {
     }
 
     /// Gets this transaction ID.
-    pub fn id(&self) -> reth_libmdbx::Result<u64> {
-        self.metrics_handler.as_ref().map_or_else(|| self.inner.id(), |handler| Ok(handler.txn_id))
+    pub fn id(&self) -> u64 {
+        self.metrics_handler.as_ref().map_or_else(|| self.inner.id(), |handler| handler.txn_id)
     }
 
     /// Gets a table database handle if it exists, otherwise creates it.
@@ -439,7 +437,7 @@ mod tests {
 
         assert_eq!(
             tx.get::<tables::Transactions>(0).err(),
-            Some(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionTimeout.into()))
+            Some(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionAborted.into()))
         ); // Transaction is timeout-ed
         assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
         // Backtrace is recorded

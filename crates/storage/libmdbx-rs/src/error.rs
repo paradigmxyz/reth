@@ -1,3 +1,4 @@
+use crate::{txn_manager::TxnManager, TransactionKind};
 use libc::c_int;
 use std::result;
 
@@ -117,9 +118,8 @@ pub enum Error {
     /// [Mode::ReadOnly](crate::flags::Mode::ReadOnly), write transactions can't be opened.
     #[error("write transactions are not supported in read-only mode")]
     WriteTransactionUnsupportedInReadOnlyMode,
-    /// Read transaction has been timed out.
-    #[error("read transaction has been timed out")]
-    ReadTransactionTimeout,
+    #[error("read transaction has been aborted by the transaction manager")]
+    ReadTransactionAborted,
     /// Unknown error code.
     #[error("unknown error code")]
     Other(i32),
@@ -193,10 +193,9 @@ impl Error {
             Error::DecodeErrorLenDiff | Error::DecodeError => ffi::MDBX_EINVAL,
             Error::Access => ffi::MDBX_EACCESS,
             Error::TooLarge => ffi::MDBX_TOO_LARGE,
-            Error::BadSignature => ffi::MDBX_EBADSIGN,
+            Error::BadSignature | Error::ReadTransactionAborted => ffi::MDBX_EBADSIGN,
             Error::WriteTransactionUnsupportedInReadOnlyMode => ffi::MDBX_EACCESS,
             Error::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
-            Error::ReadTransactionTimeout => -96000, // Custom non-MDBX error code
             Error::Other(err_code) => *err_code,
         }
     }
@@ -215,6 +214,33 @@ pub(crate) fn mdbx_result(err_code: c_int) -> Result<bool> {
         ffi::MDBX_RESULT_TRUE => Ok(true),
         other => Err(Error::from_err_code(other)),
     }
+}
+
+#[cfg(feature = "read-tx-timeouts")]
+#[inline]
+pub(crate) fn mdbx_result_with_tx_kind<K: TransactionKind>(
+    err_code: c_int,
+    txn: *mut ffi::MDBX_txn,
+    txn_manager: &TxnManager,
+) -> Result<bool> {
+    if K::IS_READ_ONLY &&
+        txn_manager.remove_aborted_read_transaction(txn).is_some() &&
+        err_code == ffi::MDBX_EBADSIGN
+    {
+        return Err(Error::ReadTransactionAborted)
+    }
+
+    mdbx_result(err_code)
+}
+
+#[cfg(not(feature = "read-tx-timeouts"))]
+#[inline]
+pub(crate) fn mdbx_result_with_tx_kind<K: TransactionKind>(
+    err_code: c_int,
+    _txn: *mut ffi::MDBX_txn,
+    _txn_manager: &TxnManager,
+) -> Result<bool> {
+    mdbx_result(err_code)
 }
 
 #[macro_export]
