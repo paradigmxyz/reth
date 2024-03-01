@@ -12,9 +12,6 @@ use reth_eth_wire::{
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
-use reth_metrics::common::mpsc::{
-    metered_unbounded_channel, UnboundedMeteredReceiver, UnboundedMeteredSender,
-};
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
 use schnellru::ByLength;
 #[cfg(debug_assertions)]
@@ -63,12 +60,6 @@ pub struct TransactionFetcher {
     pub(super) filter_valid_message: MessageFilter,
     /// Info on capacity of the transaction fetcher.
     pub info: TransactionFetcherInfo,
-    /// [`FetchEvent`]s as a result of advancing inflight requests. This is an intermediary ¨
-    /// storage, before [`TransactionsManager`](super::TransactionsManager) streams them.
-    #[pin]
-    pub fetch_events_head: UnboundedMeteredReceiver<FetchEvent>,
-    /// Handle for queueing [`FetchEvent`]s as a result of advancing inflight requests.
-    pub fetch_events_tail: UnboundedMeteredSender<FetchEvent>,
 }
 
 // === impl TransactionFetcher ===
@@ -940,8 +931,6 @@ impl Stream for TransactionFetcher {
 
 impl Default for TransactionFetcher {
     fn default() -> Self {
-        let (fetch_events_tail, fetch_events_head) = metered_unbounded_channel("net::tx");
-
         Self {
             active_peers: LruMap::new(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS),
             inflight_requests: Default::default(),
@@ -956,8 +945,6 @@ impl Default for TransactionFetcher {
             ),
             filter_valid_message: Default::default(),
             info: TransactionFetcherInfo::default(),
-            fetch_events_head,
-            fetch_events_tail,
         }
     }
 }
