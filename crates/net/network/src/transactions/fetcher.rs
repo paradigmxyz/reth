@@ -851,6 +851,10 @@ impl TransactionFetcher {
 
         match result {
             Ok(Ok(transactions)) => {
+                if transactions.is_empty() {
+                    return FetchEvent::FetchError { peer_id, error: RequestError::EmptyResponse }
+                }
+
                 let payload = UnverifiedPooledTransactions::new(transactions);
 
                 let unverified_len = payload.len();

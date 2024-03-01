@@ -59,11 +59,12 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
     fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
         if let Err(err) = self {
             match err {
-                RequestError::ChannelClosed => None,
-                RequestError::ConnectionDropped => None,
-                RequestError::UnsupportedCapability => None,
+                RequestError::ChannelClosed |
+                RequestError::ConnectionDropped |
+                RequestError::UnsupportedCapability |
+                RequestError::EmptyResponse => None,
+                RequestError::BadResponse => Some(ReputationChangeKind::BadTransactions),
                 RequestError::Timeout => Some(ReputationChangeKind::Timeout),
-                RequestError::BadResponse => None,
             }
         } else {
             None
@@ -96,6 +97,9 @@ pub enum RequestError {
     #[error("received bad response")]
     /// Indicates a bad response was received.
     BadResponse,
+    /// An empty response was received.
+    #[error("received empty response")]
+    EmptyResponse,
 }
 
 // === impl RequestError ===
