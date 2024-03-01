@@ -1,5 +1,3 @@
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 //! A collection of shared traits and error types used in Reth.
 //!
 //! ## Feature Flags
@@ -11,7 +9,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(unused_crate_dependencies)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Consensus traits.

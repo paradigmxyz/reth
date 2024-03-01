@@ -1,5 +1,3 @@
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 //! Discovery v4 implementation: <https://github.com/ethereum/devp2p/blob/master/discv4.md>
 //!
 //! Discv4 employs a kademlia-like routing table to store and manage discovered peers and topics.
@@ -23,6 +21,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{

@@ -1,5 +1,3 @@
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 //! ETL data collector.
 //!
 //! This crate is useful for dumping unsorted data into temporary files and iterating on their
@@ -13,6 +11,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
