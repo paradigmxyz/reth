@@ -10,7 +10,6 @@ use crate::{
 };
 use eyre::Context;
 use metrics::{gauge, Label};
-use once_cell::sync::Lazy;
 use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
@@ -33,19 +32,6 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 /// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
 #[cfg(not(windows))]
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
-
-#[cfg(not(windows))]
-static PROCESS_ID: Lazy<u32> = Lazy::new(|| {
-    #[cfg(unix)]
-    {
-        std::os::unix::process::parent_id()
-    }
-
-    #[cfg(not(unix))]
-    {
-        std::process::id()
-    }
-});
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -255,11 +241,21 @@ impl DatabaseEnv {
         });
         #[cfg(not(windows))]
         {
-            let _ = *PROCESS_ID; // Initialize the process ID at the time of environment opening
+            fn is_current_process(id: u32) -> bool {
+                #[cfg(unix)]
+                {
+                    id == std::os::unix::process::parent_id() || id == std::process::id()
+                }
+
+                #[cfg(not(unix))]
+                {
+                    id == std::process::id()
+                }
+            }
             inner_env.set_handle_slow_readers(
                 |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
                     if space > MAX_SAFE_READER_SPACE {
-                        let message = if process_id == *PROCESS_ID {
+                        let message = if is_current_process(process_id) {
                             "Current process has a long-lived database transaction that grows the database file."
                         } else {
                             "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
