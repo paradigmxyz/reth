@@ -165,6 +165,16 @@ where
         Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
     }
 
+    /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
+    async fn raw_transaction_by_block_hash_and_index(
+        &self,
+        hash: B256,
+        index: Index,
+    ) -> Result<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getRawTransactionByBlockHashAndIndex");
+        Ok(EthApi::raw_transaction_by_block_and_tx_index(self, hash, index).await?)
+    }
+
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
     async fn transaction_by_block_hash_and_index(
         &self,
@@ -173,6 +183,16 @@ where
     ) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
         Ok(EthApi::transaction_by_block_and_tx_index(self, hash, index).await?)
+    }
+
+    /// Handler for: `eth_getRawTransactionByBlockNumberAndIndex`
+    async fn raw_transaction_by_block_number_and_index(
+        &self,
+        number: BlockNumberOrTag,
+        index: Index,
+    ) -> Result<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getRawTransactionByBlockNumberAndIndex");
+        Ok(EthApi::raw_transaction_by_block_and_tx_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionByBlockNumberAndIndex`
