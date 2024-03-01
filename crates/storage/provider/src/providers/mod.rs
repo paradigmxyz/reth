@@ -1,14 +1,20 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
+    BlockSource, BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
     CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     DatabaseProviderFactory, EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
     StateProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, models::StoredBlockBodyIndices};
+use reth_db::{
+    database::Database,
+    models::{AccountBeforeTx, StoredBlockBodyIndices},
+};
 use reth_interfaces::{
-    blockchain_tree::{BlockchainTreeEngine, BlockchainTreeViewer},
+    blockchain_tree::{
+        error::InsertBlockError, BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer,
+        CanonicalOutcome, InsertPayloadOk,
+    },
     consensus::ForkchoiceState,
     provider::ProviderResult,
     RethError, RethResult,
@@ -31,27 +37,29 @@ use std::{
 };
 use tracing::trace;
 
+mod database;
+pub use database::*;
+
+mod static_file;
+pub use static_file::{
+    StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
+    StaticFileWriter,
+};
+
+mod state;
 pub use state::{
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
 
 mod bundle_state_provider;
-mod chain_info;
-mod database;
-mod static_file;
-pub use static_file::{
-    StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
-    StaticFileWriter,
-};
-mod state;
-use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use bundle_state_provider::BundleStateProvider;
-pub use database::*;
-use reth_db::models::AccountBeforeTx;
-use reth_interfaces::blockchain_tree::{
-    error::InsertBlockError, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
-};
+
+mod chain_info;
+use chain_info::ChainInfoTracker;
+
+mod consistent_view;
+pub use consistent_view::ConsistentDbView;
 
 /// The main type for interacting with the blockchain.
 ///
