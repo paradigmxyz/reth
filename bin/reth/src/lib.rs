@@ -150,6 +150,19 @@ pub mod rpc {
     }
 }
 
+#[cfg(all(unix, any(target_env = "gnu", target_os = "macos")))]
+pub mod sigsegv_handler;
+
+#[cfg(not(all(unix, any(target_env = "gnu", target_os = "macos"))))]
+pub mod sigsegv_handler {
+    //! Signal handler to extract a backtrace from stack overflow.
+    //!
+    //! This is a no-op because this platform doesn't support our signal handler's requirements.
+
+    /// No-op function.
+    pub fn install() {}
+}
+
 #[cfg(all(feature = "jemalloc", unix))]
 use jemallocator as _;
 
