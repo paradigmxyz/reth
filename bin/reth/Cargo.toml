@@ -110,8 +110,6 @@ jsonrpsee.workspace = true
 assert_matches = "1.5.0"
 
 [features]
-default = ["jemalloc"]
-
 asm-keccak = ["reth-primitives/asm-keccak"]
 
 jemalloc = ["dep:jemallocator", "reth-node-core/jemalloc"]
