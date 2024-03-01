@@ -128,7 +128,7 @@ impl StaticFileProvider {
                 let fixed_block_range = find_fixed_range(block_range.start());
                 let jar_provider = self
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
-                    .ok_or(ProviderError::NippyJar("segment proider is not found".to_string()))?;
+                    .ok_or(ProviderError::MissingStaticFileBlock(segment, block_range.start()))?;
 
                 entries += jar_provider.rows();
 
