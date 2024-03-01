@@ -144,6 +144,7 @@ impl Command {
                 listen_addr,
                 prometheus_exporter::install_recorder()?,
                 Arc::clone(&db),
+                factory.static_file_provider(),
                 metrics_process::Collector::default(),
             )
             .await?;

@@ -28,6 +28,7 @@ use reth_primitives::{
 };
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
+    fs::File,
     ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::{mpsc, Arc},
@@ -112,6 +113,49 @@ impl StaticFileProvider {
             Arc::try_unwrap(self.0).expect("should be called when initializing only");
         provider.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
         Self(Arc::new(provider))
+    }
+
+    /// Reports metrics for the static files.
+    pub fn report_metrics(&self) -> ProviderResult<()> {
+        let Some(metrics) = &self.metrics else { return Ok(()) };
+
+        let static_files = iter_static_files(&self.path)?;
+        for (segment, ranges) in static_files {
+            let mut entries = 0;
+            let mut size = 0;
+
+            for (block_range, _) in &ranges {
+                let fixed_block_range = find_fixed_range(block_range.start());
+                let jar_provider = self
+                    .get_segment_provider(segment, || Some(fixed_block_range), None)?
+                    .ok_or(ProviderError::NippyJar("segment proider is not found".to_string()))?;
+
+                entries += jar_provider.rows();
+
+                let data_size = File::open(jar_provider.data_path())
+                    .and_then(|file| file.metadata())
+                    .map(|metadata| metadata.len())
+                    .unwrap_or_default();
+                let index_size = File::open(jar_provider.index_path())
+                    .and_then(|file| file.metadata())
+                    .map(|metadata| metadata.len())
+                    .unwrap_or_default();
+                let offsets_size = File::open(jar_provider.offsets_path())
+                    .and_then(|file| file.metadata())
+                    .map(|metadata| metadata.len())
+                    .unwrap_or_default();
+                let config_size = File::open(jar_provider.config_path())
+                    .and_then(|file| file.metadata())
+                    .map(|metadata| metadata.len())
+                    .unwrap_or_default();
+
+                size += data_size + index_size + offsets_size + config_size;
+            }
+
+            metrics.record_segment(segment, size, ranges.len(), entries);
+        }
+
+        Ok(())
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and block.
