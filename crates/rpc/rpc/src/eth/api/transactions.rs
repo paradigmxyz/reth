@@ -1288,6 +1288,20 @@ where
 
         Ok(None)
     }
+
+    pub(crate) async fn raw_transaction_by_block_and_tx_index(
+        &self,
+        block_id: impl Into<BlockId>,
+        index: Index,
+    ) -> EthResult<Option<Bytes>> {
+        if let Some(block) = self.block_with_senders(block_id.into()).await? {
+            if let Some(tx) = block.transactions().nth(index.into()) {
+                return Ok(Some(tx.envelope_encoded()))
+            }
+        }
+
+        Ok(None)
+    }
 }
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
