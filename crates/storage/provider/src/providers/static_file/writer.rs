@@ -120,6 +120,9 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
+    /// Commits configuration changes to disk and updates the reader index with the new changes.
+    ///
+    /// CAUTION: does not call `sync_all` on the files.
     #[cfg(feature = "test-utils")]
     pub fn commit_without_fsync(&mut self) -> ProviderResult<()> {
         let start = Instant::now();

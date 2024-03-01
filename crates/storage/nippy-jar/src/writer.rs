@@ -420,7 +420,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Flushes offsets to disk.
     ///
-    /// CAUTION: Does not call `fsync` on the offsets file and requires a manual call to
+    /// CAUTION: Does not call `sync_all` on the offsets file and requires a manual call to
     /// `self.offsets_file.get_ref().sync_all()`.
     fn commit_offsets_inner(&mut self) -> Result<(), NippyJarError> {
         // The last offset on disk can be the first offset of `self.offsets` given how
