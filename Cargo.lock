@@ -1401,19 +1401,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 
 [[package]]
-name = "codecs-derive"
-version = "0.1.0-alpha.21"
-dependencies = [
- "convert_case 0.6.0",
- "parity-scale-codec",
- "proc-macro2",
- "quote",
- "serde",
- "similar-asserts",
- "syn 2.0.50",
-]
-
-[[package]]
 name = "coins-bip32"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2129,12 +2116,6 @@ dependencies = [
  "rustc_version 0.4.0",
  "syn 1.0.109",
 ]
-
-[[package]]
-name = "difflib"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6184e33543162437515c2e2b48714794e37845ec9851711914eec9d308f6ebe8"
 
 [[package]]
 name = "digest"
@@ -2886,15 +2867,6 @@ checksum = "46303f565772937ffe1d394a4fac6f411c6013172fadde9dcdb1e147a086940e"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
-]
-
-[[package]]
-name = "float-cmp"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
-dependencies = [
- "num-traits",
 ]
 
 [[package]]
@@ -4468,9 +4440,9 @@ dependencies = [
 
 [[package]]
 name = "mockall"
-version = "0.11.4"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c84490118f2ee2d74570d114f3d0493cbf02790df303d2707606c3e14e07c96"
+checksum = "43766c2b5203b10de348ffe19f7e54564b64f3d6018ff7648d1e2d6d3a0f0a48"
 dependencies = [
  "cfg-if",
  "downcast",
@@ -4483,14 +4455,14 @@ dependencies = [
 
 [[package]]
 name = "mockall_derive"
-version = "0.11.4"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22ce75669015c4f47b289fd4d4f56e894e4c96003ffdf3ac51313126f94c6cbb"
+checksum = "af7cbce79ec385a1d4f54baa90a76401eb15d9cab93685f62e7e9f942aa00ae2"
 dependencies = [
  "cfg-if",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.50",
 ]
 
 [[package]]
@@ -4549,12 +4521,6 @@ dependencies = [
  "memchr",
  "minimal-lexical",
 ]
-
-[[package]]
-name = "normalize-line-endings"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61807f77802ff30975e01f4f071c8ba10c022052f98b3294119f3e615d13e5be"
 
 [[package]]
 name = "nu-ansi-term"
@@ -5221,16 +5187,12 @@ checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
 
 [[package]]
 name = "predicates"
-version = "2.1.5"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59230a63c37f3e18569bdb90e4a89cbf5bf8b06fea0b84e65ea10cc4df47addd"
+checksum = "68b87bfd4605926cdfefc1c3b5f8fe560e3feca9d5552cf68c466d3d8236c7e8"
 dependencies = [
- "difflib",
- "float-cmp",
- "itertools 0.10.5",
- "normalize-line-endings",
+ "anstyle",
  "predicates-core",
- "regex",
 ]
 
 [[package]]
@@ -5866,7 +5828,6 @@ dependencies = [
  "reth-metrics",
  "reth-node-api",
  "reth-node-ethereum",
- "reth-node-optimism",
  "reth-payload-builder",
  "reth-payload-validator",
  "reth-primitives",
@@ -5881,7 +5842,6 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "schnellru",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -5928,12 +5888,23 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "bytes",
- "codecs-derive",
  "modular-bitfield",
  "proptest",
  "proptest-derive",
+ "reth-codecs-derive",
  "serde",
  "test-fuzz",
+]
+
+[[package]]
+name = "reth-codecs-derive"
+version = "0.1.0-alpha.21"
+dependencies = [
+ "convert_case 0.6.0",
+ "proc-macro2",
+ "quote",
+ "similar-asserts",
+ "syn 2.0.50",
 ]
 
 [[package]]
@@ -5956,7 +5927,6 @@ dependencies = [
 name = "reth-consensus-common"
 version = "0.1.0-alpha.21"
 dependencies = [
- "assert_matches",
  "mockall",
  "reth-interfaces",
  "reth-primitives",
@@ -6151,7 +6121,6 @@ dependencies = [
  "crc",
  "proptest",
  "proptest-derive",
- "rand 0.8.5",
  "serde",
  "thiserror",
 ]
@@ -6507,7 +6476,6 @@ dependencies = [
 name = "reth-node-ethereum"
 version = "0.1.0-alpha.21"
 dependencies = [
- "async-trait",
  "eyre",
  "reth-basic-payload-builder",
  "reth-db",
@@ -6521,7 +6489,6 @@ dependencies = [
  "reth-rpc-types",
  "reth-tracing",
  "reth-transaction-pool",
- "revm",
  "serde",
 ]
 

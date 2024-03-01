@@ -29,13 +29,11 @@ clap = { workspace = true, features = ["derive"], optional = true }
 rayon.workspace = true
 
 [dev-dependencies]
-# reth
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
 
-# misc
-tempfile.workspace = true
 assert_matches.workspace = true
+tempfile.workspace = true
 
 [features]
 clap = ["dep:clap"]
