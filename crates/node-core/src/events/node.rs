@@ -22,7 +22,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::time::Interval;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
@@ -366,7 +366,7 @@ where
                 );
 
                 if let Some(stage_eta) = eta.fmt_for_stage(*stage_id) {
-                    info!(
+                    debug!(
                         target: "reth::cli",
                         connected_peers = this.state.num_connected_peers(),
                         %freelist,
@@ -378,7 +378,7 @@ where
                         "Status"
                     );
                 } else {
-                    info!(
+                    debug!(
                         target: "reth::cli",
                         connected_peers = this.state.num_connected_peers(),
                         %freelist,
@@ -395,7 +395,7 @@ where
                 if now - this.state.latest_block_time.unwrap_or(0) > 60 {
                     // Once we start receiving consensus nodes, don't emit status unless stalled for
                     // 1 minute
-                    info!(
+                    debug!(
                         target: "reth::cli",
                         connected_peers = this.state.num_connected_peers(),
                         %freelist,
@@ -404,7 +404,7 @@ where
                     );
                 }
             } else {
-                info!(
+                debug!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
                     %freelist,
