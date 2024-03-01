@@ -552,7 +552,7 @@ impl TransactionPtr {
         if let Some(lock) = self.lock.try_lock() {
             lock
         } else {
-            tracing::warn!(
+            tracing::debug!(
                 target: "libmdbx",
                 txn = %self.txn as usize,
                 backtrace = %std::backtrace::Backtrace::force_capture(),
