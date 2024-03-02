@@ -38,6 +38,9 @@ use tracing_futures::Instrument;
 pub mod metrics;
 pub mod shutdown;
 
+#[cfg(feature = "pool")]
+pub mod pool;
+
 /// A type that can spawn tasks.
 ///
 /// The main purpose of this type is to abstract over [TaskExecutor] so it's more convenient to

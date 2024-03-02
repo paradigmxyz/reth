@@ -7,8 +7,9 @@ use reth_rpc::{
         gas_oracle::GasPriceOracleConfig,
         EthFilterConfig, FeeHistoryCacheConfig, RPC_DEFAULT_GAS_CAP,
     },
-    BlockingTaskPool, EthApi, EthFilter, EthPubSub,
+    EthApi, EthFilter, EthPubSub,
 };
+use reth_tasks::pool::BlockingTaskPool;
 use serde::{Deserialize, Serialize};
 
 /// All handlers for the `eth` namespace
