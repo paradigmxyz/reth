@@ -1064,7 +1064,7 @@ pub struct UnverifiedPooledTransactions {
 }
 
 /// [`PooledTransactions`] that have been successfully verified.
-#[derive(Debug, Constructor)]
+#[derive(Debug, Constructor, Deref)]
 pub struct VerifiedPooledTransactions {
     txns: PooledTransactions,
 }
@@ -1188,10 +1188,11 @@ impl Default for TransactionFetcherInfo {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashSet;
+    use std::{collections::HashSet, str::FromStr};
 
+    use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
-    use reth_primitives::B256;
+    use reth_primitives::{hex, TransactionSigned, B256};
 
     use crate::transactions::tests::{default_cache, new_mock_session};
 
@@ -1363,5 +1364,42 @@ mod test {
             requested_hashes.into_iter().collect::<HashSet<_>>(),
             seen_hashes.into_iter().collect::<HashSet<_>>()
         )
+    }
+
+    #[test]
+    fn verify_response_hashes() {
+        let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa");
+        let signed_tx_1: PooledTransactionsElement =
+            TransactionSigned::decode(&mut &input[..]).unwrap().into();
+        let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
+        let signed_tx_2: PooledTransactionsElement =
+            TransactionSigned::decode(&mut &input[..]).unwrap().into();
+
+        // only tx 1 is requested
+        let request_hashes = [
+            B256::from_str("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e67890")
+                .unwrap(),
+            *signed_tx_1.hash(),
+            B256::from_str("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e12345")
+                .unwrap(),
+            B256::from_str("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4edabe3")
+                .unwrap(),
+        ];
+
+        for hash in &request_hashes {
+            assert_ne!(hash, signed_tx_2.hash())
+        }
+
+        let request_hashes = RequestTxHashes::new(request_hashes.clone().to_vec());
+
+        // but response contains tx 1 + another tx
+        let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2.clone()]);
+        let payload = UnverifiedPooledTransactions::new(response_txns);
+
+        let (outcome, verified_payload) = payload.verify(&request_hashes, &PeerId::ZERO);
+
+        assert_eq!(VerificationOutcome::ReportPeer, outcome);
+        assert_eq!(1, verified_payload.len());
+        assert!(verified_payload.contains(&signed_tx_1));
     }
 }
