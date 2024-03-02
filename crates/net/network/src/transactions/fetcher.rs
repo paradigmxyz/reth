@@ -852,15 +852,21 @@ impl TransactionFetcher {
         match result {
             Ok(Ok(transactions)) => {
                 //
-                // peer has failed to serve any of the hashes it has announced to us that we, as a
-                // follow, have requested
+                // 1. peer has failed to serve any of the hashes it has announced to us that we,
+                // as a follow, have requested
                 //
                 if transactions.is_empty() {
-                    return FetchEvent::FetchError { peer_id, error: RequestError::EmptyResponse }
+                    trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        requested_hashes_len=requested_hashes.len(),
+                        "received empty `PooledTransactions` response from peer, peer failed to serve hashes it announced"
+                    );
+
+                    return FetchEvent::EmptyResponse { peer_id }
                 }
 
                 //
-                // filter out hashes that we didn't request
+                // 2. filter out hashes that we didn't request
                 //
                 let payload = UnverifiedPooledTransactions::new(transactions);
 
@@ -883,7 +889,7 @@ impl TransactionFetcher {
                 }
 
                 //
-                // validated payload, e.g. dedup
+                // 3. stateless validation of payload, e.g. dedup
                 //
                 let unvalidated_payload_len = verified_payload.len();
 
@@ -900,14 +906,16 @@ impl TransactionFetcher {
                         peer_id=format!("{peer_id:#}"),
                         unvalidated_payload_len=unvalidated_payload_len,
                         valid_payload_len=valid_payload.len(),
-                        "received invalid `PooledTransactions` response from peer, filtered out invalid entries"
+                        "received invalid `PooledTransactions` response from peer, filtered out duplicate entries"
                     );
                 }
                 // valid payload will have at least one transaction at this point. even if the tx
                 // size/type announced by the peer is different to the actual tx size/type, pass on
                 // to pending pool imports pipeline for validation.
 
-                // clear received hashes
+                //
+                // 4. clear received hashes
+                //
                 let mut fetched = Vec::with_capacity(valid_payload.len());
                 requested_hashes.retain(|requested_hash| {
                     if valid_payload.contains_key(requested_hash) {
@@ -920,7 +928,9 @@ impl TransactionFetcher {
                 fetched.shrink_to_fit();
                 self.remove_hashes_from_transaction_fetcher(fetched);
 
-                // buffer left over hashes
+                //
+                // 5. buffer left over hashes
+                //
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
 
                 let transactions =
@@ -1025,6 +1035,11 @@ pub enum FetchEvent {
         peer_id: PeerId,
         /// The specific error that occurred while fetching.
         error: RequestError,
+    },
+    /// An empty response was received.
+    EmptyResponse {
+        /// The ID of the sender.
+        peer_id: PeerId,
     },
 }
 

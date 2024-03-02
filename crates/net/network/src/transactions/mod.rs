@@ -1123,9 +1123,7 @@ where
         let kind = match req_err {
             RequestError::UnsupportedCapability => ReputationChangeKind::BadProtocol,
             RequestError::Timeout => ReputationChangeKind::Timeout,
-            RequestError::ChannelClosed |
-            RequestError::ConnectionDropped |
-            RequestError::EmptyResponse => {
+            RequestError::ChannelClosed | RequestError::ConnectionDropped => {
                 // peer is already disconnected
                 return
             }
@@ -1291,6 +1289,9 @@ where
                             FetchEvent::FetchError { peer_id, error } => {
                                 trace!(target: "net::tx", ?peer_id, %error, "requesting transactions from peer failed");
                                 this.on_request_error(peer_id, error);
+                            }
+                            FetchEvent::EmptyResponse { peer_id } => {
+                                trace!(target: "net::tx", ?peer_id, "peer returned empty response");
                             }
                         }
                         some_ready = true;
