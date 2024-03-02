@@ -691,7 +691,10 @@ where
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
-        // 2. filter out known hashes
+        // 2. filter out transactions pending import to pool
+        partially_valid_msg.retain_by_hash(|hash| !self.transactions_by_peers.contains_key(hash));
+
+        // 3. filter out known hashes
         //
         // known txns have already been successfully fetched or received over gossip.
         //
@@ -713,7 +716,7 @@ where
             return
         }
 
-        // 3. filter out invalid entries (spam)
+        // 4. filter out invalid entries (spam)
         //
         // validates messages with respect to the given network, e.g. allowed tx types
         //
@@ -742,7 +745,7 @@ where
             return
         }
 
-        // 4. filter out already seen unknown hashes
+        // 5. filter out already seen unknown hashes
         //
         // seen hashes are already in the tx fetcher, pending fetch.
         //
