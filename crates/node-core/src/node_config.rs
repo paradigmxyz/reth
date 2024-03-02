@@ -866,6 +866,7 @@ impl NodeConfig {
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
                     stage_config.transaction_lookup.chunk_size,
+                    stage_config.transaction_lookup.etl_file_size,
                     prune_modes.transaction_lookup,
                 ))
                 .set(IndexAccountHistoryStage::new(
