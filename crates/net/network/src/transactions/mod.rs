@@ -866,11 +866,6 @@ where
                     .filter_map(Result::ok)
                     .collect::<PooledTransactions>();
 
-                // mark the transactions as received
-                self.transaction_fetcher.remove_hashes_from_transaction_fetcher(
-                    non_blob_txs.iter().map(|tx| *tx.hash()),
-                );
-
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
                 if has_blob_txs {
@@ -991,6 +986,10 @@ where
         }
 
         let mut transactions = transactions.0;
+
+        // mark the transactions as received
+        self.transaction_fetcher
+            .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| *tx.hash()));
 
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
 
@@ -1154,7 +1153,6 @@ where
                 self.report_peer_bad_transactions(peer_id);
             }
         }
-        self.transaction_fetcher.remove_hashes_from_transaction_fetcher([hash]);
         self.bad_imports.insert(hash);
     }
 
