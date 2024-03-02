@@ -691,7 +691,10 @@ where
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
-        // 2. filter out known hashes
+        // 2. filter out transactions pending import to pool
+        partially_valid_msg.retain_by_hash(|hash| !self.transactions_by_peers.contains_key(hash));
+
+        // 3. filter out known hashes
         //
         // known txns have already been successfully fetched or received over gossip.
         //
@@ -713,7 +716,7 @@ where
             return
         }
 
-        // 3. filter out invalid entries (spam)
+        // 4. filter out invalid entries (spam)
         //
         // validates messages with respect to the given network, e.g. allowed tx types
         //
@@ -742,7 +745,7 @@ where
             return
         }
 
-        // 4. filter out already seen unknown hashes
+        // 5. filter out already seen unknown hashes
         //
         // seen hashes are already in the tx fetcher, pending fetch.
         //
@@ -862,11 +865,6 @@ where
                     .map(PooledTransactionsElement::try_from_broadcast)
                     .filter_map(Result::ok)
                     .collect::<PooledTransactions>();
-
-                // mark the transactions as received
-                self.transaction_fetcher.remove_hashes_from_transaction_fetcher(
-                    non_blob_txs.iter().map(|tx| *tx.hash()),
-                );
 
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
@@ -988,6 +986,10 @@ where
         }
 
         let mut transactions = transactions.0;
+
+        // mark the transactions as received
+        self.transaction_fetcher
+            .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| *tx.hash()));
 
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
 
@@ -1151,7 +1153,6 @@ where
                 self.report_peer_bad_transactions(peer_id);
             }
         }
-        self.transaction_fetcher.remove_hashes_from_transaction_fetcher([hash]);
         self.bad_imports.insert(hash);
     }
 
