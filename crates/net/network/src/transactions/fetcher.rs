@@ -916,6 +916,7 @@ impl TransactionFetcher {
                 //
                 // 4. clear received hashes
                 //
+                let requested_hashes_len = requested_hashes.len();
                 let mut fetched = Vec::with_capacity(valid_payload.len());
                 requested_hashes.retain(|requested_hash| {
                     if valid_payload.contains_key(requested_hash) {
@@ -926,6 +927,14 @@ impl TransactionFetcher {
                     true
                 });
                 fetched.shrink_to_fit();
+                if fetched.len() < requested_hashes_len {
+                    trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        requested_hashes_len=requested_hashes_len,
+                        fetched_len=fetched.len(),
+                        "peer failed to serve hashes it announced"
+                    );
+                }
                 self.remove_hashes_from_transaction_fetcher(fetched);
 
                 //
