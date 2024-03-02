@@ -193,6 +193,11 @@ The transaction lookup stage builds an index of transaction hashes to their sequ
 # Lower thresholds correspond to more frequent disk I/O (writes),
 # but lowers memory usage
 chunk_size = 5000000
+
+# The size of temporary file for ETL data collector.
+#
+# Lower threshold corresponds to more frequent flushes,
+# but lowers temporary storage usage
 etl_file-size = 524288000
 ```
 
