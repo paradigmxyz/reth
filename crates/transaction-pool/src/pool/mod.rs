@@ -373,11 +373,10 @@ where
             changed_senders,
         );
 
-        
         // This will discard outdated transactions based on the account's nonce
         self.delete_discarded_blobs(outcome.discarded.iter());
 
-        self.prune_sender_info(&outcome);
+        self.prune_sender_info();
         // notify listeners about updates
         self.notify_on_new_state(outcome);
     }
@@ -687,20 +686,20 @@ where
     }
 
     /// Prune known senders which do not exist in any subpool
-    pub(crate) fn prune_sender_info(
-        &self,
-        outcome: &OnNewCanonicalStateOutcome<T::Transaction>
-    ) {
+    pub(crate) fn prune_sender_info(&self) {
+        let mut pool = self.pool.write();
+        let identifiers = &self.identifiers;
+
         for sender_address in self.unique_senders().iter() {
-            for tx in self.get_transactions_by_sender(*sender_address) {
+            if identifiers.read().sender_id(sender_address).is_none() {
+                // will create sender identifier
                 let sender_id = self.get_sender_id(*sender_address);
-                if outcome.mined.contains(tx.hash()) || outcome.discarded.iter().any(|d| d.sender_id() == sender_id) {
-                    let mut pool = self.pool.write();
-                    pool.remove_sender_info(&sender_id);
-                    let mut identifiers = self.identifiers.write();
-                    identifiers.remove_sender_address(&sender_id);
-                    identifiers.remove_sender_id(sender_address);
-                }
+
+                pool.remove_sender_info(&sender_id);
+
+                // clean up created sender identifier
+                identifiers.write().remove_sender_address(&sender_id);
+                identifiers.write().remove_sender_id(sender_address);
             }
         }
     }

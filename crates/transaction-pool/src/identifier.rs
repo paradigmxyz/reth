@@ -28,7 +28,7 @@ impl SenderIdentifiers {
         self.address_to_id.get(addr).copied()
     }
 
-    /// Returns the existing `SendId` or assigns a new one if it's missing
+    /// Returns the existing `SenderId` or assigns a new one if it's missing
     pub(crate) fn sender_id_or_create(&mut self, addr: Address) -> SenderId {
         self.sender_id(&addr).unwrap_or_else(|| {
             let id = self.next_id();
@@ -36,6 +36,13 @@ impl SenderIdentifiers {
             self.sender_to_address.insert(id, addr);
             id
         })
+    }
+
+    /// Returns a new address
+    fn next_id(&mut self) -> SenderId {
+        let id = self.id;
+        self.id = self.id.wrapping_add(1);
+        SenderId(id)
     }
 
     /// Remove the sender address via its `SenderId`.
@@ -46,13 +53,6 @@ impl SenderIdentifiers {
     /// Remove the `SenderId` via its address.
     pub(crate) fn remove_sender_id(&mut self, addr: &Address) -> Option<SenderId> {
         self.address_to_id.remove(addr)
-    }
-
-    /// Returns a new address
-    fn next_id(&mut self) -> SenderId {
-        let id = self.id;
-        self.id = self.id.wrapping_add(1);
-        SenderId(id)
     }
 }
 
