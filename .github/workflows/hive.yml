@@ -162,7 +162,8 @@ jobs:
     name: run
     runs-on:
       group: Reth
-
+    permissions:
+      issues: write
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v3
@@ -191,6 +192,26 @@ jobs:
           cd hivetests
           hive --sim "${{ matrix.sim }}$" --sim.limit "${{matrix.limit}}/${{join(matrix.include, '|')}}" --client reth
 
+      - name: Create github issue if sim failed
+        if: ${{ failure() }}
+        run: |
+          echo "Simulator failed, creating issue"
+          # Check if issue already exists
+          # get all issues with the label C-hivetest, loop over each page and check if the issue already exists
+          
+          existing_issues=$(gh api /repos/paradigmxyz/reth/issues -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -F "labels=C-hivetest" --method GET | jq '.[].title')
+          if [[ $existing_issues == *"Hive Test Failure: ${{ matrix.sim }}"* ]]; then
+            echo "Issue already exists"
+            exit 0
+          fi
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            /repos/${{ github.repository }}/issues \
+            -f title='Hive Test Failure: ${{ matrix.sim }}' \
+            -f body="!!!!!!! This is an automated issue created by the hive test failure !!!!!!!<br /><br />The hive test for ${{ matrix.sim }} failed. Please investigate and fix the issue.<br /><br />[Link to the failed run](https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }})" \
+            -f "labels[]=C-hivetest" 
       - name: Print simulator output
         if: ${{ failure() }}
         run: |
