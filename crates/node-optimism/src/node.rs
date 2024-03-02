@@ -16,7 +16,7 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore, CoinbaseTipOrdering, TransactionPool,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 
@@ -88,11 +88,11 @@ impl<Node> PoolBuilder<Node> for OptimismPoolBuilder
 where
     Node: FullNodeTypes,
 {
-    type Pool = OpTransactionPool<Node::Provider, InMemoryBlobStore>;
+    type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.data_dir();
-        let blob_store = InMemoryBlobStore::default();
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
 
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
