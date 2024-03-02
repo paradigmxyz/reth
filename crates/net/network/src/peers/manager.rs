@@ -2318,6 +2318,20 @@ mod tests {
             peer_manager.add_peer(PeerId::random(), socket_addr, None);
         }
 
+        for _ in 0..peer_manager.connection_info.max_concurrent_outbound_dials * 2 {
+            match event!(peer_manager) {
+                PeerAction::PeerAdded(_) => {}
+                _ => unreachable!(),
+            }
+        }
+
+        for _ in 0..peer_manager.connection_info.max_concurrent_outbound_dials {
+            match event!(peer_manager) {
+                PeerAction::Connect { .. } => {}
+                _ => unreachable!(),
+            }
+        }
+
         // generate 'Connect' actions
         peer_manager.fill_outbound_slots();
 
@@ -2345,5 +2359,8 @@ mod tests {
         for peer_id in num_pendingout_states.iter() {
             assert_eq!(peer_manager.peers.get(peer_id).unwrap().state, PeerConnectionState::Out);
         }
+
+        // no more pending outbound connections
+        assert_eq!(peer_manager.connection_info.num_pendingout, 0);
     }
 }
