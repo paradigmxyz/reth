@@ -91,7 +91,7 @@ impl TransactionFetcher {
         let remove = || -> bool {
             if let Some(inflight_count) = self.active_peers.get(peer_id) {
                 *inflight_count -= 1;
-                if *inflight_count <= 0 {
+                if *inflight_count == 0 {
                     return true
                 }
             }
