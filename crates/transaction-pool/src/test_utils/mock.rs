@@ -37,42 +37,6 @@ pub fn mock_tx_pool() -> MockTxPool {
     MockTxPool::new(Default::default(), Default::default())
 }
 
-#[cfg(feature = "optimism")]
-macro_rules! op_set_value {
-    ($this:ident, sender, $value:ident) => {
-        $this.from = $value;
-    };
-    ($this:ident, gas_limit, $value:ident) => {
-        $this.gas_limit = $value;
-    };
-    ($this:ident, value, $value:ident) => {
-        $this.value = $value.into();
-    };
-    ($this:ident, input, $value:ident) => {
-        $this.value = $value;
-    };
-    ($this:ident, $other:ident, $field:ident) => {};
-}
-
-#[cfg(feature = "optimism")]
-macro_rules! op_get_value {
-    ($this:ident, sender) => {
-        $this.from
-    };
-    ($this:ident, gas_limit) => {
-        $this.gas_limit
-    };
-    ($this:ident, value) => {
-        $this.value.into()
-    };
-    ($this:ident, input) => {
-        $this.input.clone()
-    };
-    ($this:ident, $other:ident) => {
-        Default::default()
-    };
-}
-
 /// Sets the value for the field
 macro_rules! set_value {
     ($this:ident => $field:ident) => {
@@ -331,6 +295,8 @@ impl MockTransaction {
             TxType::EIP2930 => Self::eip2930(),
             TxType::EIP1559 => Self::eip1559(),
             TxType::EIP4844 => Self::eip4844(),
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => todo!(), // not handled in mock tx
         }
     }
 
@@ -751,6 +717,12 @@ impl PoolTransaction for MockTransaction {
     fn chain_id(&self) -> Option<u64> {
         Some(1)
     }
+
+    /// Returns true if the transaction is a deposit transaction.
+    #[cfg(feature = "optimism")]
+    fn is_deposit(&self) -> bool {
+        false
+    }
 }
 
 impl FromRecoveredTransaction for MockTransaction {
@@ -850,6 +822,8 @@ impl FromRecoveredTransaction for MockTransaction {
                 accesslist: access_list,
                 size,
             },
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => todo!(), // not handled in mock tx
         }
     }
 }
