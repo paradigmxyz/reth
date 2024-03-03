@@ -1247,13 +1247,13 @@ where
                     // is an announcement (if same hashes are announced that didn't fit into a
                     // previous request).
                     //
+                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+                    // (128 KiB / 10 bytes > 13k transactions).
+                    //
                     // If this is an event with `Transactions` message, since transactions aren't
                     // validated until they are inserted into the pool, this can potentially queue
                     // >13k transactions for insertion to pool. More if the message size is bigger
                     // than the soft limit on a `Transactions` broadcast message, which is 128 KiB.
-                    //
-                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes.
-                    // 128 KiB / 10 bytes > 13k transactions
                     if let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
                         this.on_network_tx_event(event);
                         some_ready = true;
@@ -1270,13 +1270,13 @@ where
                     // Advance fetching transaction events (flush transaction fetcher and queue for
                     // import to pool).
                     //
+                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+                    // (2 MiB / 10 bytes > 200k transactions).
+                    //
                     // Since transactions aren't validated until they are inserted into the pool,
                     // this can potentially queue >200k transactions for insertion to pool. More
                     // if the message size is bigger than the soft limit on a `PooledTransactions`
                     // response which is 2 MiB.
-                    //
-                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes.
-                    // 2 MiB / 10 bytes > 200k transactions
                     if let Poll::Ready(Some(fetch_event)) =
                         this.transaction_fetcher.poll_next_unpin(cx)
                     {
@@ -1311,13 +1311,13 @@ where
                     // minimum batch size is 1 transaction (and might often be the case with blob
                     // transactions).
                     //
+                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+                    // (2 MiB / 10 bytes > 200k transactions).
+                    //
                     // Since transactions aren't validated until they are inserted into the pool,
                     // this can potentially validate >200k transactions. More if the message size
                     // is bigger than the soft limit on a `PooledTransactions` response which is
                     // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
-                    //
-                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes.
-                    // 2 MiB / 10 bytes > 200k transactions
                     if let Poll::Ready(Some(batch_import_res)) =
                         this.pool_imports.poll_next_unpin(cx)
                     {
