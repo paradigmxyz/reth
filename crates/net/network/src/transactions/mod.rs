@@ -2070,7 +2070,7 @@ mod tests {
 
         let hashes = hashes.into_iter().collect::<HashSet<_>>();
 
-        assert_eq!(hashes, seen_hashes.clone().into_iter().collect::<HashSet<_>>());
+        assert_eq!(hashes, seen_hashes.into_iter().collect::<HashSet<_>>());
 
         // fail request to peer_1
         response
