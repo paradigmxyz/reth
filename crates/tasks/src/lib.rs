@@ -1,4 +1,8 @@
 //! Reth task management.
+//!
+//! # Feature Flags
+//!
+//! - `rayon`: Enable rayon thread pool for blocking tasks.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
