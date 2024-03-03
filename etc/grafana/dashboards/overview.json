@@ -158,7 +158,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -223,7 +225,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -288,7 +292,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -353,7 +359,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -418,7 +426,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -483,7 +493,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -559,7 +571,9 @@
       "options": {
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -624,7 +638,9 @@
         "minVizWidth": 0,
         "orientation": "horizontal",
         "reduceOptions": {
-          "calcs": ["last"],
+          "calcs": [
+            "last"
+          ],
           "fields": "",
           "values": false
         },
@@ -1484,16 +1500,22 @@
       },
       "id": 48,
       "options": {
-        "displayLabels": ["name"],
+        "displayLabels": [
+          "name"
+        ],
         "legend": {
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "values": ["value"]
+          "values": [
+            "value"
+          ]
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -1650,11 +1672,15 @@
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "values": ["value"]
+          "values": [
+            "value"
+          ]
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -1814,7 +1840,9 @@
         "footer": {
           "countRows": false,
           "fields": "",
-          "reducer": ["sum"],
+          "reducer": [
+            "sum"
+          ],
           "show": false
         },
         "showHeader": true
@@ -2101,16 +2129,22 @@
       },
       "id": 202,
       "options": {
-        "displayLabels": ["name"],
+        "displayLabels": [
+          "name"
+        ],
         "legend": {
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "values": ["value"]
+          "values": [
+            "value"
+          ]
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -2260,7 +2294,9 @@
         "footer": {
           "countRows": false,
           "fields": "",
-          "reducer": ["sum"],
+          "reducer": [
+            "sum"
+          ],
           "show": false
         },
         "showHeader": true
@@ -2408,7 +2444,9 @@
         "footer": {
           "countRows": false,
           "fields": "",
-          "reducer": ["sum"],
+          "reducer": [
+            "sum"
+          ],
           "show": false
         },
         "showHeader": true
@@ -2827,7 +2865,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2920,7 +2959,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3038,7 +3078,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3063,7 +3104,9 @@
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "values": ["value"]
+          "values": [
+            "value"
+          ]
         },
         "tooltip": {
           "mode": "multi",
@@ -3146,7 +3189,9 @@
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -3338,7 +3383,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3445,7 +3491,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3600,7 +3647,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3718,7 +3766,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3838,7 +3887,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4038,7 +4088,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
@@ -4152,7 +4203,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4257,7 +4309,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4381,7 +4434,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4491,7 +4545,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Tracks a heuristic of the memory footprint of the various transaction pool sub-pools",
+      "description": "Transaction pool maintenance metrics",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4533,15 +4587,15 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
                 "value": 80
               }
             ]
-          },
-          "unit": "bytes"
+          }
         },
         "overrides": []
       },
@@ -4551,7 +4605,7 @@
         "x": 0,
         "y": 155
       },
-      "id": 91,
+      "id": 122,
       "options": {
         "legend": {
           "calcs": [],
@@ -4570,49 +4624,70 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_basefee_pool_size_bytes{instance=~\"$instance\"}",
-          "legendFormat": "Base fee pool size",
+          "expr": "reth_transaction_pool_dirty_accounts{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Dirty Accounts",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_pending_pool_size_bytes{instance=~\"$instance\"}",
+          "expr": "reth_transaction_pool_drift_count{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
           "hide": false,
-          "legendFormat": "Pending pool size",
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Drift Count",
           "range": true,
-          "refId": "B"
+          "refId": "B",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_queued_pool_size_bytes{instance=~\"$instance\"}",
+          "expr": "reth_transaction_pool_reinserted_transactions{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
           "hide": false,
-          "legendFormat": "Queued pool size",
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Reinserted Transactions",
           "range": true,
-          "refId": "C"
+          "refId": "C",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_blob_pool_size_bytes{instance=~\"$instance\"}",
-          "legendFormat": "Blob pool size",
+          "expr": "reth_transaction_pool_deleted_tracked_finalized_blobs{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Deleted Tracked Finalized Blobs",
           "range": true,
-          "refId": "D"
+          "refId": "D",
+          "useBackend": false
         }
       ],
-      "title": "Subpool sizes in bytes",
+      "title": "TxPool Maintenance",
       "type": "timeseries"
     },
     {
@@ -4662,7 +4737,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4748,7 +4824,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Currently active outgoing GetPooledTransactions requests.",
+      "description": "Tracks a heuristic of the memory footprint of the various transaction pool sub-pools",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4790,14 +4866,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "bytes"
         },
         "overrides": []
       },
@@ -4807,7 +4885,7 @@
         "x": 0,
         "y": 163
       },
-      "id": 104,
+      "id": 91,
       "options": {
         "legend": {
           "calcs": [],
@@ -4827,14 +4905,48 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_inflight_transaction_requests{instance=~\"$instance\"}",
+          "expr": "reth_transaction_pool_basefee_pool_size_bytes{instance=~\"$instance\"}",
+          "legendFormat": "Base fee pool size",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_pending_pool_size_bytes{instance=~\"$instance\"}",
           "hide": false,
-          "legendFormat": "Inflight Transaction Requests",
+          "legendFormat": "Pending pool size",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_queued_pool_size_bytes{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Queued pool size",
           "range": true,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blob_pool_size_bytes{instance=~\"$instance\"}",
+          "legendFormat": "Blob pool size",
+          "range": true,
+          "refId": "D"
         }
       ],
-      "title": "Inflight Transaction Requests",
+      "title": "Subpool sizes in bytes",
       "type": "timeseries"
     },
     {
@@ -4884,7 +4996,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4936,6 +5049,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "description": "Currently active outgoing GetPooledTransactions requests.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4977,7 +5091,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4994,7 +5109,7 @@
         "x": 0,
         "y": 171
       },
-      "id": 199,
+      "id": 104,
       "options": {
         "legend": {
           "calcs": [],
@@ -5013,46 +5128,15 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_network_hashes_pending_fetch{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Hashes in Pending Fetch Cache",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
+          "expr": "reth_network_inflight_transaction_requests{instance=~\"$instance\"}",
           "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Hashes in Inflight Requests",
+          "legendFormat": "Inflight Transaction Requests",
           "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "__expr__",
-            "uid": "${DS_EXPRESSION}"
-          },
-          "expression": "$A + $B",
-          "hide": false,
-          "refId": "Total Hashes in Transaction Fetcher",
-          "type": "math"
+          "refId": "C"
         }
       ],
-      "title": "Transaction Fetcher Hashes",
+      "title": "Inflight Transaction Requests",
       "type": "timeseries"
     },
     {
@@ -5102,7 +5186,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5203,14 +5288,13 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Tracks the number of transaction messages in the channel from the network to the transaction pool",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
-            "axisCenteredZero": true,
+            "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
@@ -5245,42 +5329,17 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
                 "value": 80
               }
             ]
-          },
-          "unit": "reqps"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "B"
-            },
-            "properties": [
-              {
-                "id": "custom.transform",
-                "value": "negative-Y"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "C"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "events"
-              }
-            ]
           }
-        ]
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -5288,7 +5347,7 @@
         "x": 0,
         "y": 179
       },
-      "id": 95,
+      "id": 199,
       "options": {
         "legend": {
           "calcs": [],
@@ -5307,40 +5366,46 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_network_pool_transactions_messages_sent{instance=~\"$instance\"}[$__rate_interval])",
-          "hide": false,
+          "expr": "reth_network_hashes_pending_fetch{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Tx",
+          "legendFormat": "Hashes in Pending Fetch Cache",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_network_pool_transactions_messages_received{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
           "hide": false,
-          "legendFormat": "Rx",
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Hashes in Inflight Requests",
           "range": true,
-          "refId": "B"
+          "refId": "B",
+          "useBackend": false
         },
         {
           "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "type": "__expr__",
+            "uid": "${DS_EXPRESSION}"
           },
-          "editorMode": "code",
-          "expr": "reth_network_pool_transactions_messages_sent{instance=~\"$instance\"} - reth_network_pool_transactions_messages_received{instance=~\"$instance\"}",
+          "expression": "$A + $B",
           "hide": false,
-          "legendFormat": "Messages in channel",
-          "range": true,
-          "refId": "C"
+          "refId": "Total Hashes in Transaction Fetcher",
+          "type": "math"
         }
       ],
-      "title": "Network transaction channel",
+      "title": "Transaction Fetcher Hashes",
       "type": "timeseries"
     },
     {
@@ -5390,7 +5455,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5497,6 +5563,278 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "description": "Tracks the number of transaction messages in the channel from the network to the transaction pool",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": true,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.transform",
+                "value": "negative-Y"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "events"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 187
+      },
+      "id": 95,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "rate(reth_network_pool_transactions_messages_sent{instance=~\"$instance\"}[$__rate_interval])",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Tx",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "rate(reth_network_pool_transactions_messages_received{instance=~\"$instance\"}[$__rate_interval])",
+          "hide": false,
+          "legendFormat": "Rx",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_network_pool_transactions_messages_sent{instance=~\"$instance\"} - reth_network_pool_transactions_messages_received{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Messages in channel",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Network transaction channel",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Duration spent insdie one call to poll the `TransactionsManager` future",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Transactions Manager Future"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 187
+      },
+      "id": 201,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_duration_poll_tx_manager{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Transactions Manager Future",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Transactions Manager Future Poll Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "description": "Accumulated durations of nested function calls, in one call to poll `TransactionsManager` future (`TransactionsManager` future has a loop, hence accumulated).\n\nNetwork Events - stream peer session updates from `NetworkManager`\nTransaction Events - stream txns gossip fom `NetworkManager`\nImported Transactions - stream hashes of successfully inserted txns from `TransactionPool`\nPending pool imports - flush txns to pool from `TransactionsManager`\nFetch Events - stream fetch txn events (success case wraps a tx) from `TransactionFetcher`\nCommands - stream commands from (?) to fetch/serve/propagate txns\n  ",
       "fieldConfig": {
         "defaults": {
@@ -5539,7 +5877,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5555,7 +5894,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 187
+        "y": 195
       },
       "id": 200,
       "options": {
@@ -5683,7 +6022,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Duration spent insdie one call to poll the `TransactionsManager` future",
+      "description": "Duration spent inside one call to poll the `NetworkManager` future",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5725,7 +6064,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5735,38 +6075,15 @@
           },
           "unit": "s"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": ["Transactions Manager Future"],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 187
+        "y": 195
       },
-      "id": 201,
+      "id": 209,
       "options": {
         "legend": {
           "calcs": [],
@@ -5787,18 +6104,18 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_network_duration_poll_tx_manager{instance=\"$instance\"}",
+          "expr": "reth_network_duration_poll_network_manager{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Transactions Manager Future",
+          "legendFormat": "Network Manager Future",
           "range": true,
-          "refId": "A",
+          "refId": "B",
           "useBackend": false
         }
       ],
-      "title": "Transactions Manager Future Poll Duration",
+      "title": "Network Manager Future Poll Duration",
       "type": "timeseries"
     },
     {
@@ -5806,7 +6123,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Transaction pool maintenance metrics",
+      "description": "Durations of nested function calls, in one call to poll `NetworkManager` future.\n\nNetwork Handle Message - stream network handle messages from `Transactions`\nSwarm Events - stream txns gossip fom `NetworkManager`",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5848,14 +6165,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "s"
         },
         "overrides": []
       },
@@ -5863,9 +6182,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 154
+        "y": 203
       },
-      "id": 122,
+      "id": 208,
       "options": {
         "legend": {
           "calcs": [],
@@ -5886,28 +6205,12 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_dirty_accounts{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Dirty Accounts",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_drift_count{instance=~\"$instance\"}",
+          "expr": "reth_network_duration_poll_network_handle{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Drift Count",
+          "legendFormat": "Network Handle Messages",
           "range": true,
           "refId": "B",
           "useBackend": false
@@ -5919,35 +6222,18 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_reinserted_transactions{instance=~\"$instance\"}",
+          "expr": "reth_network_duration_poll_swarm{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Reinserted Transactions",
+          "legendFormat": "Swarm Events",
           "range": true,
-          "refId": "C",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_deleted_tracked_finalized_blobs{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Deleted Tracked Finalized Blobs",
-          "range": true,
-          "refId": "D",
+          "refId": "A",
           "useBackend": false
         }
       ],
-      "title": "TxPool Maintenance",
+      "title": "Network Manager Poll Duration Nested Function Calls",
       "type": "timeseries"
     },
     {
@@ -5956,7 +6242,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 195
+        "y": 211
       },
       "id": 79,
       "panels": [],
@@ -6012,7 +6298,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6027,7 +6314,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 196
+        "y": 212
       },
       "id": 74,
       "options": {
@@ -6106,7 +6393,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6121,7 +6409,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 196
+        "y": 212
       },
       "id": 80,
       "options": {
@@ -6200,7 +6488,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6215,7 +6504,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 204
+        "y": 220
       },
       "id": 81,
       "options": {
@@ -6309,7 +6598,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 204
+        "y": 220
       },
       "id": 114,
       "options": {
@@ -6404,7 +6693,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 212
+        "y": 228
       },
       "id": 158,
       "options": {
@@ -6525,7 +6814,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 212
+        "y": 228
       },
       "id": 190,
       "options": {
@@ -6563,7 +6852,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 220
+        "y": 236
       },
       "id": 87,
       "panels": [],
@@ -6634,7 +6923,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 221
+        "y": 237
       },
       "id": 83,
       "options": {
@@ -6727,7 +7016,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 221
+        "y": 237
       },
       "id": 84,
       "options": {
@@ -6832,7 +7121,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 229
+        "y": 245
       },
       "id": 85,
       "options": {
@@ -6869,7 +7158,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 237
+        "y": 253
       },
       "id": 68,
       "panels": [],
@@ -6940,7 +7229,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 238
+        "y": 254
       },
       "id": 60,
       "options": {
@@ -7033,7 +7322,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 238
+        "y": 254
       },
       "id": 62,
       "options": {
@@ -7126,7 +7415,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 246
+        "y": 262
       },
       "id": 64,
       "options": {
@@ -7163,7 +7452,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 254
+        "y": 270
       },
       "id": 97,
       "panels": [],
@@ -7232,7 +7521,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 255
+        "y": 271
       },
       "id": 98,
       "options": {
@@ -7392,7 +7681,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 255
+        "y": 271
       },
       "id": 101,
       "options": {
@@ -7487,7 +7776,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 263
+        "y": 279
       },
       "id": 99,
       "options": {
@@ -7582,7 +7871,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 263
+        "y": 279
       },
       "id": 100,
       "options": {
@@ -7620,7 +7909,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 271
+        "y": 287
       },
       "id": 105,
       "panels": [],
@@ -7690,7 +7979,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 272
+        "y": 288
       },
       "id": 106,
       "options": {
@@ -7785,7 +8074,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 272
+        "y": 288
       },
       "id": 107,
       "options": {
@@ -7823,7 +8112,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 280
+        "y": 296
       },
       "id": 108,
       "panels": [],
@@ -7918,7 +8207,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 281
+        "y": 297
       },
       "id": 109,
       "options": {
@@ -7980,7 +8269,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 281
+        "y": 297
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -8106,7 +8395,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 289
+        "y": 305
       },
       "id": 120,
       "options": {
@@ -8164,7 +8453,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 289
+        "y": 305
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -8314,7 +8603,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 297
+        "y": 313
       },
       "id": 198,
       "options": {
@@ -8521,6 +8810,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 4,
+  "version": 3,
   "weekStart": ""
 }
