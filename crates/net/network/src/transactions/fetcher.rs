@@ -90,10 +90,10 @@ impl TransactionFetcher {
     fn decrement_inflight_request_count_for(&mut self, peer_id: &PeerId) {
         let remove = || -> bool {
             if let Some(inflight_count) = self.active_peers.get(peer_id) {
-                if *inflight_count <= DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
+                *inflight_count -= 1;
+                if *inflight_count == 0 {
                     return true
                 }
-                *inflight_count -= 1;
             }
             false
         }();
