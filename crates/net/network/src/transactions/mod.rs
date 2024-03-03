@@ -1280,6 +1280,9 @@ where
                                 trace!(target: "net::tx", ?peer_id, %error, "requesting transactions from peer failed");
                                 this.on_request_error(peer_id, error);
                             }
+                            FetchEvent::EmptyResponse { peer_id } => {
+                                trace!(target: "net::tx", ?peer_id, "peer returned empty response");
+                            }
                         }
                         some_ready = true;
                     }
