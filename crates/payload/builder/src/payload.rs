@@ -120,10 +120,6 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
-            // Optimism-specific: Post-cancun, the parent beacon block root is included in the
-            // enveloped payload. We set this as `None` here so that optimism-specific
-            // handling can fill the value.
-            parent_beacon_block_root: None,
         }
     }
 }

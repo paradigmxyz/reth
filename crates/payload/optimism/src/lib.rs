@@ -229,6 +229,7 @@ mod builder {
                 sealed_block,
                 U256::ZERO,
                 chain_spec,
+                attributes,
             ))
         }
     }
@@ -511,7 +512,7 @@ mod builder {
             &mut db,
             &chain_spec,
             attributes.payload_attributes.timestamp,
-            attributes.payload_attributes.withdrawals,
+            attributes.clone().payload_attributes.withdrawals,
         )?;
 
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
@@ -592,6 +593,7 @@ mod builder {
             sealed_block,
             total_fees,
             chain_spec,
+            attributes,
         );
 
         // extend the payload with the blob sidecars from the executed txs

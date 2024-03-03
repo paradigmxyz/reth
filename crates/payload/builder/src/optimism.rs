@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{EthBuiltPayload, EthPayloadBuilderAttributes};
+use crate::EthPayloadBuilderAttributes;
 use alloy_rlp::{Encodable, Error as DecodeError};
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
@@ -10,13 +10,14 @@ use reth_primitives::{
     Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1,
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, OptimismExecutionPayloadEnvelopeV3,
     OptimismPayloadAttributes, PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v3, convert_block_to_payload_field_v2,
     convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
 };
+use revm_primitives::FixedBytes;
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,26 +176,22 @@ pub struct OptimismBuiltPayload {
     pub(crate) sidecars: Vec<BlobTransactionSidecar>,
     /// The rollup's chainspec.
     pub(crate) chain_spec: Arc<ChainSpec>,
-}
-
-impl From<EthBuiltPayload> for OptimismBuiltPayload {
-    fn from(value: EthBuiltPayload) -> Self {
-        Self {
-            id: value.id,
-            block: value.block,
-            fees: value.fees,
-            sidecars: value.sidecars,
-            chain_spec: Arc::new(ChainSpec::default()),
-        }
-    }
+    /// The payload attributes.
+    pub(crate) attributes: OptimismPayloadBuilderAttributes,
 }
 
 // === impl BuiltPayload ===
 
 impl OptimismBuiltPayload {
     /// Initializes the payload with the given initial block.
-    pub fn new(id: PayloadId, block: SealedBlock, fees: U256, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { id, block, fees, sidecars: Vec::new(), chain_spec }
+    pub fn new(
+        id: PayloadId,
+        block: SealedBlock,
+        fees: U256,
+        chain_spec: Arc<ChainSpec>,
+        attributes: OptimismPayloadBuilderAttributes,
+    ) -> Self {
+        Self { id, block, fees, sidecars: Vec::new(), chain_spec, attributes }
     }
 
     /// Returns the identifier of the payload.
@@ -257,12 +254,18 @@ impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     }
 }
 
-impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV3 {
+impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
     fn from(value: OptimismBuiltPayload) -> Self {
-        let OptimismBuiltPayload { block, fees, sidecars, .. } = value;
+        let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
 
-        ExecutionPayloadEnvelopeV3 {
-            execution_payload: block_to_payload_v3(block),
+        let parent_beacon_block_root =
+            if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
+                attributes.parent_beacon_block_root().unwrap_or_else(FixedBytes::<32>::default)
+            } else {
+                FixedBytes::<32>::default()
+            };
+        OptimismExecutionPayloadEnvelopeV3 {
+            execution_payload: block_to_payload_v3(block.clone()),
             block_value: fees,
             // From the engine API spec:
             //
@@ -274,7 +277,7 @@ impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV3 {
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
-            parent_beacon_block_root: None,
+            parent_beacon_block_root,
         }
     }
 }
