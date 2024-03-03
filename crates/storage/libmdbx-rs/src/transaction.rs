@@ -536,7 +536,7 @@ impl TransactionPtr {
     //
     // When transaction is timed out via `TxnManager`, it's actually reset using
     // `mdbx_txn_reset`. It makes the transaction unusable (MDBX fails on any usages of such
-    // transactions),
+    // transactions).
     //
     // Importantly, we can't rely on `MDBX_TXN_FINISHED` flag to check if the transaction is timed
     // out using `mdbx_txn_reset`, because MDBX uses it in other cases too.
