@@ -149,7 +149,7 @@ impl TransactionFetcher {
             let idle_peer = self.get_idle_peer_for(hash, &is_session_active);
 
             if idle_peer.is_some() {
-                hashes_to_request.push(hash);
+                hashes_to_request.insert(hash);
                 break idle_peer.copied()
             }
 
@@ -160,7 +160,7 @@ impl TransactionFetcher {
                 }
             }
         };
-        let hash = hashes_to_request.first()?;
+        let hash = hashes_to_request.iter().next()?;
 
         // pop hash that is loaded in request buffer from cache of hashes pending fetch
         drop(hashes_pending_fetch_iter);
@@ -206,7 +206,7 @@ impl TransactionFetcher {
         let mut hashes_from_announcement_iter = hashes_from_announcement.into_iter();
 
         if let Some((hash, Some((_ty, size)))) = hashes_from_announcement_iter.next() {
-            hashes_to_request.push(hash);
+            hashes_to_request.insert(hash);
 
             // tx is really big, pack request with single tx
             if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
@@ -235,9 +235,9 @@ impl TransactionFetcher {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
                 acc_size_response = next_acc_size;
-                hashes_to_request.push(hash)
+                _ = hashes_to_request.insert(hash)
             } else {
-                surplus_hashes.push(hash)
+                _ = surplus_hashes.insert(hash)
             }
 
             let free_space =
@@ -275,11 +275,11 @@ impl TransactionFetcher {
             RequestTxHashes::default()
         } else {
             let surplus_hashes =
-                hashes.split_off(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST - 1);
+                hashes.retain_count(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
             *hashes_to_request = hashes;
             hashes_to_request.shrink_to_fit();
 
-            RequestTxHashes::new(surplus_hashes)
+            surplus_hashes
         }
     }
 
@@ -604,7 +604,9 @@ impl TransactionFetcher {
 
         let (response, rx) = oneshot::channel();
         let req: PeerRequest = PeerRequest::GetPooledTransactions {
-            request: GetPooledTransactions(new_announced_hashes.clone()),
+            request: GetPooledTransactions(
+                new_announced_hashes.iter().copied().collect::<Vec<_>>(),
+            ),
             response,
         };
 
@@ -612,12 +614,9 @@ impl TransactionFetcher {
         if let Err(err) = peer.request_tx.try_send(req) {
             // peer channel is full
             match err {
-                TrySendError::Full(req) | TrySendError::Closed(req) => {
-                    // need to do some cleanup so
-                    let req = req.into_get_pooled_transactions().expect("is get pooled tx");
-
+                TrySendError::Full(_) | TrySendError::Closed(_) => {
                     metrics_increment_egress_peer_channel_full();
-                    return Some(RequestTxHashes::new(req.0))
+                    return Some(new_announced_hashes)
                 }
             }
         } else {
@@ -657,7 +656,7 @@ impl TransactionFetcher {
         seen_hashes: &LruCache<TxHash>,
         mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
     ) {
-        let Some(hash) = hashes_to_request.first() else { return };
+        let Some(hash) = hashes_to_request.iter().next() else { return };
 
         let mut acc_size_response = self
             .hashes_fetch_inflight_and_pending_fetch
@@ -681,7 +680,7 @@ impl TransactionFetcher {
             };
 
             // 2. Optimistically include the hash in the request.
-            hashes_to_request.push(*hash);
+            hashes_to_request.insert(*hash);
 
             // 3. Accumulate expected total response size.
             let size = self
@@ -1141,7 +1140,7 @@ impl DedupPayload for VerifiedPooledTransactions {
 trait VerifyPooledTransactionsResponse {
     fn verify(
         self,
-        requested_hashes: &[TxHash],
+        requested_hashes: &RequestTxHashes,
         peer_id: &PeerId,
     ) -> (VerificationOutcome, VerifiedPooledTransactions);
 }
@@ -1149,7 +1148,7 @@ trait VerifyPooledTransactionsResponse {
 impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
     fn verify(
         self,
-        requested_hashes: &[TxHash],
+        requested_hashes: &RequestTxHashes,
         _peer_id: &PeerId,
     ) -> (VerificationOutcome, VerifiedPooledTransactions) {
         let mut verification_outcome = VerificationOutcome::Ok;
@@ -1291,9 +1290,11 @@ mod test {
             0,
         ];
 
-        let expected_request_hashes = [eth68_hashes[0], eth68_hashes[2]];
+        let expected_request_hashes =
+            [eth68_hashes[0], eth68_hashes[2]].into_iter().collect::<HashSet<_>>();
 
-        let expected_surplus_hashes = [eth68_hashes[1], eth68_hashes[3], eth68_hashes[4]];
+        let expected_surplus_hashes =
+            [eth68_hashes[1], eth68_hashes[3], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
 
         let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
 
@@ -1310,11 +1311,11 @@ mod test {
         let surplus_eth68_hashes =
             tx_fetcher.pack_request_eth68(&mut eth68_hashes_to_request, valid_announcement_data);
 
-        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<Vec<_>>();
-        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<Vec<_>>();
+        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<HashSet<_>>();
+        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<HashSet<_>>();
 
-        assert_eq!(expected_request_hashes.to_vec(), eth68_hashes_to_request);
-        assert_eq!(expected_surplus_hashes.to_vec(), surplus_eth68_hashes);
+        assert_eq!(expected_request_hashes, eth68_hashes_to_request);
+        assert_eq!(expected_surplus_hashes, surplus_eth68_hashes);
     }
 
     #[tokio::test]
@@ -1437,7 +1438,8 @@ mod test {
             assert_ne!(hash, signed_tx_2.hash())
         }
 
-        let request_hashes = RequestTxHashes::new(request_hashes.clone().to_vec());
+        let request_hashes =
+            RequestTxHashes::new(request_hashes.into_iter().collect::<HashSet<_>>());
 
         // but response contains tx 1 + another tx
         let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2.clone()]);
