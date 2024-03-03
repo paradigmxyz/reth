@@ -1390,7 +1390,8 @@ mod test {
             assert_ne!(hash, signed_tx_2.hash())
         }
 
-        let request_hashes = RequestTxHashes::new(request_hashes.clone().to_vec());
+        let request_hashes =
+            RequestTxHashes::new(request_hashes.into_iter().collect::<HashSet<_>>());
 
         // but response contains tx 1 + another tx
         let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2.clone()]);
