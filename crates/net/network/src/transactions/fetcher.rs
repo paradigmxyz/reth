@@ -1,6 +1,7 @@
 use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
+    metrics::TransactionFetcherMetrics,
     transactions::{validation, PartiallyFilterMessage},
 };
 use derive_more::{Constructor, Deref};
@@ -21,6 +22,7 @@ use std::{
     num::NonZeroUsize,
     pin::Pin,
     task::{ready, Context, Poll},
+    time::Instant,
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::{debug, trace};
@@ -60,18 +62,40 @@ pub struct TransactionFetcher {
     pub(super) filter_valid_message: MessageFilter,
     /// Info on capacity of the transaction fetcher.
     pub info: TransactionFetcherInfo,
+    #[doc(hidden)]
+    metrics: TransactionFetcherMetrics,
 }
 
 // === impl TransactionFetcher ===
 
 impl TransactionFetcher {
+    #[inline]
+    pub fn update_metrics(&self) {
+        let metrics = &self.metrics;
+
+        metrics.inflight_transaction_requests.set(self.inflight_requests.len() as f64);
+
+        let hashes_pending_fetch = self.hashes_pending_fetch.len() as f64;
+        let total_hashes = self.hashes_fetch_inflight_and_pending_fetch.len() as f64;
+
+        metrics.hashes_pending_fetch.set(hashes_pending_fetch);
+        metrics.hashes_inflight_transaction_requests.set(total_hashes - hashes_pending_fetch);
+    }
+
     /// Sets up transaction fetcher with config
-    pub fn with_transaction_fetcher_config(mut self, config: &TransactionFetcherConfig) -> Self {
-        self.info.soft_limit_byte_size_pooled_transactions_response =
+    pub fn with_transaction_fetcher_config(config: &TransactionFetcherConfig) -> Self {
+        let mut tx_fetcher = TransactionFetcher::default();
+
+        tx_fetcher.info.soft_limit_byte_size_pooled_transactions_response =
             config.soft_limit_byte_size_pooled_transactions_response;
-        self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request =
+        tx_fetcher.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request =
             config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
-        self
+        tx_fetcher
+            .metrics
+            .capacity_inflight_requests
+            .increment(tx_fetcher.info.max_inflight_requests as u64);
+
+        tx_fetcher
     }
 
     /// Removes the specified hashes from inflight tracking.
@@ -141,6 +165,8 @@ impl TransactionFetcher {
         is_session_active: impl Fn(&PeerId) -> bool,
         mut budget: Option<usize>, // search fallback peers for max `budget` lru pending hashes
     ) -> Option<PeerId> {
+        let start = Instant::now();
+
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
         let idle_peer = loop {
@@ -165,6 +191,10 @@ impl TransactionFetcher {
         // pop hash that is loaded in request buffer from cache of hashes pending fetch
         drop(hashes_pending_fetch_iter);
         _ = self.hashes_pending_fetch.remove(hash);
+
+        self.metrics
+            .duration_find_idle_fallback_peer_for_any_pending_hash
+            .set(start.elapsed().as_secs_f64());
 
         idle_peer
     }
@@ -357,7 +387,6 @@ impl TransactionFetcher {
         &mut self,
         peers: &HashMap<PeerId, PeerMetadata>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
-        metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) {
         let init_capacity_req = approx_capacity_get_pooled_transactions_req_eth68(&self.info);
         let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
@@ -405,11 +434,9 @@ impl TransactionFetcher {
         );
 
         // request the buffered missing transactions
-        if let Some(failed_to_request_hashes) = self.request_transactions_from_peer(
-            hashes_to_request,
-            peer,
-            metrics_increment_egress_peer_channel_full,
-        ) {
+        if let Some(failed_to_request_hashes) =
+            self.request_transactions_from_peer(hashes_to_request, peer)
+        {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 failed_to_request_hashes=?failed_to_request_hashes,
@@ -548,7 +575,6 @@ impl TransactionFetcher {
         &mut self,
         new_announced_hashes: RequestTxHashes,
         peer: &PeerMetadata,
-        metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) -> Option<RequestTxHashes> {
         let peer_id: PeerId = peer.request_tx.peer_id;
         let conn_eth_version = peer.version;
@@ -615,7 +641,7 @@ impl TransactionFetcher {
             // peer channel is full
             match err {
                 TrySendError::Full(_) | TrySendError::Closed(_) => {
-                    metrics_increment_egress_peer_channel_full();
+                    self.metrics.egress_peer_channel_full.increment(1);
                     return Some(new_announced_hashes)
                 }
             }
@@ -714,6 +740,10 @@ impl TransactionFetcher {
         for hash in hashes_to_request.iter() {
             self.hashes_pending_fetch.remove(hash);
         }
+
+        self.metrics
+            .duration_fill_request_from_hashes_pending_fetch
+            .set(start.elapsed().as_secs_f64())
     }
 
     /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns
@@ -986,8 +1016,8 @@ impl Default for TransactionFetcher {
             ),
             filter_valid_message: Default::default(),
             info: TransactionFetcherInfo::default(),
+            metrics: Default::default(),
         }
-    }
 }
 
 /// Metadata of a transaction hash that is yet to be fetched.
@@ -1398,7 +1428,7 @@ mod test {
 
         // TEST
 
-        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true, || ());
+        tx_fetcher.on_fetch_pending_hashes(&peers, |_| true);
 
         // mock session of peer_1 receives request
         let req = peer_1_mock_session_rx
