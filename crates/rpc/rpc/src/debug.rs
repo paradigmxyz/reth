@@ -8,7 +8,7 @@ use crate::{
         EthTransactions,
     },
     result::{internal_rpc_err, ToRpcResult},
-    BlockingTaskGuard, EthApiSpec,
+    EthApiSpec,
 };
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
@@ -29,6 +29,7 @@ use reth_rpc_types::{
     },
     BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
 };
+use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::CacheDB,
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},

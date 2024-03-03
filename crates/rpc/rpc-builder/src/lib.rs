@@ -195,12 +195,15 @@ use reth_rpc::{
         gas_oracle::GasPriceOracle,
         EthBundle, FeeHistoryCache,
     },
-    AdminApi, AuthLayer, BlockingTaskGuard, BlockingTaskPool, Claims, DebugApi, EngineEthApi,
-    EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi,
-    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+    AdminApi, AuthLayer, Claims, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub,
+    EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi, OtterscanApi, RPCApi, RethApi,
+    TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
-use reth_tasks::{TaskSpawner, TokioTaskExecutor};
+use reth_tasks::{
+    pool::{BlockingTaskGuard, BlockingTaskPool},
+    TaskSpawner, TokioTaskExecutor,
+};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 // re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
