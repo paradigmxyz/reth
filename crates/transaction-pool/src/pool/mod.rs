@@ -327,7 +327,11 @@ where
                     continue
                 }
             } else {
-                PooledTransactionsElement::from(tx)
+                match PooledTransactionsElement::try_from(tx) {
+                    Ok(element) => element,
+                    Err(_) => continue, /* Skip transactions that fail to convert, since they
+                                         * won't be broadcast on p2p anyway */
+                }
             };
 
             size += encoded_len;
@@ -351,7 +355,10 @@ where
             if tx.is_eip4844() {
                 self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
             } else {
-                Some(PooledTransactionsElement::from(tx))
+                match PooledTransactionsElement::try_from(tx) {
+                    Ok(element) => Some(element),
+                    Err(_) => None, // Conversion failed, return None
+                }
             }
         })
     }

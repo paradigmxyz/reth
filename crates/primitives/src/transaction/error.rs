@@ -52,3 +52,14 @@ pub enum InvalidTransactionError {
     #[error("transaction signer has bytecode set")]
     SignerAccountHasBytecode,
 }
+
+/// Represents error variants that can happen when trying to convert a transaction to
+/// [`PooledTransactionsElement`](crate::PooledTransactionsElement)
+#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
+pub enum TransactionConversionError {
+    /// This error variant is used when a transaction cannot be converted into a
+    /// [`PooledTransactionsElement`](crate::PooledTransactionsElement) because it is not supported
+    /// for broadcasting over the P2P network.
+    #[error("transaction cannot be casted to PooledTransactionsElement since it's unsupported for p2p broadcast")]
+    UnsupportedForBroadcast,
+}
