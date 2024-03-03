@@ -232,6 +232,8 @@ impl PooledTransactionsElement {
                         signature: typed_tx.signature,
                         hash: typed_tx.hash,
                     }),
+                    #[cfg(feature = "optimism")]
+                    Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement"))
                 }
             }
         }
@@ -482,6 +484,8 @@ impl Decodable for PooledTransactionsElement {
                         signature: typed_tx.signature,
                         hash: typed_tx.hash,
                     }),
+                    #[cfg(feature = "optimism")]
+                    Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement"))
                 }
             }
         }
