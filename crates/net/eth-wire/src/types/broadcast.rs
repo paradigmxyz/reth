@@ -718,12 +718,13 @@ impl RequestTxHashes {
 
         let mut i = 0;
         self.hashes.retain(|hash| {
-            i += 1;
-            if i <= count {
-                return true
+            if i >= count {
+                rest.insert(*hash);
+                return false
             }
-            rest.insert(*hash);
-            false
+            i += 1;
+
+            true
         });
 
         rest
