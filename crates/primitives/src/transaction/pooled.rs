@@ -539,7 +539,7 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
             }
             Ok(tx) => Ok(tx), // Successfully converted, but not a BlobTransaction.
             Err(_) => Err(arbitrary::Error::IncorrectFormat), /* Conversion failed, return an
-                                                               * arbitrary error. */
+                                * arbitrary error. */
         }
     }
 }
