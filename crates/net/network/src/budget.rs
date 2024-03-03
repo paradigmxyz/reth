@@ -1,7 +1,7 @@
 /// Default budget to try and drain streams.
 ///
-/// Default is 1 024 iterations.
-pub const DEFAULT_BUDGET_TRY_DRAIN_STREAM: u32 = 1024;
+/// Default is 10 iterations.
+pub const DEFAULT_BUDGET_TRY_DRAIN_STREAM: u32 = 10;
 
 /// Default budget to try and drain `crate::Swarm`.
 ///
@@ -12,28 +12,30 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_SWARM: u32 = 10;
 /// channel. Polling the [`TransactionsManager`](crate::transactions::TransactionsManager) future
 /// sends these types of messages.
 //
-// Default is 4 096 outgoing transaction messages.
-pub const DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL: u32 = 4 * 1024;
+// Default is 40 outgoing transaction messages.
+pub const DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL: u32 =
+    4 * DEFAULT_BUDGET_TRY_DRAIN_STREAM;
 
 /// Default budget to try and drain stream of
 /// [`NetworkTransactionEvent`](crate::transactions::NetworkTransactionEvent)s from
 /// [`NetworkManager`](crate::NetworkManager).
 ///
-/// Default is 4 096 incoming transaction messages.
-pub const DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS: u32 = 4 * 1024;
+/// Default is 10 incoming transaction messages.
+pub const DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS: u32 = DEFAULT_BUDGET_TRY_DRAIN_SWARM;
 
 /// Default budget to try and flush pending pool imports to pool. This number reflects the number
 /// of transactions that can be queued for import to pool in each iteration of the loop in the
 /// [`TransactionsManager`](crate::transactions::TransactionsManager) future.
 //
-// Default is 3k million pending pool imports.
-pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 3 * 100000000;
+// Default is 40 pending pool imports.
+pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 4 * DEFAULT_BUDGET_TRY_DRAIN_STREAM;
 
 /// Default budget to try and stream hashes of successfully imported transactions from the pool.
 ///
 /// Default is naturally same as the number of transactions to attempt importing,
-/// [`DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS`], so 3k million pool imports.
-pub const DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS: u32 = 3 * 100000000;
+/// [`DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS`], so 40 pool imports.
+pub const DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS: u32 =
+    DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS;
 
 /// Budget pool once.
 pub const BUDGET_ONCE: u32 = 1;
