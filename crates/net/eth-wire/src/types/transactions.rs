@@ -62,19 +62,10 @@ impl PooledTransactions {
 }
 
 impl TryFrom<Vec<TransactionSigned>> for PooledTransactions {
-    type Error = TransactionConversionError; // Assume this is defined elsewhere
+    type Error = TransactionConversionError;
 
     fn try_from(txs: Vec<TransactionSigned>) -> Result<Self, Self::Error> {
-        let mut pooled_txs = Vec::new();
-
-        for tx in txs {
-            match PooledTransactionsElement::try_from(tx) {
-                Ok(pooled_tx) => pooled_txs.push(pooled_tx),
-                Err(e) => return Err(e),
-            }
-        }
-
-        Ok(PooledTransactions(pooled_txs))
+        txs.into_iter().map(PooledTransactionsElement::try_from).collect()
     }
 }
 

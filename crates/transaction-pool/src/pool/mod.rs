@@ -355,10 +355,7 @@ where
             if tx.is_eip4844() {
                 self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
             } else {
-                match PooledTransactionsElement::try_from(tx) {
-                    Ok(element) => Some(element),
-                    Err(_) => None, // Conversion failed, return None
-                }
+                PooledTransactionsElement::try_from(tx).ok()
             }
         })
     }

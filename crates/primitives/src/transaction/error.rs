@@ -59,7 +59,7 @@ pub enum InvalidTransactionError {
 pub enum TransactionConversionError {
     /// This error variant is used when a transaction cannot be converted into a
     /// [`PooledTransactionsElement`](crate::PooledTransactionsElement) because it is not supported
-    /// for broadcasting over the P2P network.
-    #[error("transaction cannot be casted to PooledTransactionsElement since it's unsupported for p2p broadcast")]
-    UnsupportedForBroadcast,
+    /// for P2P network.
+    #[error("Transaction is not supported for p2p")]
+    UnsupportedForP2P,
 }

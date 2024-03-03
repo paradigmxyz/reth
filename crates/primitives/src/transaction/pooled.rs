@@ -56,8 +56,9 @@ pub enum PooledTransactionsElement {
 impl PooledTransactionsElement {
     /// Tries to convert a [TransactionSigned] into a [PooledTransactionsElement].
     ///
-    /// [BlobTransaction] are disallowed from being propagated, hence this returns an error if the
-    /// `tx` is [Transaction::Eip4844]
+    /// This function used as a helper to convert from a decoded p2p broadcast message to
+    /// [PooledTransactio'nsElement]. Since [BlobTransaction] is disallowed to be broadcasted on
+    /// p2p, return an err if `tx` is [Transaction::Eip4844].
     pub fn try_from_broadcast(tx: TransactionSigned) -> Result<Self, TransactionSigned> {
         if tx.is_eip4844() {
             return Err(tx)
@@ -644,7 +645,7 @@ impl TryFrom<TransactionSignedEcRecovered> for PooledTransactionsElementEcRecove
             Ok(pooled_transaction) => {
                 Ok(Self { transaction: pooled_transaction, signer: tx.signer })
             }
-            Err(_) => Err(TransactionConversionError::UnsupportedForBroadcast),
+            Err(_) => Err(TransactionConversionError::UnsupportedForP2P),
         }
     }
 }
