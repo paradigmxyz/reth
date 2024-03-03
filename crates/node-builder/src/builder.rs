@@ -395,17 +395,22 @@ where
         // Does not do anything on windows.
         fdlimit::raise_fd_limit()?;
 
-        let prometheus_handle = config.install_prometheus_recorder()?;
-        config.start_metrics_endpoint(prometheus_handle, database.clone()).await?;
-
-        info!(target: "reth::cli", "Database opened");
-
         let provider_factory = ProviderFactory::new(
             database.clone(),
             Arc::clone(&config.chain),
             data_dir.static_files_path(),
         )?
         .with_static_files_metrics();
+        info!(target: "reth::cli", "Database opened");
+
+        let prometheus_handle = config.install_prometheus_recorder()?;
+        config
+            .start_metrics_endpoint(
+                prometheus_handle,
+                database.clone(),
+                provider_factory.static_file_provider(),
+            )
+            .await?;
 
         debug!(target: "reth::cli", chain=%config.chain.chain, genesis=?config.chain.genesis_hash(), "Initializing genesis");
 

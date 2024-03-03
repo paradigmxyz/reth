@@ -8,7 +8,7 @@
 //!
 //! If no recipients are specified, all transactions will be inspected.
 
-#![warn(unused_crate_dependencies)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use clap::Parser;
 use futures_util::StreamExt;

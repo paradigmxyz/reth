@@ -47,9 +47,10 @@ use reth_primitives::{
     BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256, MAINNET,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader,
-    BlockchainTreePendingStateProvider, CanonStateSubscriptions, HeaderProvider, HeaderSyncMode,
-    ProviderFactory, StageCheckpointReader,
+    providers::{BlockchainProvider, StaticFileProvider},
+    BlockHashReader, BlockNumReader, BlockReader, BlockchainTreePendingStateProvider,
+    CanonStateSubscriptions, HeaderProvider, HeaderSyncMode, ProviderFactory,
+    StageCheckpointReader,
 };
 use reth_revm::EvmProcessorFactory;
 use reth_stages::{
@@ -599,6 +600,7 @@ impl NodeConfig {
         &self,
         prometheus_handle: PrometheusHandle,
         db: Metrics,
+        static_file_provider: StaticFileProvider,
     ) -> eyre::Result<()>
     where
         Metrics: DatabaseMetrics + 'static + Send + Sync,
@@ -609,6 +611,7 @@ impl NodeConfig {
                 listen_addr,
                 prometheus_handle,
                 db,
+                static_file_provider,
                 metrics_process::Collector::default(),
             )
             .await?;
