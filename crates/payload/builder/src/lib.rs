@@ -79,7 +79,7 @@
 //!     }
 //! }
 //!
-//! /// A [PayloadJob] is a a future that's being polled by the `PayloadBuilderService`
+//! /// A [PayloadJob] is a future that's being polled by the `PayloadBuilderService`
 //! impl Future for EmptyBlockPayloadJob {
 //!  type Output = Result<(), PayloadBuilderError>;
 //!

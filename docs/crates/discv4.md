@@ -3,7 +3,7 @@
 The `discv4` crate plays an important role in Reth, enabling discovery of other peers across the network. It is recommended to know how [Kademlia distributed hash tables](https://en.wikipedia.org/wiki/Kademlia) and [Ethereum's node discovery protocol](https://github.com/ethereum/devp2p/blob/master/discv4.md) work before reading through this chapter. While all concepts will be explained through the following sections, reading through the links above will make understanding this chapter much easier! With that note out of the way, lets jump into `disc4`.
 
 ## Starting the Node Discovery Protocol
-As mentioned in the network and stages chapters, when the node is first started up, the `node::Command::execute()` function is called, which initializes the node and starts to run the Reth pipeline. Throughout the initialization of the node, there are many processes that are are started. One of the processes that is initialized is the p2p network which starts the node discovery protocol amongst other tasks.  
+As mentioned in the network and stages chapters, when the node is first started up, the `node::Command::execute()` function is called, which initializes the node and starts to run the Reth pipeline. Throughout the initialization of the node, there are many processes that are started. One of the processes that is initialized is the p2p network which starts the node discovery protocol amongst other tasks.  
 
 [File: bin/reth/src/node/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/bin/reth/src/node/mod.rs#L314-L322)
 ```rust ignore

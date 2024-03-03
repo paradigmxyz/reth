@@ -58,7 +58,7 @@ where
     }
 }
 
-/// A [PayloadJob] is a a future that's being polled by the `PayloadBuilderService`
+/// A [PayloadJob] is a future that's being polled by the `PayloadBuilderService`
 impl<Client, Pool, Tasks, Builder> Future for EmptyBlockPayloadJob<Client, Pool, Tasks, Builder>
 where
     Client: StateProviderFactory + Clone + Unpin + 'static,

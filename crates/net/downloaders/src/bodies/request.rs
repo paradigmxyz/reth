@@ -155,7 +155,7 @@ where
     }
 
     /// Attempt to buffer body responses. Returns an error if body response fails validation.
-    /// Every body preceeding the failed one will be buffered.
+    /// Every body preceding the failed one will be buffered.
     ///
     /// This method removes headers from the internal collection.
     /// If the response fails validation, then the header will be put back.

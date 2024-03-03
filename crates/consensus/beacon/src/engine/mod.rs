@@ -915,7 +915,7 @@ where
             total_difficulty: Default::default(),
         };
 
-        // we update the the tracked header first
+        // we update the tracked header first
         self.blockchain.set_canonical_head(head);
 
         head_block.total_difficulty =

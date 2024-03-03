@@ -161,7 +161,7 @@ pub struct TaskManager {
 // === impl TaskManager ===
 
 impl TaskManager {
-    /// Returns a a [TaskManager] over the currently running Runtime.
+    /// Returns a [TaskManager] over the currently running Runtime.
     ///
     /// # Panics
     ///
