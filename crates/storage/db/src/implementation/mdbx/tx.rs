@@ -123,12 +123,15 @@ impl<K: TransactionKind> Tx<K> {
             let (result, commit_latency) = f(tx);
             let total_duration = start.elapsed();
 
-            debug!(
-                target: "storage::db::mdbx",
-                ?total_duration,
-                ?commit_latency,
-                "Commit"
-            );
+            if outcome.is_commit() {
+                debug!(
+                    target: "storage::db::mdbx",
+                    ?total_duration,
+                    ?commit_latency,
+                    is_read_only = K::IS_READ_ONLY,
+                    "Commit"
+                );
+            }
 
             (result, commit_latency, total_duration)
         };
