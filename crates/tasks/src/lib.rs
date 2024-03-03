@@ -38,7 +38,7 @@ use tracing_futures::Instrument;
 pub mod metrics;
 pub mod shutdown;
 
-#[cfg(feature = "pool")]
+#[cfg(feature = "rayon")]
 pub mod pool;
 
 /// A type that can spawn tasks.
