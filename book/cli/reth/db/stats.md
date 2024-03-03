@@ -18,6 +18,9 @@ Options:
           
           [default: default]
 
+      --only-total-size
+          Show only the total size for static files
+
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -26,6 +29,9 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
           
           [default: mainnet]
+
+      --summary
+          Show only the summary per static file segment
 
       --instance <INSTANCE>
           Add a new instance of a node.

@@ -29,6 +29,7 @@
 
 use crate::{
     cache::LruCache,
+    duration_metered_exec,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
@@ -224,7 +225,7 @@ pub struct TransactionsManager<Pool> {
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
+    transactions_by_peers: HashMap<TxHash, HashSet<PeerId>>,
     /// Transactions that are currently imported into the `Pool`.
     ///
     /// The import process includes:
@@ -369,7 +370,7 @@ where
 
         // update metrics for whole poll function
         metrics.duration_poll_tx_manager.set(start.elapsed().as_secs_f64());
-        // update poll metrics for nested streams
+        // update metrics for nested expressions
         metrics.acc_duration_poll_network_events.set(acc_network_events.as_secs_f64());
         metrics.acc_duration_poll_pending_pool_imports.set(acc_pending_imports.as_secs_f64());
         metrics.acc_duration_poll_transaction_events.set(acc_tx_events.as_secs_f64());
@@ -690,7 +691,10 @@ where
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
-        // 2. filter out known hashes
+        // 2. filter out transactions pending import to pool
+        partially_valid_msg.retain_by_hash(|hash| !self.transactions_by_peers.contains_key(hash));
+
+        // 3. filter out known hashes
         //
         // known txns have already been successfully fetched or received over gossip.
         //
@@ -712,7 +716,7 @@ where
             return
         }
 
-        // 3. filter out invalid entries (spam)
+        // 4. filter out invalid entries (spam)
         //
         // validates messages with respect to the given network, e.g. allowed tx types
         //
@@ -741,7 +745,7 @@ where
             return
         }
 
-        // 4. filter out already seen unknown hashes
+        // 5. filter out already seen unknown hashes
         //
         // seen hashes are already in the tx fetcher, pending fetch.
         //
@@ -861,11 +865,6 @@ where
                     .map(PooledTransactionsElement::try_from_broadcast)
                     .filter_map(Result::ok)
                     .collect::<PooledTransactions>();
-
-                // mark the transactions as received
-                self.transaction_fetcher.remove_hashes_from_transaction_fetcher(
-                    non_blob_txs.iter().map(|tx| *tx.hash()),
-                );
 
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
@@ -988,6 +987,10 @@ where
 
         let mut transactions = transactions.0;
 
+        // mark the transactions as received
+        self.transaction_fetcher
+            .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| *tx.hash()));
+
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
 
         // track that the peer knows these transaction, but only if this is a new broadcast.
@@ -1037,7 +1040,7 @@ where
                 match self.transactions_by_peers.entry(*tx.hash()) {
                     Entry::Occupied(mut entry) => {
                         // transaction was already inserted
-                        entry.get_mut().push(peer_id);
+                        entry.get_mut().insert(peer_id);
                     }
                     Entry::Vacant(entry) => {
                         if !self.bad_imports.contains(tx.hash()) {
@@ -1045,7 +1048,7 @@ where
                             let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
                             new_txs.push(pool_transaction);
 
-                            entry.insert(vec![peer_id]);
+                            entry.insert(HashSet::from([peer_id]));
                         } else {
                             trace!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
@@ -1150,29 +1153,16 @@ where
                 self.report_peer_bad_transactions(peer_id);
             }
         }
-        self.transaction_fetcher.remove_hashes_from_transaction_fetcher([hash]);
         self.bad_imports.insert(hash);
     }
 
-    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns  
+    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns
     /// `false` if [`TransactionsManager`] is operating close to full capacity.
     fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         self.pending_pool_imports_info
             .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports) &&
             self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
     }
-}
-
-/// Measures the duration of executing the given code block. The duration is added to the given
-/// accumulator value passed as a mutable reference.
-macro_rules! duration_metered_exec {
-    ($code:block, $acc:ident) => {
-        let start = Instant::now();
-
-        $code;
-
-        *$acc += start.elapsed();
-    };
 }
 
 #[derive(Debug, Default)]
@@ -1919,10 +1909,11 @@ mod tests {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
-        assert_eq!(
-            *handle1.peer_id(),
-            transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
-        );
+        assert!(transactions
+            .transactions_by_peers
+            .get(&signed_tx.hash())
+            .unwrap()
+            .contains(handle1.peer_id()));
 
         // advance the transaction manager future
         poll_fn(|cx| {

@@ -22,7 +22,6 @@ alloy-chains.workspace = true
 serde = { workspace = true, features = ["derive"], optional = true }
 
 # misc
-async-trait.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 

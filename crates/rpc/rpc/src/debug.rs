@@ -8,15 +8,14 @@ use crate::{
         EthTransactions,
     },
     result::{internal_rpc_err, ToRpcResult},
-    BlockingTaskGuard, EthApiSpec,
+    EthApiSpec,
 };
-use alloy_primitives::U256;
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
     revm::env::tx_env_with_recovered, Address, Block, BlockId, BlockNumberOrTag, Bytes,
-    TransactionSignedEcRecovered, Withdrawals, B256,
+    TransactionSignedEcRecovered, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
@@ -30,6 +29,7 @@ use reth_rpc_types::{
     },
     BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
 };
+use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::CacheDB,
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},

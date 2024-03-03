@@ -546,9 +546,10 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // Update invalid transactions metric
                 self.metrics.invalid_transactions.increment(1);
                 match err {
-                    InsertErr::Underpriced { existing, transaction: _ } => {
-                        Err(PoolError::new(existing, PoolErrorKind::ReplacementUnderpriced))
-                    }
+                    InsertErr::Underpriced { existing: _, transaction } => Err(PoolError::new(
+                        *transaction.hash(),
+                        PoolErrorKind::ReplacementUnderpriced,
+                    )),
                     InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap } => {
                         Err(PoolError::new(
                             *transaction.hash(),
@@ -1725,8 +1726,8 @@ pub(crate) type InsertResult<T> = Result<InsertOk<T>, InsertErr<T>>;
 pub(crate) enum InsertErr<T: PoolTransaction> {
     /// Attempted to replace existing transaction, but was underpriced
     Underpriced {
-        #[allow(dead_code)]
         transaction: Arc<ValidPoolTransaction<T>>,
+        #[allow(dead_code)]
         existing: TxHash,
     },
     /// Attempted to insert a blob transaction with a nonce gap

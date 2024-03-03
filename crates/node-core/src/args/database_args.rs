@@ -5,7 +5,7 @@ use reth_interfaces::db::LogLevel;
 
 /// Parameters for database configuration
 #[derive(Debug, Args, PartialEq, Default, Clone, Copy)]
-#[clap(next_help_heading = "Database")]
+#[command(next_help_heading = "Database")]
 pub struct DatabaseArgs {
     /// Database logging level. Levels higher than "notice" require a debug build.
     #[arg(long = "db.log-level", value_enum)]
@@ -20,7 +20,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

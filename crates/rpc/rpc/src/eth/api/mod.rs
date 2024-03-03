@@ -21,12 +21,11 @@ use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, B256,
     U256, U64,
 };
-
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_types::{SyncInfo, SyncStatus};
-use reth_tasks::{TaskSpawner, TokioTaskExecutor};
+use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{CfgEnv, SpecId};
 use std::{
@@ -35,7 +34,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-
 use tokio::sync::{oneshot, Mutex};
 
 mod block;
@@ -50,7 +48,6 @@ mod sign;
 mod state;
 mod transactions;
 
-use crate::BlockingTaskPool;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.

@@ -5,9 +5,8 @@ use crate::{
     keccak256,
     trie::{HashBuilder, Nibbles, TrieAccount},
     Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned, Withdrawal,
-    B256,
+    B256, U256,
 };
-use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use bytes::{BufMut, BytesMut};
 use itertools::Itertools;

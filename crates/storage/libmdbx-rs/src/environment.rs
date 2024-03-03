@@ -20,6 +20,7 @@ use std::{
     thread::sleep,
     time::Duration,
 };
+use tracing::warn;
 
 /// The default maximum duration of a read transaction.
 #[cfg(feature = "read-tx-timeouts")]
@@ -96,6 +97,7 @@ impl Environment {
     /// Create a read-write transaction for use with the environment. This method will block while
     /// there are any other read-write transactions open on the environment.
     pub fn begin_rw_txn(&self) -> Result<Transaction<RW>> {
+        let mut warned = false;
         let txn = loop {
             let (tx, rx) = sync_channel(0);
             self.txn_manager().send_message(TxnManagerMessage::Begin {
@@ -105,6 +107,10 @@ impl Environment {
             });
             let res = rx.recv().unwrap();
             if let Err(Error::Busy) = &res {
+                if !warned {
+                    warned = true;
+                    warn!(target: "libmdbx", "Process stalled, awaiting read-write transaction lock.");
+                }
                 sleep(Duration::from_millis(250));
                 continue
             }
@@ -937,7 +943,8 @@ mod tests {
             .open(tempdir.path())
             .unwrap();
 
-        // Insert some data in the database, so the read transaction can lock on the snapshot of it
+        // Insert some data in the database, so the read transaction can lock on the static file of
+        // it
         {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();
@@ -950,7 +957,8 @@ mod tests {
         // Create a read transaction
         let _tx_ro = env.begin_ro_txn().unwrap();
 
-        // Change previously inserted data, so the read transaction would use the previous snapshot
+        // Change previously inserted data, so the read transaction would use the previous static
+        // file
         {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();
@@ -961,7 +969,7 @@ mod tests {
         }
 
         // Insert more data in the database, so we hit the DB size limit error, and MDBX tries to
-        // kick long-lived readers and delete their snapshots
+        // kick long-lived readers and delete their static_files
         {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();

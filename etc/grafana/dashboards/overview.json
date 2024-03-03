@@ -1,5 +1,4 @@
 {
-
   "__inputs": [
     {
       "name": "DS_PROMETHEUS",
@@ -8,10 +7,22 @@
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
+    },
+    {
+      "name": "DS_EXPRESSION",
+      "label": "Expression",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "__expr__"
     }
   ],
   "__elements": {},
   "__requires": [
+    {
+      "type": "datasource",
+      "id": "__expr__",
+      "version": "1.0.0"
+    },
     {
       "type": "panel",
       "id": "bargauge",
@@ -47,6 +58,12 @@
       "id": "prometheus",
       "name": "Prometheus",
       "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
     },
     {
       "type": "panel",
@@ -86,7 +103,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 1,
+  "id": null,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -670,7 +687,6 @@
               "MerkleUnwind": 5,
               "SenderRecovery": 3,
               "StorageHashing": 7,
-              "TotalDifficulty": 1,
               "TransactionLookup": 9
             }
           }
@@ -2077,6 +2093,582 @@
         "x": 0,
         "y": 69
       },
+      "id": 203,
+      "panels": [],
+      "title": "Static Files",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "The size of segments in the static files",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": [],
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 70
+      },
+      "id": 202,
+      "options": {
+        "displayLabels": [
+          "name"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value"
+          ]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "9.3.6",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_static_files_segment_size{instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "{{segment}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Segments size",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "displayName",
+                "value": "Entries"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "segment"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Segment"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "instance"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "__name__"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 70
+      },
+      "id": 204,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "reth_static_files_segment_entries{instance=~\"$instance\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Entries per segment",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "displayName",
+                "value": "Files"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "segment"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Segment"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "instance"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "__name__"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 70
+      },
+      "id": 205,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "10.1.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "reth_static_files_segment_files{instance=~\"$instance\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Files per segment",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "The size of the static files over time",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 78
+      },
+      "id": 206,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (job) ( reth_static_files_segment_size{instance=~\"$instance\"} )",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Static Files growth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "The maximum time the static files operation which commits a writer took.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "points",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 78
+      },
+      "id": 207,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "max(max_over_time(reth_static_files_jar_provider_write_duration_seconds{instance=~\"$instance\", operation=\"commit-writer\", quantile=\"1\"}[$__interval]) > 0) by (segment)",
+          "legendFormat": "{{segment}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Max writer commit time",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 86
+      },
       "id": 46,
       "panels": [],
       "repeat": "instance",
@@ -2144,7 +2736,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 87
       },
       "id": 56,
       "options": {
@@ -2217,7 +2809,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 78
+        "y": 95
       },
       "id": 6,
       "panels": [],
@@ -2289,7 +2881,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 79
+        "y": 96
       },
       "id": 18,
       "options": {
@@ -2383,7 +2975,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 79
+        "y": 96
       },
       "id": 16,
       "options": {
@@ -2503,7 +3095,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 79
+        "y": 96
       },
       "id": 8,
       "options": {
@@ -2586,7 +3178,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 87
+        "y": 104
       },
       "id": 54,
       "options": {
@@ -2807,7 +3399,7 @@
         "h": 8,
         "w": 14,
         "x": 8,
-        "y": 87
+        "y": 104
       },
       "id": 103,
       "options": {
@@ -2844,7 +3436,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 95
+        "y": 112
       },
       "id": 24,
       "panels": [],
@@ -2940,7 +3532,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 96
+        "y": 113
       },
       "id": 26,
       "options": {
@@ -3072,7 +3664,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 96
+        "y": 113
       },
       "id": 33,
       "options": {
@@ -3190,7 +3782,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 104
+        "y": 121
       },
       "id": 36,
       "options": {
@@ -3239,7 +3831,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 112
+        "y": 129
       },
       "id": 32,
       "panels": [],
@@ -3345,7 +3937,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 113
+        "y": 130
       },
       "id": 30,
       "options": {
@@ -3509,7 +4101,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 113
+        "y": 130
       },
       "id": 28,
       "options": {
@@ -3627,7 +4219,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 121
+        "y": 138
       },
       "id": 35,
       "options": {
@@ -3751,7 +4343,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 121
+        "y": 138
       },
       "id": 73,
       "options": {
@@ -3876,7 +4468,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 129
+        "y": 146
       },
       "id": 102,
       "options": {
@@ -3939,7 +4531,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 137
+        "y": 154
       },
       "id": 89,
       "panels": [],
@@ -3953,7 +4545,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Tracks a heuristic of the memory footprint of the various transaction pool sub-pools",
+      "description": "Transaction pool maintenance metrics",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4003,8 +4595,7 @@
                 "value": 80
               }
             ]
-          },
-          "unit": "bytes"
+          }
         },
         "overrides": []
       },
@@ -4012,9 +4603,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 138
+        "y": 155
       },
-      "id": 91,
+      "id": 122,
       "options": {
         "legend": {
           "calcs": [],
@@ -4033,49 +4624,70 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_basefee_pool_size_bytes{instance=~\"$instance\"}",
-          "legendFormat": "Base fee pool size",
+          "expr": "reth_transaction_pool_dirty_accounts{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Dirty Accounts",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_pending_pool_size_bytes{instance=~\"$instance\"}",
+          "expr": "reth_transaction_pool_drift_count{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
           "hide": false,
-          "legendFormat": "Pending pool size",
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Drift Count",
           "range": true,
-          "refId": "B"
+          "refId": "B",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_queued_pool_size_bytes{instance=~\"$instance\"}",
+          "expr": "reth_transaction_pool_reinserted_transactions{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
           "hide": false,
-          "legendFormat": "Queued pool size",
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Reinserted Transactions",
           "range": true,
-          "refId": "C"
+          "refId": "C",
+          "useBackend": false
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_blob_pool_size_bytes{instance=~\"$instance\"}",
-          "legendFormat": "Blob pool size",
+          "expr": "reth_transaction_pool_deleted_tracked_finalized_blobs{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Deleted Tracked Finalized Blobs",
           "range": true,
-          "refId": "D"
+          "refId": "D",
+          "useBackend": false
         }
       ],
-      "title": "Subpool sizes in bytes",
+      "title": "TxPool Maintenance",
       "type": "timeseries"
     },
     {
@@ -4141,7 +4753,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 138
+        "y": 155
       },
       "id": 92,
       "options": {
@@ -4212,7 +4824,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Currently active outgoing GetPooledTransactions requests.",
+      "description": "Tracks a heuristic of the memory footprint of the various transaction pool sub-pools",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4262,7 +4874,8 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "bytes"
         },
         "overrides": []
       },
@@ -4270,9 +4883,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 146
+        "y": 163
       },
-      "id": 104,
+      "id": 91,
       "options": {
         "legend": {
           "calcs": [],
@@ -4292,14 +4905,48 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_inflight_transaction_requests{instance=~\"$instance\"}",
+          "expr": "reth_transaction_pool_basefee_pool_size_bytes{instance=~\"$instance\"}",
+          "legendFormat": "Base fee pool size",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_pending_pool_size_bytes{instance=~\"$instance\"}",
           "hide": false,
-          "legendFormat": "Inflight Transaction Requests",
+          "legendFormat": "Pending pool size",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_queued_pool_size_bytes{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Queued pool size",
           "range": true,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blob_pool_size_bytes{instance=~\"$instance\"}",
+          "legendFormat": "Blob pool size",
+          "range": true,
+          "refId": "D"
         }
       ],
-      "title": "Inflight Transaction Requests",
+      "title": "Subpool sizes in bytes",
       "type": "timeseries"
     },
     {
@@ -4365,7 +5012,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 146
+        "y": 163
       },
       "id": 94,
       "options": {
@@ -4402,6 +5049,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "description": "Currently active outgoing GetPooledTransactions requests.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4443,7 +5091,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4458,9 +5107,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 154
+        "y": 171
       },
-      "id": 199,
+      "id": 104,
       "options": {
         "legend": {
           "calcs": [],
@@ -4479,47 +5128,15 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_network_hashes_pending_fetch{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Hashes in Pending Fetch Cache",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
+          "expr": "reth_network_inflight_transaction_requests{instance=~\"$instance\"}",
           "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Hashes in Inflight Requests",
+          "legendFormat": "Inflight Transaction Requests",
           "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "name": "Expression",
-            "type": "__expr__",
-            "uid": "__expr__"
-          },
-          "expression": "$A + $B",
-          "hide": false,
-          "refId": "Total Hashes in Transaction Fetcher",
-          "type": "math"
+          "refId": "C"
         }
       ],
-      "title": "Transaction Fetcher Hashes",
+      "title": "Inflight Transaction Requests",
       "type": "timeseries"
     },
     {
@@ -4569,7 +5186,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4598,7 +5216,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 154
+        "y": 171
       },
       "id": 93,
       "options": {
@@ -4663,6 +5281,281 @@
         }
       ],
       "title": "Inserted transactions",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 179
+      },
+      "id": 199,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_hashes_pending_fetch{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Hashes in Pending Fetch Cache",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Hashes in Inflight Requests",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "__expr__",
+            "uid": "${DS_EXPRESSION}"
+          },
+          "expression": "$A + $B",
+          "hide": false,
+          "refId": "Total Hashes in Transaction Fetcher",
+          "type": "math"
+        }
+      ],
+      "title": "Transaction Fetcher Hashes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Tracks the entries, byte size, failed inserts and file deletes of the blob store",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 179
+      },
+      "id": 115,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_entries{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Entries",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_byte_size{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Bytesize",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_failed_inserts{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Failed Inserts",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blobstore_failed_deletes{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Failed Deletes",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        }
+      ],
+      "title": "Blob store",
       "type": "timeseries"
     },
     {
@@ -4754,7 +5647,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 162
+        "y": 187
       },
       "id": 95,
       "options": {
@@ -4816,7 +5709,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Tracks the entries, byte size, failed inserts and file deletes of the blob store",
+      "description": "Duration spent insdie one call to poll the `TransactionsManager` future",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4866,17 +5759,43 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "s"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "Transactions Manager Future"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 162
+        "y": 187
       },
-      "id": 115,
+      "id": 201,
       "options": {
         "legend": {
           "calcs": [],
@@ -4897,15 +5816,100 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_blobstore_entries{instance=~\"$instance\"}",
+          "expr": "reth_network_duration_poll_tx_manager{instance=\"$instance\"}",
           "fullMetaSearch": false,
+          "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Entries",
+          "legendFormat": "Transactions Manager Future",
           "range": true,
           "refId": "A",
           "useBackend": false
+        }
+      ],
+      "title": "Transactions Manager Future Poll Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Accumulated durations of nested function calls, in one call to poll `TransactionsManager` future (`TransactionsManager` future has a loop, hence accumulated).\n\nNetwork Events - stream peer session updates from `NetworkManager`\nTransaction Events - stream txns gossip fom `NetworkManager`\nImported Transactions - stream hashes of successfully inserted txns from `TransactionPool`\nPending pool imports - flush txns to pool from `TransactionsManager`\nFetch Events - stream fetch txn events (success case wraps a tx) from `TransactionFetcher`\nCommands - stream commands from (?) to fetch/serve/propagate txns\n  ",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
         },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 195
+      },
+      "id": 200,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
         {
           "datasource": {
             "type": "prometheus",
@@ -4913,12 +5917,12 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_blobstore_byte_size{instance=~\"$instance\"}",
+          "expr": "reth_network_acc_duration_poll_network_events{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Bytesize",
+          "legendFormat": "Network Events",
           "range": true,
           "refId": "B",
           "useBackend": false
@@ -4930,12 +5934,12 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_blobstore_failed_inserts{instance=~\"$instance\"}",
+          "expr": "reth_network_acc_duration_poll_transaction_events{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Failed Inserts",
+          "legendFormat": "Transaction Events",
           "range": true,
           "refId": "C",
           "useBackend": false
@@ -4947,18 +5951,289 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_transaction_pool_blobstore_failed_deletes{instance=~\"$instance\"}",
+          "exemplar": false,
+          "expr": "reth_network_acc_duration_poll_imported_transactions{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Failed Deletes",
+          "legendFormat": "Imported Transactions",
           "range": true,
           "refId": "D",
           "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_pending_pool_imports{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Pending Pool Imports",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_fetch_events{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Fetch Events",
+          "range": true,
+          "refId": "F",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_acc_duration_poll_commands{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Commands",
+          "range": true,
+          "refId": "G",
+          "useBackend": false
         }
       ],
-      "title": "Blob store",
+      "title": "Transactions Manager Poll Duration Nested Function Calls",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Duration spent inside one call to poll the `NetworkManager` future",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 195
+      },
+      "id": 209,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_duration_poll_network_manager{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Network Manager Future",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        }
+      ],
+      "title": "Network Manager Future Poll Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Durations of nested function calls, in one call to poll `NetworkManager` future.\n\nNetwork Handle Message - stream network handle messages from `Transactions`\nSwarm Events - stream txns gossip fom `NetworkManager`",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 203
+      },
+      "id": 208,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_duration_poll_network_handle{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Network Handle Messages",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_network_duration_poll_swarm{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Swarm Events",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Network Manager Poll Duration Nested Function Calls",
       "type": "timeseries"
     },
     {
@@ -4967,7 +6242,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 170
+        "y": 211
       },
       "id": 79,
       "panels": [],
@@ -5039,7 +6314,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 171
+        "y": 212
       },
       "id": 74,
       "options": {
@@ -5134,7 +6409,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 171
+        "y": 212
       },
       "id": 80,
       "options": {
@@ -5229,7 +6504,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 179
+        "y": 220
       },
       "id": 81,
       "options": {
@@ -5307,8 +6582,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5324,7 +6598,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 179
+        "y": 220
       },
       "id": 114,
       "options": {
@@ -5403,8 +6677,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5420,7 +6693,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 187
+        "y": 228
       },
       "id": 158,
       "options": {
@@ -5525,8 +6798,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5542,7 +6814,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 187
+        "y": 228
       },
       "id": 190,
       "options": {
@@ -5580,7 +6852,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 195
+        "y": 236
       },
       "id": 87,
       "panels": [],
@@ -5636,8 +6908,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5652,7 +6923,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 196
+        "y": 237
       },
       "id": 83,
       "options": {
@@ -5730,8 +7001,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5746,7 +7016,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 196
+        "y": 237
       },
       "id": 84,
       "options": {
@@ -5836,8 +7106,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5852,7 +7121,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 204
+        "y": 245
       },
       "id": 85,
       "options": {
@@ -5889,7 +7158,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 212
+        "y": 253
       },
       "id": 68,
       "panels": [],
@@ -5945,8 +7214,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5961,7 +7229,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 213
+        "y": 254
       },
       "id": 60,
       "options": {
@@ -6039,8 +7307,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6055,7 +7322,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 213
+        "y": 254
       },
       "id": 62,
       "options": {
@@ -6133,8 +7400,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6149,7 +7415,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 221
+        "y": 262
       },
       "id": 64,
       "options": {
@@ -6186,7 +7452,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 229
+        "y": 270
       },
       "id": 97,
       "panels": [],
@@ -6239,8 +7505,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6256,7 +7521,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 230
+        "y": 271
       },
       "id": 98,
       "options": {
@@ -6400,8 +7665,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6417,7 +7681,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 230
+        "y": 271
       },
       "id": 101,
       "options": {
@@ -6496,8 +7760,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6513,7 +7776,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 238
+        "y": 279
       },
       "id": 99,
       "options": {
@@ -6592,8 +7855,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6609,7 +7871,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 238
+        "y": 279
       },
       "id": 100,
       "options": {
@@ -6647,7 +7909,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 246
+        "y": 287
       },
       "id": 105,
       "panels": [],
@@ -6701,8 +7963,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6718,7 +7979,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 247
+        "y": 288
       },
       "id": 106,
       "options": {
@@ -6797,8 +8058,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6814,7 +8074,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 247
+        "y": 288
       },
       "id": 107,
       "options": {
@@ -6852,7 +8112,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 255
+        "y": 296
       },
       "id": 108,
       "panels": [],
@@ -6906,8 +8166,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6948,7 +8207,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 256
+        "y": 297
       },
       "id": 109,
       "options": {
@@ -7010,7 +8269,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 256
+        "y": 297
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -7120,8 +8379,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7137,7 +8395,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 264
+        "y": 305
       },
       "id": 120,
       "options": {
@@ -7195,7 +8453,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 264
+        "y": 305
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -7305,8 +8563,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7346,7 +8603,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 272
+        "y": 313
       },
       "id": 198,
       "options": {
@@ -7553,6 +8810,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 15,
+  "version": 3,
   "weekStart": ""
 }

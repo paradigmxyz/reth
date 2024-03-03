@@ -13,7 +13,7 @@ Feature defines what is the main codec used by `#[main_codec]`. However it is st
 
 ```rust
 default = ["scale"]
-scale = ["codecs-derive/scale"]
-postcard = ["codecs-derive/postcard"]
-no_codec = ["codecs-derive/no_codec"]
+scale = ["reth-codecs-derive/scale"]
+postcard = ["reth-codecs-derive/postcard"]
+no_codec = ["reth-codecs-derive/no_codec"]
 ```
