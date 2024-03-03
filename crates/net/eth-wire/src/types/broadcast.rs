@@ -13,7 +13,7 @@ use reth_primitives::{
 
 use std::{
     collections::{HashMap, HashSet},
-    iter, mem,
+    mem,
     sync::Arc,
 };
 
