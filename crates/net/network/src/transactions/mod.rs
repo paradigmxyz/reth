@@ -2053,6 +2053,7 @@ mod tests {
 
         // peer_1 is idle
         assert!(tx_fetcher.is_idle(&peer_id_1));
+        assert_eq!(tx_fetcher.active_peers.len(), 0);
 
         // sends request for buffered hashes to peer_1
         tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true, || ());
@@ -2062,6 +2063,7 @@ mod tests {
         assert!(tx_fetcher.hashes_pending_fetch.is_empty());
         // as long as request is in inflight peer_1 is not idle
         assert!(!tx_fetcher.is_idle(&peer_id_1));
+        assert_eq!(tx_fetcher.active_peers.len(), 1);
 
         // mock session of peer_1 receives request
         let req = to_mock_session_rx
@@ -2085,6 +2087,7 @@ mod tests {
 
         // request has resolved, peer_1 is idle again
         assert!(tx_fetcher.is_idle(&peer_id));
+        assert_eq!(tx_fetcher.active_peers.len(), 0);
         // failing peer_1's request buffers requested hashes for retry
         assert_eq!(tx_fetcher.hashes_pending_fetch.len(), 2);
 
@@ -2097,6 +2100,9 @@ mod tests {
         tx_manager.on_new_pooled_transaction_hashes(peer_id_2, msg);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
+
+        // peer_2 should be in active_peers.
+        assert_eq!(tx_fetcher.active_peers.len(), 1);
 
         // since hashes are already seen, no changes to length of unknown hashes
         assert_eq!(tx_fetcher.hashes_fetch_inflight_and_pending_fetch.len(), 2);
@@ -2119,5 +2125,6 @@ mod tests {
         // `MAX_REQUEST_RETRIES_PER_TX_HASH`, 2, for hashes reached so this time won't be buffered
         // for retry
         assert!(tx_fetcher.hashes_pending_fetch.is_empty());
+        assert_eq!(tx_fetcher.active_peers.len(), 0);
     }
 }
