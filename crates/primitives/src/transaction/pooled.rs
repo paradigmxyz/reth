@@ -518,7 +518,7 @@ impl TryFrom<TransactionSigned> for PooledTransactionsElement {
                 }))
             }
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => Err(TransactionConversionError::UnsupportedForBroadcast),
+            Transaction::Deposit(_) => Err(TransactionConversionError::UnsupportedForP2P),
         }
     }
 }
