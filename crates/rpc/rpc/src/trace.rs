@@ -1,11 +1,8 @@
-use crate::{
-    eth::{
-        error::{EthApiError, EthResult},
-        revm_utils::{inspect, inspect_and_return_db, prepare_call_env, EvmOverrides},
-        utils::recover_raw_transaction,
-        EthTransactions,
-    },
-    BlockingTaskGuard,
+use crate::eth::{
+    error::{EthApiError, EthResult},
+    revm_utils::{inspect, inspect_and_return_db, prepare_call_env, EvmOverrides},
+    utils::recover_raw_transaction,
+    EthTransactions,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
@@ -24,6 +21,7 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*, tracerequest::TraceCallRequest},
     BlockError, BlockOverrides, Index, TransactionRequest,
 };
+use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::{CacheDB, DatabaseCommit},
     primitives::EnvWithHandlerCfg,

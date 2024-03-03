@@ -65,7 +65,7 @@ pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace.
 ///
 /// Async functions that are spawned onto the
-/// [BlockingTaskPool](crate::blocking_pool::BlockingTaskPool) begin with `spawn_`
+/// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool) begin with `spawn_`
 ///
 ///
 /// ## Calls
@@ -276,7 +276,7 @@ pub trait EthTransactions: Send + Sync {
     /// the database that points to the beginning of the transaction.
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
-    /// [BlockingTaskPool](crate::blocking_pool::BlockingTaskPool).
+    /// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool).
     async fn spawn_trace_transaction_in_block<F, R>(
         &self,
         hash: B256,
@@ -1499,17 +1499,14 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        eth::{
-            cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
-            FeeHistoryCacheConfig,
-        },
-        BlockingTaskPool,
+    use crate::eth::{
+        cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig,
     };
     use reth_network_api::noop::NoopNetwork;
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex};
     use reth_provider::test_utils::NoopProvider;
+    use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::test_utils::testing_pool;
 
     #[tokio::test]
