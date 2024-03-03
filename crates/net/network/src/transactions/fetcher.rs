@@ -1255,9 +1255,11 @@ mod test {
             0,
         ];
 
-        let expected_request_hashes = [eth68_hashes[0], eth68_hashes[2]];
+        let expected_request_hashes =
+            [eth68_hashes[0], eth68_hashes[2]].into_iter().collect::<HashSet<_>>();
 
-        let expected_surplus_hashes = [eth68_hashes[1], eth68_hashes[3], eth68_hashes[4]];
+        let expected_surplus_hashes =
+            [eth68_hashes[1], eth68_hashes[3], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
 
         let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
 
@@ -1274,11 +1276,11 @@ mod test {
         let surplus_eth68_hashes =
             tx_fetcher.pack_request_eth68(&mut eth68_hashes_to_request, valid_announcement_data);
 
-        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<Vec<_>>();
-        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<Vec<_>>();
+        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<HashSet<_>>();
+        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<HashSet<_>>();
 
-        assert_eq!(expected_request_hashes.to_vec(), eth68_hashes_to_request);
-        assert_eq!(expected_surplus_hashes.to_vec(), surplus_eth68_hashes);
+        assert_eq!(expected_request_hashes, eth68_hashes_to_request);
+        assert_eq!(expected_surplus_hashes, surplus_eth68_hashes);
     }
 
     #[tokio::test]
