@@ -8,6 +8,7 @@ use crate::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
+use once_cell::sync::OnceCell;
 use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_tracing::tracing::{debug, trace, warn};
@@ -16,7 +17,7 @@ use std::{
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, OnceLock,
+        Arc,
     },
     time::{Duration, Instant},
 };
@@ -37,7 +38,8 @@ pub struct Tx<K: TransactionKind> {
     metrics_handler: Option<MetricsHandler<K>>,
 
     /// Database table handle cache.
-    db_handles: [OnceLock<DBI>; Tables::COUNT],
+    // TODO: Use `std::sync::OnceLock` once `get_or_try_init` is stable.
+    db_handles: [OnceCell<DBI>; Tables::COUNT],
 }
 
 impl<K: TransactionKind> Tx<K> {
@@ -65,13 +67,13 @@ impl<K: TransactionKind> Tx<K> {
 
     #[inline]
     fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
-        // NOTE: These constants are needed to initialize `OnceLock` at compile-time, as array
+        // NOTE: These constants are needed to initialize `OnceCell` at compile-time, as array
         // initialization is not allowed with non-Copy types, and `const { }` blocks are not stable
         // yet.
         #[allow(clippy::declare_interior_mutable_const)]
-        const ONCELOCK_DBI_NEW: OnceLock<DBI> = OnceLock::new();
+        const ONCECELL_DBI_NEW: OnceCell<DBI> = OnceCell::new();
         #[allow(clippy::declare_interior_mutable_const)]
-        const DB_HANDLES: [OnceLock<DBI>; Tables::COUNT] = [ONCELOCK_DBI_NEW; Tables::COUNT];
+        const DB_HANDLES: [OnceCell<DBI>; Tables::COUNT] = [ONCECELL_DBI_NEW; Tables::COUNT];
         Self { inner, db_handles: DB_HANDLES, metrics_handler }
     }
 
@@ -82,23 +84,14 @@ impl<K: TransactionKind> Tx<K> {
 
     /// Gets a table database handle if it exists, otherwise creates it.
     pub fn get_dbi<T: Table>(&self) -> Result<DBI, DatabaseError> {
-        // TODO: Use `OnceLock::get_or_try_init` once it's stable.
-        let slot = &self.db_handles[T::TABLE as usize];
-        match slot.get() {
-            Some(handle) => Ok(*handle),
-            None => self.open_and_store_db::<T>(slot),
-        }
-    }
-
-    #[cold]
-    fn open_and_store_db<T: Table>(&self, slot: &OnceLock<DBI>) -> Result<DBI, DatabaseError> {
-        match self.inner.open_db(Some(T::NAME)) {
-            Ok(db) => {
-                slot.set(db.dbi()).unwrap();
-                Ok(db.dbi())
-            }
-            Err(e) => Err(DatabaseError::Open(e.into())),
-        }
+        self.db_handles[T::TABLE as usize]
+            .get_or_try_init(|| {
+                self.inner
+                    .open_db(Some(T::NAME))
+                    .map(|db| db.dbi())
+                    .map_err(|e| DatabaseError::Open(e.into()))
+            })
+            .copied()
     }
 
     /// Create db Cursor
