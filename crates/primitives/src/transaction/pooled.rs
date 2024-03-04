@@ -4,6 +4,7 @@
 #![cfg(feature = "c-kzg")]
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
+use super::error::TransactionConversionError;
 use crate::{
     Address, BlobTransaction, BlobTransactionSidecar, Bytes, Signature, Transaction,
     TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, B256,
@@ -14,8 +15,6 @@ use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
-
-use super::error::TransactionConversionError;
 
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
 /// non-4844 signed transaction.
@@ -60,11 +59,20 @@ impl PooledTransactionsElement {
     /// [PooledTransactio'nsElement]. Since [BlobTransaction] is disallowed to be broadcasted on
     /// p2p, return an err if `tx` is [Transaction::Eip4844].
     pub fn try_from_broadcast(tx: TransactionSigned) -> Result<Self, TransactionSigned> {
-        if tx.is_eip4844() {
-            return Err(tx)
+        match tx {
+            TransactionSigned { transaction: Transaction::Legacy(tx), signature, hash } => {
+                Ok(PooledTransactionsElement::Legacy { transaction: tx, signature, hash })
+            }
+            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, hash } => {
+                Ok(PooledTransactionsElement::Eip2930 { transaction: tx, signature, hash })
+            }
+            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, hash } => {
+                Ok(PooledTransactionsElement::Eip1559 { transaction: tx, signature, hash })
+            }
+            tx @ TransactionSigned { transaction: Transaction::Eip4844(_), .. } => Err(tx),
+            #[cfg(feature = "optimism")]
+            tx @ TransactionSigned { transaction: Transaction::Deposit(_), .. } => Err(tx),
         }
-        // todo this is bad additional clone, better method?
-        PooledTransactionsElement::try_from(tx.clone()).map_err(|_| tx)
     }
 
     /// Converts from an EIP-4844 [TransactionSignedEcRecovered] to a
@@ -497,29 +505,8 @@ impl TryFrom<TransactionSigned> for PooledTransactionsElement {
     type Error = TransactionConversionError;
 
     fn try_from(tx: TransactionSigned) -> Result<Self, Self::Error> {
-        let TransactionSigned { transaction, signature, hash } = tx;
-        match transaction {
-            Transaction::Legacy(tx) => {
-                Ok(PooledTransactionsElement::Legacy { transaction: tx, signature, hash })
-            }
-            Transaction::Eip2930(tx) => {
-                Ok(PooledTransactionsElement::Eip2930 { transaction: tx, signature, hash })
-            }
-            Transaction::Eip1559(tx) => {
-                Ok(PooledTransactionsElement::Eip1559 { transaction: tx, signature, hash })
-            }
-            Transaction::Eip4844(tx) => {
-                Ok(PooledTransactionsElement::BlobTransaction(BlobTransaction {
-                    transaction: tx,
-                    signature,
-                    hash,
-                    // Assuming BlobTransaction has a sidecar that needs to be defaulted
-                    sidecar: Default::default(),
-                }))
-            }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => Err(TransactionConversionError::UnsupportedForP2P),
-        }
+        PooledTransactionsElement::try_from_broadcast(tx)
+            .map_err(|_| TransactionConversionError::UnsupportedForP2P)
     }
 }
 

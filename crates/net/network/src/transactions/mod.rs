@@ -857,7 +857,7 @@ where
                 // ensure we didn't receive any blob transactions as these are disallowed to be
                 // broadcasted in full
 
-                let has_blob_txs: bool = msg.has_eip4844();
+                let has_blob_txs = msg.has_eip4844();
 
                 let non_blob_txs = msg
                     .0
