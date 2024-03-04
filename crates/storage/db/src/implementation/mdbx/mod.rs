@@ -113,7 +113,7 @@ impl DatabaseArguments {
 #[derive(Debug)]
 pub struct DatabaseEnv {
     /// Libmdbx-sys environment.
-    inner: Environment,
+    pub inner: Environment,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
 }

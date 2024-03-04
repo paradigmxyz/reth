@@ -174,8 +174,10 @@ pub mod test_utils {
     /// A database will delete the db dir when dropped.
     #[derive(Debug)]
     pub struct TempDatabase<DB> {
-        db: Option<DB>,
-        path: PathBuf,
+        /// TODO:
+        pub db: Option<DB>,
+        /// TODO:
+        pub path: PathBuf,
     }
 
     impl<DB> Drop for TempDatabase<DB> {
