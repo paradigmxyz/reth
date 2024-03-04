@@ -142,9 +142,8 @@ impl<DB: Database> Pruner<DB> {
         provider: &DatabaseProviderRW<DB>,
         tip_block_number: BlockNumber,
         mut delete_limit: usize,
+        start: Instant,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
-        let start = Instant::now();
-
         let static_file_segments = self.static_file_segments();
         let segments = static_file_segments
             .iter()
