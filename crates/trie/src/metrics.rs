@@ -25,7 +25,7 @@ impl Default for StateRootMetrics {
 #[metrics(scope = "trie")]
 pub struct TrieRootMetrics {
     /// The number of seconds trie root calculation lasted.
-    duration: Histogram,
+    duration_seconds: Histogram,
     /// The number of branches added during trie root calculation.
     branches_added: Histogram,
     /// The number of leaves added during trie root calculation.
@@ -40,7 +40,7 @@ impl TrieRootMetrics {
 
     /// Record trie stats as metrics.
     pub fn record(&self, stats: TrieStats) {
-        self.duration.record(stats.duration().as_secs_f64());
+        self.duration_seconds.record(stats.duration().as_secs_f64());
         self.branches_added.record(stats.branches_added() as f64);
         self.leaves_added.record(stats.leaves_added() as f64);
     }
