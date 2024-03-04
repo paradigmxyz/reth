@@ -437,11 +437,13 @@ impl TransactionFetcher {
 
         let acc = &mut search_durations.find_idle_peer;
         duration_metered_exec!(
-            self.fill_request_from_hashes_pending_fetch(
-                &mut hashes_to_request,
-                &peer.seen_transactions,
-                budget_fill_request,
-            ),
+            {
+                self.fill_request_from_hashes_pending_fetch(
+                    &mut hashes_to_request,
+                    &peer.seen_transactions,
+                    budget_fill_request,
+                )
+            },
             acc
         );
 
