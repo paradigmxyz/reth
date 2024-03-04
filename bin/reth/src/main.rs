@@ -1,6 +1,6 @@
-// We use jemalloc for performance reasons
 #![allow(missing_docs)]
 
+// We use jemalloc for performance reasons.
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
@@ -13,8 +13,10 @@ fn main() {
     use reth::cli::Cli;
     use reth_node_ethereum::EthereumNode;
 
+    reth::sigsegv_handler::install();
+
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
-    if std::env::var("RUST_BACKTRACE").is_err() {
+    if std::env::var_os("RUST_BACKTRACE").is_none() {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 

@@ -153,3 +153,20 @@ pub struct RootMismatch {
     /// The target block hash.
     pub block_hash: BlockHash,
 }
+
+/// Consistent database view error.
+#[derive(Error, Debug)]
+pub enum ConsistentViewError {
+    /// Error thrown on attempt to initialize provider while node is still syncing.
+    #[error("node is syncing. best block: {0}")]
+    Syncing(BlockNumber),
+    /// Error thrown on inconsistent database view.
+    #[error("inconsistent database state: {tip:?}")]
+    InconsistentView {
+        /// The tip diff.
+        tip: GotExpected<Option<B256>>,
+    },
+    /// Underlying provider error.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+}

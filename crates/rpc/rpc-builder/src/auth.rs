@@ -22,11 +22,11 @@ use reth_rpc::{
         cache::EthStateCache, gas_oracle::GasPriceOracle, EthFilterConfig, FeeHistoryCache,
         FeeHistoryCacheConfig,
     },
-    AuthLayer, BlockingTaskPool, Claims, EngineEthApi, EthApi, EthFilter,
-    EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret,
+    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
+    JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::servers::*;
-use reth_tasks::TaskSpawner;
+use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},

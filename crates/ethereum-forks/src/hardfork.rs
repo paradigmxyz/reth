@@ -91,8 +91,25 @@ impl Hardfork {
     /// Retrieves the activation block for the specified hardfork on the given chain.
     pub fn activation_block(&self, chain: Chain) -> Option<u64> {
         if chain == Chain::mainnet() {
-            return self.mainnet_activation_block()
+            return self.mainnet_activation_block();
         }
+        if chain == Chain::sepolia() {
+            return self.sepolia_activation_block();
+        }
+        if chain == Chain::holesky() {
+            return self.holesky_activation_block();
+        }
+
+        #[cfg(feature = "optimism")]
+        {
+            if chain == Chain::base_sepolia() {
+                return self.base_sepolia_activation_block();
+            }
+            if chain == Chain::base_mainnet() {
+                return self.base_mainnet_activation_block();
+            }
+        }
+
         None
     }
 
@@ -124,11 +141,135 @@ impl Hardfork {
         }
     }
 
+    /// Retrieves the activation block for the specified hardfork on the Sepolia testnet.
+    pub fn sepolia_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Paris => Some(1735371),
+            Hardfork::Shanghai => Some(2990908),
+            Hardfork::Cancun => Some(5187023),
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(0),
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the Base Sepolia testnet.
+    #[cfg(feature = "optimism")]
+    pub fn base_sepolia_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(0),
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            Hardfork::Paris => Some(0),
+            Hardfork::Bedrock => Some(0),
+            Hardfork::Regolith => Some(0),
+            Hardfork::Shanghai => Some(2106456),
+            Hardfork::Canyon => Some(2106456),
+            Hardfork::Cancun => Some(6383256),
+            Hardfork::Ecotone => Some(6383256),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the Base mainnet.
+    #[cfg(feature = "optimism")]
+    pub fn base_mainnet_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(0),
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            Hardfork::Paris => Some(0),
+            Hardfork::Bedrock => Some(0),
+            Hardfork::Regolith => Some(0),
+            Hardfork::Shanghai => Some(9101527),
+            Hardfork::Canyon => Some(9101527),
+            Hardfork::Cancun => Some(11188936),
+            Hardfork::Ecotone => Some(11188936),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the holesky testnet.
+    fn holesky_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            Hardfork::Paris => Some(0),
+            Hardfork::Shanghai => Some(6698),
+            Hardfork::Cancun => Some(894733),
+            _ => None,
+        }
+    }
+
     /// Retrieves the activation timestamp for the specified hardfork on the given chain.
     pub fn activation_timestamp(&self, chain: Chain) -> Option<u64> {
         if chain == Chain::mainnet() {
-            return self.mainnet_activation_timestamp()
+            return self.mainnet_activation_timestamp();
         }
+        if chain == Chain::sepolia() {
+            return self.sepolia_activation_timestamp();
+        }
+        if chain == Chain::holesky() {
+            return self.holesky_activation_timestamp();
+        }
+        #[cfg(feature = "optimism")]
+        {
+            if chain == Chain::base_sepolia() {
+                return self.base_sepolia_activation_timestamp();
+            }
+            if chain == Chain::base_mainnet() {
+                return self.base_mainnet_activation_timestamp();
+            }
+        }
+
         None
     }
 
@@ -155,6 +296,116 @@ impl Hardfork {
             Hardfork::Cancun => Some(1710338135),
 
             // upcoming hardforks
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Sepolia testnet.
+    pub fn sepolia_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(1633267481),
+            Hardfork::Homestead => Some(1633267481),
+            Hardfork::Dao => Some(1633267481),
+            Hardfork::Tangerine => Some(1633267481),
+            Hardfork::SpuriousDragon => Some(1633267481),
+            Hardfork::Byzantium => Some(1633267481),
+            Hardfork::Constantinople => Some(1633267481),
+            Hardfork::Petersburg => Some(1633267481),
+            Hardfork::Istanbul => Some(1633267481),
+            Hardfork::MuirGlacier => Some(1633267481),
+            Hardfork::Berlin => Some(1633267481),
+            Hardfork::London => Some(1633267481),
+            Hardfork::ArrowGlacier => Some(1633267481),
+            Hardfork::GrayGlacier => Some(1633267481),
+            Hardfork::Paris => Some(1633267481),
+            Hardfork::Shanghai => Some(1677557088),
+            Hardfork::Cancun => Some(1706655072),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Holesky testnet.
+    pub fn holesky_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Shanghai => Some(1696000704),
+            Hardfork::Cancun => Some(1707305664),
+            Hardfork::Frontier => Some(1695902100),
+            Hardfork::Homestead => Some(1695902100),
+            Hardfork::Dao => Some(1695902100),
+            Hardfork::Tangerine => Some(1695902100),
+            Hardfork::SpuriousDragon => Some(1695902100),
+            Hardfork::Byzantium => Some(1695902100),
+            Hardfork::Constantinople => Some(1695902100),
+            Hardfork::Petersburg => Some(1695902100),
+            Hardfork::Istanbul => Some(1695902100),
+            Hardfork::MuirGlacier => Some(1695902100),
+            Hardfork::Berlin => Some(1695902100),
+            Hardfork::London => Some(1695902100),
+            Hardfork::ArrowGlacier => Some(1695902100),
+            Hardfork::GrayGlacier => Some(1695902100),
+            Hardfork::Paris => Some(1695902100),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Base Sepolia testnet.
+    #[cfg(feature = "optimism")]
+    pub fn base_sepolia_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(1695768288),
+            Hardfork::Homestead => Some(1695768288),
+            Hardfork::Dao => Some(1695768288),
+            Hardfork::Tangerine => Some(1695768288),
+            Hardfork::SpuriousDragon => Some(1695768288),
+            Hardfork::Byzantium => Some(1695768288),
+            Hardfork::Constantinople => Some(1695768288),
+            Hardfork::Petersburg => Some(1695768288),
+            Hardfork::Istanbul => Some(1695768288),
+            Hardfork::MuirGlacier => Some(1695768288),
+            Hardfork::Berlin => Some(1695768288),
+            Hardfork::London => Some(1695768288),
+            Hardfork::ArrowGlacier => Some(1695768288),
+            Hardfork::GrayGlacier => Some(1695768288),
+            Hardfork::Paris => Some(1695768288),
+            Hardfork::Bedrock => Some(1695768288),
+            Hardfork::Regolith => Some(1695768288),
+            Hardfork::Shanghai => Some(1699981200),
+            Hardfork::Canyon => Some(1699981200),
+            Hardfork::Cancun => Some(1708534800),
+            Hardfork::Ecotone => Some(1708534800),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Base mainnet.
+    #[cfg(feature = "optimism")]
+    pub fn base_mainnet_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(1686789347),
+            Hardfork::Homestead => Some(1686789347),
+            Hardfork::Dao => Some(1686789347),
+            Hardfork::Tangerine => Some(1686789347),
+            Hardfork::SpuriousDragon => Some(1686789347),
+            Hardfork::Byzantium => Some(1686789347),
+            Hardfork::Constantinople => Some(1686789347),
+            Hardfork::Petersburg => Some(1686789347),
+            Hardfork::Istanbul => Some(1686789347),
+            Hardfork::MuirGlacier => Some(1686789347),
+            Hardfork::Berlin => Some(1686789347),
+            Hardfork::London => Some(1686789347),
+            Hardfork::ArrowGlacier => Some(1686789347),
+            Hardfork::GrayGlacier => Some(1686789347),
+            Hardfork::Paris => Some(1686789347),
+            Hardfork::Bedrock => Some(1686789347),
+            Hardfork::Regolith => Some(1686789347),
+            Hardfork::Shanghai => Some(1704992401),
+            Hardfork::Canyon => Some(1704992401),
+            Hardfork::Cancun => Some(1710374401),
+            Hardfork::Ecotone => Some(1710374401),
             _ => None,
         }
     }

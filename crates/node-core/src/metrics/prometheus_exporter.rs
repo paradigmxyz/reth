@@ -11,6 +11,7 @@ use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
+use reth_provider::providers::StaticFileProvider;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
@@ -79,17 +80,24 @@ pub async fn serve<Metrics>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
     db: Metrics,
+    static_file_provider: StaticFileProvider,
     process: metrics_process::Collector,
 ) -> eyre::Result<()>
 where
     Metrics: DatabaseMetrics + 'static + Send + Sync,
 {
     let db_metrics_hook = move || db.report_metrics();
+    let static_file_metrics_hook = move || {
+        let _ = static_file_provider.report_metrics().map_err(
+            |error| tracing::error!(%error, "Failed to report static file provider metrics"),
+        );
+    };
 
     // Clone `process` to move it into the hook and use the original `process` for describe below.
     let cloned_process = process.clone();
     let hooks: Vec<Box<dyn Hook<Output = ()>>> = vec![
         Box::new(db_metrics_hook),
+        Box::new(static_file_metrics_hook),
         Box::new(move || cloned_process.collect()),
         Box::new(collect_memory_stats),
         Box::new(collect_io_stats),
@@ -102,10 +110,13 @@ where
     describe_gauge!("db.table_pages", "The number of database pages for a table");
     describe_gauge!("db.table_entries", "The number of entries for a table");
     describe_gauge!("db.freelist", "The number of pages on the freelist");
+    describe_gauge!("static_files.segment_size", Unit::Bytes, "The size of a static file segment");
+    describe_gauge!("static_files.segment_files", "The number of files for a static file segment");
     describe_gauge!(
-        "db.timed_out_not_aborted_transactions",
-        "Number of timed out transactions that were not aborted by the user yet"
+        "static_files.segment_entries",
+        "The number of entries for a static file segment"
     );
+
     process.describe();
     describe_memory_stats();
     describe_io_stats();

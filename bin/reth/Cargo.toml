@@ -49,9 +49,7 @@ reth-trie.workspace = true
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
-reth-node-optimism = { workspace = true, optional = true, features = [
-    "optimism",
-] }
+reth-node-optimism = { workspace = true, optional = true, features = ["optimism"] }
 reth-node-core.workspace = true
 reth-node-builder.workspace = true
 
@@ -83,12 +81,7 @@ ratatui = "0.25.0"
 human_bytes = "0.4.1"
 
 # async
-tokio = { workspace = true, features = [
-    "sync",
-    "macros",
-    "time",
-    "rt-multi-thread",
-] }
+tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 futures.workspace = true
 
 # misc
@@ -104,6 +97,9 @@ boyer-moore-magiclen = "0.2.16"
 
 [target.'cfg(not(windows))'.dependencies]
 jemallocator = { version = "0.5.0", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 jsonrpsee.workspace = true
