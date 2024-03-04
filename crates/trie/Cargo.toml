@@ -18,9 +18,6 @@ reth-interfaces.workspace = true
 reth-db.workspace = true
 revm.workspace = true
 
-# metrics
-
-
 # alloy
 alloy-rlp.workspace = true
 alloy-chains.workspace = true
