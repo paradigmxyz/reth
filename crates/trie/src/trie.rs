@@ -1,9 +1,9 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
-    metrics::{TrieRootMetrics, TrieTracker, TrieType},
     node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
     prefix_set::{PrefixSet, PrefixSetLoader, PrefixSetMut, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
+    stats::TrieTracker,
     trie_cursor::TrieCursorFactory,
     updates::{TrieKey, TrieOp, TrieUpdates},
     walker::TrieWalker,
@@ -20,6 +20,9 @@ use reth_primitives::{
 use std::ops::RangeInclusive;
 use tracing::{debug, trace};
 
+#[cfg(feature = "metrics")]
+use crate::metrics::{StateRootMetrics, TrieRootMetrics, TrieType};
+
 /// StateRoot is used to compute the root node of a state trie.
 #[derive(Debug)]
 pub struct StateRoot<T, H> {
@@ -33,8 +36,9 @@ pub struct StateRoot<T, H> {
     previous_state: Option<IntermediateStateRootState>,
     /// The number of updates after which the intermediate progress should be returned.
     threshold: u64,
+    #[cfg(feature = "metrics")]
     /// State root metrics.
-    metrics: TrieRootMetrics,
+    metrics: StateRootMetrics,
 }
 
 impl<T, H> StateRoot<T, H> {
@@ -70,6 +74,7 @@ impl<T, H> StateRoot<T, H> {
             prefix_sets: self.prefix_sets,
             threshold: self.threshold,
             previous_state: self.previous_state,
+            #[cfg(feature = "metrics")]
             metrics: self.metrics,
         }
     }
@@ -82,6 +87,7 @@ impl<T, H> StateRoot<T, H> {
             prefix_sets: self.prefix_sets,
             threshold: self.threshold,
             previous_state: self.previous_state,
+            #[cfg(feature = "metrics")]
             metrics: self.metrics,
         }
     }
@@ -96,7 +102,8 @@ impl<'a, TX: DbTx> StateRoot<&'a TX, &'a TX> {
             prefix_sets: TriePrefixSets::default(),
             previous_state: None,
             threshold: 100_000,
-            metrics: TrieRootMetrics::new(TrieType::State),
+            #[cfg(feature = "metrics")]
+            metrics: StateRootMetrics::default(),
         }
     }
 
@@ -203,7 +210,7 @@ where
     }
 
     fn calculate(self, retain_updates: bool) -> Result<StateRootProgress, StateRootError> {
-        trace!(target: "trie::loader", "calculating state root");
+        trace!(target: "trie::state_root", "calculating state root");
         let mut tracker = TrieTracker::default();
         let mut trie_updates = TrieUpdates::default();
 
@@ -255,6 +262,8 @@ where
                         self.trie_cursor_factory.clone(),
                         self.hashed_cursor_factory.clone(),
                         hashed_address,
+                        #[cfg(feature = "metrics")]
+                        self.metrics.storage_trie.clone(),
                     )
                     .with_prefix_set(
                         self.prefix_sets
@@ -319,7 +328,20 @@ where
             self.prefix_sets.destroyed_accounts.into_iter().map(TrieKey::StorageTrie),
         );
 
-        self.metrics.record(tracker);
+        let stats = tracker.finish();
+
+        #[cfg(feature = "metrics")]
+        self.metrics.state_trie.record(stats);
+
+        trace!(
+            target: "trie::state_root",
+            ?root,
+            duration = ?stats.duration(),
+            branches_added = stats.branches_added(),
+            leaves_added = stats.leaves_added(),
+            "calculated state root"
+        );
+
         Ok(StateRootProgress::Complete(root, hashed_entries_walked, trie_updates))
     }
 }
@@ -335,14 +357,26 @@ pub struct StorageRoot<T, H> {
     pub hashed_address: B256,
     /// The set of storage slot prefixes that have changed.
     pub prefix_set: PrefixSet,
+    #[cfg(feature = "metrics")]
     /// Storage root metrics.
     metrics: TrieRootMetrics,
 }
 
 impl<T, H> StorageRoot<T, H> {
     /// Creates a new storage root calculator given a raw address.
-    pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H, address: Address) -> Self {
-        Self::new_hashed(trie_cursor_factory, hashed_cursor_factory, keccak256(address))
+    pub fn new(
+        trie_cursor_factory: T,
+        hashed_cursor_factory: H,
+        address: Address,
+        #[cfg(feature = "metrics")] metrics: TrieRootMetrics,
+    ) -> Self {
+        Self::new_hashed(
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            keccak256(address),
+            #[cfg(feature = "metrics")]
+            metrics,
+        )
     }
 
     /// Creates a new storage root calculator given a hashed address.
@@ -350,13 +384,15 @@ impl<T, H> StorageRoot<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         hashed_address: B256,
+        #[cfg(feature = "metrics")] metrics: TrieRootMetrics,
     ) -> Self {
         Self {
             trie_cursor_factory,
             hashed_cursor_factory,
             hashed_address,
             prefix_set: PrefixSetMut::default().freeze(),
-            metrics: TrieRootMetrics::new(TrieType::Storage),
+            #[cfg(feature = "metrics")]
+            metrics,
         }
     }
 
@@ -373,6 +409,7 @@ impl<T, H> StorageRoot<T, H> {
             hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
+            #[cfg(feature = "metrics")]
             metrics: self.metrics,
         }
     }
@@ -384,6 +421,7 @@ impl<T, H> StorageRoot<T, H> {
             hashed_cursor_factory: self.hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
+            #[cfg(feature = "metrics")]
             metrics: self.metrics,
         }
     }
@@ -392,12 +430,24 @@ impl<T, H> StorageRoot<T, H> {
 impl<'a, TX: DbTx> StorageRoot<&'a TX, &'a TX> {
     /// Create a new storage root calculator from database transaction and raw address.
     pub fn from_tx(tx: &'a TX, address: Address) -> Self {
-        Self::new(tx, tx, address)
+        Self::new(
+            tx,
+            tx,
+            address,
+            #[cfg(feature = "metrics")]
+            TrieRootMetrics::new(TrieType::Storage),
+        )
     }
 
     /// Create a new storage root calculator from database transaction and hashed address.
     pub fn from_tx_hashed(tx: &'a TX, hashed_address: B256) -> Self {
-        Self::new_hashed(tx, tx, hashed_address)
+        Self::new_hashed(
+            tx,
+            tx,
+            hashed_address,
+            #[cfg(feature = "metrics")]
+            TrieRootMetrics::new(TrieType::Storage),
+        )
     }
 }
 
@@ -475,10 +525,22 @@ where
         trie_updates.extend(walker_updates);
         trie_updates.extend_with_storage_updates(self.hashed_address, hash_builder_updates);
 
-        self.metrics.record(tracker);
-        trace!(target: "trie::storage_root", ?root, hashed_address = ?self.hashed_address, "calculated storage root");
+        let stats = tracker.finish();
 
-        let storage_slots_walked = tracker.leaves_added() as usize;
+        #[cfg(feature = "metrics")]
+        self.metrics.record(stats);
+
+        trace!(
+            target: "trie::storage_root",
+            ?root,
+            hashed_address = %self.hashed_address,
+            duration = ?stats.duration(),
+            branches_added = stats.branches_added(),
+            leaves_added = stats.leaves_added(),
+            "calculated storage root"
+        );
+
+        let storage_slots_walked = stats.leaves_added() as usize;
         Ok((root, storage_slots_walked, trie_updates))
     }
 }
