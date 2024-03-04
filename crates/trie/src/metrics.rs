@@ -5,8 +5,8 @@ use std::time::Instant;
 #[derive(Metrics)]
 #[metrics(scope = "trie")]
 pub(crate) struct TrieRootMetrics {
-    /// The number of microseconds trie root calculation lasted.
-    duration_micros: Histogram,
+    /// The number of seconds trie root calculation lasted.
+    duration: Histogram,
     /// The number of branches added during trie root calculation.
     branches_added: Histogram,
     /// The number of leaves added during trie root calculation.
@@ -19,7 +19,7 @@ impl TrieRootMetrics {
     }
 
     pub(crate) fn record(&self, tracker: TrieTracker) {
-        self.duration_micros.record(tracker.started_at.elapsed().as_millis() as f64);
+        self.duration.record(tracker.started_at.elapsed().as_secs_f64());
         self.branches_added.record(tracker.branches_added as f64);
         self.leaves_added.record(tracker.leaves_added as f64);
     }
