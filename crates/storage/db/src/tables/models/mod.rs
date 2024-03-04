@@ -47,6 +47,36 @@ macro_rules! impl_uints {
 
 impl_uints!(u64, u32, u16, u8);
 
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    Hash,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary, proptest_derive::Arbitrary))]
+pub struct TxNumberLe(pub u64);
+
+impl Encode for TxNumberLe {
+    type Encoded = [u8; std::mem::size_of::<u64>()];
+
+    fn encode(self) -> Self::Encoded {
+        self.0.to_le_bytes()
+    }
+}
+
+impl Decode for TxNumberLe {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
+        Ok(Self(u64::from_le_bytes(value.as_ref().try_into().map_err(|_| DatabaseError::Decode)?)))
+    }
+}
+
 impl Encode for Vec<u8> {
     type Encoded = Vec<u8>;
 

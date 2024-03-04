@@ -1,4 +1,6 @@
 #![allow(missing_docs)]
+mod integer_keys;
+
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };

@@ -44,6 +44,8 @@ use reth_primitives::{
 };
 use std::fmt;
 
+use self::models::TxNumberLe;
+
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum TableType {
@@ -269,12 +271,13 @@ tables! {
     table Transactions<Key = TxNumber, Value = TransactionSignedNoHash>;
 
     /// Stores the mapping of the transaction hash to the transaction number.
-    table TransactionHashNumbers<Key = TxHash, Value = TxNumber>;
+    // table TransactionHashNumbers<Key = TxHash, Value = TxNumber>;
 
     /// Stores the mapping of transaction number to the blocks number.
     ///
     /// The key is the highest transaction ID in the block.
     table TransactionBlocks<Key = TxNumber, Value = BlockNumber>;
+    table TransactionBlocks2<Key = TxNumberLe, Value = BlockNumber>;
 
     /// Canonical only Stores transaction receipts.
     table Receipts<Key = TxNumber, Value = Receipt>;

@@ -13,8 +13,9 @@ use reth_db::{
     cursor::DbCursorRW,
     is_database_empty,
     mdbx::DatabaseArguments,
+    models::TxNumberLe,
     test_utils::{TempDatabase, ERROR_DB_CREATION},
-    DatabaseEnvKind, DatabaseError, TransactionBlocks,
+    DatabaseEnvKind, DatabaseError, RawTable, TransactionBlocks, TransactionBlocks2,
 };
 use reth_libmdbx::{DatabaseFlags, MaxReadTransactionDuration};
 use std::collections::HashSet;
@@ -77,10 +78,10 @@ pub fn integer_keys(c: &mut Criterion) {
             size,
             false,
         );
-        measure_table_insertion::<TransactionBlocks>(
+        measure_table_insertion::<TransactionBlocks2>(
             &mut group,
-            preload.clone(),
-            unsorted_input.clone(),
+            preload.clone().into_iter().map(|(k, v)| (TxNumberLe(k), v)).collect(),
+            unsorted_input.clone().into_iter().map(|(k, v)| (TxNumberLe(k), v)).collect(),
             size,
             true,
         );
@@ -107,8 +108,8 @@ fn measure_table_insertion<T>(
     let bench_db_path = Path::new(BENCH_DB_PATH);
 
     let scenarios: Vec<(fn(_, _) -> _, &str)> = vec![
-        // (append::<T>, "append_all"),
-        // (append::<T>, "append_input"),
+        (append::<T>, "append_all"),
+        (append::<T>, "append_input"),
         (insert::<T>, "insert_unsorted"),
         (insert::<T>, "insert_sorted"),
         (put::<T>, "put_unsorted"),
@@ -141,7 +142,7 @@ fn measure_table_insertion<T>(
                 .unwrap();
 
             tx.create_db(
-                Some("TransactionBlocks"),
+                Some(if use_ints { "TransactionBlocks2" } else { "TransactionBlocks" }),
                 if use_ints { DatabaseFlags::INTEGER_KEY } else { DatabaseFlags::default() },
             )
             .map_err(|e| DatabaseError::CreateTable(e.into()))
