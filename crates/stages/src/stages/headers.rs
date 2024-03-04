@@ -590,5 +590,7 @@ mod tests {
             processed == checkpoint + headers.len() as u64 - 1 && total == tip.number
         );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+        assert!(runner.stage().hash_collector.is_empty());
+        assert!(runner.stage().header_collector.is_empty());
     }
 }
