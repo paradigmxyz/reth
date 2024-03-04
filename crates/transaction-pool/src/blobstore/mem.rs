@@ -67,7 +67,9 @@ impl BlobStore for InMemoryBlobStore {
         Ok(())
     }
 
-    fn cleanup(&self) {}
+    fn cleanup(&self) -> (usize, usize) {
+        (0, 0)
+    }
 
     // Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
