@@ -48,8 +48,9 @@ pub struct Pruner<DB> {
 }
 
 impl<DB: Database> Pruner<DB> {
-    /// Time limit that [`Pruner`] can run before it's forced to yield the db rw hook.
-    const DEFAULT_TIME_OUT_DURATION_PRUNER: Duration = Duration::from_millis(100);
+    /// Time limit that [`Pruner`] can run before it's forced to yield the [`DatabaseProviderRW`]
+    /// hook.
+    pub const DEFAULT_TIME_OUT_DURATION_PRUNER: Duration = Duration::from_millis(100);
 
     /// Creates a new [Pruner].
     pub fn new(
