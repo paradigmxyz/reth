@@ -39,7 +39,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     ///
     /// This is intended to be called in the background to clean up any old or unused data, in case
     /// the store uses deferred cleanup: [DiskFileBlobStore]
-    fn cleanup(&self) -> (usize, usize);
+    fn cleanup(&self) -> BlobStoreCleanupStat;
 
     /// Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
@@ -138,6 +138,13 @@ impl PartialEq for BlobStoreSize {
         self.data_size.load(Ordering::Relaxed) == other.data_size.load(Ordering::Relaxed) &&
             self.num_blobs.load(Ordering::Relaxed) == other.num_blobs.load(Ordering::Relaxed)
     }
+}
+
+/// Statistics for the cleanup operation.
+#[derive(Debug, Default)]
+pub struct BlobStoreCleanupStat {
+    pub(crate) delete_succeed: usize,
+    pub(crate) delete_failed: usize,
 }
 
 #[cfg(test)]

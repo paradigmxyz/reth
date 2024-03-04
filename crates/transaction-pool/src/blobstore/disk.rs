@@ -1,6 +1,6 @@
 //! A simple diskstore for blobs
 
-use crate::{blobstore::BlobStoreSize, BlobStore, BlobStoreError};
+use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
 use alloy_rlp::{Decodable, Encodable};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{BlobTransactionSidecar, TxHash, B256};
@@ -71,12 +71,12 @@ impl BlobStore for DiskFileBlobStore {
         Ok(())
     }
 
-    fn cleanup(&self) -> (usize, usize) {
+    fn cleanup(&self) -> BlobStoreCleanupStat {
         let txs_to_delete = {
             let mut txs_to_delete = self.inner.txs_to_delete.write();
             std::mem::take(&mut *txs_to_delete)
         };
-        let (mut delete_succeed, mut delete_failed) = (0, 0);
+        let mut stat = BlobStoreCleanupStat::default();
         let mut subsize = 0;
         debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
         for tx in txs_to_delete {
@@ -85,17 +85,17 @@ impl BlobStore for DiskFileBlobStore {
                 subsize += meta.len();
             });
             match fs::remove_file(&path) {
-                Ok(_) => delete_succeed += 1,
+                Ok(_) => stat.delete_succeed += 1,
                 Err(e) => {
-                    delete_failed += 1;
+                    stat.delete_failed += 1;
                     let err = DiskFileBlobStoreError::DeleteFile(tx, path, e);
                     debug!(target:"txpool::blob", %err);
                 }
             };
         }
         self.inner.size_tracker.sub_size(subsize as usize);
-        self.inner.size_tracker.sub_len(delete_succeed);
-        (delete_succeed, delete_failed)
+        self.inner.size_tracker.sub_len(stat.delete_succeed);
+        stat
     }
 
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {

@@ -794,8 +794,8 @@ where
 
     /// Cleans up the blob store
     pub(crate) fn cleanup_blobs(&self) {
-        let (_, failed) = self.blob_store.cleanup();
-        self.blob_store_metrics.blobstore_failed_deletes.increment(failed as u64);
+        let stat = self.blob_store.cleanup();
+        self.blob_store_metrics.blobstore_failed_deletes.increment(stat.delete_failed as u64);
         self.update_blob_store_metrics();
     }
 
