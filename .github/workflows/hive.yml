@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: mkdir artifacts
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
       - name: Build and export reth image
         uses: docker/build-push-action@v4
         with:
