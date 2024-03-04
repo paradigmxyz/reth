@@ -13,11 +13,11 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
-reth-revm.workspace = true
-reth-transaction-pool.workspace = true
-reth-provider.workspace = true
-reth-payload-builder.workspace = true
+reth-primitives ={workspace = true, features = ["optimism"]}
+reth-revm = {workspace = true, features = ["optimism"]}
+reth-transaction-pool = {workspace = true, features = ["optimism"]}
+reth-provider = {workspace = true, features = ["optimism"]}
+reth-payload-builder={workspace = true, features = ["optimism"] }
 reth-basic-payload-builder.workspace = true
 
 # ethereum
@@ -26,15 +26,3 @@ revm.workspace = true
 # misc
 tracing.workspace = true
 thiserror.workspace = true
-
-
-[features]
-# This is a workaround for reth-cli crate to allow this as mandatory dependency without breaking the build even if unused.
-# This makes managing features and testing workspace easier because clippy always builds all members if --workspace is provided
-optimism = [
-    "reth-primitives/optimism",
-    "reth-revm/optimism",
-    "reth-transaction-pool/optimism",
-    "reth-provider/optimism",
-    "reth-payload-builder/optimism",
-]
