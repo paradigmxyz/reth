@@ -15,7 +15,7 @@ use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::Database,
+    database::{Database, DEFAULT_TIME_OUT_DURATION_PRUNER},
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
@@ -825,6 +825,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> Result<(usize, bool), DatabaseError> {
+        let start = Instant::now();
+
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
         let mut deleted = 0;
@@ -837,7 +839,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                     delete_callback(row);
                 }
 
-                if deleted == limit {
+                if DEFAULT_TIME_OUT_DURATION_PRUNER <= start.elapsed() || deleted == limit {
                     break
                 }
             }
