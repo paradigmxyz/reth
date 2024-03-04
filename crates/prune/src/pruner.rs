@@ -109,7 +109,7 @@ impl<DB: Database> Pruner<DB> {
 
         let provider = self.provider_factory.provider_rw()?;
         let (stats, delete_limit, progress) =
-            self.prune_segments(&provider, tip_block_number, delete_limit)?;
+            self.prune_segments(&provider, tip_block_number, delete_limit, start)?;
         provider.commit()?;
         drop(provider);
 
