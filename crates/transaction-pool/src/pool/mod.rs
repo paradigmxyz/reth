@@ -784,26 +784,18 @@ where
 
     /// Delete a blob from the blob store
     pub(crate) fn delete_blob(&self, blob: TxHash) {
-        if let Err(err) = self.blob_store.delete(blob) {
-            warn!(target: "txpool", %err, "[{:?}] failed to delete blobs", blob);
-            self.blob_store_metrics.blobstore_failed_deletes.increment(1);
-        }
-        self.update_blob_store_metrics();
+        let _ = self.blob_store.delete(blob);
     }
 
     /// Delete all blobs from the blob store
     pub(crate) fn delete_blobs(&self, txs: Vec<TxHash>) {
-        let num = txs.len();
-        if let Err(err) = self.blob_store.delete_all(txs) {
-            warn!(target: "txpool", %err,?num, "failed to delete blobs");
-            self.blob_store_metrics.blobstore_failed_deletes.increment(num as u64);
-        }
-        self.update_blob_store_metrics();
+        let _ = self.blob_store.delete_all(txs);
     }
 
     /// Cleans up the blob store
     pub(crate) fn cleanup_blobs(&self) {
-        self.blob_store.cleanup();
+        let stat = self.blob_store.cleanup();
+        self.blob_store_metrics.blobstore_failed_deletes.increment(stat.delete_failed as u64);
         self.update_blob_store_metrics();
     }
 
