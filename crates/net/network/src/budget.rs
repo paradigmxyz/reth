@@ -5,7 +5,7 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_STREAM: u32 = 10;
 
 /// Default budget to try and drain [`Swarm`](crate::swarm::Swarm).
 ///
-/// Default is 10 [`SwarmEvent`](crate::swarm::SwarmEvent)`s.
+/// Default is 10 [`SwarmEvent`](crate::swarm::SwarmEvent)s.
 pub const DEFAULT_BUDGET_TRY_DRAIN_SWARM: u32 = 10;
 
 /// Default budget to try and drain pending messages from [`NetworkHandle`](crate::NetworkHandle)
