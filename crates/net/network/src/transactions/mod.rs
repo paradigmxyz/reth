@@ -1145,17 +1145,6 @@ where
     }
 }
 
-#[derive(Debug, Default)]
-struct TxManagerPollDurations {
-    acc_network_events: Duration,
-    acc_pending_imports: Duration,
-    acc_tx_events: Duration,
-    acc_imported_txns: Duration,
-    acc_fetch_events: Duration,
-    acc_pending_fetch: Duration,
-    acc_cmds: Duration,
-}
-
 /// An endless future. Preemption ensure that future is non-blocking, nonetheless. See
 /// [`crate::NetworkManager`] for more context on the design pattern.
 ///
@@ -1176,6 +1165,7 @@ where
         // `NetworkManager` for more context on the design pattern.
         let mut budget = 1024;
 
+        loop {
             let mut some_ready = false;
 
             let acc = &mut poll_durations.acc_network_events;
@@ -1199,10 +1189,6 @@ where
                         let max_pending_pool_imports = info.max_pending_pool_imports;
                         let has_capacity_wrt_pending_pool_imports =
                             |divisor| info.has_capacity(max_pending_pool_imports / divisor);
-
-                        let metrics = &this.metrics;
-                        let metrics_increment_egress_peer_channel_full =
-                            || metrics.egress_peer_channel_full.increment(1);
 
                         this.transaction_fetcher.on_fetch_pending_hashes(
                             &this.peers,
@@ -1240,7 +1226,7 @@ where
             let acc = &mut poll_durations.acc_fetch_events;
             duration_metered_exec!(
                 {
-                    this.update_fetch_metrics();
+                    this.transaction_fetcher.update_metrics();
 
                     // advance fetching transaction events
                     if let Poll::Ready(Some(fetch_event)) =
@@ -1265,7 +1251,7 @@ where
                         some_ready = true;
                     }
 
-                    this.update_fetch_metrics();
+                    this.transaction_fetcher.update_metrics();
                 },
                 acc
             );
@@ -1324,64 +1310,17 @@ where
                 acc
             );
 
-        // try drain incoming transaction events (stream new txns/announcements from network
-        // manager and queue for import to pool/fetch txns)
-        let acc = &mut poll_durations.acc_tx_events;
-        let maybe_more_tx_events = metered_poll_nested_stream_with_yield_points!(
-            acc,
-            "net::tx",
-            "Commands channel",
-            DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
-            this.transaction_events.poll_next_unpin(cx),
-            |event| this.on_network_tx_event(event),
-        );
+            // all channels are fully drained and import futures pending
+            if !some_ready {
+                break
+            }
 
-        // try drain hashes pending fetch if there is capacity (fetch txns)
-        //
-        // sends at most one request
-        let acc = &mut poll_durations.acc_pending_fetch;
-        duration_metered_exec!(
-            {
-                if this.has_capacity_for_fetching_pending_hashes() {
-                    // try drain transaction hashes pending fetch
-                    let info = &this.pending_pool_imports_info;
-                    let max_pending_pool_imports = info.max_pending_pool_imports;
-                    let has_capacity_wrt_pending_pool_imports =
-                        |divisor| info.has_capacity(max_pending_pool_imports / divisor);
-
-                    this.transaction_fetcher.on_fetch_pending_hashes(
-                        &this.peers,
-                        has_capacity_wrt_pending_pool_imports,
-                    );
-                }
-            },
-            acc
-        );
-
-        // try drain commands (propagate/fetch/serve txns)
-        let acc = &mut poll_durations.acc_cmds;
-        let maybe_more_commands = metered_poll_nested_stream_with_yield_points!(
-            acc,
-            "net::tx",
-            "Commands channel",
-            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-            this.command_rx.poll_next_unpin(cx),
-            |cmd| { this.on_command(cmd) }
-        );
-
-        this.transaction_fetcher.update_metrics();
-
-        // all channels are fully drained and import futures pending
-        if maybe_more_network_events ||
-            maybe_more_commands ||
-            maybe_more_tx_events ||
-            maybe_more_tx_fetch_events ||
-            maybe_more_pool_imports ||
-            maybe_more_pending_txns
-        {
-            // make sure we're woken up again
-            cx.waker().wake_by_ref();
-            return Poll::Pending
+            budget -= 1;
+            if budget <= 0 {
+                // Make sure we're woken up again
+                cx.waker().wake_by_ref();
+                break
+            }
         }
 
         this.update_poll_metrics(start, poll_durations);
@@ -1627,6 +1566,17 @@ impl Default for PendingPoolImportsInfo {
     fn default() -> Self {
         Self::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS)
     }
+}
+
+#[derive(Debug, Default)]
+struct TxManagerPollDurations {
+    acc_network_events: Duration,
+    acc_pending_imports: Duration,
+    acc_tx_events: Duration,
+    acc_imported_txns: Duration,
+    acc_fetch_events: Duration,
+    acc_pending_fetch: Duration,
+    acc_cmds: Duration,
 }
 
 #[cfg(test)]
@@ -2081,7 +2031,7 @@ mod tests {
         assert_eq!(tx_fetcher.active_peers.len(), 0);
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true, || ());
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
