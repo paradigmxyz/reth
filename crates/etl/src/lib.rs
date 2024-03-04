@@ -85,6 +85,14 @@ where
         self.len == 0
     }
 
+    pub fn clear(&mut self) {
+        // Clear vectors and free the allocated memory
+        self.files = Vec::new();
+        self.buffer = Vec::new();
+        self.buffer_size_bytes = 0;
+        self.len = 0;
+    }
+
     /// Insert an entry into the collector.
     pub fn insert(&mut self, key: K, value: V) {
         let key = key.encode();

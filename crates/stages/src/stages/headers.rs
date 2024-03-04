@@ -291,6 +291,10 @@ where
         let last_header_number =
             self.write_headers::<DB>(provider.tx_ref(), provider.static_file_provider().clone())?;
 
+        // Clear ETL collectors
+        self.hash_collector.clear();
+        self.header_collector.clear();
+
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(last_header_number).with_headers_stage_checkpoint(
                 HeadersCheckpoint {
