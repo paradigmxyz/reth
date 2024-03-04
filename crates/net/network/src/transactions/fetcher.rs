@@ -1,5 +1,6 @@
 use crate::{
     cache::{LruCache, LruMap},
+    duration_metered_exec,
     message::PeerRequest,
     metrics::TransactionFetcherMetrics,
     transactions::{validation, PartiallyFilterMessage},
@@ -25,7 +26,7 @@ use std::{
     num::NonZeroUsize,
     pin::Pin,
     task::{ready, Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::{debug, trace};
@@ -90,6 +91,17 @@ impl TransactionFetcher {
 
         metrics.hashes_pending_fetch.set(hashes_pending_fetch);
         metrics.hashes_inflight_transaction_requests.set(total_hashes - hashes_pending_fetch);
+    }
+
+    #[inline]
+    fn update_pending_fetch_cache_search_metrics(&self, durations: TxFetcherSearchDurations) {
+        let metrics = &self.metrics;
+
+        let TxFetcherSearchDurations { find_idle_peer, fill_request } = durations;
+        metrics
+            .duration_find_idle_fallback_peer_for_any_pending_hash
+            .set(find_idle_peer.as_secs_f64());
+        metrics.duration_fill_request_from_hashes_pending_fetch.set(fill_request.as_secs_f64());
     }
 
     /// Sets up transaction fetcher with config
@@ -175,8 +187,6 @@ impl TransactionFetcher {
         is_session_active: impl Fn(&PeerId) -> bool,
         mut budget: Option<usize>, // search fallback peers for max `budget` lru pending hashes
     ) -> Option<PeerId> {
-        let start = Instant::now();
-
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
         let idle_peer = loop {
@@ -201,10 +211,6 @@ impl TransactionFetcher {
         // pop hash that is loaded in request buffer from cache of hashes pending fetch
         drop(hashes_pending_fetch_iter);
         _ = self.hashes_pending_fetch.remove(hash);
-
-        self.metrics
-            .duration_find_idle_fallback_peer_for_any_pending_hash
-            .set(start.elapsed().as_secs_f64());
 
         idle_peer
     }
@@ -402,18 +408,29 @@ impl TransactionFetcher {
         let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
+        let mut search_durations = TxFetcherSearchDurations::default();
+
         // budget to look for an idle peer before giving up
         let budget_find_idle_fallback_peer = self
             .search_breadth_budget_find_idle_fallback_peer(&has_capacity_wrt_pending_pool_imports);
 
-        let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
-            &mut hashes_to_request,
-            is_session_active,
-            budget_find_idle_fallback_peer,
-        ) else {
-            // no peers are idle or budget is depleted
-            return
-        };
+        let acc = &mut search_durations.fill_request;
+        let peer_id = duration_metered_exec!(
+            {
+                let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
+                    &mut hashes_to_request,
+                    is_session_active,
+                    budget_find_idle_fallback_peer,
+                ) else {
+                    // no peers are idle or budget is depleted
+                    return
+                };
+
+                peer_id
+            },
+            acc
+        );
+
         // peer should always exist since `is_session_active` already checked
         let Some(peer) = peers.get(&peer_id) else { return };
         let conn_eth_version = peer.version;
@@ -427,14 +444,20 @@ impl TransactionFetcher {
                 &has_capacity_wrt_pending_pool_imports,
             );
 
-        self.fill_request_from_hashes_pending_fetch(
-            &mut hashes_to_request,
-            &peer.seen_transactions,
-            budget_fill_request,
+        let acc = &mut search_durations.find_idle_peer;
+        duration_metered_exec!(
+            self.fill_request_from_hashes_pending_fetch(
+                &mut hashes_to_request,
+                &peer.seen_transactions,
+                budget_fill_request,
+            ),
+            acc
         );
 
         // free unused memory
         hashes_to_request.shrink_to_fit();
+
+        self.update_pending_fetch_cache_search_metrics(search_durations);
 
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
@@ -694,8 +717,6 @@ impl TransactionFetcher {
         seen_hashes: &LruCache<TxHash>,
         mut budget_fill_request: Option<usize>, // check max `budget` lru pending hashes
     ) {
-        let start = Instant::now();
-
         let Some(hash) = hashes_to_request.first() else { return };
 
         let mut acc_size_response = self
@@ -754,10 +775,6 @@ impl TransactionFetcher {
         for hash in hashes_to_request.iter() {
             self.hashes_pending_fetch.remove(hash);
         }
-
-        self.metrics
-            .duration_fill_request_from_hashes_pending_fetch
-            .set(start.elapsed().as_secs_f64())
     }
 
     /// Returns `true` if [`TransactionFetcher`] has capacity to request pending hashes. Returns
@@ -1228,6 +1245,12 @@ impl Default for TransactionFetcherInfo {
             SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE
         )
     }
+}
+
+#[derive(Debug, Default)]
+struct TxFetcherSearchDurations {
+    find_idle_peer: Duration,
+    fill_request: Duration,
 }
 
 #[cfg(test)]

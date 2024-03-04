@@ -1150,17 +1150,6 @@ where
     }
 }
 
-#[derive(Debug, Default)]
-struct TxManagerPollDurations {
-    acc_network_events: Duration,
-    acc_pending_imports: Duration,
-    acc_tx_events: Duration,
-    acc_imported_txns: Duration,
-    acc_fetch_events: Duration,
-    acc_pending_fetch: Duration,
-    acc_cmds: Duration,
-}
-
 /// An endless future. Preemption ensure that future is non-blocking, nonetheless. See
 /// [`crate::NetworkManager`] for more context on the design pattern.
 ///
@@ -1572,6 +1561,17 @@ impl Default for PendingPoolImportsInfo {
     fn default() -> Self {
         Self::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS)
     }
+}
+
+#[derive(Debug, Default)]
+struct TxManagerPollDurations {
+    acc_network_events: Duration,
+    acc_pending_imports: Duration,
+    acc_tx_events: Duration,
+    acc_imported_txns: Duration,
+    acc_fetch_events: Duration,
+    acc_pending_fetch: Duration,
+    acc_cmds: Duration,
 }
 
 #[cfg(test)]
@@ -2025,7 +2025,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(&peer_id_1));
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true, || ());
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
