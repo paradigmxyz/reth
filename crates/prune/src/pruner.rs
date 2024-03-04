@@ -11,7 +11,10 @@ use reth_primitives::{
 };
 use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
 use reth_tokio_util::EventListeners;
-use std::{collections::BTreeMap, time::Instant};
+use std::{
+    collections::BTreeMap,
+    time::{Duration, Instant},
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::debug;
 
@@ -45,6 +48,9 @@ pub struct Pruner<DB> {
 }
 
 impl<DB: Database> Pruner<DB> {
+    /// Time limit that [`Pruner`] can run before it's forced to yield the db rw hook.
+    const DEFAULT_TIME_OUT_DURATION_PRUNER: Duration = Duration::from_millis(100);
+
     /// Creates a new [Pruner].
     pub fn new(
         provider_factory: ProviderFactory<DB>,
@@ -137,6 +143,8 @@ impl<DB: Database> Pruner<DB> {
         tip_block_number: BlockNumber,
         mut delete_limit: usize,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
+        let start = Instant::now();
+
         let static_file_segments = self.static_file_segments();
         let segments = static_file_segments
             .iter()
@@ -147,7 +155,7 @@ impl<DB: Database> Pruner<DB> {
         let mut stats = PrunerStats::new();
 
         for (segment, purpose) in segments {
-            if delete_limit == 0 {
+            if Self::DEFAULT_TIME_OUT_DURATION_PRUNER <= start.elapsed() || delete_limit == 0 {
                 break
             }
 
