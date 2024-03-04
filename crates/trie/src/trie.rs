@@ -335,7 +335,7 @@ where
 
         trace!(
             target: "trie::state_root",
-            ?root,
+            %root,
             duration = ?stats.duration(),
             branches_added = stats.branches_added(),
             leaves_added = stats.leaves_added(),
@@ -532,7 +532,7 @@ where
 
         trace!(
             target: "trie::storage_root",
-            ?root,
+            %root,
             hashed_address = %self.hashed_address,
             duration = ?stats.duration(),
             branches_added = stats.branches_added(),
