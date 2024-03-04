@@ -59,6 +59,7 @@ similar-asserts.workspace = true
 criterion.workspace = true
 
 [features]
+default = ["metrics"]
 metrics = ["reth-metrics", "dep:metrics"]
 test-utils = ["triehash"]
 
