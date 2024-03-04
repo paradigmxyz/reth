@@ -50,10 +50,10 @@ pub mod updates;
 mod progress;
 pub use progress::{IntermediateStateRootState, StateRootProgress};
 
-/// Trie metrics tracker.
+/// Trie calculation stats.
 pub mod stats;
 
-/// Trie root metrics.
+/// Trie calculation metrics.
 #[cfg(feature = "metrics")]
 pub mod metrics;
 
