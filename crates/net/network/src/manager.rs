@@ -674,6 +674,11 @@ where
                         .peers_mut()
                         .on_incoming_session_established(peer_id, remote_addr);
                 }
+
+                if direction.is_outgoing() {
+                    self.swarm.state_mut().peers_mut().on_active_outgoing_established(peer_id);
+                }
+
                 self.event_listeners.notify(NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
