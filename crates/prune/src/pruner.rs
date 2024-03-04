@@ -111,7 +111,6 @@ impl<DB: Database> Pruner<DB> {
         let (stats, delete_limit, progress) =
             self.prune_segments(&provider, tip_block_number, delete_limit, start)?;
         provider.commit()?;
-        drop(provider);
 
         self.previous_tip_block_number = Some(tip_block_number);
 
