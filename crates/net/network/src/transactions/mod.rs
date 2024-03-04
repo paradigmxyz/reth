@@ -255,7 +255,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
 
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-        let transaction_fetcher = TransactionFetcher::default().with_transaction_fetcher_config(
+        let transaction_fetcher = TransactionFetcher::with_transaction_fetcher_config(
             &transactions_manager_config.transaction_fetcher_config,
         );
 
@@ -263,11 +263,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         // over the network
         let pending = pool.pending_transactions_listener();
         let pending_pool_imports_info = PendingPoolImportsInfo::default();
-
         let metrics = TransactionsManagerMetrics::default();
-        metrics
-            .capacity_inflight_requests
-            .increment(transaction_fetcher.info.max_inflight_requests as u64);
         metrics
             .capacity_pending_pool_imports
             .increment(pending_pool_imports_info.max_pending_pool_imports as u64);
@@ -314,19 +310,6 @@ impl<Pool> TransactionsManager<Pool>
 where
     Pool: TransactionPool + 'static,
 {
-    #[inline]
-    fn update_fetch_metrics(&self) {
-        let tx_fetcher = &self.transaction_fetcher;
-
-        self.metrics.inflight_transaction_requests.set(tx_fetcher.inflight_requests.len() as f64);
-
-        let hashes_pending_fetch = tx_fetcher.hashes_pending_fetch.len() as f64;
-        let total_hashes = tx_fetcher.hashes_fetch_inflight_and_pending_fetch.len() as f64;
-
-        self.metrics.hashes_pending_fetch.set(hashes_pending_fetch);
-        self.metrics.hashes_inflight_transaction_requests.set(total_hashes - hashes_pending_fetch);
-    }
-
     #[inline]
     fn update_poll_metrics(&self, start: Instant, poll_durations: TxManagerPollDurations) {
         let metrics = &self.metrics;
@@ -804,11 +787,8 @@ where
         //
         // get handle to peer's session again, at this point we know it exists
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
-        let metrics = &self.metrics;
         if let Some(failed_to_request_hashes) =
-            self.transaction_fetcher.request_transactions_from_peer(hashes_to_request, peer, || {
-                metrics.egress_peer_channel_full.increment(1)
-            })
+            self.transaction_fetcher.request_transactions_from_peer(hashes_to_request, peer)
         {
             let conn_eth_version = peer.version;
 
@@ -1138,17 +1118,6 @@ where
     }
 }
 
-#[derive(Debug, Default)]
-struct TxManagerPollDurations {
-    acc_network_events: Duration,
-    acc_pending_imports: Duration,
-    acc_tx_events: Duration,
-    acc_imported_txns: Duration,
-    acc_fetch_events: Duration,
-    acc_pending_fetch: Duration,
-    acc_cmds: Duration,
-}
-
 /// An endless future. Preemption ensure that future is non-blocking, nonetheless. See
 /// [`crate::NetworkManager`] for more context on the design pattern.
 ///
@@ -1201,14 +1170,9 @@ where
                         let has_capacity_wrt_pending_pool_imports =
                             |divisor| info.has_capacity(max_pending_pool_imports / divisor);
 
-                        let metrics = &this.metrics;
-                        let metrics_increment_egress_peer_channel_full =
-                            || metrics.egress_peer_channel_full.increment(1);
-
                         this.transaction_fetcher.on_fetch_pending_hashes(
                             &this.peers,
                             has_capacity_wrt_pending_pool_imports,
-                            metrics_increment_egress_peer_channel_full,
                         );
                     }
                 },
@@ -1255,7 +1219,7 @@ where
             let acc = &mut poll_durations.acc_fetch_events;
             duration_metered_exec!(
                 {
-                    this.update_fetch_metrics();
+                    this.transaction_fetcher.update_metrics();
 
                     // Advance fetching transaction events (flush transaction fetcher and queue for
                     // import to pool).
@@ -1289,7 +1253,7 @@ where
                         some_ready = true;
                     }
 
-                    this.update_fetch_metrics();
+                    this.transaction_fetcher.update_metrics();
                 },
                 acc
             );
@@ -1619,6 +1583,17 @@ impl Default for PendingPoolImportsInfo {
     fn default() -> Self {
         Self::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS)
     }
+}
+
+#[derive(Debug, Default)]
+struct TxManagerPollDurations {
+    acc_network_events: Duration,
+    acc_pending_imports: Duration,
+    acc_tx_events: Duration,
+    acc_imported_txns: Duration,
+    acc_fetch_events: Duration,
+    acc_pending_fetch: Duration,
+    acc_cmds: Duration,
 }
 
 #[cfg(test)]
@@ -2073,7 +2048,7 @@ mod tests {
         assert_eq!(tx_fetcher.active_peers.len(), 0);
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true, || ());
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
