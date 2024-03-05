@@ -29,7 +29,6 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tempfile::TempDir;
 use tracing::*;
 
 /// The headers stage.
@@ -77,7 +76,6 @@ where
         downloader: Downloader,
         mode: HeaderSyncMode,
         consensus: Arc<dyn Consensus>,
-        tempdir: Arc<TempDir>,
     ) -> Self {
         Self {
             provider: database,
@@ -85,8 +83,8 @@ where
             mode,
             consensus,
             sync_gap: None,
-            hash_collector: Collector::new(tempdir.clone(), 100 * (1024 * 1024)),
-            header_collector: Collector::new(tempdir, 100 * (1024 * 1024)),
+            hash_collector: Collector::new(100 * (1024 * 1024)),
+            header_collector: Collector::new(100 * (1024 * 1024)),
             is_etl_ready: false,
         }
     }
@@ -158,7 +156,7 @@ where
         // add it to the collector and use tx.append on all hashes.
         if let Some((hash, block_number)) = cursor_header_numbers.last()? {
             if block_number.value()? == 0 {
-                self.hash_collector.insert(hash.key()?, 0);
+                self.hash_collector.insert(hash.key()?, 0)?;
                 cursor_header_numbers.delete_current()?;
                 first_sync = true;
             }
@@ -244,8 +242,8 @@ where
                     for header in headers {
                         let header_number = header.number;
 
-                        self.hash_collector.insert(header.hash(), header_number);
-                        self.header_collector.insert(header_number, header);
+                        self.hash_collector.insert(header.hash(), header_number)?;
+                        self.header_collector.insert(header_number, header)?;
 
                         // Headers are downloaded in reverse, so if we reach here, we know we have
                         // filled the gap.
@@ -290,6 +288,10 @@ where
         let to_be_processed = self.hash_collector.len() as u64;
         let last_header_number =
             self.write_headers::<DB>(provider.tx_ref(), provider.static_file_provider().clone())?;
+
+        // Clear ETL collectors
+        self.hash_collector.clear();
+        self.header_collector.clear();
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(last_header_number).with_headers_stage_checkpoint(
@@ -420,7 +422,6 @@ mod tests {
                     (*self.downloader_factory)(),
                     HeaderSyncMode::Tip(self.channel.1.clone()),
                     self.consensus.clone(),
-                    Arc::new(TempDir::new().unwrap()),
                 )
             }
         }
@@ -586,5 +587,7 @@ mod tests {
             processed == checkpoint + headers.len() as u64 - 1 && total == tip.number
         );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+        assert!(runner.stage().hash_collector.is_empty());
+        assert!(runner.stage().header_collector.is_empty());
     }
 }
