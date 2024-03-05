@@ -103,11 +103,12 @@ impl<DB: Database> Pruner<DB> {
             }))
             .min(self.prune_max_blocks_per_run);
         let delete_limit = self.delete_limit * blocks_since_last_run;
-        let limit = PruneLimiter::new(Some(delete_limit), Some(Duration::from_millis(100)), start);
+        let limiter =
+            PruneLimiter::new(Some(delete_limit), Some(Duration::from_millis(100)), start);
 
         let provider = self.provider_factory.provider_rw()?;
         let (stats, deleted_segments, progress) =
-            self.prune_segments(&provider, tip_block_number, limit)?;
+            self.prune_segments(&provider, tip_block_number, limiter)?;
         provider.commit()?;
 
         self.previous_tip_block_number = Some(tip_block_number);
@@ -119,8 +120,9 @@ impl<DB: Database> Pruner<DB> {
             target: "pruner",
             %tip_block_number,
             ?elapsed,
+            timeout=?limiter.timeout(),
             ?deleted_segments,
-            delete_limit=limit.segment_limit(),
+            delete_limit=?limiter.segment_limit(),
             ?progress,
             ?stats,
             "Pruner finished"
