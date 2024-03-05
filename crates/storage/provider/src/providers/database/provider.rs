@@ -11,7 +11,6 @@ use crate::{
     PruneCheckpointWriter, StageCheckpointReader, StatsReader, StorageReader, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
-use derive_more::Constructor;
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
