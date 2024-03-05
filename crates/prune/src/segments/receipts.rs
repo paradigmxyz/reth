@@ -46,7 +46,7 @@ impl<DB: Database> Segment<DB> for Receipts {
         let mut last_pruned_transaction = tx_range_end;
         let (pruned, done) = provider.prune_table_with_range::<tables::Receipts>(
             tx_range,
-            input.delete_limit,
+            input.limit,
             |_| false,
             |row| last_pruned_transaction = row.0,
         )?;
@@ -138,7 +138,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Receipts)
                     .unwrap(),
                 to_block,
-                delete_limit: 10,
+                limit: 10,
             };
             let segment = Receipts::new(prune_mode);
 
@@ -157,7 +157,7 @@ mod tests {
                 .take(to_block as usize)
                 .map(|block| block.body.len())
                 .sum::<usize>()
-                .min(next_tx_number_to_prune as usize + input.delete_limit)
+                .min(next_tx_number_to_prune as usize + input.limit)
                 .sub(1);
 
             let provider = db.factory.provider_rw().unwrap();

@@ -42,7 +42,7 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             }
         }
         .into_inner();
-        let tx_range = start..=(end.min(start + input.delete_limit as u64 - 1));
+        let tx_range = start..=(end.min(start + input.limit as u64 - 1));
         let tx_range_end = *tx_range.end();
 
         // Retrieve transactions in the range and calculate their hashes in parallel
@@ -63,7 +63,7 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         let mut last_pruned_transaction = None;
         let (pruned, _) = provider.prune_table_with_iterator::<tables::TransactionHashNumbers>(
             hashes,
-            input.delete_limit,
+            input.limit,
             |row| {
                 last_pruned_transaction = Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
             },
@@ -142,7 +142,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::TransactionLookup)
                     .unwrap(),
                 to_block,
-                delete_limit: 10,
+                limit: 10,
             };
             let segment = TransactionLookup::new(prune_mode);
 
@@ -161,7 +161,7 @@ mod tests {
                 .take(to_block as usize)
                 .map(|block| block.body.len())
                 .sum::<usize>()
-                .min(next_tx_number_to_prune as usize + input.delete_limit)
+                .min(next_tx_number_to_prune as usize + input.limit)
                 .sub(1);
 
             let last_pruned_block_number = blocks

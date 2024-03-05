@@ -45,7 +45,7 @@ impl<DB: Database> Segment<DB> for SenderRecovery {
         let mut last_pruned_transaction = tx_range_end;
         let (pruned, done) = provider.prune_table_with_range::<tables::TransactionSenders>(
             tx_range,
-            input.delete_limit,
+            input.limit,
             |_| false,
             |row| last_pruned_transaction = row.0,
         )?;
@@ -80,9 +80,9 @@ mod tests {
     use reth_db::tables;
     use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber, B256};
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{PruneCheckpointReader, PruneLimit};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use std::ops::Sub;
+    use std::{ops::Sub, time::Instant};
 
     #[test]
     fn prune() {
@@ -123,7 +123,8 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::SenderRecovery)
                     .unwrap(),
                 to_block,
-                delete_limit: 10,
+                limit: PruneLimit::new(Some(10), None),
+                start: Instant::now(),
             };
             let segment = SenderRecovery::new(prune_mode);
 
@@ -142,7 +143,7 @@ mod tests {
                 .take(to_block as usize)
                 .map(|block| block.body.len())
                 .sum::<usize>()
-                .min(next_tx_number_to_prune as usize + input.delete_limit)
+                .min(next_tx_number_to_prune as usize + input.limit.segment_limit().unwrap())
                 .sub(1);
 
             let last_pruned_block_number = blocks

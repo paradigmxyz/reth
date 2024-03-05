@@ -15,7 +15,7 @@ pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;
 pub use sender_recovery::SenderRecovery;
 pub use set::SegmentSet;
-use std::fmt::Debug;
+use std::{fmt::Debug, time::Instant};
 pub use storage_history::StorageHistory;
 pub use transaction_lookup::TransactionLookup;
 pub use transactions::Transactions;
@@ -24,7 +24,9 @@ use crate::PrunerError;
 use reth_db::database::Database;
 use reth_interfaces::{provider::ProviderResult, RethResult};
 use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber};
-use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter};
+use reth_provider::{
+    providers::PruneLimit, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
+};
 use std::ops::RangeInclusive;
 use tracing::error;
 
@@ -65,8 +67,10 @@ pub struct PruneInput {
     pub(crate) previous_checkpoint: Option<PruneCheckpoint>,
     /// Target block up to which the pruning needs to be done, inclusive.
     pub(crate) to_block: BlockNumber,
-    /// Maximum entries to delete from the database.
-    pub(crate) delete_limit: usize,
+    /// Limit on prune job.
+    pub(crate) limit: PruneLimit,
+    /// Time at which prune job was started.
+    pub(crate) start: Instant,
 }
 
 impl PruneInput {

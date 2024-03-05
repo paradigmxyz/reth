@@ -4,10 +4,7 @@ use crate::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use std::{fmt::Debug, sync::Arc, time::Duration};
-
-/// Time limit that pruning can run before it's forced to yield the [`DatabaseProviderRW`] hook.
-pub const DEFAULT_TIME_OUT_DURATION_PRUNER: Duration = Duration::from_millis(100);
+use std::{fmt::Debug, sync::Arc};
 
 /// Main Database trait that can open read-only and read-write transactions.
 ///

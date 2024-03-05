@@ -6,8 +6,8 @@ use itertools::Itertools;
 use reth_db::{database::Database, table::Table, tables};
 use reth_interfaces::RethResult;
 use reth_primitives::{BlockNumber, PruneMode, PruneSegment};
-use reth_provider::DatabaseProviderRW;
-use std::ops::RangeInclusive;
+use reth_provider::{DatabaseProviderRW, PruneLimit};
+use std::{num::NonZeroUsize, ops::RangeInclusive};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -44,21 +44,26 @@ impl<DB: Database> Segment<DB> for Headers {
             }
         };
 
-        let delete_limit = input.delete_limit / 3;
-        if delete_limit == 0 {
-            // Nothing to do, `input.delete_limit` is less than 3, so we can't prune all
-            // headers-related tables up to the same height
-            return Ok(PruneOutput::not_done())
+        let limit = PruneLimit::new_with_fraction_of_segment_limit(
+            input.limit,
+            NonZeroUsize::new(3).expect("infallible"),
+        );
+        if let Some(limit) = limit.segment_limit() {
+            if limit == 0 {
+                // Nothing to do, `input.delete_limit` is less than 3, so we can't prune all
+                // headers-related tables up to the same height
+                return Ok(PruneOutput::not_done())
+            }
         }
 
         let results = [
-            self.prune_table::<DB, tables::Headers>(provider, block_range.clone(), delete_limit)?,
+            self.prune_table::<DB, tables::Headers>(provider, block_range.clone(), limit)?,
             self.prune_table::<DB, tables::HeaderTerminalDifficulties>(
                 provider,
                 block_range.clone(),
-                delete_limit,
+                limit,
             )?,
-            self.prune_table::<DB, tables::CanonicalHeaders>(provider, block_range, delete_limit)?,
+            self.prune_table::<DB, tables::CanonicalHeaders>(provider, block_range, limit)?,
         ];
 
         if !results.iter().map(|(_, _, last_pruned_block)| last_pruned_block).all_equal() {
@@ -93,12 +98,12 @@ impl Headers {
         &self,
         provider: &DatabaseProviderRW<DB>,
         range: RangeInclusive<BlockNumber>,
-        delete_limit: usize,
+        limit: PruneLimit,
     ) -> RethResult<(bool, usize, BlockNumber)> {
         let mut last_pruned_block = *range.end();
         let (pruned, done) = provider.prune_table_with_range::<T>(
             range,
-            delete_limit,
+            limit,
             |_| false,
             |row| last_pruned_block = row.0,
         )?;
@@ -110,12 +115,14 @@ impl Headers {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use crate::segments::{Headers, PruneInput, PruneOutput, Segment};
     use assert_matches::assert_matches;
     use reth_db::{tables, transaction::DbTx};
     use reth_interfaces::test_utils::{generators, generators::random_header_range};
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256, U256};
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{PruneCheckpointReader, PruneLimit};
     use reth_stages::test_utils::TestStageDB;
 
     #[test]
@@ -144,7 +151,8 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Headers)
                     .unwrap(),
                 to_block,
-                delete_limit: 10,
+                limit: PruneLimit::new(Some(10), None),
+                start: Instant::now(),
             };
             let segment = Headers::new(prune_mode);
 
@@ -173,8 +181,11 @@ mod tests {
                 .unwrap();
             provider.commit().expect("commit");
 
-            let last_pruned_block_number = to_block
-                .min(next_block_number_to_prune + input.delete_limit as BlockNumber / 3 - 1);
+            let last_pruned_block_number = to_block.min(
+                next_block_number_to_prune +
+                    input.limit.segment_limit().unwrap() as BlockNumber / 3 -
+                    1,
+            );
 
             assert_eq!(
                 db.table::<tables::CanonicalHeaders>().unwrap().len(),
@@ -210,7 +221,8 @@ mod tests {
             previous_checkpoint: None,
             to_block: 1,
             // Less than total number of tables for `Headers` segment
-            delete_limit: 2,
+            limit: PruneLimit::new(Some(2), None),
+            start: Instant::now(),
         };
         let segment = Headers::new(PruneMode::Full);
 

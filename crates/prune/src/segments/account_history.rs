@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use crate::{
     segments::{
         history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
@@ -6,7 +8,7 @@ use crate::{
 };
 use reth_db::{database::Database, models::ShardedKey, tables};
 use reth_primitives::{PruneMode, PruneSegment};
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{DatabaseProviderRW, PruneLimit};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -33,7 +35,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
     fn prune(
         &self,
         provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
+        mut input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         let range = match input.get_next_block_range() {
             Some(range) => range,
@@ -45,10 +47,14 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
+        let limit = PruneLimit::new_with_fraction_of_segment_limit(
+            input.limit,
+            NonZeroUsize::new(2).expect("infallible"),
+        );
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::AccountChangeSets>(
                 range,
-                input.delete_limit / 2,
+                limit,
                 |_| false,
                 |row| last_changeset_pruned_block = Some(row.0),
             )?;
@@ -89,9 +95,9 @@ mod tests {
         generators::{random_block_range, random_changeset_range, random_eoa_accounts},
     };
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{PruneCheckpointReader, PruneLimit};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use std::{collections::BTreeMap, ops::AddAssign};
+    use std::{collections::BTreeMap, ops::AddAssign, time::Instant};
 
     #[test]
     fn prune() {
@@ -139,7 +145,8 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::AccountHistory)
                     .unwrap(),
                 to_block,
-                delete_limit: 2000,
+                limit: PruneLimit::new(Some(2000), None),
+                start: Instant::now(),
             };
             let segment = AccountHistory::new(prune_mode);
 
@@ -171,7 +178,8 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip_while(|(i, (block_number, _))| {
-                    *i < input.delete_limit / 2 * run && *block_number <= to_block as usize
+                    *i < input.limit.segment_limit().unwrap() / 2 * run &&
+                        *block_number <= to_block as usize
                 })
                 .next()
                 .map(|(i, _)| i)

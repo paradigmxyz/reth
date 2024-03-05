@@ -31,7 +31,7 @@ use tracing::trace;
 mod metrics;
 mod provider;
 
-pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, PruneLimit};
 use reth_db::mdbx::DatabaseArguments;
 
 /// A common provider that fetches data from a database.

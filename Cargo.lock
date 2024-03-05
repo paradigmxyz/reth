@@ -6619,6 +6619,7 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "dashmap",
+ "derive_more",
  "itertools 0.12.1",
  "metrics",
  "parking_lot 0.12.1",

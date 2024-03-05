@@ -113,7 +113,8 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             "Calculated block ranges and filtered addresses",
         );
 
-        let mut limit = input.delete_limit;
+        let mut limit = input.limit;
+        let mut pruned = 0;
         let mut done = true;
         let mut last_pruned_transaction = None;
         for (start_block, end_block, num_addresses) in block_ranges {
@@ -135,7 +136,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
 
             // Delete receipts, except the ones in the inclusion list
             let mut last_skipped_transaction = 0;
-            let deleted;
+            let deleted: usize;
             (deleted, done) = provider.prune_table_with_range::<tables::Receipts>(
                 tx_range,
                 limit,
@@ -154,7 +155,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             )?;
             trace!(target: "pruner", %deleted, %done, ?block_range, "Pruned receipts");
 
-            limit = limit.saturating_sub(deleted);
+            pruned += deleted;
 
             // For accurate checkpoints we need to know that we have checked every transaction.
             // Example: we reached the end of the range, and the last receipt is supposed to skip
@@ -172,7 +173,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                     .saturating_sub(if done { 0 } else { 1 }),
             );
 
-            if limit == 0 {
+            if limit.at_limit(input.start, pruned) {
                 done &= end_block == to_block;
                 break
             }
@@ -203,7 +204,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             },
         )?;
 
-        Ok(PruneOutput { done, pruned: input.delete_limit - limit, checkpoint: None })
+        Ok(PruneOutput { done, pruned, checkpoint: None })
     }
 }
 
@@ -217,9 +218,9 @@ mod tests {
         generators::{random_block_range, random_eoa_account, random_log, random_receipt},
     };
     use reth_primitives::{PruneMode, PruneSegment, ReceiptsLogPruneConfig, B256};
-    use reth_provider::{PruneCheckpointReader, TransactionsProvider};
+    use reth_provider::{PruneCheckpointReader, PruneLimit, TransactionsProvider};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, time::Instant};
 
     #[test]
     fn prune_receipts_by_logs() {
@@ -278,7 +279,8 @@ mod tests {
                         .get_prune_checkpoint(PruneSegment::ContractLogs)
                         .unwrap(),
                     to_block: tip,
-                    delete_limit: 10,
+                    limit: PruneLimit::new(Some(10), None),
+                    start: Instant::now(),
                 },
             );
             provider.commit().expect("commit");
