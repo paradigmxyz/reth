@@ -8,7 +8,7 @@ use crate::{
 };
 use reth_db::{database::Database, models::ShardedKey, tables};
 use reth_primitives::{PruneMode, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneLimit};
+use reth_provider::{DatabaseProviderRW, PruneLimiter};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -47,8 +47,8 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
-        let limit = PruneLimit::new_with_fraction_of_segment_limit(
-            input.limit,
+        let limit = PruneLimiter::new_with_fraction_of_segment_limit(
+            input.limiter,
             NonZeroUsize::new(2).unwrap(),
         );
         let (pruned_changesets, done) = provider
@@ -95,7 +95,7 @@ mod tests {
         generators::{random_block_range, random_changeset_range, random_eoa_accounts},
     };
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
-    use reth_provider::{PruneCheckpointReader, PruneLimit};
+    use reth_provider::{PruneCheckpointReader, PruneLimiter};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::{collections::BTreeMap, ops::AddAssign};
 
@@ -145,7 +145,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::AccountHistory)
                     .unwrap(),
                 to_block,
-                limit: PruneLimit::new_without_timeout(2000),
+                limiter: PruneLimiter::new_without_timeout(2000),
             };
             let segment = AccountHistory::new(prune_mode);
 
@@ -177,7 +177,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip_while(|(i, (block_number, _))| {
-                    *i < input.limit.segment_limit().unwrap() / 2 * run &&
+                    *i < input.limiter.segment_limit().unwrap() / 2 * run &&
                         *block_number <= to_block as usize
                 })
                 .next()

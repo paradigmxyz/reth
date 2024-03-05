@@ -46,7 +46,7 @@ impl<DB: Database> Segment<DB> for Receipts {
         let mut last_pruned_transaction = tx_range_end;
         let (pruned, done) = provider.prune_table_with_range::<tables::Receipts>(
             tx_range,
-            input.limit,
+            input.limiter,
             |_| false,
             |row| last_pruned_transaction = row.0,
         )?;
@@ -98,7 +98,7 @@ mod tests {
         generators::{random_block_range, random_receipt},
     };
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber, B256};
-    use reth_provider::{PruneCheckpointReader, PruneLimit};
+    use reth_provider::{PruneCheckpointReader, PruneLimiter};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
 
@@ -138,7 +138,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Receipts)
                     .unwrap(),
                 to_block,
-                limit: PruneLimit::new_without_timeout(10),
+                limiter: PruneLimiter::new_without_timeout(10),
             };
             let segment = Receipts::new(prune_mode);
 
@@ -157,7 +157,7 @@ mod tests {
                 .take(to_block as usize)
                 .map(|block| block.body.len())
                 .sum::<usize>()
-                .min(next_tx_number_to_prune as usize + input.limit.segment_limit().unwrap())
+                .min(next_tx_number_to_prune as usize + input.limiter.segment_limit().unwrap())
                 .sub(1);
 
             let provider = db.factory.provider_rw().unwrap();

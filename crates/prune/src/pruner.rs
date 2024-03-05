@@ -9,7 +9,7 @@ use reth_db::database::Database;
 use reth_primitives::{
     BlockNumber, PruneMode, PruneProgress, PrunePurpose, PruneSegment, StaticFileSegment,
 };
-use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneLimit};
+use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneLimiter};
 use reth_tokio_util::EventListeners;
 use std::{
     collections::BTreeMap,
@@ -103,7 +103,7 @@ impl<DB: Database> Pruner<DB> {
             }))
             .min(self.prune_max_blocks_per_run);
         let delete_limit = self.delete_limit * blocks_since_last_run;
-        let limit = PruneLimit::new(Some(delete_limit), Some(Duration::from_millis(100)), start);
+        let limit = PruneLimiter::new(Some(delete_limit), Some(Duration::from_millis(100)), start);
 
         let provider = self.provider_factory.provider_rw()?;
         let (stats, deleted_segments, progress) =
@@ -140,7 +140,7 @@ impl<DB: Database> Pruner<DB> {
         &mut self,
         provider: &DatabaseProviderRW<DB>,
         tip_block_number: BlockNumber,
-        limit: PruneLimit,
+        mut limiter: PruneLimiter,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
         let static_file_segments = self.static_file_segments();
         let segments = static_file_segments
@@ -150,10 +150,9 @@ impl<DB: Database> Pruner<DB> {
 
         let mut done = true;
         let mut stats = PrunerStats::new();
-        let mut deleted = 0;
 
         for (segment, purpose) in segments {
-            if limit.at_limit(deleted) {
+            if limiter.at_limit() {
                 break
             }
 
@@ -174,8 +173,8 @@ impl<DB: Database> Pruner<DB> {
 
                 let segment_start = Instant::now();
                 let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
-                let output =
-                    segment.prune(provider, PruneInput { previous_checkpoint, to_block, limit })?;
+                let output = segment
+                    .prune(provider, PruneInput { previous_checkpoint, to_block, limiter })?;
                 if let Some(checkpoint) = output.checkpoint {
                     segment
                         .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
@@ -191,7 +190,7 @@ impl<DB: Database> Pruner<DB> {
                     .set(to_block as f64);
 
                 done = done && output.done;
-                deleted += 1;
+                limiter.increment_deleted_segments_count();
 
                 debug!(
                     target: "pruner",
@@ -214,7 +213,7 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
-        Ok((stats, deleted, PruneProgress::from_done(done)))
+        Ok((stats, limiter.deleted_segments_count(), PruneProgress::from_done(done)))
     }
 
     /// Returns pre-configured segments that needs to be pruned according to the highest

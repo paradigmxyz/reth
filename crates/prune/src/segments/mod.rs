@@ -25,7 +25,7 @@ use reth_db::database::Database;
 use reth_interfaces::{provider::ProviderResult, RethResult};
 use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber};
 use reth_provider::{
-    providers::PruneLimit, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
+    providers::PruneLimiter, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
 };
 use std::ops::RangeInclusive;
 use tracing::error;
@@ -67,8 +67,8 @@ pub struct PruneInput {
     pub(crate) previous_checkpoint: Option<PruneCheckpoint>,
     /// Target block up to which the pruning needs to be done, inclusive.
     pub(crate) to_block: BlockNumber,
-    /// Limit on prune job.
-    pub(crate) limit: PruneLimit,
+    /// Limits the prune job.
+    pub(crate) limiter: PruneLimiter,
 }
 
 impl PruneInput {

@@ -6,7 +6,7 @@ use itertools::Itertools;
 use reth_db::{database::Database, table::Table, tables};
 use reth_interfaces::RethResult;
 use reth_primitives::{BlockNumber, PruneMode, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneLimit};
+use reth_provider::{DatabaseProviderRW, PruneLimiter};
 use std::{num::NonZeroUsize, ops::RangeInclusive};
 use tracing::{instrument, trace};
 
@@ -44,8 +44,8 @@ impl<DB: Database> Segment<DB> for Headers {
             }
         };
 
-        let limit = PruneLimit::new_with_fraction_of_segment_limit(
-            input.limit,
+        let limit = PruneLimiter::new_with_fraction_of_segment_limit(
+            input.limiter,
             NonZeroUsize::new(3).unwrap(),
         );
         if let Some(limit) = limit.segment_limit() {
@@ -98,12 +98,12 @@ impl Headers {
         &self,
         provider: &DatabaseProviderRW<DB>,
         range: RangeInclusive<BlockNumber>,
-        limit: PruneLimit,
+        limiter: PruneLimiter,
     ) -> RethResult<(bool, usize, BlockNumber)> {
         let mut last_pruned_block = *range.end();
         let (pruned, done) = provider.prune_table_with_range::<T>(
             range,
-            limit,
+            limiter,
             |_| false,
             |row| last_pruned_block = row.0,
         )?;
@@ -120,7 +120,7 @@ mod tests {
     use reth_db::{tables, transaction::DbTx};
     use reth_interfaces::test_utils::{generators, generators::random_header_range};
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256, U256};
-    use reth_provider::{PruneCheckpointReader, PruneLimit};
+    use reth_provider::{PruneCheckpointReader, PruneLimiter};
     use reth_stages::test_utils::TestStageDB;
 
     #[test]
@@ -149,7 +149,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Headers)
                     .unwrap(),
                 to_block,
-                limit: PruneLimit::new_without_timeout(10),
+                limiter: PruneLimiter::new_without_timeout(10),
             };
             let segment = Headers::new(prune_mode);
 
@@ -180,7 +180,7 @@ mod tests {
 
             let last_pruned_block_number = to_block.min(
                 next_block_number_to_prune +
-                    input.limit.segment_limit().unwrap() as BlockNumber / 3 -
+                    input.limiter.segment_limit().unwrap() as BlockNumber / 3 -
                     1,
             );
 
@@ -218,7 +218,7 @@ mod tests {
             previous_checkpoint: None,
             to_block: 1,
             // Less than total number of tables for `Headers` segment
-            limit: PruneLimit::new_without_timeout(2),
+            limiter: PruneLimiter::new_without_timeout(2),
         };
         let segment = Headers::new(PruneMode::Full);
 
