@@ -4,6 +4,7 @@
 #![cfg(feature = "c-kzg")]
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
+use super::error::TransactionConversionError;
 use crate::{
     Address, BlobTransaction, BlobTransactionSidecar, Bytes, Signature, Transaction,
     TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, B256,
@@ -49,28 +50,31 @@ pub enum PooledTransactionsElement {
     },
     /// A blob transaction, which includes the transaction, blob data, commitments, and proofs.
     BlobTransaction(BlobTransaction),
-    /// An Optimism deposit transaction
-    #[cfg(feature = "optimism")]
-    Deposit {
-        /// The inner transaction
-        transaction: crate::TxDeposit,
-        /// The signature
-        signature: Signature,
-        /// The hash of the transaction
-        hash: TxHash,
-    },
 }
 
 impl PooledTransactionsElement {
     /// Tries to convert a [TransactionSigned] into a [PooledTransactionsElement].
     ///
-    /// [BlobTransaction] are disallowed from being propagated, hence this returns an error if the
-    /// `tx` is [Transaction::Eip4844]
+    /// This function used as a helper to convert from a decoded p2p broadcast message to
+    /// [PooledTransactionsElement]. Since [BlobTransaction] is disallowed to be broadcasted on
+    /// p2p, return an err if `tx` is [Transaction::Eip4844].
     pub fn try_from_broadcast(tx: TransactionSigned) -> Result<Self, TransactionSigned> {
-        if tx.is_eip4844() {
-            return Err(tx)
+        match tx {
+            TransactionSigned { transaction: Transaction::Legacy(tx), signature, hash } => {
+                Ok(PooledTransactionsElement::Legacy { transaction: tx, signature, hash })
+            }
+            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, hash } => {
+                Ok(PooledTransactionsElement::Eip2930 { transaction: tx, signature, hash })
+            }
+            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, hash } => {
+                Ok(PooledTransactionsElement::Eip1559 { transaction: tx, signature, hash })
+            }
+            // Not supported because missing blob sidecar
+            tx @ TransactionSigned { transaction: Transaction::Eip4844(_), .. } => Err(tx),
+            #[cfg(feature = "optimism")]
+            // Not supported because deposit transactions are never pooled
+            tx @ TransactionSigned { transaction: Transaction::Deposit(_), .. } => Err(tx),
         }
-        Ok(tx.into())
     }
 
     /// Converts from an EIP-4844 [TransactionSignedEcRecovered] to a
@@ -107,8 +111,6 @@ impl PooledTransactionsElement {
             Self::Eip2930 { transaction, .. } => transaction.signature_hash(),
             Self::Eip1559 { transaction, .. } => transaction.signature_hash(),
             Self::BlobTransaction(blob_tx) => blob_tx.transaction.signature_hash(),
-            #[cfg(feature = "optimism")]
-            Self::Deposit { .. } => B256::ZERO,
         }
     }
 
@@ -119,8 +121,6 @@ impl PooledTransactionsElement {
             PooledTransactionsElement::Eip2930 { hash, .. } |
             PooledTransactionsElement::Eip1559 { hash, .. } => hash,
             PooledTransactionsElement::BlobTransaction(tx) => &tx.hash,
-            #[cfg(feature = "optimism")]
-            PooledTransactionsElement::Deposit { hash, .. } => hash,
         }
     }
 
@@ -131,10 +131,6 @@ impl PooledTransactionsElement {
             Self::Eip2930 { signature, .. } |
             Self::Eip1559 { signature, .. } => signature,
             Self::BlobTransaction(blob_tx) => &blob_tx.signature,
-            #[cfg(feature = "optimism")]
-            Self::Deposit { .. } => {
-                panic!("Deposit transactions do not have a signature! This is a bug.")
-            }
         }
     }
 
@@ -145,8 +141,6 @@ impl PooledTransactionsElement {
             Self::Eip2930 { transaction, .. } => transaction.nonce,
             Self::Eip1559 { transaction, .. } => transaction.nonce,
             Self::BlobTransaction(blob_tx) => blob_tx.transaction.nonce,
-            #[cfg(feature = "optimism")]
-            Self::Deposit { .. } => 0,
         }
     }
 
@@ -250,11 +244,7 @@ impl PooledTransactionsElement {
                         hash: typed_tx.hash,
                     }),
                     #[cfg(feature = "optimism")]
-                    Transaction::Deposit(tx) => Ok(PooledTransactionsElement::Deposit {
-                        transaction: tx,
-                        signature: typed_tx.signature,
-                        hash: typed_tx.hash,
-                    }),
+                    Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement"))
                 }
             }
         }
@@ -283,12 +273,6 @@ impl PooledTransactionsElement {
                 hash,
             },
             Self::BlobTransaction(blob_tx) => blob_tx.into_parts().0,
-            #[cfg(feature = "optimism")]
-            Self::Deposit { transaction, signature, hash } => TransactionSigned {
-                transaction: Transaction::Deposit(transaction),
-                signature,
-                hash,
-            },
         }
     }
 
@@ -311,8 +295,6 @@ impl PooledTransactionsElement {
                 // the encoding does not use a header, so we set `with_header` to false
                 blob_tx.payload_len_with_type(false)
             }
-            #[cfg(feature = "optimism")]
-            Self::Deposit { transaction, .. } => transaction.payload_len_without_header(),
         }
     }
 
@@ -355,10 +337,6 @@ impl PooledTransactionsElement {
                 // `tx_type || rlp([transaction_payload_body, blobs, commitments, proofs]))`
                 blob_tx.encode_with_type_inner(out, false);
             }
-            #[cfg(feature = "optimism")]
-            Self::Deposit { transaction, .. } => {
-                transaction.encode(out, false);
-            }
         }
     }
 }
@@ -395,10 +373,6 @@ impl Encodable for PooledTransactionsElement {
                 // `rlp(tx_type || rlp([transaction_payload_body, blobs, commitments, proofs]))`
                 blob_tx.encode_with_type_inner(out, true);
             }
-            #[cfg(feature = "optimism")]
-            Self::Deposit { transaction, .. } => {
-                transaction.encode(out, true);
-            }
         }
     }
 
@@ -419,11 +393,6 @@ impl Encodable for PooledTransactionsElement {
             Self::BlobTransaction(blob_tx) => {
                 // the encoding uses a header, so we set `with_header` to true
                 blob_tx.payload_len_with_type(true)
-            }
-            #[cfg(feature = "optimism")]
-            Self::Deposit { transaction, .. } => {
-                // method computes the payload len with a RLP header
-                transaction.payload_len()
             }
         }
     }
@@ -527,47 +496,19 @@ impl Decodable for PooledTransactionsElement {
                         hash: typed_tx.hash,
                     }),
                     #[cfg(feature = "optimism")]
-                    Transaction::Deposit(tx) => Ok(PooledTransactionsElement::Deposit {
-                        transaction: tx,
-                        signature: typed_tx.signature,
-                        hash: typed_tx.hash,
-                    }),
+                    Transaction::Deposit(_) => Err(RlpError::Custom("Optimism deposit transaction cannot be decoded to PooledTransactionsElement"))
                 }
             }
         }
     }
 }
 
-impl From<TransactionSigned> for PooledTransactionsElement {
-    /// Converts from a [TransactionSigned] to a [PooledTransactionsElement].
-    ///
-    /// NOTE: For EIP-4844 transactions, this will return an empty sidecar.
-    fn from(tx: TransactionSigned) -> Self {
-        let TransactionSigned { transaction, signature, hash } = tx;
-        match transaction {
-            Transaction::Legacy(tx) => {
-                PooledTransactionsElement::Legacy { transaction: tx, signature, hash }
-            }
-            Transaction::Eip2930(tx) => {
-                PooledTransactionsElement::Eip2930 { transaction: tx, signature, hash }
-            }
-            Transaction::Eip1559(tx) => {
-                PooledTransactionsElement::Eip1559 { transaction: tx, signature, hash }
-            }
-            Transaction::Eip4844(tx) => {
-                PooledTransactionsElement::BlobTransaction(BlobTransaction {
-                    transaction: tx,
-                    signature,
-                    hash,
-                    // This is empty - just for the conversion!
-                    sidecar: Default::default(),
-                })
-            }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(tx) => {
-                PooledTransactionsElement::Deposit { transaction: tx, signature, hash }
-            }
-        }
+impl TryFrom<TransactionSigned> for PooledTransactionsElement {
+    type Error = TransactionConversionError;
+
+    fn try_from(tx: TransactionSigned) -> Result<Self, Self::Error> {
+        PooledTransactionsElement::try_from_broadcast(tx)
+            .map_err(|_| TransactionConversionError::UnsupportedForP2P)
     }
 }
 
@@ -582,43 +523,46 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
     /// `PooledTransactionsElement`.
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         // Attempt to create a `TransactionSigned` with arbitrary data.
-        Ok(match PooledTransactionsElement::from(TransactionSigned::arbitrary(u)?) {
-            // If the generated `PooledTransactionsElement` is a blob transaction...
-            PooledTransactionsElement::BlobTransaction(mut tx) => {
-                // Generate a sidecar for the blob transaction using arbitrary data.
+        let tx_signed = TransactionSigned::arbitrary(u)?;
+        // Attempt to create a `PooledTransactionsElement` with arbitrary data, handling the Result.
+        match PooledTransactionsElement::try_from(tx_signed) {
+            Ok(PooledTransactionsElement::BlobTransaction(mut tx)) => {
+                // Successfully converted to a BlobTransaction, now generate a sidecar.
                 tx.sidecar = crate::BlobTransactionSidecar::arbitrary(u)?;
-                // Return the blob transaction with the generated sidecar.
-                PooledTransactionsElement::BlobTransaction(tx)
+                Ok(PooledTransactionsElement::BlobTransaction(tx))
             }
-            // If the generated `PooledTransactionsElement` is not a blob transaction...
-            tx => tx,
-        })
+            Ok(tx) => Ok(tx), // Successfully converted, but not a BlobTransaction.
+            Err(_) => Err(arbitrary::Error::IncorrectFormat), /* Conversion failed, return an
+                                * arbitrary error. */
+        }
     }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for PooledTransactionsElement {
     type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<PooledTransactionsElement>;
+
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::{any, Strategy};
 
         any::<(TransactionSigned, crate::BlobTransactionSidecar)>()
             .prop_map(move |(transaction, sidecar)| {
-                // this will have an empty sidecar
-                let pooled_txs_element = PooledTransactionsElement::from(transaction);
-
-                // generate a sidecar for blob txs
-                if let PooledTransactionsElement::BlobTransaction(mut tx) = pooled_txs_element {
-                    tx.sidecar = sidecar;
-                    PooledTransactionsElement::BlobTransaction(tx)
-                } else {
-                    pooled_txs_element
+                match PooledTransactionsElement::try_from(transaction) {
+                    Ok(PooledTransactionsElement::BlobTransaction(mut tx)) => {
+                        tx.sidecar = sidecar;
+                        PooledTransactionsElement::BlobTransaction(tx)
+                    }
+                    Ok(tx) => tx,
+                    Err(_) => PooledTransactionsElement::Eip1559 {
+                        transaction: Default::default(),
+                        signature: Default::default(),
+                        hash: Default::default(),
+                    }, // Gen an Eip1559 as arbitrary for testing purpose
                 }
             })
             .boxed()
     }
-
-    type Strategy = proptest::strategy::BoxedStrategy<PooledTransactionsElement>;
 }
 
 /// A signed pooled transaction with recovered signer.
@@ -682,9 +626,16 @@ impl PooledTransactionsElementEcRecovered {
 }
 
 /// Converts a `TransactionSignedEcRecovered` into a `PooledTransactionsElementEcRecovered`.
-impl From<TransactionSignedEcRecovered> for PooledTransactionsElementEcRecovered {
-    fn from(tx: TransactionSignedEcRecovered) -> Self {
-        Self { transaction: tx.signed_transaction.into(), signer: tx.signer }
+impl TryFrom<TransactionSignedEcRecovered> for PooledTransactionsElementEcRecovered {
+    type Error = TransactionConversionError;
+
+    fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
+        match PooledTransactionsElement::try_from(tx.signed_transaction) {
+            Ok(pooled_transaction) => {
+                Ok(Self { transaction: pooled_transaction, signer: tx.signer })
+            }
+            Err(_) => Err(TransactionConversionError::UnsupportedForP2P),
+        }
     }
 }
 
