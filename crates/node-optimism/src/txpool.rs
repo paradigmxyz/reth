@@ -84,7 +84,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        if transaction.is_deposit() || transaction.is_eip4844() {
+        if transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TxTypeNotSupported.into(),
@@ -115,7 +115,7 @@ where
                 &self.chain_spec(),
                 self.block_timestamp(),
                 encoded.as_ref(),
-                valid_tx.transaction().is_deposit(),
+                false,
             ) {
                 Ok(cost) => cost,
                 Err(err) => {
