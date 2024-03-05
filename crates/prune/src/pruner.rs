@@ -133,7 +133,7 @@ impl<DB: Database> Pruner<DB> {
                 %tip_block_number,
                 ?elapsed,
                 ?deleted_segments,
-                delete_limit=?limiter.segment_limit(),
+                delete_limit=?limiter.entries_limit(),
                 ?progress,
                 ?stats,
                 "Pruner interrupted by limit on deleted segments"
@@ -215,7 +215,7 @@ impl<DB: Database> Pruner<DB> {
                     .set(to_block as f64);
 
                 done = done && output.progress.is_done();
-                limiter.increment_deleted_segments_count();
+                limiter.increment_deleted_entries_count();
 
                 debug!(
                     target: "pruner",
@@ -240,7 +240,7 @@ impl<DB: Database> Pruner<DB> {
 
         Ok((
             stats,
-            limiter.deleted_segments_count(),
+            limiter.deleted_entries_count(),
             PruneProgress::new(done, limiter.is_timed_out()),
         ))
     }

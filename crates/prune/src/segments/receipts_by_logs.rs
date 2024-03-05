@@ -156,7 +156,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
 
             trace!(target: "pruner", %deleted, ?progress, ?block_range, "Pruned receipts");
 
-            limiter.increment_deleted_segments_count();
+            limiter.increment_deleted_entries_count();
 
             // For accurate checkpoints we need to know that we have checked every transaction.
             // Example: we reached the end of the range, and the last receipt is supposed to skip
@@ -205,7 +205,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             },
         )?;
 
-        let pruned = limiter.deleted_segments_count();
+        let pruned = limiter.deleted_entries_count();
         Ok(PruneOutput {
             progress: PruneProgress::new(done, limiter.is_timed_out()),
             pruned,

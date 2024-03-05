@@ -802,7 +802,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 let row = cursor.seek_exact(key.clone())?;
                 if let Some(row) = row {
                     cursor.delete_current()?;
-                    limiter.increment_deleted_segments_count();
+                    limiter.increment_deleted_entries_count();
                     delete_callback(row);
                 }
 
@@ -814,7 +814,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let done = keys.next().is_none();
 
-        Ok((limiter.deleted_segments_count(), PruneProgress::new(done, limiter.is_timed_out())))
+        Ok((limiter.deleted_entries_count(), PruneProgress::new(done, limiter.is_timed_out())))
     }
 
     /// Prune the table for the specified key range.
@@ -834,7 +834,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             while let Some(row) = walker.next().transpose()? {
                 if !skip_filter(&row) {
                     walker.delete_current()?;
-                    limiter.increment_deleted_segments_count();
+                    limiter.increment_deleted_entries_count();
                     delete_callback(row);
                 }
 
@@ -846,7 +846,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let done = walker.next().transpose()?.is_none();
 
-        Ok((limiter.deleted_segments_count(), PruneProgress::new(done, limiter.is_timed_out())))
+        Ok((limiter.deleted_entries_count(), PruneProgress::new(done, limiter.is_timed_out())))
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -2524,9 +2524,9 @@ fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {
 #[derive(Debug, Clone, Copy)]
 pub struct PruneLimiter {
     /// Maximum entries to delete from the database in one prune job.
-    segment_limit: Option<usize>,
+    entries_limit: Option<usize>,
     /// Current number of entries that have been deleted from database during the prune job.
-    deleted_segments_count: usize,
+    deleted_entries_count: usize,
     /// The max time one prune job can run.
     job_timeout: Option<Duration>,
     /// Time at which the prune job was started.
@@ -2538,16 +2538,16 @@ pub struct PruneLimiter {
 impl PruneLimiter {
     /// Returns a new instance.
     pub const fn new(
-        segment_limit: Option<usize>,
+        entries_limit: Option<usize>,
         job_timeout: Option<Duration>,
         start: Instant,
     ) -> Self {
-        Self { segment_limit, deleted_segments_count: 0, job_timeout, start, timed_out: false }
+        Self { entries_limit, deleted_entries_count: 0, job_timeout, start, timed_out: false }
     }
 
-    /// Returns a new instance with half the segment limit of the old instance.
-    pub fn new_with_fraction_of_segment_limit(old: Self, denominator: NonZeroUsize) -> Self {
-        let Self { segment_limit, job_timeout, start, .. } = old;
+    /// Returns a new instance with a fraction of the limit on entries of the old instance.
+    pub fn new_with_fraction_of_entries_limit(old: Self, denominator: NonZeroUsize) -> Self {
+        let Self { entries_limit: segment_limit, job_timeout, start, .. } = old;
 
         Self::new(segment_limit.map(|limit| limit / denominator), job_timeout, start)
     }
@@ -2559,8 +2559,8 @@ impl PruneLimiter {
 
     /// Returns the maximum entries that can be deleted from the database in one prune job. `None`
     /// is equivalent to unlimited segments.
-    pub fn segment_limit(&self) -> Option<usize> {
-        self.segment_limit
+    pub fn entries_limit(&self) -> Option<usize> {
+        self.entries_limit
     }
 
     /// Returns max time one prune job can run. `None` is equivalent to unlimited time.
@@ -2574,13 +2574,19 @@ impl PruneLimiter {
     }
 
     /// Returns the number of segments that have already been deleted by the prune job.
-    pub fn deleted_segments_count(&self) -> usize {
-        self.deleted_segments_count
+    pub fn deleted_entries_count(&self) -> usize {
+        self.deleted_entries_count
     }
 
     /// Returns true if prune limit is reached.
     pub fn at_limit(&mut self) -> bool {
-        let Self { segment_limit, deleted_segments_count, job_timeout, start, .. } = self;
+        let Self {
+            entries_limit: segment_limit,
+            deleted_entries_count: deleted_segments_count,
+            job_timeout,
+            start,
+            ..
+        } = self;
 
         if let Some(limit) = segment_limit {
             if limit == deleted_segments_count {
@@ -2598,7 +2604,7 @@ impl PruneLimiter {
     }
 
     /// Increments the count of deleted segments by one.
-    pub fn increment_deleted_segments_count(&mut self) {
-        self.deleted_segments_count += 1
+    pub fn increment_deleted_entries_count(&mut self) {
+        self.deleted_entries_count += 1
     }
 }
