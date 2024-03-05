@@ -23,7 +23,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::time::Interval;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
@@ -483,14 +483,23 @@ impl Eta {
         let Some(current) = checkpoint.entities() else { return };
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
-            let processed_since_last = current.processed - self.last_checkpoint.processed;
+            let Some(processed_since_last) =
+                current.processed.checked_sub(self.last_checkpoint.processed)
+            else {
+                self.eta = None;
+                debug!(target: "reth::cli", ?current, ?self.last_checkpoint, "Failed to calculate the ETA: processed entities is less than the last checkpoint");
+                return
+            };
             let elapsed = last_checkpoint_time.elapsed();
             let per_second = processed_since_last as f64 / elapsed.as_secs_f64();
 
-            self.eta = Duration::try_from_secs_f64(
-                ((current.total - current.processed) as f64) / per_second,
-            )
-            .ok();
+            let Some(remaining) = current.total.checked_sub(current.processed) else {
+                self.eta = None;
+                debug!(target: "reth::cli", ?current, "Failed to calculate the ETA: total entities is less than processed entities");
+                return
+            };
+
+            self.eta = Duration::try_from_secs_f64(remaining as f64 / per_second).ok();
         }
 
         self.last_checkpoint = current;
