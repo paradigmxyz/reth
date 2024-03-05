@@ -1,5 +1,4 @@
 use std::sync::Arc;
-
 use crate::EthPayloadBuilderAttributes;
 use alloy_rlp::{Encodable, Error as DecodeError};
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
