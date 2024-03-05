@@ -356,7 +356,7 @@ pub trait EthTransactions: Send + Sync {
     /// 2. configures the EVM evn
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
-    /// _after_ the transaction [StateProviderDatabase] and the database that points to the state
+    /// _after_ the transaction [StateCacheDB] and the database that points to the state
     /// right _before_ the transaction.
     ///
     /// This accepts a `inspector_setup` closure that returns the inspector to be used for tracing
