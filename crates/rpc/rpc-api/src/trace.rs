@@ -2,11 +2,14 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{BlockId, Bytes, B256};
 use reth_rpc_types::{
     state::StateOverride,
-    trace::{filter::TraceFilter, parity::*},
+    trace::{
+        filter::TraceFilter,
+        opcode::{BlockOpcodeGas, TransactionOpcodeGas},
+        parity::*,
+    },
     BlockOverrides, Index, TransactionRequest,
 };
 use std::collections::HashSet;
-use reth_rpc_types::trace::opcode::{BlockOpcodeGas, TransactionOpcodeGas};
 
 /// Ethereum trace API
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "trace"))]
@@ -93,7 +96,8 @@ pub trait TraceApi {
         hash: B256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>>;
 
-    /// Returns all opcodes with their count and combined gas usage for the given transaction in no particular order.
+    /// Returns all opcodes with their count and combined gas usage for the given transaction in no
+    /// particular order.
     #[method(name = "transactionOpcodeGas")]
     async fn trace_transaction_opcode_gas(
         &self,
@@ -104,8 +108,5 @@ pub trait TraceApi {
     ///
     /// This is the same as `trace_transactionOpcodeGas` but for all transactions in a block.
     #[method(name = "blockOpcodeGas")]
-    async fn trace_block_opcode_gas(
-        &self,
-        block_id: BlockId,
-    ) -> RpcResult<Option<BlockOpcodeGas>>;
+    async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>>;
 }
