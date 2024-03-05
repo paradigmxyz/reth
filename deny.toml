@@ -45,6 +45,7 @@ allow = [
     "ISC",
     "Unicode-DFS-2016",
     "Unlicense",
+    "Unicode-3.0",
     # https://github.com/briansmith/ring/issues/902
     "LicenseRef-ring",
     # https://github.com/briansmith/webpki/issues/148
