@@ -915,6 +915,9 @@ pub enum EthBlobTransactionSidecar {
 
 impl EthPooledTransaction {
     /// Create new instance of [Self].
+    ///
+    /// Caution: In case of blob transactions, this does marks the blob sidecar as
+    /// [EthBlobTransactionSidecar::Missing]
     pub fn new(transaction: TransactionSignedEcRecovered, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
         let gas_cost = match &transaction.transaction {

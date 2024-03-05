@@ -56,7 +56,7 @@ impl PooledTransactionsElement {
     /// Tries to convert a [TransactionSigned] into a [PooledTransactionsElement].
     ///
     /// This function used as a helper to convert from a decoded p2p broadcast message to
-    /// [PooledTransactio'nsElement]. Since [BlobTransaction] is disallowed to be broadcasted on
+    /// [PooledTransactionsElement]. Since [BlobTransaction] is disallowed to be broadcasted on
     /// p2p, return an err if `tx` is [Transaction::Eip4844].
     pub fn try_from_broadcast(tx: TransactionSigned) -> Result<Self, TransactionSigned> {
         match tx {
@@ -69,8 +69,10 @@ impl PooledTransactionsElement {
             TransactionSigned { transaction: Transaction::Eip1559(tx), signature, hash } => {
                 Ok(PooledTransactionsElement::Eip1559 { transaction: tx, signature, hash })
             }
+            // Not supported because missing blob sidecar
             tx @ TransactionSigned { transaction: Transaction::Eip4844(_), .. } => Err(tx),
             #[cfg(feature = "optimism")]
+            // Not supported because deposit transactions are never pooled
             tx @ TransactionSigned { transaction: Transaction::Deposit(_), .. } => Err(tx),
         }
     }
