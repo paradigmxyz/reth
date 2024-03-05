@@ -19,7 +19,6 @@ use std::{
     collections::BinaryHeap,
     io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::Path,
-    sync::Arc,
 };
 
 use rayon::prelude::*;
@@ -41,7 +40,7 @@ where
     <V as Compress>::Compressed: std::fmt::Debug,
 {
     /// Directory for temporary file storage
-    dir: Option<Arc<TempDir>>,
+    dir: Option<TempDir>,
     /// Collection of temporary ETL files
     files: Vec<EtlFile>,
     /// Current buffer size in bytes
@@ -111,11 +110,11 @@ where
 
     /// Returns a reference to the temporary directory used by the collector. If the directory
     /// doesn't exist, it will be created.
-    fn dir(&mut self) -> io::Result<Arc<TempDir>> {
+    fn dir(&mut self) -> io::Result<&TempDir> {
         if self.dir.is_none() {
-            self.dir = Some(Arc::new(TempDir::new()?));
+            self.dir = Some(TempDir::new()?);
         }
-        Ok(self.dir.clone().unwrap())
+        Ok(self.dir.as_ref().unwrap())
     }
 
     fn flush(&mut self) -> io::Result<()> {
