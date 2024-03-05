@@ -47,14 +47,14 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
-        let limit = PruneLimiter::new_with_fraction_of_segment_limit(
+        let limiter = PruneLimiter::new_with_fraction_of_segment_limit(
             input.limiter,
             NonZeroUsize::new(2).unwrap(),
         );
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::AccountChangeSets>(
                 range,
-                limit,
+                limiter,
                 |_| false,
                 |row| last_changeset_pruned_block = Some(row.0),
             )?;

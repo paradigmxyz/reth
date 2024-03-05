@@ -818,7 +818,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     pub fn prune_table_with_range<T: Table>(
         &self,
         keys: impl RangeBounds<T::Key> + Clone + Debug,
-        limiter: PruneLimiter,
+        mut limiter: PruneLimiter,
         mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> Result<(usize, bool), DatabaseError> {
@@ -832,6 +832,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
             if !skip_filter(&row) {
                 walker.delete_current()?;
+                limiter.increment_deleted_segments_count();
                 delete_callback(row);
             }
         }
@@ -2521,6 +2522,8 @@ pub struct PruneLimiter {
     job_timeout: Option<Duration>,
     /// Time at which the prune job was started.
     start: Instant,
+    /// Prune job has timed out.
+    timed_out: bool,
 }
 
 impl PruneLimiter {
@@ -2530,7 +2533,7 @@ impl PruneLimiter {
         job_timeout: Option<Duration>,
         start: Instant,
     ) -> Self {
-        Self { segment_limit, deleted_segments_count: 0, job_timeout, start }
+        Self { segment_limit, deleted_segments_count: 0, job_timeout, start, timed_out: false }
     }
 
     /// Returns a new instance with half the segment limit of the old instance.
@@ -2556,23 +2559,28 @@ impl PruneLimiter {
         self.job_timeout.as_ref()
     }
 
+    /// Returns `true` if prune job has timed out.
+    pub fn is_timed_out(&self) -> bool {
+        self.timed_out
+    }
+
     /// Returns the number of segments that have already been deleted by the prune job.
     pub fn deleted_segments_count(&self) -> usize {
         self.deleted_segments_count
     }
 
     /// Returns true if prune limit is reached.
-    pub fn at_limit(&self) -> bool {
-        let Self { segment_limit, deleted_segments_count: deleted_segments, job_timeout, start } =
-            self;
+    pub fn at_limit(&mut self) -> bool {
+        let Self { segment_limit, deleted_segments_count, job_timeout, start, .. } = self;
 
         if let Some(limit) = segment_limit {
-            if limit == deleted_segments {
+            if limit == deleted_segments_count {
                 return true
             }
         }
         if let Some(timeout) = job_timeout {
             if *timeout <= start.elapsed() {
+                self.timed_out = true;
                 return true
             }
         }

@@ -44,11 +44,11 @@ impl<DB: Database> Segment<DB> for Headers {
             }
         };
 
-        let limit = PruneLimiter::new_with_fraction_of_segment_limit(
+        let limiter = PruneLimiter::new_with_fraction_of_segment_limit(
             input.limiter,
             NonZeroUsize::new(3).unwrap(),
         );
-        if let Some(limit) = limit.segment_limit() {
+        if let Some(limit) = limiter.segment_limit() {
             if limit == 0 {
                 // Nothing to do, `input.delete_limit` is less than 3, so we can't prune all
                 // headers-related tables up to the same height
@@ -57,13 +57,13 @@ impl<DB: Database> Segment<DB> for Headers {
         }
 
         let results = [
-            self.prune_table::<DB, tables::Headers>(provider, block_range.clone(), limit)?,
+            self.prune_table::<DB, tables::Headers>(provider, block_range.clone(), limiter)?,
             self.prune_table::<DB, tables::HeaderTerminalDifficulties>(
                 provider,
                 block_range.clone(),
-                limit,
+                limiter,
             )?,
-            self.prune_table::<DB, tables::CanonicalHeaders>(provider, block_range, limit)?,
+            self.prune_table::<DB, tables::CanonicalHeaders>(provider, block_range, limiter)?,
         ];
 
         if !results.iter().map(|(_, _, last_pruned_block)| last_pruned_block).all_equal() {

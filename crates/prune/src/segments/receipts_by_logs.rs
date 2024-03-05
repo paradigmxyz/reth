@@ -113,8 +113,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             "Calculated block ranges and filtered addresses",
         );
 
-        let limit = input.limiter;
-        let mut pruned = 0;
+        let mut limiter = input.limiter;
         let mut done = true;
         let mut last_pruned_transaction = None;
         for (start_block, end_block, num_addresses) in block_ranges {
@@ -139,7 +138,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             let deleted: usize;
             (deleted, done) = provider.prune_table_with_range::<tables::Receipts>(
                 tx_range,
-                limit,
+                limiter,
                 |(tx_num, receipt)| {
                     let skip = num_addresses > 0 &&
                         receipt.logs.iter().any(|log| {
@@ -155,7 +154,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             )?;
             trace!(target: "pruner", %deleted, %done, ?block_range, "Pruned receipts");
 
-            pruned += deleted;
+            limiter.increment_deleted_segments_count();
 
             // For accurate checkpoints we need to know that we have checked every transaction.
             // Example: we reached the end of the range, and the last receipt is supposed to skip
@@ -173,7 +172,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                     .saturating_sub(if done { 0 } else { 1 }),
             );
 
-            if limit.at_limit() {
+            if limiter.at_limit() {
                 done &= end_block == to_block;
                 break
             }
@@ -204,6 +203,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             },
         )?;
 
+        let pruned = limiter.deleted_segments_count();
         Ok(PruneOutput { done, pruned, checkpoint: None })
     }
 }
