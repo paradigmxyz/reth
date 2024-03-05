@@ -173,7 +173,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                     .saturating_sub(if done { 0 } else { 1 }),
             );
 
-            if limit.at_limit(pruned) {
+            if limit.at_limit() {
                 done &= end_block == to_block;
                 break
             }
