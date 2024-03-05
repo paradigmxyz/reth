@@ -91,9 +91,33 @@ impl ReceiptsLogPruneConfig {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PruneProgress {
     /// There is more data to prune.
-    HasMoreData,
+    HasMoreData(PruneInterruptReason),
     /// Pruning has been finished.
     Finished,
+}
+/// Reason for interrupting a prune job.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum PruneInterruptReason {
+    /// Prune job timed out.
+    Timeout,
+    /// Limit on the number of deleted segments per prune job was reached.
+    LimitSegmentsDeleted,
+}
+
+impl PruneInterruptReason {
+    fn is_timeout(&self) -> bool {
+        match self {
+            Self::Timeout => true,
+            Self::LimitSegmentsDeleted => false,
+        }
+    }
+
+    fn is_segment_limit_reached(&self) -> bool {
+        match self {
+            Self::Timeout => false,
+            Self::LimitSegmentsDeleted => true,
+        }
+    }
 }
 
 impl PruneProgress {
@@ -105,7 +129,41 @@ impl PruneProgress {
         if done {
             Self::Finished
         } else {
-            Self::HasMoreData
+            Self::HasMoreData(PruneInterruptReason::LimitSegmentsDeleted)
+        }
+    }
+
+    /// Creates new [PruneProgress] that summarises prune job.
+    ///
+    /// If `done == true`, returns [PruneProgress::Finished], otherwise [PruneProgress::HasMoreData]
+    /// is returned.
+    pub fn summary(done: bool, timeout: bool) -> Self {
+        if done {
+            Self::Finished
+        } else {
+            let interrupt_reason = if timeout {
+                PruneInterruptReason::Timeout
+            } else {
+                PruneInterruptReason::LimitSegmentsDeleted
+            };
+
+            Self::HasMoreData(interrupt_reason)
+        }
+    }
+
+    /// Returns `true` if prune job was interrupted by timeout.
+    pub fn is_timed_out(&self) -> bool {
+        match self {
+            Self::Finished => false,
+            Self::HasMoreData(reason) => reason.is_timeout(),
+        }
+    }
+
+    /// Returns `true` if prune job was interrupted by reaching limit on deleted segments.
+    pub fn is_segment_limit_reached(&self) -> bool {
+        match self {
+            Self::Finished => false,
+            Self::HasMoreData(reason) => reason.is_segment_limit_reached(),
         }
     }
 }

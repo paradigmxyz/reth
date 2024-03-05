@@ -116,17 +116,39 @@ impl<DB: Database> Pruner<DB> {
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        debug!(
-            target: "pruner",
-            %tip_block_number,
-            ?elapsed,
-            timeout=?limiter.timeout(),
-            ?deleted_segments,
-            delete_limit=?limiter.segment_limit(),
-            ?progress,
-            ?stats,
-            "Pruner finished"
-        );
+        if progress.is_timed_out() {
+            debug!(
+                target: "pruner",
+                %tip_block_number,
+                ?elapsed,
+                timeout=?limiter.timeout(),
+                ?deleted_segments,
+                ?progress,
+                ?stats,
+                ,
+            );
+        } else if progress.is_segment_limit_reached() {
+            debug!(
+                target: "pruner",
+                %tip_block_number,
+                ?elapsed,
+                ?deleted_segments,
+                delete_limit=?limiter.segment_limit(),
+                ?progress,
+                ?stats,
+                "Pruner interrupted by limit on deleted segments"
+            );
+        } else {
+            debug!(
+                target: "pruner",
+                %tip_block_number,
+                ?elapsed,
+                ?deleted_segments,
+                ?progress,
+                ?stats,
+                "Pruner finished",
+            );
+        }
 
         self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
 
@@ -215,7 +237,11 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
-        Ok((stats, limiter.deleted_segments_count(), PruneProgress::from_done(done)))
+        Ok((
+            stats,
+            limiter.deleted_segments_count(),
+            PruneProgress::summary(done, limiter.is_timed_out()),
+        ))
     }
 
     /// Returns pre-configured segments that needs to be pruned according to the highest
@@ -272,10 +298,15 @@ impl<DB: Database> Pruner<DB> {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+
     use crate::Pruner;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_primitives::MAINNET;
-    use reth_provider::ProviderFactory;
+    use reth_provider::{ProviderFactory, PruneLimiter};
 
     #[test]
     fn is_pruning_needed() {
@@ -298,5 +329,31 @@ mod tests {
         // Tip block number delta is < than min block interval
         let third_block_number = second_block_number;
         assert!(!pruner.is_pruning_needed(third_block_number));
+    }
+
+    #[test]
+    fn timeout_prune() {
+        const PRUNE_JOB_TIMEOUT: Duration = Duration::from_millis(100);
+
+        let db = create_test_rw_db();
+        let provider_factory =
+            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir())
+                .expect("create provide factory with static_files");
+        let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5);
+
+        // Tip block number delta is >= than min block interval
+        let tip_block_number = 1 + pruner.min_block_interval as u64;
+        assert!(pruner.is_pruning_needed(tip_block_number));
+
+        let provider = pruner.provider_factory.provider_rw().unwrap();
+
+        let start = Instant::now();
+        let limiter = PruneLimiter::new(None, Some(PRUNE_JOB_TIMEOUT), start);
+
+        thread::sleep(Duration::from_millis(100));
+
+        let (_, _, progress) = pruner.prune_segments(&provider, tip_block_number, limiter);
+
+        assert!(progress.is_timed_out())
     }
 }
