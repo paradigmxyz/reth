@@ -85,6 +85,7 @@ where
         self.len == 0
     }
 
+    /// Clears the collector, removing all data, including the temporary directory.
     pub fn clear(&mut self) {
         self.dir = None;
         // Clear vectors and free the allocated memory
@@ -108,6 +109,8 @@ where
         Ok(())
     }
 
+    /// Returns a reference to the temporary directory used by the collector. If the directory
+    /// doesn't exist, it will be created.
     fn dir(&mut self) -> io::Result<Arc<TempDir>> {
         if self.dir.is_none() {
             self.dir = Some(Arc::new(TempDir::new()?));
