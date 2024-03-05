@@ -118,10 +118,26 @@ where
     }
 }
 
-/// A basic optimism payload service.
+/// A basic optimism payload service builder
 #[derive(Debug, Default, Clone)]
-#[non_exhaustive]
-pub struct OptimismPayloadBuilder;
+pub struct OptimismPayloadBuilder {
+    /// By default the pending block equals the latest block
+    /// to save resources and not leak txs from the tx-pool,
+    /// this flag enables computing of the pending block
+    /// from the tx-pool instead.
+    ///
+    /// If `compute_pending_block` is not enabled, the payload builder
+    /// will use the payload attributes from the latest block. Note
+    /// that this flag is not yet functional.
+    pub compute_pending_block: bool,
+}
+
+impl OptimismPayloadBuilder {
+    /// Create a new instance with the given `compute_pending_block` flag.
+    pub const fn new(compute_pending_block: bool) -> Self {
+        Self { compute_pending_block }
+    }
+}
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuilder
 where
@@ -133,7 +149,9 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
-        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default();
+        let payload_builder =
+            reth_optimism_payload_builder::OptimismPayloadBuilder::new(ctx.chain_spec())
+                .set_compute_pending_block(self.compute_pending_block);
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()

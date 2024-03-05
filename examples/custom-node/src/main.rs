@@ -31,8 +31,12 @@ use reth_primitives::{
 };
 use reth_rpc_api::{EngineApiClient, EthApiClient};
 use reth_rpc_types::{
-    engine::{ForkchoiceState, PayloadAttributes as EthPayloadAttributes, PayloadId},
+    engine::{
+        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ForkchoiceState,
+        PayloadAttributes as EthPayloadAttributes, PayloadId,
+    },
     withdrawal::Withdrawal,
+    ExecutionPayloadV1,
 };
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
@@ -77,7 +81,9 @@ impl PayloadAttributes for CustomPayloadAttributes {
 
         // custom validation logic - ensure that the custom field is not zero
         if self.custom == 0 {
-            return Err(AttributesValidationError::invalid_params(CustomError::CustomFieldIsNotZero))
+            return Err(AttributesValidationError::invalid_params(
+                CustomError::CustomFieldIsNotZero,
+            ));
         }
 
         Ok(())
@@ -172,7 +178,7 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 
 /// Custom engine types - uses a custom payload attributes RPC type, but uses the default
 /// payload builder attributes type.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct CustomEngineTypes;
 
@@ -180,6 +186,9 @@ impl EngineTypes for CustomEngineTypes {
     type PayloadAttributes = CustomPayloadAttributes;
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
+    type ExecutionPayloadV1 = ExecutionPayloadV1;
+    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
+    type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
 
     fn validate_version_specific_fields(
         chain_spec: &ChainSpec,

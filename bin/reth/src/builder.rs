@@ -243,8 +243,9 @@ impl<DB: Database + DatabaseMetrics + DatabaseMetadata + 'static> NodeBuilderWit
         // TODO: stateful node builder should handle this in with_payload_builder
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
-            .set_compute_pending_block(self.config.builder.compute_pending_block);
+        let payload_builder =
+            reth_optimism_payload_builder::OptimismPayloadBuilder::new(self.config.chain.clone())
+                .set_compute_pending_block(self.config.builder.compute_pending_block);
 
         #[cfg(feature = "optimism")]
         let payload_builder: PayloadBuilderHandle<OptimismEngineTypes> =
