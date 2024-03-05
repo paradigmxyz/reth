@@ -6493,6 +6493,7 @@ version = "0.1.0-alpha.21"
 dependencies = [
  "clap",
  "eyre",
+ "parking_lot 0.12.1",
  "reth-basic-payload-builder",
  "reth-db",
  "reth-network",
@@ -6502,6 +6503,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rpc",
  "reth-rpc-types",
  "reth-rpc-types-compat",
