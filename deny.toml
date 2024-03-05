@@ -60,7 +60,7 @@ exceptions = [
     { allow = ["CC0-1.0"], name = "more-asserts" },
     { allow = ["CC0-1.0"], name = "aurora-engine-modexp" },
     # TODO: decide on MPL-2.0 handling
-    # These dependencies are grandfathered in in https://github.com/paradigmxyz/reth/pull/#
+    # These dependencies are grandfathered in in https://github.com/paradigmxyz/reth/pull/6980
     { allow = ["MPL-2.0"], name = "attohttpc" },
     { allow = ["MPL-2.0"], name = "option-ext" },
     { allow = ["MPL-2.0"], name = "webpki-roots" },
