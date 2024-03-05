@@ -312,9 +312,7 @@ pub trait EthTransactions: Send + Sync {
         F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB) -> EthResult<R>
             + Send
             + 'static,
-        Insp: for<'a> Inspector<&'a mut CacheDB<StateProviderDatabase<StateProviderBox>>>
-            + Send
-            + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
         R: Send + 'static;
 
     /// Executes all transactions of a block and returns a list of callback results invoked for each
@@ -341,7 +339,7 @@ pub trait EthTransactions: Send + Sync {
                 TracingInspector,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
+                &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -377,14 +375,12 @@ pub trait EthTransactions: Send + Sync {
                 Insp,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
+                &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: for<'a> Inspector<&'a mut CacheDB<StateProviderDatabase<StateProviderBox>>>
-            + Send
-            + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, None, insp_setup, f).await
@@ -408,7 +404,7 @@ pub trait EthTransactions: Send + Sync {
                 TracingInspector,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
+                &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -444,14 +440,12 @@ pub trait EthTransactions: Send + Sync {
                 Insp,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
+                &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: for<'a> Inspector<&'a mut CacheDB<StateProviderDatabase<StateProviderBox>>>
-            + Send
-            + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
         R: Send + 'static;
 }
 
@@ -1005,9 +999,7 @@ where
         F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB) -> EthResult<R>
             + Send
             + 'static,
-        Insp: for<'a> Inspector<&'a mut CacheDB<StateProviderDatabase<StateProviderBox>>>
-            + Send
-            + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
         R: Send + 'static,
     {
         let (transaction, block) = match self.transaction_and_block(hash).await? {
@@ -1052,14 +1044,12 @@ where
                 Insp,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
+                &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: for<'a> Inspector<&'a mut CacheDB<StateProviderDatabase<StateProviderBox>>>
-            + Send
-            + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
         R: Send + 'static,
     {
         let ((cfg, block_env, _), block) =
