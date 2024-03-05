@@ -40,8 +40,7 @@ mod builder {
     use tracing::{debug, trace, warn};
 
     /// Optimism's payload builder
-    #[derive(Debug, Clone, PartialEq, Eq, Default)]
-    #[non_exhaustive]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct OptimismPayloadBuilder {
         /// The rollup's compute pending block configuration option.
         // TODO(clabby): Implement this feature.
@@ -51,6 +50,11 @@ mod builder {
     }
 
     impl OptimismPayloadBuilder {
+        /// OptimismPayloadBuilder constructor.
+        pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+            Self { compute_pending_block: true, chain_spec }
+        }
+
         /// Sets the rollup's compute pending block configuration option.
         pub fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
             self.compute_pending_block = compute_pending_block;

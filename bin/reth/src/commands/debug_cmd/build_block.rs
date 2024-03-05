@@ -296,8 +296,9 @@ impl Command {
         );
 
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
-            .compute_pending_block();
+        let payload_builder =
+            reth_optimism_payload_builder::OptimismPayloadBuilder::new(self.chain.clone())
+                .compute_pending_block();
 
         #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
