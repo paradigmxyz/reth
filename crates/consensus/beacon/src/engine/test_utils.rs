@@ -399,17 +399,14 @@ where
                     .build(client.clone(), consensus.clone(), provider_factory.clone())
                     .into_task();
 
-                Pipeline::builder().add_stages(
-                    DefaultStages::new(
-                        provider_factory.clone(),
-                        HeaderSyncMode::Tip(tip_rx.clone()),
-                        Arc::clone(&consensus),
-                        header_downloader,
-                        body_downloader,
-                        executor_factory.clone(),
-                    )
-                    .expect("should build"),
-                )
+                Pipeline::builder().add_stages(DefaultStages::new(
+                    provider_factory.clone(),
+                    HeaderSyncMode::Tip(tip_rx.clone()),
+                    Arc::clone(&consensus),
+                    header_downloader,
+                    body_downloader,
+                    executor_factory.clone(),
+                ))
             }
         };
 

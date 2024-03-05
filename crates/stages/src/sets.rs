@@ -52,7 +52,7 @@ use crate::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    StageError, StageSet, StageSetBuilder,
+    StageSet, StageSetBuilder,
 };
 use reth_db::database::Database;
 use reth_interfaces::{
@@ -61,7 +61,6 @@ use reth_interfaces::{
 };
 use reth_provider::{ExecutorFactory, HeaderSyncGapProvider, HeaderSyncMode};
 use std::sync::Arc;
-use tempfile::TempDir;
 
 /// A set containing all stages to run a fully syncing instance of reth.
 ///
@@ -101,21 +100,20 @@ impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
         header_downloader: H,
         body_downloader: B,
         executor_factory: EF,
-    ) -> Result<Self, StageError>
+    ) -> Self
     where
         EF: ExecutorFactory,
     {
-        Ok(Self {
+        Self {
             online: OnlineStages::new(
                 provider,
                 header_mode,
                 consensus,
                 header_downloader,
                 body_downloader,
-                Arc::new(TempDir::new()?),
             ),
             executor_factory,
-        })
+        }
     }
 }
 
@@ -164,8 +162,6 @@ pub struct OnlineStages<Provider, H, B> {
     header_downloader: H,
     /// The block body downloader
     body_downloader: B,
-    /// Temporary directory for ETL usage on headers stage.
-    temp_dir: Arc<TempDir>,
 }
 
 impl<Provider, H, B> OnlineStages<Provider, H, B> {
@@ -176,9 +172,8 @@ impl<Provider, H, B> OnlineStages<Provider, H, B> {
         consensus: Arc<dyn Consensus>,
         header_downloader: H,
         body_downloader: B,
-        temp_dir: Arc<TempDir>,
     ) -> Self {
-        Self { provider, header_mode, consensus, header_downloader, body_downloader, temp_dir }
+        Self { provider, header_mode, consensus, header_downloader, body_downloader }
     }
 }
 
@@ -203,16 +198,9 @@ where
         mode: HeaderSyncMode,
         header_downloader: H,
         consensus: Arc<dyn Consensus>,
-        temp_dir: Arc<TempDir>,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(
-                provider,
-                header_downloader,
-                mode,
-                consensus.clone(),
-                temp_dir.clone(),
-            ))
+            .add_stage(HeaderStage::new(provider, header_downloader, mode, consensus.clone()))
             .add_stage(bodies)
     }
 }
@@ -231,7 +219,6 @@ where
                 self.header_downloader,
                 self.header_mode,
                 self.consensus.clone(),
-                self.temp_dir.clone(),
             ))
             .add_stage(BodyStage::new(self.body_downloader))
     }
