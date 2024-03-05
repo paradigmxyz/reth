@@ -260,7 +260,7 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
             if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
                 attributes.parent_beacon_block_root().unwrap_or(B256::ZERO)
             } else {
-                panic!("V3 is only possible after cancun");
+                B256::ZERO
             };
         OptimismExecutionPayloadEnvelopeV3 {
             execution_payload: block_to_payload_v3(block.clone()),
