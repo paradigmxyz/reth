@@ -284,6 +284,8 @@ mod tests {
             );
         }
 
+        let temp_dir_path = collector.dir.as_ref().unwrap().path().to_path_buf();
+
         collector.clear();
         assert!(collector.dir.is_none());
         assert!(collector.files.is_empty());
@@ -291,5 +293,6 @@ mod tests {
         assert!(collector.buffer.is_empty());
         assert_eq!(collector.len, 0);
         assert!(collector.is_empty());
+        assert!(!temp_dir_path.exists());
     }
 }
