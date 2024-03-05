@@ -63,13 +63,15 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         }
 
         let mut last_pruned_transaction = None;
-        let (pruned, _) = provider.prune_table_with_iterator::<tables::TransactionHashNumbers>(
-            hashes,
-            input.limiter,
-            |row| {
-                last_pruned_transaction = Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
-            },
-        )?;
+        let (pruned, progress) = provider
+            .prune_table_with_iterator::<tables::TransactionHashNumbers>(
+                hashes,
+                input.limiter,
+                |row| {
+                    last_pruned_transaction =
+                        Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
+                },
+            )?;
         let done = tx_range_end == end;
         trace!(target: "pruner", %pruned, %done, "Pruned transaction lookup");
 
@@ -81,10 +83,10 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             // If there's more transaction lookup entries to prune, set the checkpoint block number
             // to previous, so we could finish pruning its transaction lookup entries on the next
             // run.
-            .checked_sub(if done { 0 } else { 1 });
+            .checked_sub(if progress.is_done() { 0 } else { 1 });
 
         Ok(PruneOutput {
-            done,
+            progress,
             pruned,
             checkpoint: Some(PruneOutputCheckpoint {
                 block_number: last_pruned_block,
@@ -104,7 +106,9 @@ mod tests {
     };
     use reth_db::tables;
     use reth_interfaces::test_utils::{generators, generators::random_block_range};
-    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber, B256};
+    use reth_primitives::{
+        BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, TxNumber, B256,
+    };
     use reth_provider::{PruneCheckpointReader, PruneLimiter};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
@@ -134,7 +138,7 @@ mod tests {
             db.table::<tables::TransactionHashNumbers>().unwrap().len()
         );
 
-        let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
+        let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let input = PruneInput {
                 previous_checkpoint: db
@@ -184,8 +188,8 @@ mod tests {
             let result = segment.prune(&provider, input).unwrap();
             assert_matches!(
                 result,
-                PruneOutput {done, pruned, checkpoint: Some(_)}
-                    if (done, pruned) == expected_result
+                PruneOutput {progress, pruned, checkpoint: Some(_)}
+                    if (progress, pruned) == expected_result
             );
             segment
                 .save_checkpoint(
@@ -196,7 +200,7 @@ mod tests {
             provider.commit().expect("commit");
 
             let last_pruned_block_number =
-                last_pruned_block_number.checked_sub(if result.done { 0 } else { 1 });
+                last_pruned_block_number.checked_sub(if result.progress.is_done() { 0 } else { 1 });
 
             assert_eq!(
                 db.table::<tables::TransactionHashNumbers>().unwrap().len(),
@@ -216,8 +220,8 @@ mod tests {
             );
         };
 
-        test_prune(6, (false, 10));
-        test_prune(6, (true, 2));
-        test_prune(10, (true, 8));
+        test_prune(6, (PruneProgress::new_segment_limit_reached(), 10));
+        test_prune(6, (PruneProgress::new_finished(), 2));
+        test_prune(10, (PruneProgress::new_finished(), 8));
     }
 }

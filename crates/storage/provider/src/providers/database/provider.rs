@@ -38,9 +38,10 @@ use reth_primitives::{
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Hardfork, Head, Header, PruneCheckpoint, PruneModes,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
-    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    PruneProgress, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StaticFileSegment, StorageEntry, TransactionMeta, TransactionSigned,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
+    Withdrawals, B256, U256,
 };
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -792,24 +793,28 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         keys: impl IntoIterator<Item = T::Key>,
         mut limiter: PruneLimiter,
         mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> Result<(usize, bool), DatabaseError> {
+    ) -> Result<(usize, PruneProgress), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut keys = keys.into_iter();
 
-        for key in &mut keys {
-            if limiter.at_limit() {
-                break
-            }
+        if !limiter.at_limit() {
+            for key in &mut keys {
+                let row = cursor.seek_exact(key.clone())?;
+                if let Some(row) = row {
+                    cursor.delete_current()?;
+                    limiter.increment_deleted_segments_count();
+                    delete_callback(row);
+                }
 
-            let row = cursor.seek_exact(key.clone())?;
-            if let Some(row) = row {
-                cursor.delete_current()?;
-                limiter.increment_deleted_segments_count();
-                delete_callback(row);
+                if limiter.at_limit() {
+                    break
+                }
             }
         }
 
-        Ok((limiter.deleted_segments_count(), keys.next().is_none()))
+        let done = keys.next().is_none();
+
+        Ok((limiter.deleted_segments_count(), PruneProgress::new(done, limiter.is_timed_out())))
     }
 
     /// Prune the table for the specified key range.
@@ -821,23 +826,27 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         mut limiter: PruneLimiter,
         mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
         mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> Result<(usize, bool), DatabaseError> {
+    ) -> Result<(usize, PruneProgress), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
 
-        while let Some(row) = walker.next().transpose()? {
-            if limiter.at_limit() {
-                break
-            }
+        if !limiter.at_limit() {
+            while let Some(row) = walker.next().transpose()? {
+                if !skip_filter(&row) {
+                    walker.delete_current()?;
+                    limiter.increment_deleted_segments_count();
+                    delete_callback(row);
+                }
 
-            if !skip_filter(&row) {
-                walker.delete_current()?;
-                limiter.increment_deleted_segments_count();
-                delete_callback(row);
+                if limiter.at_limit() {
+                    break
+                }
             }
         }
 
-        Ok((limiter.deleted_segments_count(), walker.next().transpose()?.is_none()))
+        let done = walker.next().transpose()?.is_none();
+
+        Ok((limiter.deleted_segments_count(), PruneProgress::new(done, limiter.is_timed_out())))
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -2528,7 +2537,7 @@ pub struct PruneLimiter {
 
 impl PruneLimiter {
     /// Returns a new instance.
-    pub fn new(
+    pub const fn new(
         segment_limit: Option<usize>,
         job_timeout: Option<Duration>,
         start: Instant,

@@ -23,7 +23,10 @@ pub use transactions::Transactions;
 use crate::PrunerError;
 use reth_db::database::Database;
 use reth_interfaces::{provider::ProviderResult, RethResult};
-use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber};
+use reth_primitives::{
+    BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
+    TxNumber,
+};
 use reth_provider::{
     providers::PruneLimiter, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
 };
@@ -147,9 +150,9 @@ impl PruneInput {
 /// Segment pruning output, see [Segment::prune].
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct PruneOutput {
-    /// `true` if pruning has been completed up to the target block, and `false` if there's more
-    /// data to prune in further runs.
-    pub(crate) done: bool,
+    /// [`PruneProgress::new_finished()`] if pruning has been completed up to the target block, and
+    /// [`PruneProgress::HasMoreData`] if there's more data to prune in further runs.
+    pub(crate) progress: PruneProgress,
     /// Number of entries pruned, i.e. deleted from the database.
     pub(crate) pruned: usize,
     /// Pruning checkpoint to save to database, if any.
@@ -160,13 +163,13 @@ impl PruneOutput {
     /// Returns a [PruneOutput] with `done = true`, `pruned = 0` and `checkpoint = None`.
     /// Use when no pruning is needed.
     pub(crate) const fn done() -> Self {
-        Self { done: true, pruned: 0, checkpoint: None }
+        Self { progress: PruneProgress::new_finished(), pruned: 0, checkpoint: None }
     }
 
     /// Returns a [PruneOutput] with `done = false`, `pruned = 0` and `checkpoint = None`.
     /// Use when pruning is needed but cannot be done.
-    pub(crate) const fn not_done() -> Self {
-        Self { done: false, pruned: 0, checkpoint: None }
+    pub(crate) const fn not_done(reason: PruneInterruptReason) -> Self {
+        Self { progress: PruneProgress::HasMoreData(reason), pruned: 0, checkpoint: None }
     }
 }
 

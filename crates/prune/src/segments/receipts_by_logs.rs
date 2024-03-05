@@ -4,7 +4,7 @@ use crate::{
 };
 use reth_db::{database::Database, tables};
 use reth_primitives::{
-    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
+    PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
     MINIMUM_PRUNING_DISTANCE,
 };
 use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
@@ -135,8 +135,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
 
             // Delete receipts, except the ones in the inclusion list
             let mut last_skipped_transaction = 0;
-            let deleted: usize;
-            (deleted, done) = provider.prune_table_with_range::<tables::Receipts>(
+            let (deleted, progress) = provider.prune_table_with_range::<tables::Receipts>(
                 tx_range,
                 limiter,
                 |(tx_num, receipt)| {
@@ -152,7 +151,10 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                 },
                 |row| last_pruned_transaction = Some(row.0),
             )?;
-            trace!(target: "pruner", %deleted, %done, ?block_range, "Pruned receipts");
+
+            done = progress.is_done();
+
+            trace!(target: "pruner", %deleted, ?progress, ?block_range, "Pruned receipts");
 
             limiter.increment_deleted_segments_count();
 
@@ -204,7 +206,11 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
         )?;
 
         let pruned = limiter.deleted_segments_count();
-        Ok(PruneOutput { done, pruned, checkpoint: None })
+        Ok(PruneOutput {
+            progress: PruneProgress::new(done, limiter.is_timed_out()),
+            pruned,
+            checkpoint: None,
+        })
     }
 }
 
@@ -217,7 +223,7 @@ mod tests {
         generators,
         generators::{random_block_range, random_eoa_account, random_log, random_receipt},
     };
-    use reth_primitives::{PruneMode, PruneSegment, ReceiptsLogPruneConfig, B256};
+    use reth_primitives::{PruneMode, PruneProgress, PruneSegment, ReceiptsLogPruneConfig, B256};
     use reth_provider::{PruneCheckpointReader, PruneLimiter, TransactionsProvider};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::collections::BTreeMap;
@@ -305,10 +311,10 @@ mod tests {
                     ((pruned_tx + 1) - unprunable) as usize
             );
 
-            output.done
+            output.progress
         };
 
-        while !run_prune() {}
+        while let PruneProgress::HasMoreData(_) = run_prune() {}
 
         let provider = db.factory.provider().unwrap();
         let mut cursor = provider.tx_ref().cursor_read::<tables::Receipts>().unwrap();

@@ -44,23 +44,23 @@ impl<DB: Database> Segment<DB> for Receipts {
         let tx_range_end = *tx_range.end();
 
         let mut last_pruned_transaction = tx_range_end;
-        let (pruned, done) = provider.prune_table_with_range::<tables::Receipts>(
+        let (pruned, progress) = provider.prune_table_with_range::<tables::Receipts>(
             tx_range,
             input.limiter,
             |_| false,
             |row| last_pruned_transaction = row.0,
         )?;
-        trace!(target: "pruner", %pruned, %done, "Pruned receipts");
+        trace!(target: "pruner", %pruned, ?progress, "Pruned receipts");
 
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
             // If there's more receipts to prune, set the checkpoint block number to previous,
             // so we could finish pruning its receipts on the next run.
-            .checked_sub(if done { 0 } else { 1 });
+            .checked_sub(if progress.is_done() { 0 } else { 1 });
 
         Ok(PruneOutput {
-            done,
+            progress,
             pruned,
             checkpoint: Some(PruneOutputCheckpoint {
                 block_number: last_pruned_block,
@@ -97,7 +97,9 @@ mod tests {
         generators,
         generators::{random_block_range, random_receipt},
     };
-    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber, B256};
+    use reth_primitives::{
+        BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, TxNumber, B256,
+    };
     use reth_provider::{PruneCheckpointReader, PruneLimiter};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
@@ -128,7 +130,7 @@ mod tests {
             db.table::<tables::Receipts>().unwrap().len()
         );
 
-        let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
+        let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let input = PruneInput {
                 previous_checkpoint: db
@@ -164,8 +166,8 @@ mod tests {
             let result = segment.prune(&provider, input).unwrap();
             assert_matches!(
                 result,
-                PruneOutput {done, pruned, checkpoint: Some(_)}
-                    if (done, pruned) == expected_result
+                PruneOutput {progress, pruned, checkpoint: Some(_)}
+                    if (progress, pruned) == expected_result
             );
             segment
                 .save_checkpoint(
@@ -188,7 +190,7 @@ mod tests {
                 })
                 .into_inner()
                 .0
-                .checked_sub(if result.done { 0 } else { 1 });
+                .checked_sub(if result.progress.is_done() { 0 } else { 1 });
 
             assert_eq!(
                 db.table::<tables::Receipts>().unwrap().len(),
@@ -208,8 +210,8 @@ mod tests {
             );
         };
 
-        test_prune(6, (false, 10));
-        test_prune(6, (true, 2));
-        test_prune(10, (true, 8));
+        test_prune(6, (PruneProgress::new_segment_limit_reached(), 10));
+        test_prune(6, (PruneProgress::new_finished(), 2));
+        test_prune(10, (PruneProgress::new_finished(), 8));
     }
 }

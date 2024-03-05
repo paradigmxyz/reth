@@ -105,14 +105,16 @@ pub enum PruneInterruptReason {
 }
 
 impl PruneInterruptReason {
-    fn is_timeout(&self) -> bool {
+    /// Returns `true` if reason is timeout.
+    pub fn is_timeout(&self) -> bool {
         match self {
             Self::Timeout => true,
             Self::LimitSegmentsDeleted => false,
         }
     }
 
-    fn is_segment_limit_reached(&self) -> bool {
+    /// Returns `true` if reason is reaching limit on deleted segments.
+    pub fn is_segment_limit_reached(&self) -> bool {
         match self {
             Self::Timeout => false,
             Self::LimitSegmentsDeleted => true,
@@ -123,19 +125,40 @@ impl PruneInterruptReason {
 impl PruneProgress {
     /// Creates new [PruneProgress] that summarises prune job.
     ///
-    /// If `done == true`, returns [PruneProgress::Finished], otherwise [PruneProgress::HasMoreData]
-    /// is returned.
+    /// If `done == true`, returns [PruneProgress::new_finished()], otherwise
+    /// [PruneProgress::HasMoreData] is returned.
     pub fn new(done: bool, timeout: bool) -> Self {
         if done {
             Self::Finished
+        } else if timeout {
+            Self::new_timed_out()
         } else {
-            let interrupt_reason = if timeout {
-                PruneInterruptReason::Timeout
-            } else {
-                PruneInterruptReason::LimitSegmentsDeleted
-            };
+            Self::new_segment_limit_reached()
+        }
+    }
 
-            Self::HasMoreData(interrupt_reason)
+    /// Returns a new instance of variant [`Finished`](Self::Finished).
+    pub const fn new_finished() -> Self {
+        Self::Finished
+    }
+
+    /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
+    /// [`PruneInterruptReason::Timeout`].
+    pub const fn new_timed_out() -> Self {
+        Self::HasMoreData(PruneInterruptReason::Timeout)
+    }
+
+    /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
+    /// [`PruneInterruptReason::LimitSegmentsDeleted`].
+    pub const fn new_segment_limit_reached() -> Self {
+        Self::HasMoreData(PruneInterruptReason::LimitSegmentsDeleted)
+    }
+
+    /// Returns `true` if prune job is done.
+    pub fn is_done(&self) -> bool {
+        match self {
+            Self::Finished => true,
+            Self::HasMoreData(_) => false,
         }
     }
 

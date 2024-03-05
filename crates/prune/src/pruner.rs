@@ -79,7 +79,7 @@ impl<DB: Database> Pruner<DB> {
             self.previous_tip_block_number = Some(tip_block_number);
 
             debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PruneProgress::Finished)
+            return Ok(PruneProgress::new_finished())
         }
 
         self.listeners.notify(PrunerEvent::Started { tip_block_number });
@@ -214,7 +214,7 @@ impl<DB: Database> Pruner<DB> {
                     .highest_pruned_block
                     .set(to_block as f64);
 
-                done = done && output.done;
+                done = done && output.progress.is_done();
                 limiter.increment_deleted_segments_count();
 
                 debug!(
@@ -228,12 +228,10 @@ impl<DB: Database> Pruner<DB> {
                 );
 
                 if output.pruned > 0 {
-                    let is_timed_out = limiter.at_limit() && limiter.is_timed_out();
+                    // sets `is_timed_out`
+                    let _ = limiter.at_limit();
 
-                    stats.insert(
-                        segment.segment(),
-                        (PruneProgress::new(output.done, is_timed_out), output.pruned),
-                    );
+                    stats.insert(segment.segment(), (output.progress, output.pruned));
                 }
             } else {
                 debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
@@ -301,15 +299,11 @@ impl<DB: Database> Pruner<DB> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        thread,
-        time::{Duration, Instant},
-    };
 
     use crate::Pruner;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_primitives::MAINNET;
-    use reth_provider::{ProviderFactory, PruneLimiter};
+    use reth_provider::ProviderFactory;
 
     #[test]
     fn is_pruning_needed() {
@@ -332,31 +326,5 @@ mod tests {
         // Tip block number delta is < than min block interval
         let third_block_number = second_block_number;
         assert!(!pruner.is_pruning_needed(third_block_number));
-    }
-
-    #[test]
-    fn timeout_prune() {
-        const PRUNE_JOB_TIMEOUT: Duration = Duration::from_millis(100);
-
-        let db = create_test_rw_db();
-        let provider_factory =
-            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir())
-                .expect("create provide factory with static_files");
-        let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5);
-
-        // Tip block number delta is >= than min block interval
-        let tip_block_number = 1 + pruner.min_block_interval as u64;
-        assert!(pruner.is_pruning_needed(tip_block_number));
-
-        let provider = pruner.provider_factory.provider_rw().unwrap();
-
-        let start = Instant::now();
-        let limiter = PruneLimiter::new(None, Some(PRUNE_JOB_TIMEOUT), start);
-
-        thread::sleep(Duration::from_millis(100));
-
-        _ = pruner.prune_segments(&provider, tip_block_number, limiter);
-
-        assert!(progress.is_timed_out())
     }
 }
