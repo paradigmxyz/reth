@@ -9,6 +9,7 @@ use crate::{
     utils::DbTool,
 };
 use clap::Parser;
+use itertools::Itertools;
 use reth_db::{
     database::Database, mdbx::DatabaseArguments, open_db, static_file::iter_static_files, tables,
     transaction::DbTxMut, DatabaseEnv,
@@ -79,7 +80,12 @@ impl Command {
             let static_file_provider = tool.provider_factory.static_file_provider();
             let static_files = iter_static_files(static_file_provider.directory())?;
             if let Some(segment_static_files) = static_files.get(&static_file_segment) {
-                for (block_range, _) in segment_static_files {
+                // Delete static files from the highest to the lowest block range
+                for (block_range, _) in segment_static_files
+                    .iter()
+                    .sorted_by_key(|(block_range, _)| block_range.start())
+                    .rev()
+                {
                     static_file_provider
                         .delete_jar(static_file_segment, find_fixed_range(block_range.start()))?;
                 }
