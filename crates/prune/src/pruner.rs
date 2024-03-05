@@ -175,66 +175,72 @@ impl<DB: Database> Pruner<DB> {
         let mut done = true;
         let mut stats = PrunerStats::new();
 
-        for (segment, purpose) in segments {
-            if limiter.at_limit() {
-                done = false;
-                break
-            }
-
-            if let Some((to_block, prune_mode)) = segment
-                .mode()
-                .map(|mode| mode.prune_target_block(tip_block_number, segment.segment(), purpose))
-                .transpose()?
-                .flatten()
-            {
-                debug!(
-                    target: "pruner",
-                    segment = ?segment.segment(),
-                    ?purpose,
-                    %to_block,
-                    ?prune_mode,
-                    "Segment pruning started"
-                );
-
-                let segment_start = Instant::now();
-                let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
-                let output = segment
-                    .prune(provider, PruneInput { previous_checkpoint, to_block, limiter })?;
-                if let Some(checkpoint) = output.checkpoint {
-                    segment
-                        .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
+        if !limiter.at_limit() {
+            for (segment, purpose) in segments {
+                if limiter.at_limit() {
+                    done = false;
+                    break
                 }
-                self.metrics
-                    .get_prune_segment_metrics(segment.segment())
-                    .duration_seconds
-                    .record(segment_start.elapsed());
 
-                self.metrics
-                    .get_prune_segment_metrics(segment.segment())
-                    .highest_pruned_block
-                    .set(to_block as f64);
+                if let Some((to_block, prune_mode)) = segment
+                    .mode()
+                    .map(|mode| {
+                        mode.prune_target_block(tip_block_number, segment.segment(), purpose)
+                    })
+                    .transpose()?
+                    .flatten()
+                {
+                    debug!(
+                        target: "pruner",
+                        segment = ?segment.segment(),
+                        ?purpose,
+                        %to_block,
+                        ?prune_mode,
+                        "Segment pruning started"
+                    );
 
-                done = done && output.progress.is_done();
-                limiter.increment_deleted_entries_count();
+                    let segment_start = Instant::now();
+                    let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
+                    let output = segment
+                        .prune(provider, PruneInput { previous_checkpoint, to_block, limiter })?;
+                    if let Some(checkpoint) = output.checkpoint {
+                        segment.save_checkpoint(
+                            provider,
+                            checkpoint.as_prune_checkpoint(prune_mode),
+                        )?;
+                    }
+                    self.metrics
+                        .get_prune_segment_metrics(segment.segment())
+                        .duration_seconds
+                        .record(segment_start.elapsed());
 
-                debug!(
-                    target: "pruner",
-                    segment = ?segment.segment(),
-                    ?purpose,
-                    %to_block,
-                    ?prune_mode,
-                    %output.pruned,
-                    "Segment pruning finished"
-                );
+                    self.metrics
+                        .get_prune_segment_metrics(segment.segment())
+                        .highest_pruned_block
+                        .set(to_block as f64);
 
-                if output.pruned > 0 {
-                    // sets `is_timed_out`
-                    let _ = limiter.at_limit();
+                    done = done && output.progress.is_done();
+                    limiter.increment_deleted_entries_count();
 
-                    stats.insert(segment.segment(), (output.progress, output.pruned));
+                    debug!(
+                        target: "pruner",
+                        segment = ?segment.segment(),
+                        ?purpose,
+                        %to_block,
+                        ?prune_mode,
+                        %output.pruned,
+                        "Segment pruning finished"
+                    );
+
+                    if output.pruned > 0 {
+                        // sets `is_timed_out`
+                        let _ = limiter.at_limit();
+
+                        stats.insert(segment.segment(), (output.progress, output.pruned));
+                    }
+                } else {
+                    debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
                 }
-            } else {
-                debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
             }
         }
 
