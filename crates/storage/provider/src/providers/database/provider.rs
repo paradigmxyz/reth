@@ -791,7 +791,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     pub fn prune_table_with_iterator<T: Table>(
         &self,
         keys: impl IntoIterator<Item = T::Key>,
-        limit: usize,
+        limit: PruneLimit,
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
@@ -799,18 +799,16 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let mut keys = keys.into_iter();
 
-        if limit != 0 {
-            for key in &mut keys {
-                let row = cursor.seek_exact(key.clone())?;
-                if let Some(row) = row {
-                    cursor.delete_current()?;
-                    deleted += 1;
-                    delete_callback(row);
-                }
+        for key in &mut keys {
+            if limit.at_limit(deleted) {
+                break
+            }
 
-                if deleted == limit {
-                    break
-                }
+            let row = cursor.seek_exact(key.clone())?;
+            if let Some(row) = row {
+                cursor.delete_current()?;
+                deleted += 1;
+                delete_callback(row);
             }
         }
 
@@ -827,14 +825,12 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> Result<(usize, bool), DatabaseError> {
-        let start = Instant::now();
-
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
         let mut deleted = 0;
 
         while let Some(row) = walker.next().transpose()? {
-            if limit.at_limit(start, deleted) {
+            if limit.at_limit(deleted) {
                 break
             }
 
@@ -2520,15 +2516,18 @@ fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {
 
 /// Limits on how long pruning can run before it's forced to stop and thereby yield the
 /// [`DatabaseProviderRW`] hook.
-#[derive(Debug, Default, Clone, Copy, Constructor)]
+#[derive(Debug, Clone, Copy, Constructor)]
 pub struct PruneLimit {
     /// Maximum entries to delete from the database in one prune job.
     segment_limit: Option<usize>,
     /// The max time one prune job can run.
     job_timeout: Option<Duration>,
+    /// Time at which prune job was started.
+    start: Instant,
 }
 
 impl PruneLimit {
+    ///
     /// Returns the maximum entries that can be deleted from the database in one prune job. `None`
     /// is equivalent to unlimited segments.
     pub fn segment_limit(&self) -> Option<usize> {
@@ -2541,8 +2540,8 @@ impl PruneLimit {
     }
 
     /// Returns true if prune limit is reached.
-    pub fn at_limit(&self, start: Instant, deleted_segments: usize) -> bool {
-        let Self { segment_limit, job_timeout } = self;
+    pub fn at_limit(&self, deleted_segments: usize) -> bool {
+        let Self { segment_limit, job_timeout, start } = self;
 
         if let Some(limit) = segment_limit {
             if *limit == deleted_segments {
@@ -2560,8 +2559,13 @@ impl PruneLimit {
 
     /// Returns a new instance with half the segment limit of the old instance.
     pub fn new_with_fraction_of_segment_limit(old: Self, denominator: NonZeroUsize) -> Self {
-        let Self { segment_limit, job_timeout } = old;
+        let Self { segment_limit, job_timeout, start } = old;
 
-        Self::new(segment_limit.map(|limit| limit / denominator), job_timeout)
+        Self::new(segment_limit.map(|limit| limit / denominator), job_timeout, start)
+    }
+
+    /// Returns a new instance without a time out.
+    pub fn new_without_timeout(segment_limit: usize) -> Self {
+        Self::new(Some(segment_limit), None, Instant::now())
     }
 }

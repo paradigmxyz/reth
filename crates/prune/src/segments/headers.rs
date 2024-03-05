@@ -46,7 +46,7 @@ impl<DB: Database> Segment<DB> for Headers {
 
         let limit = PruneLimit::new_with_fraction_of_segment_limit(
             input.limit,
-            NonZeroUsize::new(3).expect("infallible"),
+            NonZeroUsize::new(3).unwrap(),
         );
         if let Some(limit) = limit.segment_limit() {
             if limit == 0 {
@@ -115,8 +115,6 @@ impl Headers {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use crate::segments::{Headers, PruneInput, PruneOutput, Segment};
     use assert_matches::assert_matches;
     use reth_db::{tables, transaction::DbTx};
@@ -151,8 +149,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Headers)
                     .unwrap(),
                 to_block,
-                limit: PruneLimit::new(Some(10), None),
-                start: Instant::now(),
+                limit: PruneLimit::new_without_timeout(10),
             };
             let segment = Headers::new(prune_mode);
 
@@ -221,8 +218,7 @@ mod tests {
             previous_checkpoint: None,
             to_block: 1,
             // Less than total number of tables for `Headers` segment
-            limit: PruneLimit::new(Some(2), None),
-            start: Instant::now(),
+            limit: PruneLimit::new_without_timeout(2),
         };
         let segment = Headers::new(PruneMode::Full);
 

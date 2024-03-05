@@ -42,7 +42,9 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             }
         }
         .into_inner();
-        let tx_range = start..=(end.min(start + input.limit as u64 - 1));
+        let tx_range = start..=
+            (Some(end).min(input.limit.segment_limit().map(|limit| start + limit as u64 - 1)))
+                .unwrap();
         let tx_range_end = *tx_range.end();
 
         // Retrieve transactions in the range and calculate their hashes in parallel
@@ -103,7 +105,7 @@ mod tests {
     use reth_db::tables;
     use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber, B256};
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{PruneCheckpointReader, PruneLimit};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
 
@@ -142,7 +144,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::TransactionLookup)
                     .unwrap(),
                 to_block,
-                limit: 10,
+                limit: PruneLimit::new_without_timeout(10),
             };
             let segment = TransactionLookup::new(prune_mode);
 
@@ -161,7 +163,7 @@ mod tests {
                 .take(to_block as usize)
                 .map(|block| block.body.len())
                 .sum::<usize>()
-                .min(next_tx_number_to_prune as usize + input.limit)
+                .min(next_tx_number_to_prune as usize + input.limit.segment_limit().unwrap())
                 .sub(1);
 
             let last_pruned_block_number = blocks

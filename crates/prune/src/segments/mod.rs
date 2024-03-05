@@ -15,7 +15,7 @@ pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;
 pub use sender_recovery::SenderRecovery;
 pub use set::SegmentSet;
-use std::{fmt::Debug, time::Instant};
+use std::fmt::Debug;
 pub use storage_history::StorageHistory;
 pub use transaction_lookup::TransactionLookup;
 pub use transactions::Transactions;
@@ -69,8 +69,6 @@ pub struct PruneInput {
     pub(crate) to_block: BlockNumber,
     /// Limit on prune job.
     pub(crate) limit: PruneLimit,
-    /// Time at which prune job was started.
-    pub(crate) start: Instant,
 }
 
 impl PruneInput {

@@ -113,7 +113,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             "Calculated block ranges and filtered addresses",
         );
 
-        let mut limit = input.limit;
+        let limit = input.limit;
         let mut pruned = 0;
         let mut done = true;
         let mut last_pruned_transaction = None;
@@ -173,7 +173,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                     .saturating_sub(if done { 0 } else { 1 }),
             );
 
-            if limit.at_limit(input.start, pruned) {
+            if limit.at_limit(pruned) {
                 done &= end_block == to_block;
                 break
             }
@@ -220,7 +220,7 @@ mod tests {
     use reth_primitives::{PruneMode, PruneSegment, ReceiptsLogPruneConfig, B256};
     use reth_provider::{PruneCheckpointReader, PruneLimit, TransactionsProvider};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use std::{collections::BTreeMap, time::Instant};
+    use std::collections::BTreeMap;
 
     #[test]
     fn prune_receipts_by_logs() {
@@ -279,8 +279,7 @@ mod tests {
                         .get_prune_checkpoint(PruneSegment::ContractLogs)
                         .unwrap(),
                     to_block: tip,
-                    limit: PruneLimit::new(Some(10), None),
-                    start: Instant::now(),
+                    limit: PruneLimit::new_without_timeout(10),
                 },
             );
             provider.commit().expect("commit");

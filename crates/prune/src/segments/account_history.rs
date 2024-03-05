@@ -35,7 +35,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
     fn prune(
         &self,
         provider: &DatabaseProviderRW<DB>,
-        mut input: PruneInput,
+        input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         let range = match input.get_next_block_range() {
             Some(range) => range,
@@ -49,7 +49,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         let mut last_changeset_pruned_block = None;
         let limit = PruneLimit::new_with_fraction_of_segment_limit(
             input.limit,
-            NonZeroUsize::new(2).expect("infallible"),
+            NonZeroUsize::new(2).unwrap(),
         );
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::AccountChangeSets>(
@@ -97,7 +97,7 @@ mod tests {
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
     use reth_provider::{PruneCheckpointReader, PruneLimit};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use std::{collections::BTreeMap, ops::AddAssign, time::Instant};
+    use std::{collections::BTreeMap, ops::AddAssign};
 
     #[test]
     fn prune() {
@@ -145,8 +145,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::AccountHistory)
                     .unwrap(),
                 to_block,
-                limit: PruneLimit::new(Some(2000), None),
-                start: Instant::now(),
+                limit: PruneLimit::new_without_timeout(2000),
             };
             let segment = AccountHistory::new(prune_mode);
 

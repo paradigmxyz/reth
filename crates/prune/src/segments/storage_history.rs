@@ -53,7 +53,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         let mut last_changeset_pruned_block = None;
         let limit = PruneLimit::new_with_fraction_of_segment_limit(
             input.limit,
-            NonZeroUsize::new(2).expect("infallible"),
+            NonZeroUsize::new(2).unwrap(),
         );
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::StorageChangeSets>(
@@ -101,7 +101,7 @@ mod tests {
     use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
     use reth_provider::{PruneCheckpointReader, PruneLimit};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use std::{collections::BTreeMap, ops::AddAssign, time::Instant};
+    use std::{collections::BTreeMap, ops::AddAssign};
 
     #[test]
     fn prune() {
@@ -149,8 +149,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::StorageHistory)
                     .unwrap(),
                 to_block,
-                limit: PruneLimit::new(Some(1000), None),
-                start: Instant::now(),
+                limit: PruneLimit::new_without_timeout(1000),
             };
             let segment = StorageHistory::new(prune_mode);
 
