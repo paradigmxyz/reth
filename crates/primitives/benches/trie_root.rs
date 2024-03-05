@@ -1,10 +1,6 @@
 #![allow(missing_docs, unreachable_pub)]
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use proptest::{
-    prelude::*,
-    strategy::{Strategy, ValueTree},
-    test_runner::TestRunner,
-};
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_primitives::{proofs::triehash::KeccakHasher, ReceiptWithBloom, B256};
 
 /// Benchmarks different implementations of the root calculation.

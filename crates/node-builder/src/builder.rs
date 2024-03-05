@@ -23,7 +23,10 @@ use reth_db::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_interfaces::p2p::either::EitherDownloader;
-use reth_network::{NetworkBuilder, NetworkEvents, NetworkHandle};
+use reth_network::{
+    transactions::{TransactionFetcherConfig, TransactionsManagerConfig},
+    NetworkBuilder, NetworkEvents, NetworkHandle,
+};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
@@ -36,7 +39,7 @@ use reth_node_core::{
 };
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    ChainSpec, DisplayHardforks,
+    ChainSpec,
 };
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
 use reth_prune::{PrunerBuilder, PrunerEvent};
@@ -364,7 +367,7 @@ where
 
         let genesis_hash = init_genesis(database.clone(), config.chain.clone())?;
 
-        info!(target: "reth::cli", "{}", DisplayHardforks::new(config.chain.hardforks()));
+        info!(target: "reth::cli", "{}", config.chain.display_hardforks());
 
         let consensus = config.consensus();
 
@@ -731,8 +734,20 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     where
         Pool: TransactionPool + Unpin + 'static,
     {
-        let (handle, network, txpool, eth) =
-            builder.transactions(pool).request_handler(self.provider().clone()).split_with_handle();
+        let (handle, network, txpool, eth) = builder
+            .transactions(
+                pool,
+                TransactionsManagerConfig {
+                    transaction_fetcher_config: TransactionFetcherConfig::new(
+                        self.config.network.soft_limit_byte_size_pooled_transactions_response,
+                        self.config
+                            .network
+                            .soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+                    ),
+                },
+            )
+            .request_handler(self.provider().clone())
+            .split_with_handle();
 
         self.executor.spawn_critical("p2p txpool", txpool);
         self.executor.spawn_critical("p2p eth request handler", eth);

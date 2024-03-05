@@ -429,7 +429,7 @@ pub(crate) enum BlockResponseOutcome {
 mod tests {
     use super::*;
     use crate::{peers::PeersManager, PeersConfig};
-    use reth_primitives::{SealedHeader, B256, B512};
+    use reth_primitives::{SealedHeader, B512};
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]

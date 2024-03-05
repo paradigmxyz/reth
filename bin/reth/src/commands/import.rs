@@ -16,10 +16,9 @@ use reth_config::Config;
 use reth_db::database_metrics::DatabaseMetadata;
 
 use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
-use reth_downloaders::remote_client::{CertificateCheckSettings, RemoteClient};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder, remote_client::RemoteClient,
 };
 use reth_interfaces::consensus::Consensus;
 use reth_node_core::{args::BitfinityArgs, events::node::NodeEvent, init::init_genesis};
@@ -150,7 +149,13 @@ impl ImportCommand {
         );
 
         // override the tip
-        let tip = remote_client.tip().expect("file client has no tip");
+        let tip = if let Some(tip) = remote_client.tip() {
+            tip
+        } else {
+            debug!(target: "reth::cli", "No tip found, skipping import");
+            return Ok(());
+        };
+
         info!(target: "reth::cli", "Chain file imported");
 
         let (mut pipeline, events) = self.build_import_pipeline(

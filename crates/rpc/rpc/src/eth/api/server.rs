@@ -24,8 +24,8 @@ use reth_provider::{
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index, RichBlock, StateContext,
-    SyncStatus, TransactionReceipt, TransactionRequest, Work,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
+    StateContext, SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -226,6 +226,18 @@ where
             .await?)
     }
 
+    /// Handler for: `eth_getHeaderByNumber`
+    async fn header_by_number(&self, block_number: BlockNumberOrTag) -> Result<Option<Header>> {
+        trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
+        Ok(EthApi::rpc_block_header(self, block_number).await?)
+    }
+
+    /// Handler for: `eth_getHeaderByHash`
+    async fn header_by_hash(&self, hash: B256) -> Result<Option<Header>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
+        Ok(EthApi::rpc_block_header(self, hash).await?)
+    }
+
     /// Handler for: `eth_call`
     async fn call(
         &self,
@@ -345,15 +357,13 @@ where
     }
 
     /// Handler for: `eth_sendTransaction`
-    async fn send_transaction(&self, request: TransactionRequest) -> Result<B256> {
-        trace!(target: "rpc::eth", ?request, "Serving eth_sendTransaction");
-        Ok(EthTransactions::send_transaction(self, request).await?)
+    async fn send_transaction(&self, _request: TransactionRequest) -> Result<B256> {
+        Err(internal_rpc_err("read-only node"))
     }
 
     /// Handler for: `eth_sendRawTransaction`
-    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256> {
-        trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
-        Ok(EthTransactions::send_raw_transaction(self, tx).await?)
+    async fn send_raw_transaction(&self, _tx: Bytes) -> Result<B256> {
+        Err(internal_rpc_err("read-only node"))
     }
 
     /// Handler for: `eth_sign`

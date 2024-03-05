@@ -10,8 +10,8 @@ use crate::{
     },
     builder::{launch_from_config, NodeConfig},
     cli::{db_type::DatabaseBuilder, ext::RethCliExt},
+    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
-    runner::CliContext,
 };
 use clap::{value_parser, Parser};
 use reth_auto_seal_consensus::AutoSealConsensus;
@@ -260,7 +260,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::args::utils::SUPPORTED_CHAINS;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use std::{
         net::{IpAddr, Ipv4Addr},

@@ -23,7 +23,7 @@ pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 
 /// Validation constants.
 pub use constants::{
-    MAX_CODE_BYTE_SIZE, MAX_INIT_CODE_BYTE_SIZE, MAX_TX_INPUT_BYTES, TX_SLOT_BYTE_SIZE,
+    DEFAULT_MAX_TX_INPUT_BYTES, MAX_CODE_BYTE_SIZE, MAX_INIT_CODE_BYTE_SIZE, TX_SLOT_BYTE_SIZE,
 };
 
 /// A Result type returned after checking a transaction's validity.
@@ -132,12 +132,6 @@ impl<T: PoolTransaction> ValidTransaction<T> {
     #[inline]
     pub(crate) fn hash(&self) -> &B256 {
         self.transaction().hash()
-    }
-
-    /// Returns the length of the rlp encoded object
-    #[inline]
-    pub(crate) fn encoded_length(&self) -> usize {
-        self.transaction().encoded_length()
     }
 
     /// Returns the nonce of the transaction.

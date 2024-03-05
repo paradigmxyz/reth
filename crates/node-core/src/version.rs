@@ -19,6 +19,7 @@ pub const SHORT_VERSION: &str =
 /// - The long SHA of the latest commit.
 /// - The build datetime
 /// - The build features
+/// - The build profile
 ///
 /// # Example:
 ///
@@ -27,6 +28,7 @@ pub const SHORT_VERSION: &str =
 /// Commit SHA: defa64b2
 /// Build Timestamp: 2023-05-19T01:47:19.815651705Z
 /// Build Features: jemalloc
+/// Build Profile: maxperf
 /// ```
 pub const LONG_VERSION: &str = const_str::concat!(
     "Version: ",

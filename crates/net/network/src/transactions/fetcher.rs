@@ -2,11 +2,12 @@ use crate::{
     cache::{LruCache, LruMap},
     message::PeerRequest,
 };
+
 use derive_more::Constructor;
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
-    GetPooledTransactions, HandleAnnouncement, RequestTxHashes, ValidAnnouncementData,
+    EthVersion, GetPooledTransactions, HandleAnnouncement, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
@@ -21,8 +22,10 @@ use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError}
 use tracing::{debug, trace};
 
 use super::{
+    config::TransactionFetcherConfig,
     constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
     AnnouncementFilter, Peer, PooledTransactions,
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 
 /// The type responsible for fetching missing transactions from peers.
@@ -57,6 +60,15 @@ pub(crate) struct TransactionFetcher {
 // === impl TransactionFetcher ===
 
 impl TransactionFetcher {
+    /// Sets up transaction fetcher with config
+    pub fn with_transaction_fetcher_config(mut self, config: &TransactionFetcherConfig) -> Self {
+        self.info.soft_limit_byte_size_pooled_transactions_response =
+            config.soft_limit_byte_size_pooled_transactions_response;
+        self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request =
+            config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
+        self
+    }
+
     /// Removes the specified hashes from inflight tracking.
     #[inline]
     pub fn remove_hashes_from_transaction_fetcher<I>(&mut self, hashes: I)
@@ -180,7 +192,8 @@ impl TransactionFetcher {
     pub(super) fn pack_request_eth68(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        hashes_from_announcement: ValidAnnouncementData,
+        hashes_from_announcement: impl HandleAnnouncement
+            + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
     ) -> RequestTxHashes {
         let mut acc_size_response = 0;
         let hashes_from_announcement_len = hashes_from_announcement.len();
@@ -191,8 +204,8 @@ impl TransactionFetcher {
             hashes_to_request.push(hash);
 
             // tx is really big, pack request with single tx
-            if size >= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST {
-                return hashes_from_announcement_iter.collect::<RequestTxHashes>()
+            if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
+                return hashes_from_announcement_iter.collect::<RequestTxHashes>();
             } else {
                 acc_size_response = size;
             }
@@ -211,7 +224,9 @@ impl TransactionFetcher {
 
             let next_acc_size = acc_size_response + size;
 
-            if next_acc_size <= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST {
+            if next_acc_size <=
+                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
+            {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
                 acc_size_response = next_acc_size;
@@ -221,7 +236,8 @@ impl TransactionFetcher {
             }
 
             let free_space =
-                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST - acc_size_response;
+                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request -
+                    acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
                 break
@@ -230,6 +246,7 @@ impl TransactionFetcher {
 
         surplus_hashes.extend(hashes_from_announcement_iter.map(|(hash, _metadata)| hash));
         surplus_hashes.shrink_to_fit();
+        hashes_to_request.shrink_to_fit();
 
         surplus_hashes
     }
@@ -245,16 +262,17 @@ impl TransactionFetcher {
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
-        let (mut request_hashes, _version) = hashes_from_announcement.into_request_hashes();
-        if request_hashes.len() <= SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST {
-            *hashes_to_request = request_hashes;
+        let (mut hashes, _version) = hashes_from_announcement.into_request_hashes();
+        if hashes.len() <= SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST {
+            *hashes_to_request = hashes;
+            hashes_to_request.shrink_to_fit();
 
             RequestTxHashes::default()
         } else {
-            let surplus_hashes = request_hashes
-                .split_off(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST - 1);
-
-            *hashes_to_request = request_hashes;
+            let surplus_hashes =
+                hashes.split_off(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST - 1);
+            *hashes_to_request = hashes;
+            hashes_to_request.shrink_to_fit();
 
             RequestTxHashes::new(surplus_hashes)
         }
@@ -306,7 +324,7 @@ impl TransactionFetcher {
                 fallback_peers.insert(peer_id);
             } else {
                 if *retries >= DEFAULT_MAX_RETRIES {
-                    debug!(target: "net::tx",
+                    trace!(target: "net::tx",
                         hash=%hash,
                         retries=retries,
                         "retry limit for `GetPooledTransactions` requests reached for hash, dropping hash"
@@ -336,7 +354,9 @@ impl TransactionFetcher {
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
         metrics_increment_egress_peer_channel_full: impl FnOnce(),
     ) {
-        let mut hashes_to_request = RequestTxHashes::with_capacity(32);
+        let init_capacity_req = approx_capacity_get_pooled_transactions_req_eth68(&self.info);
+        let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req);
+
         let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
 
         // budget to look for an idle peer before giving up
@@ -366,7 +386,7 @@ impl TransactionFetcher {
 
         self.fill_request_from_hashes_pending_fetch(
             &mut hashes_to_request,
-            peer.seen_transactions.maybe_pending_transaction_hashes(),
+            &peer.seen_transactions,
             budget_fill_request,
         );
 
@@ -530,7 +550,7 @@ impl TransactionFetcher {
         let conn_eth_version = peer.version;
 
         if self.active_peers.len() >= self.info.max_inflight_requests {
-            debug!(target: "net::tx",
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?*new_announced_hashes,
                 conn_eth_version=%conn_eth_version,
@@ -551,7 +571,7 @@ impl TransactionFetcher {
         };
 
         if *inflight_count >= DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
-            debug!(target: "net::tx",
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 new_announced_hashes=?*new_announced_hashes,
                 conn_eth_version=%conn_eth_version,
@@ -782,6 +802,19 @@ impl TransactionFetcher {
             Some(limit)
         }
     }
+
+    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
+    /// have capacity for w.r.t. the given version of the protocol.
+    pub fn approx_capacity_get_pooled_transactions_req(
+        &self,
+        announcement_version: EthVersion,
+    ) -> usize {
+        if announcement_version.is_eth68() {
+            approx_capacity_get_pooled_transactions_req_eth68(&self.info)
+        } else {
+            approx_capacity_get_pooled_transactions_req_eth66()
+        }
+    }
 }
 
 impl Stream for TransactionFetcher {
@@ -810,7 +843,7 @@ impl Stream for TransactionFetcher {
             return match result {
                 Ok(Ok(transactions)) => {
                     // clear received hashes
-                    let mut fetched = Vec::with_capacity(transactions.hashes().count());
+                    let mut fetched = Vec::with_capacity(transactions.len());
                     requested_hashes.retain(|requested_hash| {
                         if transactions.hashes().any(|hash| hash == requested_hash) {
                             // hash is now known, stop tracking
@@ -819,6 +852,7 @@ impl Stream for TransactionFetcher {
                         }
                         true
                     });
+                    fetched.shrink_to_fit();
 
                     self.remove_hashes_from_transaction_fetcher(fetched);
 
@@ -966,17 +1000,37 @@ impl Future for GetPooledTxRequestFut {
 pub struct TransactionFetcherInfo {
     /// Currently active outgoing [`GetPooledTransactions`] requests.
     pub(super) max_inflight_requests: usize,
+    /// Soft limit for the byte size of the expected
+    /// [`PooledTransactions`] response on packing a
+    /// [`GetPooledTransactions`] request with hashes.
+    pub(super) soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+    /// Soft limit for the byte size of a [`PooledTransactions`]
+    /// response on assembling a [`GetPooledTransactions`]
+    /// request. Spec'd at 2 MiB.
+    pub(super) soft_limit_byte_size_pooled_transactions_response: usize,
 }
 
 impl TransactionFetcherInfo {
-    pub fn new(max_inflight_transaction_requests: usize) -> Self {
-        Self { max_inflight_requests: max_inflight_transaction_requests }
+    pub fn new(
+        max_inflight_transaction_requests: usize,
+        soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+        soft_limit_byte_size_pooled_transactions_response: usize,
+    ) -> Self {
+        Self {
+            max_inflight_requests: max_inflight_transaction_requests,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+            soft_limit_byte_size_pooled_transactions_response,
+        }
     }
 }
 
 impl Default for TransactionFetcherInfo {
     fn default() -> Self {
-        Self::new(DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES)
+        Self::new(
+            DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES,
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE
+        )
     }
 }
 
@@ -984,16 +1038,53 @@ impl Default for TransactionFetcherInfo {
 mod test {
     use std::collections::HashSet;
 
-    use reth_eth_wire::EthVersion;
+    use derive_more::IntoIterator;
     use reth_primitives::B256;
 
     use crate::transactions::tests::{default_cache, new_mock_session};
 
     use super::*;
 
+    #[derive(IntoIterator)]
+    struct TestValidAnnouncementData(Vec<(TxHash, Option<(u8, usize)>)>);
+
+    impl HandleAnnouncement for TestValidAnnouncementData {
+        fn is_empty(&self) -> bool {
+            self.0.is_empty()
+        }
+
+        fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        fn msg_version(&self) -> EthVersion {
+            EthVersion::Eth68
+        }
+
+        fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) -> Self {
+            let mut indices_to_remove = vec![];
+            for (i, (hash, _)) in self.0.iter().enumerate() {
+                if !f(hash) {
+                    indices_to_remove.push(i);
+                }
+            }
+
+            let mut removed_hashes = Vec::with_capacity(indices_to_remove.len());
+
+            for index in indices_to_remove.into_iter().rev() {
+                let entry = self.0.remove(index);
+                removed_hashes.push(entry);
+            }
+
+            TestValidAnnouncementData(removed_hashes)
+        }
+    }
+
     #[test]
     fn pack_eth68_request() {
         reth_tracing::init_test_tracing();
+
+        // RIG TEST
 
         let tx_fetcher = &mut TransactionFetcher::default();
 
@@ -1004,54 +1095,37 @@ mod test {
             B256::from_slice(&[4; 32]),
             B256::from_slice(&[5; 32]),
         ];
-        let eth68_hashes_sizes = [
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST - 2,
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST, /* this one will
-                                                                        * not fit */
-            2,
-            9, // this one won't
-            2,
+        let eth68_sizes = [
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ - MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED - 1, // first will fit
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ, // second won't
+            2, // free space > `MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED`, third will fit, no more after this
+            9,
+            0,
         ];
 
-        // possible included index combinations are
-        // (i) 0 and 2
-        // (ii) 0 and 4
-        // (iii) 1
-        // (iv) 2, 3 and 4
-        let possible_outcome_1 =
-            [eth68_hashes[0], eth68_hashes[2]].into_iter().collect::<HashSet<_>>();
-        let possible_outcome_2 =
-            [eth68_hashes[0], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
-        let possible_outcome_3 = [eth68_hashes[1]].into_iter().collect::<HashSet<_>>();
-        let possible_outcome_4 =
-            [eth68_hashes[2], eth68_hashes[3], eth68_hashes[4]].into_iter().collect::<HashSet<_>>();
+        let expected_request_hashes = [eth68_hashes[0], eth68_hashes[2]];
 
-        let possible_outcomes =
-            [possible_outcome_1, possible_outcome_2, possible_outcome_3, possible_outcome_4];
+        let expected_surplus_hashes = [eth68_hashes[1], eth68_hashes[3], eth68_hashes[4]];
 
         let mut eth68_hashes_to_request = RequestTxHashes::with_capacity(3);
-        let mut valid_announcement_data = ValidAnnouncementData::empty_eth68();
-        for i in 0..eth68_hashes.len() {
-            valid_announcement_data.insert(eth68_hashes[i], Some((0, eth68_hashes_sizes[i])));
-        }
+        let valid_announcement_data = TestValidAnnouncementData(
+            eth68_hashes
+                .into_iter()
+                .zip(eth68_sizes)
+                .map(|(hash, size)| (hash, Some((0u8, size))))
+                .collect::<Vec<_>>(),
+        );
+
+        // TEST
+
         let surplus_eth68_hashes =
             tx_fetcher.pack_request_eth68(&mut eth68_hashes_to_request, valid_announcement_data);
 
-        let combo_surplus_hashes = surplus_eth68_hashes.into_iter().collect::<HashSet<_>>();
-        for combo in possible_outcomes.clone() {
-            assert_ne!(combo, combo_surplus_hashes)
-        }
+        let eth68_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<Vec<_>>();
+        let surplus_eth68_hashes = surplus_eth68_hashes.into_iter().collect::<Vec<_>>();
 
-        let combo_hashes_to_request = eth68_hashes_to_request.into_iter().collect::<HashSet<_>>();
-
-        let mut combo_match = false;
-        for combo in possible_outcomes {
-            if combo == combo_hashes_to_request {
-                combo_match = true;
-            }
-        }
-
-        assert!(combo_match)
+        assert_eq!(expected_request_hashes.to_vec(), eth68_hashes_to_request);
+        assert_eq!(expected_surplus_hashes.to_vec(), surplus_eth68_hashes);
     }
 
     #[tokio::test]
@@ -1086,11 +1160,11 @@ mod test {
         let (mut peer_1_data, mut peer_1_mock_session_rx) =
             new_mock_session(peer_1, EthVersion::Eth66);
         for hash in &seen_hashes {
-            peer_1_data.seen_transactions.seen_in_announcement(*hash);
+            peer_1_data.seen_transactions.insert(*hash);
         }
         let (mut peer_2_data, _) = new_mock_session(peer_2, EthVersion::Eth66);
         for hash in &seen_hashes {
-            peer_2_data.seen_transactions.seen_in_announcement(*hash);
+            peer_2_data.seen_transactions.insert(*hash);
         }
         let mut peers = HashMap::new();
         peers.insert(peer_1, peer_1_data);
