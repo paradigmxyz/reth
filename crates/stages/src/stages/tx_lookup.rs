@@ -17,8 +17,6 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
     TransactionsProvider, TransactionsProviderExt,
 };
-use std::sync::Arc;
-use tempfile::TempDir;
 use tracing::*;
 
 /// The transaction lookup stage.
@@ -101,8 +99,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         }
 
         // 500MB temporary files
-        let mut hash_collector: Collector<TxHash, TxNumber> =
-            Collector::new(Arc::new(TempDir::new()?), 500 * (1024 * 1024));
+        let mut hash_collector: Collector<TxHash, TxNumber> = Collector::new(500 * (1024 * 1024));
 
         debug!(
             target: "sync::stages::transaction_lookup",
@@ -119,7 +116,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Calculating transaction hashes");
 
             for (key, value) in provider.transaction_hashes_by_range(tx_range)? {
-                hash_collector.insert(key, value);
+                hash_collector.insert(key, value)?;
             }
 
             input.checkpoint = Some(
