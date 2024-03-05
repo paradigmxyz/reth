@@ -6,6 +6,7 @@ use reth_primitives::{ChainSpec, Hardfork};
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [PayloadAttributes] trait for ethereum mainnet and optimism types.
 pub mod traits;
+use serde::{de::DeserializeOwned, ser::Serialize};
 pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 
 /// Contains error types used in the traits defined in this crate.
@@ -18,7 +19,7 @@ pub use payload::PayloadOrAttributes;
 
 /// The types that are used by the engine API.
 pub trait EngineTypes:
-    serde::de::DeserializeOwned + fmt::Debug + Unpin + Send + Sync + Clone
+    serde::de::DeserializeOwned + Serialize + fmt::Debug + Unpin + Send + Sync + Clone
 {
     /// The RPC payload attributes type the CL node emits via the engine API.
     type PayloadAttributes: PayloadAttributes + Unpin;
@@ -29,7 +30,19 @@ pub trait EngineTypes:
         + Unpin;
 
     /// The built payload type.
-    type BuiltPayload: BuiltPayload + Clone + Unpin;
+    type BuiltPayload: BuiltPayload
+        + Clone
+        + Unpin
+        + TryInto<Self::ExecutionPayloadV1>
+        + TryInto<Self::ExecutionPayloadV2>
+        + TryInto<Self::ExecutionPayloadV3>;
+
+    /// Execution Payload V1 type.
+    type ExecutionPayloadV1: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
+    /// Execution Payload V2 type.
+    type ExecutionPayloadV2: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
+    /// Execution Payload V3 type.
+    type ExecutionPayloadV3: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
 
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
