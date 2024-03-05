@@ -177,6 +177,7 @@ impl<DB: Database> Pruner<DB> {
 
         for (segment, purpose) in segments {
             if limiter.at_limit() {
+                done = false;
                 break
             }
 
@@ -227,9 +228,11 @@ impl<DB: Database> Pruner<DB> {
                 );
 
                 if output.pruned > 0 {
+                    let is_timed_out = limiter.at_limit() && limiter.is_timed_out();
+
                     stats.insert(
                         segment.segment(),
-                        (PruneProgress::from_done(output.done), output.pruned),
+                        (PruneProgress::new(output.done, is_timed_out), output.pruned),
                     );
                 }
             } else {
@@ -240,7 +243,7 @@ impl<DB: Database> Pruner<DB> {
         Ok((
             stats,
             limiter.deleted_segments_count(),
-            PruneProgress::summary(done, limiter.is_timed_out()),
+            PruneProgress::new(done, limiter.is_timed_out()),
         ))
     }
 
@@ -352,7 +355,7 @@ mod tests {
 
         thread::sleep(Duration::from_millis(100));
 
-        let (_, _, progress) = pruner.prune_segments(&provider, tip_block_number, limiter);
+        _ = pruner.prune_segments(&provider, tip_block_number, limiter);
 
         assert!(progress.is_timed_out())
     }

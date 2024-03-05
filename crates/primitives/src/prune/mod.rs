@@ -121,23 +121,11 @@ impl PruneInterruptReason {
 }
 
 impl PruneProgress {
-    /// Creates new [PruneProgress] from `done` boolean value.
-    ///
-    /// If `done == true`, returns [PruneProgress::Finished], otherwise [PruneProgress::HasMoreData]
-    /// is returned.
-    pub fn from_done(done: bool) -> Self {
-        if done {
-            Self::Finished
-        } else {
-            Self::HasMoreData(PruneInterruptReason::LimitSegmentsDeleted)
-        }
-    }
-
     /// Creates new [PruneProgress] that summarises prune job.
     ///
     /// If `done == true`, returns [PruneProgress::Finished], otherwise [PruneProgress::HasMoreData]
     /// is returned.
-    pub fn summary(done: bool, timeout: bool) -> Self {
+    pub fn new(done: bool, timeout: bool) -> Self {
         if done {
             Self::Finished
         } else {
