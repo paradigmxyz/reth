@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use crate::EthPayloadBuilderAttributes;
 use alloy_rlp::{Encodable, Error as DecodeError};
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
@@ -16,7 +15,7 @@ use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v3, convert_block_to_payload_field_v2,
     convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
 };
-use revm_primitives::FixedBytes;
+use std::sync::Arc;
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq)]
