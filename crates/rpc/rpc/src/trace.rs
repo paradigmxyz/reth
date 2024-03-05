@@ -28,6 +28,7 @@ use revm::{
 };
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+use reth_rpc_types::trace::opcode::{BlockOpcodeGas, TransactionOpcodeGas};
 
 /// `trace` API implementation.
 ///
@@ -417,6 +418,64 @@ where
             )
             .await
     }
+
+
+    /// Returns all opcodes with their count and combined gas usage for the given transaction in no particular order.
+    pub async fn trace_transaction_opcode_gas(
+        &self,
+        tx_hash: B256,
+    ) -> EthResult<Option<TransactionOpcodeGas>> {
+        // self.inner
+        //     .eth_api
+        //     .spawn_trace_transaction_in_block(
+        //         tx_hash,
+        //         TracingInspectorConfig::default_parity(),
+        //         move |tx_info, inspector, res, _| {
+        //             let traces = inspector
+        //                 .with_transaction_gas_used(res.result.gas_used())
+        //                 .into_parity_builder()
+        //                 .into_localized_transaction_traces(tx_info);
+        //             Ok(traces)
+        //         },
+        //     )
+        //     .await
+        todo!()
+    }
+
+
+    /// Returns the opcodes of all transactions in the given block.
+    ///
+    /// This is the same as [Self::trace_transaction_opcode_gas] but for all transactions in a block.
+    pub async fn trace_block_opcode_gas(
+        &self,
+        block_id: BlockId,
+    ) -> EthResult<Option<BlockOpcodeGas>> {
+        // self.inner
+        //     .eth_api
+        //     .trace_block_with(
+        //         block_id,
+        //         TracingInspectorConfig::from_parity_config(&trace_types),
+        //         move |tx_info, inspector, res, state, db| {
+        //             let mut full_trace =
+        //                 inspector.into_parity_builder().into_trace_results(&res, &trace_types);
+        //
+        //             // If statediffs were requested, populate them with the account balance and
+        //             // nonce from pre-state
+        //             if let Some(ref mut state_diff) = full_trace.state_diff {
+        //                 populate_state_diff(state_diff, db, state.iter())?;
+        //             }
+        //
+        //             let trace = TraceResultsWithTransactionHash {
+        //                 transaction_hash: tx_info.hash.expect("tx hash is set"),
+        //                 full_trace,
+        //             };
+        //             Ok(trace)
+        //         },
+        //     )
+        //     .await
+
+        todo!()
+    }
 }
 
 #[async_trait]
@@ -520,6 +579,18 @@ where
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
         Ok(TraceApi::trace_transaction(self, hash).await?)
+    }
+
+    /// Handler for `trace_transactionOpcodeGas`
+    async fn trace_transaction_opcode_gas(&self, tx_hash: B256) -> Result<Option<TransactionOpcodeGas>> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(TraceApi::trace_transaction_opcode_gas(self, tx_hash).await?)
+    }
+
+    /// Handler for `trace_blockOpcodeGas`
+    async fn trace_block_opcode_gas(&self, block_id: BlockId) -> Result<Option<BlockOpcodeGas>> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(TraceApi::trace_block_opcode_gas(self, block_id).await?)
     }
 }
 

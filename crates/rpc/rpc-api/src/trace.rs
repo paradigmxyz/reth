@@ -6,6 +6,7 @@ use reth_rpc_types::{
     BlockOverrides, Index, TransactionRequest,
 };
 use std::collections::HashSet;
+use reth_rpc_types::trace::opcode::{BlockOpcodeGas, TransactionOpcodeGas};
 
 /// Ethereum trace API
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "trace"))]
@@ -91,4 +92,20 @@ pub trait TraceApi {
         &self,
         hash: B256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>>;
+
+    /// Returns all opcodes with their count and combined gas usage for the given transaction in no particular order.
+    #[method(name = "transactionOpcodeGas")]
+    async fn trace_transaction_opcode_gas(
+        &self,
+        tx_hash: B256,
+    ) -> RpcResult<Option<TransactionOpcodeGas>>;
+
+    /// Returns the opcodes of all transactions in the given block.
+    ///
+    /// This is the same as `trace_transactionOpcodeGas` but for all transactions in a block.
+    #[method(name = "blockOpcodeGas")]
+    async fn trace_block_opcode_gas(
+        &self,
+        block_id: BlockId,
+    ) -> RpcResult<Option<BlockOpcodeGas>>;
 }
