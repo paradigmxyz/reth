@@ -34,7 +34,7 @@ reth node -vvvvv --chain bitfinity.spec.json --http --http.port 8080 -d -r https
 With cargo: 
 
 ```sh
-cargo run -p reth -- node -vvvv --chain bitfinity.spec.json --http --http.port 8080 -d -r https://orca-app-5yyst.ondigitalocean.app -i 30 -b 100  --datadir ./target/reth
+cargo run -p reth -- node -vvvv --chain bitfinity.spec.json --http --http.port 8080 -d -r https://testnet.bitfinity.network -i 30 -b 100  --datadir ./target/reth
 ```
 
 

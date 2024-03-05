@@ -1,11 +1,10 @@
 use candid::Principal;
 use did::certified::CertifiedResult;
-use ethereum_json_rpc_client::{reqwest::ReqwestClient, Client};
+use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use ic_cbor::{CertificateToCbor, HashTreeToCbor};
 use ic_certificate_verification::VerifyCertificate;
 use ic_certification::{Certificate, HashTree, LookupResult};
 use itertools::Either;
-use jsonrpc_core::{Id, MethodCall, Output, Request};
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
@@ -83,11 +82,12 @@ impl RemoteClient {
         let mut bodies = HashMap::new();
 
         let reqwest_client = ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc.to_string());
+        let provider = ethereum_json_rpc_client::EthJsonRpcClient::new(reqwest_client);
+
         let block_checker = match certificate_settings {
             None => None,
-            Some(settings) => Some(BlockCertificateChecker::new(&reqwest_client, settings).await?),
+            Some(settings) => Some(BlockCertificateChecker::new(&provider, settings).await?),
         };
-        let provider = ethereum_json_rpc_client::EthJsonRcpClient::new(reqwest_client);
 
         const MAX_BLOCKS: u64 = 10_000;
 
@@ -210,32 +210,15 @@ struct BlockCertificateChecker {
 }
 
 impl BlockCertificateChecker {
-    async fn new(reqwest_client: &ReqwestClient, certificate_settings: CertificateCheckSettings) -> Result<Self, RemoteClientError> {
+    async fn new(client: &EthJsonRpcClient<ReqwestClient>, certificate_settings: CertificateCheckSettings) -> Result<Self, RemoteClientError> {
         let evmc_principal = Principal::from_text(certificate_settings.evmc_principal).map_err(|e| RemoteClientError::CertificateError(format!("failed to parse principal: {e}")))?;
         let ic_root_key = hex::decode(&certificate_settings.ic_root_key).map_err(|e| RemoteClientError::CertificateError(format!("failed to parse IC root key: {e}")))?;
-
-        let request = Request::Single(
-            jsonrpc_core::Call::MethodCall(
-                MethodCall{
-                    jsonrpc: Some(jsonrpc_core::Version::V2),
-                    method: "ic_getLastCertifiedBlock".to_string(),
-                    params: jsonrpc_core::Params::Array(vec![]),
-                    id: Id::Null,
-                }
-            )
-        );
-
-        let jsonrpc_core::Response::Single(output) =  reqwest_client.send_rpc_request(request).await.map_err(|err| RemoteClientError::ProviderError(format!("JSON RPC call failed: {err:?}")))? else {
-            return Err(RemoteClientError::CertificateError("invalid response, expected single".to_string()))
-        };
-
-        match output {
-            Output::Success(succ) => {
-                let certified_data: CertifiedResult<did::Block<did::H256>> = serde_json::from_value(succ.result).map_err(|err| RemoteClientError::ProviderError(format!("failed to deserialize certified block data: {err:?}")))?;
-                Ok(Self{certified_data, evmc_principal, ic_root_key})
-            },
-            Output::Failure(fail) => Err(RemoteClientError::CertificateError(format!("JSON RPC call returned error: {fail:?}"))),
-        }
+        let certified_data = client.get_last_certified_block().await.map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
+        Ok(Self{certified_data: CertifiedResult{
+            data: did::Block::from(certified_data.data),
+            certificate: certified_data.certificate,
+            witness: certified_data.witness
+        }, evmc_principal, ic_root_key})
     }
 
     fn get_block_number(&self) -> u64 {

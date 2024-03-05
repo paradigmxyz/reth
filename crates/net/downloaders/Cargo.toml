@@ -50,7 +50,6 @@ hex.workspace = true
 ic-cbor.workspace = true
 ic-certificate-verification.workspace = true
 ic-certification.workspace = true
-jsonrpc-core.workspace = true
 rlp.workspace = true
 serde_json.workspace = true
 

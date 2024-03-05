@@ -274,11 +274,10 @@ test-fuzz = "5"
 
 # Bitfinity Deps
 candid = "0.10"
-did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.12.x" }
-ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.12.x", features = [
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.13.x" }
+ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.13.x", features = [
     "reqwest",
 ] }
-jsonrpc-core = "18.0"
 ic-cbor = "2.3"
 ic-certificate-verification = "2.3"
 ic-certification = "2.3"

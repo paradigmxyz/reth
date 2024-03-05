@@ -1,0 +1,10 @@
+version: '3.3'
+
+services:
+  reth:
+    image: 'ghcr.io/bitfinity-network/bitfinity-reth:bitfinity-archive-node'
+    ports:
+      - '8080:8080'
+    command: node -vvv --chain bitfinity.spec.json --http --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://orca-app-5yyst.ondigitalocean.app -i 30 -b 100 --datadir /reth/data
+    volumes:
+      - ./target/reth:/reth
