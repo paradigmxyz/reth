@@ -259,7 +259,7 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
 
         let parent_beacon_block_root =
             if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
-                attributes.parent_beacon_block_root().unwrap_or_else(FixedBytes::<32>::default)
+                attributes.parent_beacon_block_root().unwrap_or(B256::ZERO)
             } else {
                 panic!("V3 is only possible after cancun");
             };
