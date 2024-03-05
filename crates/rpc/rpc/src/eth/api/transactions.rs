@@ -361,7 +361,7 @@ pub trait EthTransactions: Send + Sync {
     /// executed on: `changed_state = tx(cached_state)`
     ///
     /// This accepts a `inspector_setup` closure that returns the inspector to be used for tracing
-    /// the transactions.
+    /// a transaction. This is invoked for each transaction.
     async fn trace_block_with_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
