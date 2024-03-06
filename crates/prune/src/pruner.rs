@@ -43,6 +43,9 @@ pub struct Pruner<DB> {
     /// Maximum number of blocks to be pruned per run, as an additional restriction to
     /// `previous_tip_block_number`.
     prune_max_blocks_per_run: usize,
+    /// Time a pruner job can run before timing out.
+    timeout: Option<Duration>,
+    #[doc(hidden)]
     metrics: Metrics,
     listeners: EventListeners<PrunerEvent>,
 }
@@ -55,6 +58,7 @@ impl<DB: Database> Pruner<DB> {
         min_block_interval: usize,
         delete_limit: usize,
         prune_max_blocks_per_run: usize,
+        timeout: Option<Duration>,
     ) -> Self {
         Self {
             provider_factory,
@@ -63,6 +67,7 @@ impl<DB: Database> Pruner<DB> {
             previous_tip_block_number: None,
             delete_limit,
             prune_max_blocks_per_run,
+            timeout,
             metrics: Metrics::default(),
             listeners: Default::default(),
         }
@@ -103,8 +108,8 @@ impl<DB: Database> Pruner<DB> {
             }))
             .min(self.prune_max_blocks_per_run);
         let delete_limit = self.delete_limit * blocks_since_last_run;
-        let limiter =
-            PruneLimiter::new(Some(delete_limit), Some(Duration::from_millis(100)), start);
+        let timeout = self.timeout;
+        let limiter = PruneLimiter::new(Some(delete_limit), timeout, start);
 
         let provider = self.provider_factory.provider_rw()?;
         let (stats, deleted_segments, progress) =
@@ -313,7 +318,7 @@ mod tests {
         let provider_factory =
             ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir())
                 .expect("create provide factory with static_files");
-        let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5);
+        let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5, None);
 
         // No last pruned block number was set before
         let first_block_number = 1;

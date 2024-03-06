@@ -2523,7 +2523,7 @@ fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {
 /// [`DatabaseProviderRW`] hook.
 #[derive(Debug, Clone, Copy)]
 pub struct PruneLimiter {
-    /// Maximum units to delete from the database in one prune job.
+    /// Maximum units to delete from the database per block.
     deleted_units_limit: Option<usize>,
     /// Current number of units (entries) that have been deleted from database during the prune
     /// job.
