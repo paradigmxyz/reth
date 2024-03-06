@@ -10,8 +10,8 @@ use reth_node_ethereum::EthereumNode;
 use reth_primitives::{b256, hex, ChainSpec, Genesis};
 use std::sync::Arc;
 
-#[tokio::main]
-async fn main() -> eyre::Result<()> {
+#[tokio::test]
+async fn can_run_dev_node() {
     let tasks = TaskManager::current();
 
     // create node config
@@ -24,11 +24,12 @@ async fn main() -> eyre::Result<()> {
         .testing_node(tasks.executor())
         .node(EthereumNode::default())
         .launch()
-        .await?;
+        .await
+        .unwrap();
 
     assert_chain_advances(node).await;
 
-    node_exit_future.await
+    node_exit_future.await.unwrap();
 }
 
 async fn assert_chain_advances<Node: FullNodeComponents>(mut node: FullNode<Node>) {

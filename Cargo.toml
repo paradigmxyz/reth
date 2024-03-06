@@ -42,7 +42,7 @@ members = [
     "crates/node-optimism/",
     "crates/node-core/",
     "crates/node-api/",
-    "crates/node-tests/",
+    "crates/node-e2e-tests/",
     "crates/stages/",
     "crates/static-file/",
     "crates/storage/codecs/",
