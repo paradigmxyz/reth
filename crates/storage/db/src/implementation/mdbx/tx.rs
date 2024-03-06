@@ -244,7 +244,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
             self.transaction_mode().is_read_only()
         {
             let open_duration = self.start.elapsed();
-            if open_duration > self.long_transaction_duration {
+            if open_duration >= self.long_transaction_duration {
                 self.backtrace_recorded.store(true, Ordering::Relaxed);
                 warn!(
                     target: "storage::db::mdbx",
@@ -412,7 +412,8 @@ mod tests {
         let mut tx = db.tx().unwrap();
         tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
         tx.disable_long_read_transaction_safety();
-        sleep(MAX_DURATION);
+        // Give the `TxnManager` some time to time out the transaction.
+        sleep(MAX_DURATION + Duration::from_millis(100));
 
         assert_eq!(
             tx.get::<tables::Transactions>(0).err(),
@@ -433,7 +434,8 @@ mod tests {
 
         let mut tx = db.tx().unwrap();
         tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
-        sleep(MAX_DURATION);
+        // Give the `TxnManager` some time to time out the transaction.
+        sleep(MAX_DURATION + Duration::from_millis(100));
 
         assert_eq!(
             tx.get::<tables::Transactions>(0).err(),
