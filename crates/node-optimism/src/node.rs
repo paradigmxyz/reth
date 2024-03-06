@@ -1,6 +1,10 @@
 //! Optimism Node types config.
 
-use crate::{args::RollupArgs, OptimismEngineTypes, OptimismEvmConfig};
+use crate::{
+    args::RollupArgs,
+    txpool::{OpTransactionPool, OpTransactionValidator},
+    OptimismEngineTypes, OptimismEvmConfig,
+};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_builder::{
@@ -12,7 +16,7 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 
@@ -84,11 +88,12 @@ impl<Node> PoolBuilder<Node> for OptimismPoolBuilder
 where
     Node: FullNodeTypes,
 {
-    type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.data_dir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
+
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
@@ -97,10 +102,15 @@ where
                 ctx.provider().clone(),
                 ctx.task_executor().clone(),
                 blob_store.clone(),
-            );
+            )
+            .map(OpTransactionValidator::new);
 
-        let transaction_pool =
-            reth_transaction_pool::Pool::eth_pool(validator, blob_store, ctx.pool_config());
+        let transaction_pool = reth_transaction_pool::Pool::new(
+            validator,
+            CoinbaseTipOrdering::default(),
+            blob_store,
+            ctx.pool_config(),
+        );
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions_path();
 
@@ -172,8 +182,9 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
-        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
-            .set_compute_pending_block(self.compute_pending_block);
+        let payload_builder =
+            reth_optimism_payload_builder::OptimismPayloadBuilder::new(ctx.chain_spec())
+                .set_compute_pending_block(self.compute_pending_block);
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()

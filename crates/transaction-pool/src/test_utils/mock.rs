@@ -290,13 +290,14 @@ impl MockTransaction {
     /// * [MockTransaction::eip1559]
     /// * [MockTransaction::eip4844]
     pub fn new_from_type(tx_type: TxType) -> Self {
+        #[allow(unreachable_patterns)]
         match tx_type {
             TxType::Legacy => Self::legacy(),
             TxType::EIP2930 => Self::eip2930(),
             TxType::EIP1559 => Self::eip1559(),
             TxType::EIP4844 => Self::eip4844(),
-            #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => todo!(), // not handled in mock tx
+
+            _ => unreachable!("Invalid transaction type"),
         }
     }
 
@@ -642,7 +643,7 @@ impl PoolTransaction for MockTransaction {
 
         // If the maximum fee per gas is less than the base fee, return None
         if max_fee_per_gas < base_fee {
-            return None;
+            return None
         }
 
         // Calculate the fee by subtracting the base fee from the maximum fee per gas
@@ -651,7 +652,7 @@ impl PoolTransaction for MockTransaction {
         // If the maximum priority fee per gas is available, return the minimum of fee and priority
         // fee
         if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            return Some(fee.min(priority_fee));
+            return Some(fee.min(priority_fee))
         }
 
         // Otherwise, return the calculated fee
@@ -717,12 +718,6 @@ impl PoolTransaction for MockTransaction {
     fn chain_id(&self) -> Option<u64> {
         Some(1)
     }
-
-    /// Returns true if the transaction is a deposit transaction.
-    #[cfg(feature = "optimism")]
-    fn is_deposit(&self) -> bool {
-        false
-    }
 }
 
 impl FromRecoveredTransaction for MockTransaction {
@@ -731,6 +726,8 @@ impl FromRecoveredTransaction for MockTransaction {
         let transaction = tx.into_signed();
         let hash = transaction.hash();
         let size = transaction.size();
+
+        #[allow(unreachable_patterns)]
         match transaction.transaction {
             Transaction::Legacy(TxLegacy {
                 chain_id: _,
@@ -822,8 +819,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 accesslist: access_list,
                 size,
             },
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => todo!(), // not handled in mock tx
+            _ => unreachable!("Invalid transaction type"),
         }
     }
 }

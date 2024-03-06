@@ -51,7 +51,7 @@ extern "C" fn print_stack_trace(_: libc::c_int) {
         // Collect return addresses
         let depth = libc::backtrace(STACK_TRACE.as_mut_ptr(), MAX_FRAMES as i32);
         if depth == 0 {
-            return;
+            return
         }
         &STACK_TRACE.as_slice()[0..(depth as _)]
     };

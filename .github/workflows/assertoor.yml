@@ -193,7 +193,7 @@ jobs:
         kurtosis enclave rm -f assertoor-${{ github.run_id }}
 
     - name: Upload dump artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: "kurtosis-enclave-dump-${{ github.run_id }}"
         path: ./temp/dump

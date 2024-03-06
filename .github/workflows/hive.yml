@@ -23,9 +23,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: mkdir artifacts
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
       - name: Build and export reth image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: .
           tags: ghcr.io/paradigmxyz/reth:latest
@@ -41,7 +41,7 @@ jobs:
           ref: master
           path: hivetests
 
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v5
         with:
           go-version: "^1.13.1"
       - run: go version
@@ -52,7 +52,7 @@ jobs:
           mv ./hive ../artifacts/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: artifacts
           path: ./artifacts
@@ -166,7 +166,7 @@ jobs:
       issues: write
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: artifacts
           path: /tmp

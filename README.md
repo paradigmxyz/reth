@@ -2,7 +2,6 @@
 
 [![CI status](https://github.com/paradigmxyz/reth/workflows/ci/badge.svg)][gh-ci]
 [![cargo-deny status](https://github.com/paradigmxyz/reth/workflows/deny/badge.svg)][gh-deny]
-[![Codecov](https://img.shields.io/codecov/c/github/paradigmxyz/reth?token=c24SDcMImE)][codecov]
 [![Telegram Chat][tg-badge]][tg-url]
 
 **Modular, contributor-friendly and blazing-fast implementation of the Ethereum protocol**
@@ -16,7 +15,6 @@
 
 _The project is still work in progress, see the [disclaimer below](#status)._
 
-[codecov]: https://app.codecov.io/gh/paradigmxyz/reth
 [gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/ci.yml
 [gh-deny]: https://github.com/paradigmxyz/reth/actions/workflows/deny.yml
 [tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth

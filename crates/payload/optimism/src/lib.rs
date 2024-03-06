@@ -18,14 +18,14 @@ mod builder {
     use crate::error::OptimismPayloadBuilderError;
     use reth_basic_payload_builder::*;
     use reth_payload_builder::{
-        error::PayloadBuilderError, EthBuiltPayload, OptimismPayloadBuilderAttributes,
+        error::PayloadBuilderError, OptimismBuiltPayload, OptimismPayloadBuilderAttributes,
     };
     use reth_primitives::{
         constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
         eip4844::calculate_excess_blob_gas,
         proofs,
         revm::env::tx_env_with_recovered,
-        Block, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts, TxType,
+        Block, ChainSpec, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts, TxType,
         EMPTY_OMMER_ROOT_HASH, U256,
     };
     use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
@@ -36,18 +36,25 @@ mod builder {
         primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
         DatabaseCommit, State,
     };
+    use std::sync::Arc;
     use tracing::{debug, trace, warn};
 
     /// Optimism's payload builder
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-    #[non_exhaustive]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct OptimismPayloadBuilder {
         /// The rollup's compute pending block configuration option.
         // TODO(clabby): Implement this feature.
         compute_pending_block: bool,
+        /// The rollup's chain spec.
+        chain_spec: Arc<ChainSpec>,
     }
 
     impl OptimismPayloadBuilder {
+        /// OptimismPayloadBuilder constructor.
+        pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+            Self { compute_pending_block: true, chain_spec }
+        }
+
         /// Sets the rollup's compute pending block configuration option.
         pub fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
             self.compute_pending_block = compute_pending_block;
@@ -63,6 +70,12 @@ mod builder {
         pub fn is_compute_pending_block(&self) -> bool {
             self.compute_pending_block
         }
+
+        /// Sets the rollup's chainspec.
+        pub fn set_chain_spec(mut self, chain_spec: Arc<ChainSpec>) -> Self {
+            self.chain_spec = chain_spec;
+            self
+        }
     }
 
     /// Implementation of the [PayloadBuilder] trait for [OptimismPayloadBuilder].
@@ -72,19 +85,29 @@ mod builder {
         Pool: TransactionPool,
     {
         type Attributes = OptimismPayloadBuilderAttributes;
-        type BuiltPayload = EthBuiltPayload;
+        type BuiltPayload = OptimismBuiltPayload;
 
         fn try_build(
             &self,
-            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, EthBuiltPayload>,
-        ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
+            args: BuildArguments<
+                Pool,
+                Client,
+                OptimismPayloadBuilderAttributes,
+                OptimismBuiltPayload,
+            >,
+        ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
             optimism_payload_builder(args, self.compute_pending_block)
         }
 
         fn on_missing_payload(
             &self,
-            args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, EthBuiltPayload>,
-        ) -> Option<EthBuiltPayload> {
+            args: BuildArguments<
+                Pool,
+                Client,
+                OptimismPayloadBuilderAttributes,
+                OptimismBuiltPayload,
+            >,
+        ) -> Option<OptimismBuiltPayload> {
             // In Optimism, the PayloadAttributes can specify a `no_tx_pool` option that implies we
             // should not pull transactions from the tx pool. In this case, we build the payload
             // upfront with the list of transactions sent in the attributes without caring about
@@ -102,7 +125,7 @@ mod builder {
         fn build_empty_payload(
             client: &Client,
             config: PayloadConfig<Self::Attributes>,
-        ) -> Result<EthBuiltPayload, PayloadBuilderError> {
+        ) -> Result<OptimismBuiltPayload, PayloadBuilderError> {
             let extra_data = config.extra_data();
             let PayloadConfig {
                 initialized_block_env,
@@ -205,10 +228,12 @@ mod builder {
             let block = Block { header, body: vec![], ommers: vec![], withdrawals };
             let sealed_block = block.seal_slow();
 
-            Ok(EthBuiltPayload::new(
+            Ok(OptimismBuiltPayload::new(
                 attributes.payload_attributes.payload_id(),
                 sealed_block,
                 U256::ZERO,
+                chain_spec,
+                attributes,
             ))
         }
     }
@@ -223,9 +248,9 @@ mod builder {
     /// a result indicating success with the payload or an error in case of failure.
     #[inline]
     pub(crate) fn optimism_payload_builder<Pool, Client>(
-        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, EthBuiltPayload>,
+        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
         _compute_pending_block: bool,
-    ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
+    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory,
         Pool: TransactionPool,
@@ -491,7 +516,7 @@ mod builder {
             &mut db,
             &chain_spec,
             attributes.payload_attributes.timestamp,
-            attributes.payload_attributes.withdrawals,
+            attributes.clone().payload_attributes.withdrawals,
         )?;
 
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
@@ -567,8 +592,13 @@ mod builder {
         let sealed_block = block.seal_slow();
         debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-        let mut payload =
-            EthBuiltPayload::new(attributes.payload_attributes.id, sealed_block, total_fees);
+        let mut payload = OptimismBuiltPayload::new(
+            attributes.payload_attributes.id,
+            sealed_block,
+            total_fees,
+            chain_spec,
+            attributes,
+        );
 
         // extend the payload with the blob sidecars from the executed txs
         payload.extend_sidecars(blob_sidecars);

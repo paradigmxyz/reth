@@ -1,5 +1,6 @@
 //! Ethereum transaction validator.
 
+use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
     blobstore::BlobStore,
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
@@ -26,16 +27,23 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-#[cfg(feature = "optimism")]
-use reth_revm::optimism::RethL1BlockInfo;
-
-use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
-
 /// Validator for Ethereum transactions.
 #[derive(Debug, Clone)]
 pub struct EthTransactionValidator<Client, T> {
     /// The type that performs the actual validation.
     inner: Arc<EthTransactionValidatorInner<Client, T>>,
+}
+
+impl<Client, Tx> EthTransactionValidator<Client, Tx> {
+    /// Returns the configured chain spec
+    pub fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.inner.chain_spec.clone()
+    }
+
+    /// Returns the configured client
+    pub fn client(&self) -> &Client {
+        &self.inner.client
+    }
 }
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx>
@@ -145,14 +153,6 @@ where
         origin: TransactionOrigin,
         mut transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        #[cfg(feature = "optimism")]
-        if transaction.is_deposit() || transaction.is_eip4844() {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::TxTypeNotSupported.into(),
-            )
-        }
-
         // Checks for tx_type
         match transaction.tx_type() {
             LEGACY_TX_TYPE_ID => {
@@ -318,51 +318,7 @@ where
             )
         }
 
-        #[cfg(not(feature = "optimism"))]
         let cost = transaction.cost();
-
-        #[cfg(feature = "optimism")]
-        let cost = {
-            let block = match self
-                .client
-                .block_by_number_or_tag(reth_primitives::BlockNumberOrTag::Latest)
-            {
-                Ok(Some(block)) => block,
-                Ok(None) => {
-                    return TransactionValidationOutcome::Error(
-                        *transaction.hash(),
-                        "Latest block should be found".into(),
-                    )
-                }
-                Err(err) => {
-                    return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
-                }
-            };
-
-            let mut encoded = reth_primitives::bytes::BytesMut::default();
-            transaction.to_recovered_transaction().encode_enveloped(&mut encoded);
-            let cost_addition = match reth_revm::optimism::extract_l1_info(&block).map(|info| {
-                info.l1_tx_data_fee(
-                    &self.chain_spec,
-                    block.timestamp,
-                    &encoded,
-                    transaction.is_deposit(),
-                )
-            }) {
-                Ok(Ok(cost)) => cost,
-                Err(err) => {
-                    return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
-                }
-                _ => {
-                    return TransactionValidationOutcome::Error(
-                        *transaction.hash(),
-                        "L1BlockInfoError".into(),
-                    )
-                }
-            };
-
-            transaction.cost().saturating_add(cost_addition)
-        };
 
         // Checks for max cost
         if cost > account.balance {
@@ -799,48 +755,5 @@ mod tests {
         assert!(res.is_ok());
         let tx = pool.get(transaction.hash());
         assert!(tx.is_some());
-    }
-
-    #[cfg(feature = "optimism")]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn validate_optimism_transaction() {
-        use crate::{blobstore::InMemoryBlobStore, traits::EthPooledTransaction};
-        use reth_primitives::{
-            Signature, Transaction, TransactionKind, TransactionSigned,
-            TransactionSignedEcRecovered, TxDeposit, MAINNET, U256,
-        };
-        use reth_provider::test_utils::MockEthProvider;
-        use reth_tasks::TokioTaskExecutor;
-
-        let client = MockEthProvider::default();
-        let validator =
-            // EthTransactionValidator::new(client, MAINNET.clone(), TokioTaskExecutor::default());
-            crate::validate::EthTransactionValidatorBuilder::new(MAINNET.clone()).no_shanghai().no_cancun().build_with_tasks(client, TokioTaskExecutor::default(), InMemoryBlobStore::default());
-        let origin = crate::TransactionOrigin::External;
-        let signer = Default::default();
-        let deposit_tx = Transaction::Deposit(TxDeposit {
-            source_hash: Default::default(),
-            from: signer,
-            to: TransactionKind::Create,
-            mint: None,
-            value: reth_primitives::U256::ZERO,
-            gas_limit: 0u64,
-            is_system_transaction: false,
-            input: Default::default(),
-        });
-        let signature = Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false };
-        let signed_tx = TransactionSigned::from_transaction_and_signature(deposit_tx, signature);
-        let signed_recovered =
-            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, signer);
-        let len = signed_recovered.length_without_header();
-        let pooled_tx = EthPooledTransaction::new(signed_recovered, len);
-        let outcome =
-            crate::TransactionValidator::validate_transaction(&validator, origin, pooled_tx).await;
-
-        let err = match outcome {
-            crate::TransactionValidationOutcome::Invalid(_, err) => err,
-            _ => panic!("Expected invalid transaction"),
-        };
-        assert_eq!(err.to_string(), "transaction type not supported");
     }
 }
