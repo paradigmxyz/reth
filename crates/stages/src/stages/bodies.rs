@@ -346,8 +346,7 @@ fn stage_checkpoint<DB: Database>(
         // Count only static files entries. If we count the database entries too, we may have
         // duplicates. We're sure that the static files have all entries that database has,
         // because we run the `StaticFileProducer` before starting the pipeline.
-        total: (provider.static_file_provider().count_entries::<tables::Headers>()? as u64)
-            .saturating_sub(1),
+        total: provider.static_file_provider().count_entries::<tables::Headers>()? as u64,
     })
 }
 
