@@ -11,7 +11,7 @@ use reth_primitives::{b256, hex, ChainSpec, Genesis};
 use std::sync::Arc;
 
 #[tokio::test]
-async fn can_run_dev_node() {
+async fn can_run_dev_node() -> eyre::Result<()> {
     let tasks = TaskManager::current();
 
     // create node config
@@ -20,16 +20,15 @@ async fn can_run_dev_node() {
         .with_rpc(RpcServerArgs::default().with_http())
         .with_chain(custom_chain());
 
-    let NodeHandle { node, node_exit_future } = NodeBuilder::new(node_config)
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
         .node(EthereumNode::default())
         .launch()
-        .await
-        .unwrap();
+        .await?;
 
     assert_chain_advances(node).await;
+    Ok(())
 
-    node_exit_future.await.unwrap();
 }
 
 async fn assert_chain_advances<Node: FullNodeComponents>(mut node: FullNode<Node>) {
