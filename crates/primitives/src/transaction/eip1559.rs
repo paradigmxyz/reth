@@ -176,7 +176,7 @@ impl TxEip1559 {
 
     /// Get transaction type
     pub(crate) fn tx_type(&self) -> TxType {
-        TxType::EIP1559
+        TxType::Eip1559
     }
 
     /// Calculates a heuristic for the in-memory size of the [TxEip1559] transaction.

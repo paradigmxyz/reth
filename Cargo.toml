@@ -96,6 +96,13 @@ homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
 exclude = [".github/"]
 
+# Speed up tests.
+[profile.dev.package]
+proptest.opt-level = 3
+rand_xorshift.opt-level = 3
+rand_chacha.opt-level = 3
+unarray.opt-level = 3
+
 # Meant for testing - all optimizations, but with debug assertions and overflow checks.
 [profile.hivetests]
 inherits = "test"
@@ -194,10 +201,10 @@ alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "975
 alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "975a52a" }
 alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "975a52a" }
 alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "975a52a" }
+
+# TODO: Remove
 ethers-core = { version = "2.0", default-features = false }
 ethers-providers = { version = "2.0", default-features = false }
-ethers-signers = { version = "2.0", default-features = false }
-ethers-middleware = { version = "2.0", default-features = false }
 
 # js
 boa_engine = "0.17"

@@ -695,19 +695,19 @@ mod tests {
 
         // create a chain of transactions by sender A, B, C
         let mut tx_set =
-            MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::EIP1559);
+            MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::Eip1559);
         let a = tx_set.clone().into_vec();
 
-        let b = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::EIP1559)
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::Eip1559)
             .into_vec();
         tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::EIP1559)
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::Eip1559)
             .into_vec();
         tx_set.extend(c.clone());
 
-        let d = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::EIP1559)
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::Eip1559)
             .into_vec();
         tx_set.extend(d.clone());
 
@@ -747,10 +747,10 @@ mod tests {
         let d = address!("000000000000000000000000000000000000000d");
 
         // Create transaction chains for senders A, B, C, and D.
-        let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 4, TxType::EIP1559);
-        let b_txs = MockTransactionSet::sequential_transactions_by_sender(b, 3, TxType::EIP1559);
-        let c_txs = MockTransactionSet::sequential_transactions_by_sender(c, 3, TxType::EIP1559);
-        let d_txs = MockTransactionSet::sequential_transactions_by_sender(d, 1, TxType::EIP1559);
+        let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 4, TxType::Eip1559);
+        let b_txs = MockTransactionSet::sequential_transactions_by_sender(b, 3, TxType::Eip1559);
+        let c_txs = MockTransactionSet::sequential_transactions_by_sender(c, 3, TxType::Eip1559);
+        let d_txs = MockTransactionSet::sequential_transactions_by_sender(d, 1, TxType::Eip1559);
 
         // Set up expected pending transactions.
         let expected_pending = vec![

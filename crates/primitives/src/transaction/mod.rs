@@ -1266,11 +1266,11 @@ impl TransactionSigned {
             return Err(RlpError::Custom("unsupported typed transaction type"))
         };
         let transaction = match tx_type {
-            TxType::EIP2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
-            TxType::EIP1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
-            TxType::EIP4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
+            TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
+            TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
+            TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => Transaction::Deposit(TxDeposit::decode_inner(data)?),
+            TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
             TxType::Legacy => unreachable!("path for legacy tx has diverged before this method"),
         };
 
@@ -1278,7 +1278,7 @@ impl TransactionSigned {
         let signature = Signature::decode(data)?;
 
         #[cfg(feature = "optimism")]
-        let signature = if let TxType::DEPOSIT = tx_type {
+        let signature = if let TxType::Deposit = tx_type {
             Signature::optimism_deposit_tx_signature()
         } else {
             Signature::decode(data)?
@@ -1664,7 +1664,7 @@ mod tests {
         // https://sepolia.etherscan.io/getRawTx?tx=0x9a22ccb0029bc8b0ddd073be1a1d923b7ae2b2ea52100bae0db4424f9107e9c0
         let raw_tx = alloy_primitives::hex::decode("0x03f9011d83aa36a7820fa28477359400852e90edd0008252089411e9ca82a3a762b4b5bd264d4173a242e7a770648080c08504a817c800f8a5a0012ec3d6f66766bedb002a190126b3549fce0047de0d4c25cffce0dc1c57921aa00152d8e24762ff22b1cfd9f8c0683786a7ca63ba49973818b3d1e9512cd2cec4a0013b98c6c83e066d5b14af2b85199e3d4fc7d1e778dd53130d180f5077e2d1c7a001148b495d6e859114e670ca54fb6e2657f0cbae5b08063605093a4b3dc9f8f1a0011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e654901a0c8de4cced43169f9aa3d36506363b2d2c44f6c49fc1fd91ea114c86f3757077ea01e11fdd0d1934eda0492606ee0bb80a7bf8f35cc5f86ec60fe5031ba48bfd544").unwrap();
         let decoded = TransactionSigned::decode_enveloped(&mut raw_tx.as_slice()).unwrap();
-        assert_eq!(decoded.tx_type(), TxType::EIP4844);
+        assert_eq!(decoded.tx_type(), TxType::Eip4844);
 
         let from = decoded.recover_signer();
         assert_eq!(from, Some(address!("A83C816D4f9b2783761a22BA6FADB0eB0606D7B2")));

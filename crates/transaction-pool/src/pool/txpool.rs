@@ -2742,7 +2742,7 @@ mod tests {
         pool.set_block_info(block_info);
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::EIP4844)
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::Eip4844)
             .into_iter()
             .map(|mut tx| {
                 tx.set_size(default_limits.max_size / 2 + 1);
@@ -2780,7 +2780,7 @@ mod tests {
         pool.update_basefee(pool_base_fee);
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::EIP1559)
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::Eip1559)
             .into_iter()
             .map(|mut tx| {
                 tx.set_size(default_limits.max_size / 2 + 1);
