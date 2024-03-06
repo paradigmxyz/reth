@@ -12,7 +12,7 @@ use reth_rpc_types::{
         ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
-    BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
+    BlockOverrides, Filter, FilterChanges, RichBlock, SyncStatus, TransactionRequest,
 };
 
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
@@ -209,5 +209,5 @@ pub trait EngineEthApi {
 
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]
-    async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>>;
+    async fn logs(&self, filter: Filter) -> RpcResult<FilterChanges>;
 }
