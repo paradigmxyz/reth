@@ -1538,9 +1538,7 @@ mod tests {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
 
-        let backoff_durations = PeerBackoffDurations::test();
-        let config = PeersConfig { backoff_durations, ..PeersConfig::test() };
-        let mut peers = PeersManager::new(config);
+        let mut peers = PeersManager::new(PeersConfig::test());
         peers.add_peer(peer, socket_addr, None);
 
         match event!(peers) {
@@ -1579,7 +1577,7 @@ mod tests {
         assert!(peers.backed_off_peers.contains_key(&peer));
         assert!(peers.peers.get(&peer).unwrap().is_backed_off());
 
-        tokio::time::sleep(backoff_durations.low).await;
+        tokio::time::sleep(peers.backoff_durations.low).await;
 
         match event!(peers) {
             PeerAction::Connect { peer_id, .. } => {
