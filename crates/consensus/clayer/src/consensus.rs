@@ -777,16 +777,19 @@ where
     }
 
     pub fn sync_seal(&mut self, state: &mut PbftState) -> Result<(), PbftError> {
-        let state_seq_num = state.seq_num;
-        let latest_db_header = self.client.latest_header().ok().flatten();
-        if let Some(latest_db_header) = latest_db_header {
-            if latest_db_header.number >= state_seq_num {
-                for seq in state_seq_num..=latest_db_header.number {
-                    let header = self.client.sealed_header_by_id(BlockId::from(seq)).ok().flatten();
-                    if let Some(header) = header {
-                        trace!(target: "consensus::cl", "trace sync:seal reqeust {} {} latest_number {} state_seq_num {}",header.number,header.hash,latest_db_header.number,state_seq_num);
-                        self.send_seal_request(state, header.hash)?;
-                        self.msg_log.add_validated_block(clayer_block_from_header(&header));
+        if state.is_validator() {
+            let state_seq_num = state.seq_num;
+            let latest_db_header = self.client.latest_header().ok().flatten();
+            if let Some(latest_db_header) = latest_db_header {
+                if latest_db_header.number >= state_seq_num {
+                    for seq in state_seq_num..=latest_db_header.number {
+                        let header =
+                            self.client.sealed_header_by_id(BlockId::from(seq)).ok().flatten();
+                        if let Some(header) = header {
+                            trace!(target: "consensus::cl", "trace sync:seal reqeust {} {} latest_number {} state_seq_num {}",header.number,header.hash,latest_db_header.number,state_seq_num);
+                            self.send_seal_request(state, header.hash)?;
+                            self.msg_log.add_validated_block(clayer_block_from_header(&header));
+                        }
                     }
                 }
             }
