@@ -775,7 +775,7 @@ impl SealedHeader {
         }
 
         // ensure that the blob gas fields for this block
-        if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(self.timestamp) {
+        if chain_spec.is_cancun_active_at_timestamp(self.timestamp) {
             self.validate_4844_header_against_parent(parent)?;
         }
 
