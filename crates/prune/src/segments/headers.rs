@@ -73,15 +73,15 @@ impl<DB: Database> Segment<DB> for Headers {
             ))
         }
 
-        let (done, pruned, last_pruned_block) = results.into_iter().fold(
-            (true, 0, 0),
-            |(total_done, total_pruned, _), (progress, pruned, last_pruned_block)| {
-                (total_done && progress.is_done(), total_pruned + pruned, last_pruned_block)
+        let (done, pruned, last_pruned_block, timed_out) = results.into_iter().fold(
+            (true, 0, 0, true),
+            |(total_done, total_pruned, _, some_timed_out), (progress, pruned, last_pruned_block)| {
+                (total_done && progress.is_done(), total_pruned + pruned, last_pruned_block, some_timed_out & progress.is_timed_out())
             },
         );
 
         Ok(PruneOutput {
-            progress: PruneProgress::new(done, limiter.is_timed_out()),
+            progress: PruneProgress::new(done, timed_out),
             pruned,
             checkpoint: Some(PruneOutputCheckpoint {
                 block_number: Some(last_pruned_block),
