@@ -1138,6 +1138,18 @@ where
         }
     }
 
+    /// Runs an operation to fetch hashes that are cached in in [`TransactionFetcher`].
+    fn on_fetch_hashes_pending_fetch(&mut self) {
+        // try drain transaction hashes pending fetch
+        let info = &self.pending_pool_imports_info;
+        let max_pending_pool_imports = info.max_pending_pool_imports;
+        let has_capacity_wrt_pending_pool_imports =
+            |divisor| info.has_capacity(max_pending_pool_imports / divisor);
+
+        self.transaction_fetcher
+            .on_fetch_pending_hashes(&self.peers, has_capacity_wrt_pending_pool_imports);
+    }
+
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
         self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
         self.metrics.reported_bad_transactions.increment(1);
@@ -1283,16 +1295,7 @@ where
         duration_metered_exec!(
             {
                 if this.has_capacity_for_fetching_pending_hashes() {
-                    // try drain transaction hashes pending fetch
-                    let info = &this.pending_pool_imports_info;
-                    let max_pending_pool_imports = info.max_pending_pool_imports;
-                    let has_capacity_wrt_pending_pool_imports =
-                        |divisor| info.has_capacity(max_pending_pool_imports / divisor);
-
-                    this.transaction_fetcher.on_fetch_pending_hashes(
-                        &this.peers,
-                        has_capacity_wrt_pending_pool_imports,
-                    );
+                    this.on_fetch_hashes_pending_fetch();
                 }
             },
             acc
