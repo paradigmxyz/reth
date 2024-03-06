@@ -2602,4 +2602,9 @@ impl PruneLimiter {
     pub fn increment_deleted_units_count(&mut self) {
         self.deleted_units_count += 1
     }
+
+    /// Increments the count of deleted units by one.
+    pub fn increment_deleted_units_count_by(&mut self, units: usize) {
+        self.deleted_units_count += units
+    }
 }
