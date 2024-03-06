@@ -4,12 +4,8 @@ use reth_primitives::{
     Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
-    engine::{
-        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, OptimismPayloadAttributes,
-        PayloadAttributes as EthPayloadAttributes, PayloadId,
-    },
+    engine::{OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId},
     withdrawal::Withdrawal,
-    ExecutionPayloadV1,
 };
 
 /// Represents a built payload type that contains a built [SealedBlock] and can be converted into
@@ -20,15 +16,6 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
 
     /// Returns the fees collected for the built block
     fn fees(&self) -> U256;
-
-    /// Converts the type into the response expected by `engine_getPayloadV1`
-    fn into_v1_payload(self) -> ExecutionPayloadV1;
-
-    /// Converts the type into the response expected by `engine_getPayloadV2`
-    fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2;
-
-    /// Converts the type into the response expected by `engine_getPayloadV3`
-    fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3;
 }
 
 /// This can be implemented by types that describe a currently running payload job.

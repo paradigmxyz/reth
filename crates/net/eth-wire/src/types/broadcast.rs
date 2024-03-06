@@ -11,7 +11,11 @@ use reth_primitives::{
     Block, Bytes, PooledTransactionsElement, TransactionSigned, TxHash, B256, U128,
 };
 
-use std::{collections::HashMap, mem, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    mem,
+    sync::Arc,
+};
 
 #[cfg(feature = "arbitrary")]
 use proptest::{collection::vec, prelude::*};
@@ -653,7 +657,7 @@ impl ValidAnnouncementData {
     /// Destructs returning only the valid hashes and the announcement message version. Caution! If
     /// this is [`Eth68`](EthVersion::Eth68) announcement data, this drops the metadata.
     pub fn into_request_hashes(self) -> (RequestTxHashes, EthVersion) {
-        let hashes = self.data.into_keys().collect::<Vec<_>>();
+        let hashes = self.data.into_keys().collect::<HashSet<_>>();
 
         (RequestTxHashes::new(hashes), self.version)
     }
@@ -687,30 +691,49 @@ pub struct RequestTxHashes {
     #[deref]
     #[deref_mut]
     #[into_iterator(owned, ref)]
-    hashes: Vec<TxHash>,
+    hashes: HashSet<TxHash>,
 }
 
 impl RequestTxHashes {
     /// Returns a new [`RequestTxHashes`] with given capacity for hashes. Caution! Make sure to
-    /// call [`Vec::shrink_to_fit`] on [`RequestTxHashes`] when full, especially where it will be
-    /// stored in its entirety like in the future waiting for a
+    /// call [`HashSet::shrink_to_fit`] on [`RequestTxHashes`] when full, especially where it will
+    /// be stored in its entirety like in the future waiting for a
     /// [`GetPooledTransactions`](crate::GetPooledTransactions) request to resolve.
     pub fn with_capacity(capacity: usize) -> Self {
-        Self::new(Vec::with_capacity(capacity))
+        Self::new(HashSet::with_capacity(capacity))
+    }
+
+    /// Returns an new empty instance.
+    fn empty() -> Self {
+        Self::new(HashSet::new())
+    }
+
+    /// Retains the given number of elements, returning and iterator over the rest.
+    pub fn retain_count(&mut self, count: usize) -> Self {
+        let rest_capacity = self.hashes.len().saturating_sub(count);
+        if rest_capacity == 0 {
+            return Self::empty()
+        }
+        let mut rest = Self::with_capacity(rest_capacity);
+
+        let mut i = 0;
+        self.hashes.retain(|hash| {
+            if i >= count {
+                rest.insert(*hash);
+                return false
+            }
+            i += 1;
+
+            true
+        });
+
+        rest
     }
 }
 
 impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
     fn from_iter<I: IntoIterator<Item = (TxHash, Eth68TxMetadata)>>(iter: I) -> Self {
-        let mut hashes = Vec::with_capacity(32);
-
-        for (hash, _) in iter {
-            hashes.push(hash);
-        }
-
-        hashes.shrink_to_fit();
-
-        RequestTxHashes::new(hashes)
+        RequestTxHashes::new(iter.into_iter().map(|(hash, _)| hash).collect::<HashSet<_>>())
     }
 }
 
@@ -718,7 +741,7 @@ impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
 mod tests {
     use super::*;
     use bytes::BytesMut;
-    use reth_primitives::hex;
+    use reth_primitives::{b256, hex};
     use std::str::FromStr;
 
     /// Takes as input a struct / encoded hex message pair, ensuring that we encode to the exact hex
@@ -867,5 +890,64 @@ mod tests {
         for vector in vectors {
             test_encoding_vector(vector);
         }
+    }
+
+    #[test]
+    fn request_hashes_retain_count_keep_subset() {
+        let mut hashes = RequestTxHashes::new(
+            [
+                b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000002"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000003"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000004"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000005"),
+            ]
+            .into_iter()
+            .collect::<HashSet<_>>(),
+        );
+
+        let rest = hashes.retain_count(3);
+
+        assert_eq!(3, hashes.len());
+        assert_eq!(2, rest.len());
+    }
+
+    #[test]
+    fn request_hashes_retain_count_keep_all() {
+        let mut hashes = RequestTxHashes::new(
+            [
+                b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000002"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000003"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000004"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000005"),
+            ]
+            .into_iter()
+            .collect::<HashSet<_>>(),
+        );
+
+        let _ = hashes.retain_count(6);
+
+        assert_eq!(5, hashes.len());
+    }
+
+    #[test]
+    fn split_request_hashes_keep_none() {
+        let mut hashes = RequestTxHashes::new(
+            [
+                b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000002"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000003"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000004"),
+                b256!("0000000000000000000000000000000000000000000000000000000000000005"),
+            ]
+            .into_iter()
+            .collect::<HashSet<_>>(),
+        );
+
+        let rest = hashes.retain_count(0);
+
+        assert_eq!(0, hashes.len());
+        assert_eq!(5, rest.len());
     }
 }

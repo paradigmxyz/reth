@@ -37,6 +37,7 @@ pin-project.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
+futures-test = "0.3.30"
 
 # io
 serde = { workspace = true, optional = true }
@@ -80,8 +81,6 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 alloy-node-bindings.workspace = true
 ethers-core = { workspace = true, default-features = false }
 ethers-providers = { workspace = true, default-features = false, features = ["ws"] }
-ethers-signers = { workspace = true, default-features = false }
-ethers-middleware = { workspace = true, default-features = false }
 
 enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 
@@ -96,7 +95,12 @@ criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 [features]
 default = ["serde"]
 serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr?/serde", "dep:serde_json"]
-test-utils = ["reth-provider/test-utils", "dep:enr", "dep:tempfile", "reth-transaction-pool/test-utils"]
+test-utils = [
+    "reth-provider/test-utils",
+    "dep:enr",
+    "dep:tempfile",
+    "reth-transaction-pool/test-utils",
+]
 geth-tests = []
 optimism = [
     "reth-primitives/optimism",

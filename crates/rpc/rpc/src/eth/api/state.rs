@@ -118,16 +118,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        eth::{
-            cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
-            FeeHistoryCacheConfig,
-        },
-        BlockingTaskPool,
+    use crate::eth::{
+        cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig,
     };
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
+    use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::test_utils::testing_pool;
     use std::collections::HashMap;
 

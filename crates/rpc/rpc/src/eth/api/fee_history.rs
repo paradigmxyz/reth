@@ -68,7 +68,7 @@ impl FeeHistoryCache {
     /// Insert block data into the cache.
     async fn insert_blocks<I>(&self, blocks: I)
     where
-        I: Iterator<Item = (SealedBlock, Arc<Vec<Receipt>>)>,
+        I: IntoIterator<Item = (SealedBlock, Arc<Vec<Receipt>>)>,
     {
         let mut entries = self.inner.entries.write().await;
 

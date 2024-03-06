@@ -26,7 +26,7 @@ macro_rules! generate_static_file_func {
                 /// * `tx`: Database transaction.
                 /// * `range`: Data range for columns in tables.
                 /// * `additional`: Additional columns which can't be straight straightforwardly walked on.
-                /// * `keys`: Iterator of keys (eg. `TxHash` or `BlockHash`) with length equal to `row_count` and ordered by future column insertion from `range`.
+                /// * `keys`: IntoIterator of keys (eg. `TxHash` or `BlockHash`) with length equal to `row_count` and ordered by future column insertion from `range`.
                 /// * `dict_compression_set`: Sets of column data for compression dictionaries. Max size is 2GB. Row count is independent.
                 /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
                 /// * `nippy_jar`: Static File object responsible for file generation.

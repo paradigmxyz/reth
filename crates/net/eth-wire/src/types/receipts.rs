@@ -45,7 +45,7 @@ mod tests {
     fn roundtrip_eip1559() {
         let receipts = Receipts(vec![vec![ReceiptWithBloom {
             receipt: Receipt {
-                tx_type: TxType::EIP1559,
+                tx_type: TxType::Eip1559,
                 success: false,
                 cumulative_gas_used: 0,
                 logs: vec![],

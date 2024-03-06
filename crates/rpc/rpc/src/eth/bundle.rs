@@ -1,13 +1,10 @@
 //! `Eth` bundle implementation and helpers.
 
-use crate::{
-    eth::{
-        error::{EthApiError, EthResult, RpcInvalidTransactionError},
-        revm_utils::FillableTransaction,
-        utils::recover_raw_transaction,
-        EthTransactions,
-    },
-    BlockingTaskGuard,
+use crate::eth::{
+    error::{EthApiError, EthResult, RpcInvalidTransactionError},
+    revm_utils::FillableTransaction,
+    utils::recover_raw_transaction,
+    EthTransactions,
 };
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
@@ -18,6 +15,7 @@ use reth_primitives::{
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::EthCallBundleApiServer;
 use reth_rpc_types::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
+use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::CacheDB,
     primitives::{ResultAndState, TxEnv},

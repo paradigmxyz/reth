@@ -25,7 +25,7 @@ use tracing::*;
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
 ///
-/// The body stage downloads block bodies for all block headers stored locally in the database.
+/// The body stage downloads block bodies for all block headers stored locally in storage.
 ///
 /// # Empty blocks
 ///
@@ -33,7 +33,7 @@ use tracing::*;
 /// no transactions will not have a block body downloaded for them, since it would be meaningless to
 /// do so.
 ///
-/// This also means that if there is no body for the block in the database (assuming the
+/// This also means that if there is no body for the block in storage (assuming the
 /// block number <= the synced block of this stage), then the block can be considered empty.
 ///
 /// # Tables
@@ -343,7 +343,10 @@ fn stage_checkpoint<DB: Database>(
 ) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
         processed: provider.count_entries::<tables::BlockBodyIndices>()? as u64,
-        total: (provider.count_entries::<tables::Headers>()? as u64).saturating_sub(1),
+        // Count only static files entries. If we count the database entries too, we may have
+        // duplicates. We're sure that the static files have all entries that database has,
+        // because we run the `StaticFileProducer` before starting the pipeline.
+        total: provider.static_file_provider().count_entries::<tables::Headers>()? as u64,
     })
 }
 
@@ -393,7 +396,7 @@ mod tests {
                     total // seeded headers
                 }))
             }, done: false }) if block_number < 200 &&
-                processed == 1 + batch_size && total == previous_stage
+                processed == batch_size + 1 && total == previous_stage + 1
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -432,7 +435,7 @@ mod tests {
                     }))
                 },
                 done: true
-            }) if processed == total && total == previous_stage
+            }) if processed + 1 == total && total == previous_stage + 1
         );
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
@@ -468,7 +471,7 @@ mod tests {
                     total
                 }))
             }, done: false }) if block_number >= 10 &&
-                processed == 1 + batch_size && total == previous_stage
+                processed - 1 == batch_size && total == previous_stage + 1
         );
         let first_run_checkpoint = first_run.unwrap().checkpoint;
 
@@ -489,7 +492,7 @@ mod tests {
                     total
                 }))
             }, done: true }) if block_number > first_run_checkpoint.block_number &&
-                processed == total && total == previous_stage
+                processed + 1 == total && total == previous_stage + 1
         );
         assert_matches!(
             runner.validate_execution(input, output.ok()),
@@ -530,7 +533,7 @@ mod tests {
                     total
                 }))
             }, done: true }) if block_number == previous_stage &&
-                processed == total && total == previous_stage
+                processed + 1 == total && total == previous_stage + 1
         );
         let checkpoint = output.unwrap().checkpoint;
         runner
@@ -556,7 +559,7 @@ mod tests {
                     processed: 1,
                     total
                 }))
-            }}) if total == previous_stage
+            }}) if total == previous_stage + 1
         );
 
         assert_matches!(runner.validate_unwind(input), Ok(_), "unwind validation");

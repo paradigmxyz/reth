@@ -34,7 +34,7 @@ mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 use reth_db::mdbx::DatabaseArguments;
 
-/// A common provider that fetches data from a database.
+/// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
 #[derive(Debug, Clone)]
