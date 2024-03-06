@@ -37,9 +37,6 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 4 * DEFAULT_BUDGE
 pub const DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS: u32 =
     DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS;
 
-/// Budget pool once.
-pub const BUDGET_ONCE: u32 = 1;
-
 /// Polls the given stream. Breaks with `true` if there maybe is more work.
 #[macro_export]
 macro_rules! poll_nested_stream_with_budget {

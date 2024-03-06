@@ -16,10 +16,7 @@
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the RLPx session.
 
 use crate::{
-    budget::{
-        BUDGET_ONCE, DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL,
-        DEFAULT_BUDGET_TRY_DRAIN_SWARM,
-    },
+    budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
     discovery::Discovery,
     error::{NetworkError, ServiceKind},
@@ -906,6 +903,11 @@ where
 
         let this = self.get_mut();
 
+        // poll new block imports (expected to be a noop for POS)
+        while let Poll::Ready(outcome) = this.block_import.poll(cx) {
+            this.on_block_import_result(outcome);
+        }
+
         // These loops drive the entire state of network and does a lot of work. Under heavy load
         // (many messages/events), data may arrive faster than it can be processed (incoming
         // messages/requests -> events), and it is possible that more data has already arrived by
@@ -924,15 +926,6 @@ where
         // iterations in << 100µs in most cases. On average it requires ~50µs, which is inside the
         // range of what's recommended as rule of thumb.
         // <https://ryhl.io/blog/async-what-is-blocking/>
-
-        // poll new block imports (expected to be a noop for POS)
-        let maybe_more_block_imports = poll_nested_stream_with_budget!(
-            "net",
-            "Block imports stream",
-            BUDGET_ONCE,
-            this.block_import.poll_next_unpin(cx),
-            |outcome| this.on_block_import_result(outcome),
-        );
 
         // process incoming messages from a handle (`TransactionsManager` has one)
         //
@@ -961,7 +954,7 @@ where
             start_network_handle.elapsed() - poll_durations.acc_network_handle;
 
         // all streams are fully drained and import futures pending
-        if maybe_more_block_imports || maybe_more_handle_messages || maybe_more_swarm_events {
+        if maybe_more_handle_messages || maybe_more_swarm_events {
             // make sure we're woken up again
             cx.waker().wake_by_ref();
             return Poll::Pending

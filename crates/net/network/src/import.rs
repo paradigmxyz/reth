@@ -1,22 +1,22 @@
 //! This module provides an abstraction over block import in the form of the `BlockImport` trait.
 
 use crate::message::NewBlockMessage;
-use futures::Stream;
 use reth_primitives::PeerId;
 use std::task::{Context, Poll};
 
 /// Abstraction over block import.
-pub trait BlockImport:
-    std::fmt::Debug + Send + Sync + Stream<Item = BlockImportOutcome> + Unpin
-{
+pub trait BlockImport: std::fmt::Debug + Send + Sync {
     /// Invoked for a received `NewBlock` broadcast message from the peer.
     ///
     /// > When a `NewBlock` announcement message is received from a peer, the client first verifies
     /// > the basic header validity of the block, checking whether the proof-of-work value is valid.
     ///
     /// This is supposed to start verification. The results are then expected to be returned via
-    /// polling the `BlockImport` stream.
+    /// [`BlockImport::poll`].
     fn on_new_block(&mut self, peer_id: PeerId, incoming_block: NewBlockMessage);
+
+    /// Returns the results of a [`BlockImport::on_new_block`]
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BlockImportOutcome>;
 }
 
 /// Outcome of the [`BlockImport`]'s block handling.
@@ -62,16 +62,8 @@ pub struct ProofOfStakeBlockImport;
 
 impl BlockImport for ProofOfStakeBlockImport {
     fn on_new_block(&mut self, _peer_id: PeerId, _incoming_block: NewBlockMessage) {}
-}
 
-impl Stream for ProofOfStakeBlockImport {
-    type Item = BlockImportOutcome;
-
-    /// Returns the results of a [`BlockImport::on_new_block`], i.e. nothing.
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockImportOutcome> {
         Poll::Pending
     }
 }
