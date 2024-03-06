@@ -549,7 +549,7 @@ impl ChainSpec {
         // * blob gas used to provided genesis or 0x0
         // * excess blob gas to provided genesis or 0x0
         let (parent_beacon_block_root, blob_gas_used, excess_blob_gas) =
-            if self.fork(Hardfork::Cancun).active_at_timestamp(self.genesis.timestamp) {
+            if self.is_cancun_active_at_timestamp(self.genesis.timestamp) {
                 let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
                 let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
                 (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
