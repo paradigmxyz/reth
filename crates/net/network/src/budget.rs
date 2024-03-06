@@ -42,7 +42,7 @@ pub const BUDGET_ONCE: u32 = 1;
 
 /// Polls the given stream. Breaks with `true` if there maybe is more work.
 #[macro_export]
-macro_rules! poll_nested_stream_with_yield_points {
+macro_rules! poll_nested_stream_with_budget {
     ($target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(, $on_ready_none:expr;)? $(,)?) => {{
         let mut budget: u32 = $budget;
 
@@ -69,11 +69,11 @@ macro_rules! poll_nested_stream_with_yield_points {
 
 /// Metered poll of the given stream. Breaks with `true` if there maybe is more work.
 #[macro_export]
-macro_rules! metered_poll_nested_stream_with_yield_points {
+macro_rules! metered_poll_nested_stream_with_budget {
     ($acc:ident, $target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(, $on_ready_none:expr;)? $(,)?) => {{
         duration_metered_exec!(
             {
-                $crate::poll_nested_stream_with_yield_points!($target, $label, $budget, $poll_stream, $on_ready_some $(, $on_ready_none;)?)
+                $crate::poll_nested_stream_with_budget!($target, $label, $budget, $poll_stream, $on_ready_some $(, $on_ready_none;)?)
             },
             $acc
         )

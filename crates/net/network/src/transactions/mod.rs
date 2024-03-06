@@ -37,7 +37,7 @@ use crate::{
     duration_metered_exec,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
-    metered_poll_nested_stream_with_yield_points,
+    metered_poll_nested_stream_with_budget,
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     NetworkEvents, NetworkHandle,
 };
@@ -1176,7 +1176,7 @@ where
 
         // try drain pool imports (flush txns to pool)
         let acc = &mut poll_durations.acc_pending_imports;
-        let maybe_more_pool_imports = metered_poll_nested_stream_with_yield_points!(
+        let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
             acc,
             "net::tx",
             "Pool imports stream",
@@ -1208,7 +1208,7 @@ where
 
         // advance network/peer related events (update peers)
         let acc = &mut poll_durations.acc_network_events;
-        let maybe_more_network_events = metered_poll_nested_stream_with_yield_points!(
+        let maybe_more_network_events = metered_poll_nested_stream_with_budget!(
             acc,
             "net::tx",
             "Network events",
@@ -1221,7 +1221,7 @@ where
         // valid), to propagate them (inform peers which txns we have seen)
         let mut new_txs = Vec::new();
         let acc = &mut poll_durations.acc_imported_txns;
-        let maybe_more_pending_txns = metered_poll_nested_stream_with_yield_points!(
+        let maybe_more_pending_txns = metered_poll_nested_stream_with_budget!(
             acc,
             "net::tx",
             "Pending transactions stream",
@@ -1236,7 +1236,7 @@ where
         // try drain fetching transaction events (flush transaction fetcher and queue for
         // import to pool)
         let acc = &mut poll_durations.acc_fetch_events;
-        let maybe_more_tx_fetch_events = metered_poll_nested_stream_with_yield_points!(
+        let maybe_more_tx_fetch_events = metered_poll_nested_stream_with_budget!(
             acc,
             "net::tx",
             "Transaction fetch events",
@@ -1265,7 +1265,7 @@ where
         // try drain incoming transaction events (stream new txns/announcements from network
         // manager and queue for import to pool/fetch txns)
         let acc = &mut poll_durations.acc_tx_events;
-        let maybe_more_tx_events = metered_poll_nested_stream_with_yield_points!(
+        let maybe_more_tx_events = metered_poll_nested_stream_with_budget!(
             acc,
             "net::tx",
             "Commands channel",
@@ -1298,7 +1298,7 @@ where
 
         // try drain commands (propagate/fetch/serve txns)
         let acc = &mut poll_durations.acc_cmds;
-        let maybe_more_commands = metered_poll_nested_stream_with_yield_points!(
+        let maybe_more_commands = metered_poll_nested_stream_with_budget!(
             acc,
             "net::tx",
             "Commands channel",

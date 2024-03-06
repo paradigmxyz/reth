@@ -30,7 +30,7 @@ use crate::{
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::{PeersHandle, PeersManager},
-    poll_nested_stream_with_yield_points,
+    poll_nested_stream_with_budget,
     protocol::IntoRlpxSubProtocol,
     session::SessionManager,
     state::NetworkState,
@@ -926,7 +926,7 @@ where
         // <https://ryhl.io/blog/async-what-is-blocking/>
 
         // poll new block imports (expected to be a noop for POS)
-        let maybe_more_block_imports = poll_nested_stream_with_yield_points!(
+        let maybe_more_block_imports = poll_nested_stream_with_budget!(
             "net",
             "Block imports stream",
             BUDGET_ONCE,
@@ -939,7 +939,7 @@ where
         // will only be closed if the channel was deliberately closed since we always have an
         // instance of `NetworkHandle`
         let start_network_handle = Instant::now();
-        let maybe_more_handle_messages = poll_nested_stream_with_yield_points!(
+        let maybe_more_handle_messages = poll_nested_stream_with_budget!(
             "net",
             "Network message channel",
             DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL,
@@ -950,7 +950,7 @@ where
         poll_durations.acc_network_handle = start_network_handle.elapsed();
 
         // process incoming messages from the network
-        let maybe_more_swarm_events = poll_nested_stream_with_yield_points!(
+        let maybe_more_swarm_events = poll_nested_stream_with_budget!(
             "net",
             "Swarm events stream",
             DEFAULT_BUDGET_TRY_DRAIN_SWARM,

@@ -2,7 +2,7 @@
 
 use crate::{
     budget::DEFAULT_BUDGET_TRY_DRAIN_STREAM, metrics::EthRequestHandlerMetrics, peers::PeersHandle,
-    poll_nested_stream_with_yield_points,
+    poll_nested_stream_with_budget,
 };
 use futures::StreamExt;
 use reth_eth_wire::{
@@ -243,7 +243,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        let maybe_more_incoming_requests = poll_nested_stream_with_yield_points!(
+        let maybe_more_incoming_requests = poll_nested_stream_with_budget!(
             "net::eth",
             "Incoming eth requests stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
