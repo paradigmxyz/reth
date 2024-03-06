@@ -16,7 +16,8 @@ use crate::{
     PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
     TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use reth_primitives::{Address, BlobTransactionSidecar, TxHash};
+use reth_eth_wire::HandleMempoolData;
+use reth_primitives::{Address, BlobTransactionSidecar, TxHash, U256};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -28,7 +29,6 @@ use tokio::sync::{mpsc, mpsc::Receiver};
 #[non_exhaustive]
 pub struct NoopTransactionPool;
 
-#[async_trait::async_trait]
 impl TransactionPool for NoopTransactionPool {
     type Transaction = EthPooledTransaction;
 
@@ -67,14 +67,14 @@ impl TransactionPool for NoopTransactionPool {
         &self,
         _origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> PoolResult<Vec<PoolResult<TxHash>>> {
-        Ok(transactions
+    ) -> Vec<PoolResult<TxHash>> {
+        transactions
             .into_iter()
             .map(|transaction| {
                 let hash = *transaction.hash();
                 Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
             })
-            .collect())
+            .collect()
     }
 
     fn transaction_event_listener(&self, _tx_hash: TxHash) -> Option<TransactionEvents> {
@@ -134,6 +134,13 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn get_pooled_transaction_element(
+        &self,
+        _tx_hash: TxHash,
+    ) -> Option<PooledTransactionsElement> {
+        None
+    }
+
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
@@ -173,7 +180,11 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
-    fn retain_unknown(&self, _hashes: &mut Vec<TxHash>) {}
+    fn retain_unknown<A>(&self, _announcement: &mut A)
+    where
+        A: HandleMempoolData,
+    {
+    }
 
     fn get(&self, _tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         None
@@ -190,6 +201,14 @@ impl TransactionPool for NoopTransactionPool {
         _sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
+    }
+
+    fn get_transactions_by_sender_and_nonce(
+        &self,
+        _sender: Address,
+        _nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        None
     }
 
     fn unique_senders(&self) -> HashSet<Address> {
@@ -233,7 +252,6 @@ pub struct MockTransactionValidator<T> {
     _marker: PhantomData<T>,
 }
 
-#[async_trait::async_trait]
 impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
 
@@ -242,16 +260,10 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        #[cfg(feature = "optimism")]
-        if transaction.is_deposit() {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                reth_primitives::InvalidTransactionError::TxTypeNotSupported.into(),
-            )
-        }
-
+        // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
+        // overdraft
         TransactionValidationOutcome::Valid {
-            balance: Default::default(),
+            balance: U256::MAX,
             state_nonce: 0,
             transaction: ValidTransaction::Valid(transaction),
             propagate: match origin {
@@ -285,7 +297,7 @@ pub struct NoopInsertError {
 }
 
 impl NoopInsertError {
-    fn new(tx: EthPooledTransaction) -> Self {
+    const fn new(tx: EthPooledTransaction) -> Self {
         Self { tx }
     }
 

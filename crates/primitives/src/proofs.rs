@@ -5,9 +5,8 @@ use crate::{
     keccak256,
     trie::{HashBuilder, Nibbles, TrieAccount},
     Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned, Withdrawal,
-    B256,
+    B256, U256,
 };
-use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use bytes::{BufMut, BytesMut};
 use itertools::Itertools;
@@ -69,14 +68,13 @@ pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
 }
 
 /// Calculates the receipt root for a header.
-#[cfg(not(feature = "optimism"))]
 pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
 /// Calculates the receipt root for a header.
 #[cfg(feature = "optimism")]
-pub fn calculate_receipt_root(
+pub fn calculate_receipt_root_optimism(
     receipts: &[ReceiptWithBloom],
     chain_spec: &crate::ChainSpec,
     timestamp: u64,
@@ -109,7 +107,6 @@ pub fn calculate_receipt_root(
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
 /// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
-#[cfg(not(feature = "optimism"))]
 pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| {
         ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
@@ -120,7 +117,7 @@ pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
 ///
 /// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
 #[cfg(feature = "optimism")]
-pub fn calculate_receipt_root_ref(
+pub fn calculate_receipt_root_ref_optimism(
     receipts: &[&Receipt],
     chain_spec: &crate::ChainSpec,
     timestamp: u64,
@@ -264,12 +261,8 @@ pub mod triehash {
 mod tests {
     use super::*;
     use crate::{
-        bloom,
-        constants::EMPTY_ROOT_HASH,
-        hex_literal::hex,
-        proofs::{calculate_receipt_root, calculate_transaction_root},
-        Address, Block, GenesisAccount, Log, Receipt, ReceiptWithBloom, TxType, B256, GOERLI,
-        HOLESKY, MAINNET, SEPOLIA, U256,
+        bloom, constants::EMPTY_ROOT_HASH, hex_literal::hex, Block, GenesisAccount, Log, TxType,
+        GOERLI, HOLESKY, MAINNET, SEPOLIA,
     };
     use alloy_primitives::b256;
     use alloy_rlp::Decodable;
@@ -294,7 +287,7 @@ mod tests {
     #[cfg(feature = "optimism")]
     #[test]
     fn check_optimism_receipt_root() {
-        use crate::{Bloom, Bytes, OP_GOERLI};
+        use crate::{Bloom, Bytes, BASE_SEPOLIA};
 
         let cases = [
             // Deposit nonces didn't exist in Bedrock; No need to strip. For the purposes of this
@@ -302,7 +295,7 @@ mod tests {
             (
                 "bedrock",
                 1679079599,
-                b256!("6eefbb5efb95235476654a8bfbf8cb64a4f5f0b0c80b700b0c5964550beee6d7"),
+                b256!("e255fed45eae7ede0556fe4fabc77b0d294d18781a5a581cab09127bc4cd9ffb"),
             ),
             // Deposit nonces introduced in Regolith. They weren't included in the receipt RLP,
             // so we need to strip them - the receipt root will differ.
@@ -543,13 +536,14 @@ mod tests {
                     bloom: Bloom(hex!("00000000000000000000000000000000400000000000000000000000000000000000004000000000000001000000000000000002000000000100000000000000000000000000000000000008000000000000000000000000000000000000000004000000020000000000000000000800000000000000000000000010200100200008000002000000000000000000800000000000000000000002000000000000000000000000000000080000000000000000000000004000000000000000000000000002000000000000000000000000000000000000200000000000000020002000000000000000002000000000000000000000000000000000000000000000").into()),
                 },
             ];
-            let root = calculate_receipt_root(&receipts, OP_GOERLI.as_ref(), case.1);
+            let root = calculate_receipt_root_optimism(&receipts, BASE_SEPOLIA.as_ref(), case.1);
             assert_eq!(root, case.2);
         }
     }
 
+    #[cfg(feature = "optimism")]
     #[test]
-    fn check_receipt_root() {
+    fn check_receipt_root_optimism() {
         let logs = vec![Log { address: Address::ZERO, topics: vec![], data: Default::default() }];
         let bloom = bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001");
         let receipt = ReceiptWithBloom {
@@ -558,21 +552,32 @@ mod tests {
                 success: true,
                 cumulative_gas_used: 102068,
                 logs,
-                #[cfg(feature = "optimism")]
                 deposit_nonce: None,
-                #[cfg(feature = "optimism")]
                 deposit_receipt_version: None,
             },
             bloom,
         };
         let receipt = vec![receipt];
-        let root = calculate_receipt_root(
-            &receipt,
-            #[cfg(feature = "optimism")]
-            crate::OP_GOERLI.as_ref(),
-            #[cfg(feature = "optimism")]
-            0,
-        );
+        let root = calculate_receipt_root_optimism(&receipt, crate::BASE_SEPOLIA.as_ref(), 0);
+        assert_eq!(root, b256!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"));
+    }
+
+    #[cfg(not(feature = "optimism"))]
+    #[test]
+    fn check_receipt_root_optimism() {
+        let logs = vec![Log { address: Address::ZERO, topics: vec![], data: Default::default() }];
+        let bloom = bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001");
+        let receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::EIP2930,
+                success: true,
+                cumulative_gas_used: 102068,
+                logs,
+            },
+            bloom,
+        };
+        let receipt = vec![receipt];
+        let root = calculate_receipt_root(&receipt);
         assert_eq!(root, b256!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"));
     }
 
@@ -625,10 +630,9 @@ mod tests {
 
         for (test_addr, expected_root) in fixtures {
             let mut genesis_alloc = HashMap::new();
-            genesis_alloc.insert(
-                test_addr,
-                GenesisAccount { nonce: None, balance: U256::MAX, code: None, storage: None },
-            );
+            genesis_alloc
+                .insert(test_addr, GenesisAccount { balance: U256::MAX, ..Default::default() });
+
             let root = state_root_unhashed(genesis_alloc);
 
             assert_eq!(root, expected_root);

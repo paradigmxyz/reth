@@ -33,6 +33,10 @@ const ALREADY_SEEN_TRANSACTION_REPUTATION_CHANGE: i32 = 0;
 /// The reputation change to apply to a peer which violates protocol rules: minimal reputation
 const BAD_PROTOCOL_REPUTATION_CHANGE: i32 = i32::MIN;
 
+/// The reputation change to apply to a peer that sent a bad announcement.
+// todo: current value is a hint, needs to be set properly
+const BAD_ANNOUNCEMENT_REPUTATION_CHANGE: i32 = REPUTATION_UNIT;
+
 /// Returns `true` if the given reputation is below the [`BANNED_REPUTATION`] threshold
 #[inline]
 pub(crate) fn is_banned_reputation(reputation: i32) -> bool {
@@ -42,6 +46,7 @@ pub(crate) fn is_banned_reputation(reputation: i32) -> bool {
 /// How the [`ReputationChangeKind`] are weighted.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct ReputationChangeWeights {
     /// Weight for [`ReputationChangeKind::BadMessage`]
     pub bad_message: Reputation,
@@ -59,6 +64,8 @@ pub struct ReputationChangeWeights {
     pub failed_to_connect: Reputation,
     /// Weight for [`ReputationChangeKind::Dropped`]
     pub dropped: Reputation,
+    /// Weight for [`ReputationChangeKind::BadAnnouncement`]
+    pub bad_announcement: Reputation,
 }
 
 // === impl ReputationChangeWeights ===
@@ -78,6 +85,7 @@ impl ReputationChangeWeights {
             ReputationChangeKind::Dropped => self.dropped.into(),
             ReputationChangeKind::Reset => DEFAULT_REPUTATION.into(),
             ReputationChangeKind::Other(val) => val.into(),
+            ReputationChangeKind::BadAnnouncement => self.bad_announcement.into(),
         }
     }
 }
@@ -93,6 +101,7 @@ impl Default for ReputationChangeWeights {
             bad_protocol: BAD_PROTOCOL_REPUTATION_CHANGE,
             failed_to_connect: FAILED_TO_CONNECT_REPUTATION_CHANGE,
             dropped: REMOTE_DISCONNECT_REPUTATION_CHANGE,
+            bad_announcement: BAD_ANNOUNCEMENT_REPUTATION_CHANGE,
         }
     }
 }

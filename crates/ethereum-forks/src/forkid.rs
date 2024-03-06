@@ -5,8 +5,12 @@
 use crate::Head;
 use alloy_primitives::{hex, BlockNumber, B256};
 use alloy_rlp::*;
+#[cfg(any(test, feature = "arbitrary"))]
+use arbitrary::Arbitrary;
 use crc::*;
-use reth_codecs::derive_arbitrary;
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest_derive::Arbitrary as PropTestArbitrary;
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -19,18 +23,10 @@ use thiserror::Error;
 const CRC_32_IEEE: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 
 /// `CRC32` hash of all previous forks starting from genesis block.
-#[derive_arbitrary(rlp)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(PropTestArbitrary, Arbitrary))]
 #[derive(
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    RlpMaxEncodedLen,
-    Serialize,
-    Deserialize,
+    Clone, Copy, PartialEq, Eq, Hash, RlpEncodableWrapper, RlpDecodableWrapper, RlpMaxEncodedLen,
 )]
 pub struct ForkHash(pub [u8; 4]);
 
@@ -72,7 +68,8 @@ where
 }
 
 /// How to filter forks.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ForkFilterKey {
     /// By block number activation.
     Block(BlockNumber),
@@ -89,7 +86,7 @@ impl PartialOrd for ForkFilterKey {
 impl Ord for ForkFilterKey {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (ForkFilterKey::Block(a), ForkFilterKey::Block(b)) => a.cmp(b),
+            (ForkFilterKey::Block(a), ForkFilterKey::Block(b)) |
             (ForkFilterKey::Time(a), ForkFilterKey::Time(b)) => a.cmp(b),
             (ForkFilterKey::Block(_), ForkFilterKey::Time(_)) => Ordering::Less,
             _ => Ordering::Greater,
@@ -108,20 +105,10 @@ impl From<ForkFilterKey> for u64 {
 
 /// A fork identifier as defined by EIP-2124.
 /// Serves as the chain compatibility identifier.
-#[derive_arbitrary(rlp)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    RlpEncodable,
-    RlpDecodable,
-    RlpMaxEncodedLen,
-    Serialize,
-    Deserialize,
-)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(PropTestArbitrary, Arbitrary))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable, RlpMaxEncodedLen)]
+
 pub struct ForkId {
     /// CRC32 checksum of the all fork blocks and timestamps from genesis.
     pub hash: ForkHash,
@@ -154,7 +141,8 @@ pub enum ValidationError {
 
 /// Filter that describes the state of blockchain and can be used to check incoming `ForkId`s for
 /// compatibility.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkFilter {
     /// The forks in the filter are keyed by `(timestamp, block)`. This ensures that block-based
     /// forks (`time == 0`) are processed before time-based forks as required by
@@ -191,6 +179,8 @@ impl ForkFilter {
                 ForkFilterKey::Block(_) => true,
                 ForkFilterKey::Time(time) => *time > genesis_timestamp,
             })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
             .fold(
                 (BTreeMap::from([(ForkFilterKey::Block(0), genesis_fork_hash)]), genesis_fork_hash),
                 |(mut acc, base_hash), key| {
@@ -201,8 +191,10 @@ impl ForkFilter {
             )
             .0;
 
+        // Compute cache based on filtered forks and the current head.
         let cache = Cache::compute_cache(&forks, head);
 
+        // Create and return a new `ForkFilter`.
         Self { forks, head, cache }
     }
 
@@ -221,16 +213,14 @@ impl ForkFilter {
             head_in_past || head_in_future
         };
 
-        let mut transition = None;
-
         // recompute the cache
-        if recompute_cache {
+        let transition = if recompute_cache {
             let past = self.current();
-
             self.cache = Cache::compute_cache(&self.forks, head);
-
-            transition = Some(ForkTransition { current: self.current(), past })
-        }
+            Some(ForkTransition { current: self.current(), past })
+        } else {
+            None
+        };
 
         self.head = head;
 
@@ -330,7 +320,8 @@ pub struct ForkTransition {
     pub past: ForkId,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Cache {
     // An epoch is a period between forks.
     // When we progress from one fork to the next one we move to the next epoch.
@@ -344,19 +335,23 @@ struct Cache {
 impl Cache {
     /// Compute cache.
     fn compute_cache(forks: &BTreeMap<ForkFilterKey, ForkHash>, head: Head) -> Self {
+        // Prepare vectors to store past and future forks.
         let mut past = Vec::with_capacity(forks.len());
         let mut future = Vec::with_capacity(forks.len());
 
+        // Initialize variables to track the epoch range.
         let mut epoch_start = ForkFilterKey::Block(0);
         let mut epoch_end = None;
+
+        // Iterate through forks and categorize them into past and future.
         for (key, hash) in forks {
-            let active = if let ForkFilterKey::Block(block) = key {
-                *block <= head.number
-            } else if let ForkFilterKey::Time(time) = key {
-                *time <= head.timestamp
-            } else {
-                unreachable!()
+            // Check if the fork is active based on its type (Block or Time).
+            let active = match key {
+                ForkFilterKey::Block(block) => *block <= head.number,
+                ForkFilterKey::Time(time) => *time <= head.timestamp,
             };
+
+            // Categorize forks into past or future based on activity.
             if active {
                 epoch_start = *key;
                 past.push((*key, *hash));
@@ -368,11 +363,13 @@ impl Cache {
             }
         }
 
+        // Create ForkId using the last past fork's hash and the next epoch start.
         let fork_id = ForkId {
-            hash: past.last().expect("there is always at least one - genesis - fork hash; qed").1,
+            hash: past.last().expect("there is always at least one - genesis - fork hash").1,
             next: epoch_end.unwrap_or(ForkFilterKey::Block(0)).into(),
         };
 
+        // Return the computed cache.
         Self { epoch_start, epoch_end, past, future, fork_id }
     }
 }

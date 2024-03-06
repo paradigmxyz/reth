@@ -280,7 +280,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<S, E> CanDisconnect<Bytes> for MuxDemuxStream<S>
 where
     S: Sink<Bytes, Error = E> + CanDisconnect<Bytes> + Unpin + Send + Sync,
@@ -344,7 +343,6 @@ impl Sink<Bytes> for StreamClone {
     }
 }
 
-#[async_trait::async_trait]
 impl CanDisconnect<Bytes> for StreamClone {
     async fn disconnect(&mut self, _reason: DisconnectReason) -> Result<(), MuxDemuxError> {
         Err(CannotDisconnectP2PStream)
@@ -352,7 +350,7 @@ impl CanDisconnect<Bytes> for StreamClone {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::{net::SocketAddr, pin::Pin};
 
     use futures::{Future, SinkExt, StreamExt};

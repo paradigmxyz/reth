@@ -1,4 +1,4 @@
-#![allow(non_snake_case)]
+#![allow(missing_docs, non_snake_case, unreachable_pub)]
 
 use paste::paste;
 use reth_db::table::{Compress, Decode, Decompress, Encode, Table};
@@ -79,12 +79,12 @@ macro_rules! impl_iai {
 
 impl_iai!(
     CanonicalHeaders,
-    HeaderTD,
+    HeaderTerminalDifficulties,
     HeaderNumbers,
     Headers,
     BlockBodyIndices,
     BlockOmmers,
-    TxHashNumber,
+    TransactionHashNumbers,
     Transactions,
     PlainStorageState,
     PlainAccountState

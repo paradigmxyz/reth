@@ -15,10 +15,9 @@ pub struct RawTable<T: Table> {
 }
 
 impl<T: Table> Table for RawTable<T> {
-    const NAME: &'static str = T::NAME;
+    const TABLE: crate::Tables = T::TABLE;
 
     type Key = RawKey<T::Key>;
-
     type Value = RawValue<T::Value>;
 }
 
@@ -30,10 +29,9 @@ pub struct RawDupSort<T: DupSort> {
 }
 
 impl<T: DupSort> Table for RawDupSort<T> {
-    const NAME: &'static str = T::NAME;
+    const TABLE: crate::Tables = T::TABLE;
 
     type Key = RawKey<T::Key>;
-
     type Value = RawValue<T::Value>;
 }
 
@@ -52,7 +50,13 @@ pub struct RawKey<K: Key> {
 impl<K: Key> RawKey<K> {
     /// Create new raw key.
     pub fn new(key: K) -> Self {
-        Self { key: K::encode(key).as_ref().to_vec(), _phantom: std::marker::PhantomData }
+        Self { key: K::encode(key).into(), _phantom: std::marker::PhantomData }
+    }
+
+    /// Creates a raw key from an existing `Vec`. Useful when we already have the encoded
+    /// key.
+    pub fn from_vec(vec: Vec<u8>) -> Self {
+        Self { key: vec, _phantom: std::marker::PhantomData }
     }
 
     /// Returns the decoded value.
@@ -104,13 +108,20 @@ impl<K: Key> Decode for RawKey<K> {
 pub struct RawValue<V: Value> {
     /// Inner compressed value
     value: Vec<u8>,
+    #[serde(skip)]
     _phantom: std::marker::PhantomData<V>,
 }
 
 impl<V: Value> RawValue<V> {
     /// Create new raw value.
     pub fn new(value: V) -> Self {
-        Self { value: V::compress(value).as_ref().to_vec(), _phantom: std::marker::PhantomData }
+        Self { value: V::compress(value).into(), _phantom: std::marker::PhantomData }
+    }
+
+    /// Creates a raw value from an existing `Vec`. Useful when we already have the encoded
+    /// value.
+    pub fn from_vec(vec: Vec<u8>) -> Self {
+        Self { value: vec, _phantom: std::marker::PhantomData }
     }
 
     /// Returns the decompressed value.

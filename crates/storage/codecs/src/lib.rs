@@ -5,21 +5,13 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(
-    missing_debug_implementations,
-    missing_docs,
-    unused_crate_dependencies,
-    unreachable_pub,
-    rustdoc::all
-)]
-#![deny(unused_must_use, rust_2018_idioms)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
+#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
-use alloc::vec::Vec;
-
-pub use codecs_derive::*;
+pub use reth_codecs_derive::*;
 
 use alloy_primitives::{Address, Bloom, Bytes, B256, B512, U256};
 use bytes::Buf;
@@ -185,9 +177,7 @@ where
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let Some(element) = self else {
-            return 0;
-        };
+        let Some(element) = self else { return 0 };
 
         // We don't know the length of the element until we compact it.
         let mut tmp = Vec::with_capacity(64);
@@ -255,7 +245,7 @@ impl Compact for U256 {
     #[inline]
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len == 0 {
-            return (U256::ZERO, buf);
+            return (U256::ZERO, buf)
         }
 
         let mut arr = [0; 32];
@@ -365,7 +355,7 @@ fn decode_varuint(buf: &[u8]) -> (usize, &[u8]) {
         let byte = buf[i];
         value |= usize::from(byte & 0x7F) << (i * 7);
         if byte < 0x80 {
-            return (value, &buf[i + 1..]);
+            return (value, &buf[i + 1..])
         }
     }
 
@@ -381,7 +371,6 @@ const fn decode_varuint_panic() -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, Bytes};
 
     #[test]
     fn compact_bytes() {

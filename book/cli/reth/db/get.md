@@ -4,16 +4,12 @@ Gets the content of a table for the given key
 
 ```bash
 $ reth db get --help
-Usage: reth db get [OPTIONS] <TABLE> <KEY>
+Usage: reth db get [OPTIONS] <COMMAND>
 
-Arguments:
-  <TABLE>
-          The table name
-          
-          NOTE: The dupsort tables are not supported now.
-
-  <KEY>
-          The key to get content for
+Commands:
+  mdbx         Gets the content of a database table for the given key
+  static-file  Gets the content of a static file segment for the given key
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
       --datadir <DATA_DIR>
@@ -26,9 +22,6 @@ Options:
           - macOS: `$HOME/Library/Application Support/reth/`
           
           [default: default]
-
-      --raw
-          Output bytes instead of human-readable decoded value
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
@@ -54,6 +47,36 @@ Options:
           Print help (see a summary with '-h')
 
 Logging:
+      --log.stdout.format <FORMAT>
+          The format to use for logs written to stdout
+          
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.stdout.filter <FILTER>
+          The filter to use for logs written to stdout
+          
+          [default: ]
+
+      --log.file.format <FORMAT>
+          The format to use for logs written to the log file
+          
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.file.filter <FILTER>
+          The filter to use for logs written to the log file
+          
+          [default: debug]
+
       --log.file.directory <PATH>
           The path to put log files in
           
@@ -68,11 +91,6 @@ Logging:
           The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
           
           [default: 5]
-
-      --log.file.filter <FILTER>
-          The filter to use for logs written to the log file
-          
-          [default: debug]
 
       --log.journald
           Write logs to journald

@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "A consensus impl for local testing purposes"
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-beacon-consensus.workspace = true
@@ -17,21 +20,13 @@ reth-provider.workspace = true
 reth-stages.workspace = true
 reth-revm.workspace = true
 reth-transaction-pool.workspace = true
+reth-node-api.workspace = true
 
 # async
 futures-util.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 tokio-stream.workspace = true
 tracing.workspace = true
-
-[dev-dependencies]
-reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth.workspace = true
-tempfile.workspace = true
-clap.workspace = true
-jsonrpsee.workspace = true
-eyre.workspace = true
-serde_json.workspace = true
 
 [features]
 # Included solely to ignore certain tests.

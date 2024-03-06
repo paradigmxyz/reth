@@ -69,8 +69,6 @@ The `optimism` feature flag in `op-reth` adds several new CLI flags to the `reth
 1. `--rollup.disable-tx-pool-gossip` - Disables gossiping of transactions in the mempool to peers. This can be ommitted for personal nodes, though providers should always opt to enable this flag.
 1. `--rollup.enable-genesis-walkback` - Disables setting the forkchoice status to tip on startup, making the `op-node` walk back to genesis and verify the integrity of the chain before starting to sync. This can be ommitted unless a corruption of local chainstate is suspected.
 
-Base's `rollup.json` files, which contain various configuration fields for the rollup, can be found in their [node][base-node] repository, under the respective L1 settlement layer's directory (`mainnet`, `goerli`, & `sepolia`).
-
 First, ensure that your L1 archival node is running and synced to tip. Then, start `op-reth` with the `--rollup.sequencer-http` flag set to the `Base Mainnet` sequencer endpoint:
 ```sh
 op-reth node \
@@ -85,9 +83,9 @@ op-reth node \
 Then, once `op-reth` has been started, start up the `op-node`:
 ```sh
 op-node \
+    --network="base-mainnet" \
     --l1=<your-L1-rpc> \
     --l2=http://localhost:9551 \
-    --rollup.config=/path/to/rollup.json \
     --l2.jwt-secret=/path/to/jwt.hex \
     --rpc.addr=0.0.0.0 \
     --rpc.port=7000 \
@@ -107,13 +105,13 @@ op-node \
 ```
 
 [l1-el-spec]: https://github.com/ethereum/execution-specs
-[rollup-node-spec]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/rollup-node.md
+[rollup-node-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/rollup-node.md
 [op-geth-forkdiff]: https://op-geth.optimism.io
-[sequencer]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/introduction.md#sequencers
-[op-stack-spec]: https://github.com/ethereum-optimism/optimism/tree/develop/specs
-[l2-el-spec]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/exec-engine.md
-[deposit-spec]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/deposits.md
-[derivation-spec]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/derivation.md
+[sequencer]: https://github.com/ethereum-optimism/specs/blob/main/specs/introduction.md#sequencers
+[op-stack-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs
+[l2-el-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/exec-engine.md
+[deposit-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/deposits.md
+[derivation-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/derivation.md
 
 [op-node-docker]: https://console.cloud.google.com/artifacts/docker/oplabs-tools-artifacts/us/images/op-node
 
@@ -121,5 +119,3 @@ op-node \
 [op-node]: https://github.com/ethereum-optimism/optimism/tree/develop/op-node
 [magi]: https://github.com/a16z/magi
 [hildr]: https://github.com/optimism-java/hildr
-
-[base-node]: https://github.com/base-org/node/tree/main

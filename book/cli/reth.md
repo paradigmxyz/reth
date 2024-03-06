@@ -4,12 +4,15 @@ Reth
 
 ```bash
 $ reth --help
+Reth
+
 Usage: reth [OPTIONS] <COMMAND>
 
 Commands:
   node          Start the node
   init          Initialize the database from a genesis file
   import        This syncs RLP encoded blocks from a file
+  dump-genesis  Dumps genesis block JSON configuration to stdout
   db            Database debugging utilities
   stage         Manipulate individual stages
   p2p           P2P Debugging utilities
@@ -47,6 +50,36 @@ Options:
           Print version
 
 Logging:
+      --log.stdout.format <FORMAT>
+          The format to use for logs written to stdout
+          
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.stdout.filter <FILTER>
+          The filter to use for logs written to stdout
+          
+          [default: ]
+
+      --log.file.format <FORMAT>
+          The format to use for logs written to the log file
+          
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.file.filter <FILTER>
+          The filter to use for logs written to the log file
+          
+          [default: debug]
+
       --log.file.directory <PATH>
           The path to put log files in
           
@@ -61,11 +94,6 @@ Logging:
           The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
           
           [default: 5]
-
-      --log.file.filter <FILTER>
-          The filter to use for logs written to the log file
-          
-          [default: debug]
 
       --log.journald
           Write logs to journald

@@ -1,5 +1,5 @@
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, SnapshotSegment,
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, StaticFileSegment,
     TxHashOrNumber, TxNumber, B256, U256,
 };
 use std::path::PathBuf;
@@ -113,15 +113,18 @@ pub enum ProviderError {
     /// Provider does not support this particular request.
     #[error("this provider does not support this request")]
     UnsupportedProvider,
-    /// Snapshot file is not found at specified path.
-    #[error("not able to find {0} snapshot file at {1}")]
-    MissingSnapshotPath(SnapshotSegment, PathBuf),
-    /// Snapshot file is not found for requested block.
-    #[error("not able to find {0} snapshot file for block number {1}")]
-    MissingSnapshotBlock(SnapshotSegment, BlockNumber),
-    /// Snapshot file is not found for requested transaction.
-    #[error("not able to find {0} snapshot file for transaction id {1}")]
-    MissingSnapshotTx(SnapshotSegment, TxNumber),
+    /// Static File is not found at specified path.
+    #[error("not able to find {0} static file at {1}")]
+    MissingStaticFilePath(StaticFileSegment, PathBuf),
+    /// Static File is not found for requested block.
+    #[error("not able to find {0} static file for block number {1}")]
+    MissingStaticFileBlock(StaticFileSegment, BlockNumber),
+    /// Static File is not found for requested transaction.
+    #[error("unable to find {0} static file for transaction id {1}")]
+    MissingStaticFileTx(StaticFileSegment, TxNumber),
+    /// Static File is finalized and cannot be written to.
+    #[error("unable to write block #{1} to finalized static file {0}")]
+    FinalizedStaticFile(StaticFileSegment, BlockNumber),
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]
     BlockNumberOverflow(U256),
@@ -149,4 +152,21 @@ pub struct RootMismatch {
     pub block_number: BlockNumber,
     /// The target block hash.
     pub block_hash: BlockHash,
+}
+
+/// Consistent database view error.
+#[derive(Error, Debug)]
+pub enum ConsistentViewError {
+    /// Error thrown on attempt to initialize provider while node is still syncing.
+    #[error("node is syncing. best block: {0}")]
+    Syncing(BlockNumber),
+    /// Error thrown on inconsistent database view.
+    #[error("inconsistent database state: {tip:?}")]
+    InconsistentView {
+        /// The tip diff.
+        tip: GotExpected<Option<B256>>,
+    },
+    /// Underlying provider error.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
 }

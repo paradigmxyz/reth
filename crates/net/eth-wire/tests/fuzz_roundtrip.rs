@@ -1,5 +1,8 @@
 //! Round-trip encoding fuzzing for the `eth-wire` crate.
 
+// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
+#![allow(unknown_lints, non_local_definitions)]
+
 use alloy_rlp::{Decodable, Encodable};
 use serde::Serialize;
 use std::fmt::Debug;
@@ -37,6 +40,7 @@ where
 macro_rules! fuzz_type_and_name {
     ( $x:ty, $fuzzname:ident ) => {
         /// Fuzzes the round-trip encoding of the type.
+        #[allow(non_snake_case)]
         #[test_fuzz]
         fn $fuzzname(thing: $x) {
             crate::roundtrip_fuzz::<$x>(thing)
@@ -44,7 +48,6 @@ macro_rules! fuzz_type_and_name {
     };
 }
 
-#[allow(non_snake_case)]
 #[cfg(any(test, feature = "bench"))]
 pub mod fuzz_rlp {
     use crate::roundtrip_encoding;
@@ -131,7 +134,7 @@ pub mod fuzz_rlp {
         RlpEncodableWrapper,
         RlpDecodableWrapper,
     )]
-    struct GetBlockHeadersWrapper(pub GetBlockHeaders);
+    struct GetBlockHeadersWrapper(GetBlockHeaders);
 
     impl Default for GetBlockHeadersWrapper {
         fn default() -> Self {

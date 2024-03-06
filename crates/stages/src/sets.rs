@@ -13,22 +13,32 @@
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::EvmProcessorFactory;
-//! # use reth_primitives::MAINNET;
+//! # use reth_primitives::{PruneModes, MAINNET};
+//! # use reth_node_ethereum::EthEvmConfig;
 //! # use reth_provider::test_utils::create_test_provider_factory;
+//! # use reth_static_file::StaticFileProducer;
 //!
-//! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone());
+//! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone(), EthEvmConfig::default());
 //! # let provider_factory = create_test_provider_factory();
+//! # let static_file_producer =  StaticFileProducer::new(
+//!     provider_factory.clone(),
+//!     provider_factory.static_file_provider(),
+//!     PruneModes::default(),
+//! );
 //! // Build a pipeline with all offline stages.
-//! # let pipeline = Pipeline::builder().add_stages(OfflineStages::new(executor_factory)).build(provider_factory);
+//! # let pipeline = Pipeline::builder()
+//!     .add_stages(OfflineStages::new(executor_factory))
+//!     .build(provider_factory, static_file_producer);
 //! ```
 //!
 //! ```ignore
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::{StageSet, sets::OfflineStages};
 //! # use reth_revm::EvmProcessorFactory;
+//! # use reth_node_ethereum::EthEvmConfig;
 //! # use reth_primitives::MAINNET;
 //! // Build a pipeline with all offline stages and a custom stage at the end.
-//! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone());
+//! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone(), EthEvmConfig::default());
 //! Pipeline::builder()
 //!     .add_stages(
 //!         OfflineStages::new(executor_factory).builder().add_stage(MyCustomStage)
@@ -40,7 +50,7 @@ use crate::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
+        StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -62,7 +72,6 @@ use std::sync::Arc;
 ///
 /// This expands to the following series of stages:
 /// - [`HeaderStage`]
-/// - [`TotalDifficultyStage`]
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
 /// - [`ExecutionStage`]
@@ -117,17 +126,20 @@ where
         default_offline: StageSetBuilder<DB>,
         executor_factory: EF,
     ) -> StageSetBuilder<DB> {
-        default_offline.add_set(OfflineStages::new(executor_factory)).add_stage(FinishStage)
+        StageSetBuilder::default()
+            .add_set(default_offline)
+            .add_set(OfflineStages::new(executor_factory))
+            .add_stage(FinishStage)
     }
 }
 
-impl<DB, Provider, H, B, EF> StageSet<DB> for DefaultStages<Provider, H, B, EF>
+impl<Provider, H, B, EF, DB> StageSet<DB> for DefaultStages<Provider, H, B, EF>
 where
-    DB: Database,
     Provider: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
     EF: ExecutorFactory,
+    DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
         Self::add_offline_stages(self.online.builder(), self.executor_factory)
@@ -175,12 +187,8 @@ where
     pub fn builder_with_headers<DB: Database>(
         headers: HeaderStage<Provider, H>,
         body_downloader: B,
-        consensus: Arc<dyn Consensus>,
     ) -> StageSetBuilder<DB> {
-        StageSetBuilder::default()
-            .add_stage(headers)
-            .add_stage(TotalDifficultyStage::new(consensus.clone()))
-            .add_stage(BodyStage::new(body_downloader))
+        StageSetBuilder::default().add_stage(headers).add_stage(BodyStage::new(body_downloader))
     }
 
     /// Create a new builder using the given bodies stage.
@@ -192,8 +200,7 @@ where
         consensus: Arc<dyn Consensus>,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(provider, header_downloader, mode))
-            .add_stage(TotalDifficultyStage::new(consensus.clone()))
+            .add_stage(HeaderStage::new(provider, header_downloader, mode, consensus.clone()))
             .add_stage(bodies)
     }
 }
@@ -207,8 +214,12 @@ where
 {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(self.provider, self.header_downloader, self.header_mode))
-            .add_stage(TotalDifficultyStage::new(self.consensus.clone()))
+            .add_stage(HeaderStage::new(
+                self.provider,
+                self.header_downloader,
+                self.header_mode,
+                self.consensus.clone(),
+            ))
             .add_stage(BodyStage::new(self.body_downloader))
     }
 }

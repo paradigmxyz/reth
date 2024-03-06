@@ -20,7 +20,6 @@ const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
 #[allow(dead_code)]
 pub(crate) fn load_vectors<T: Table>() -> Vec<(T::Key, Bytes, T::Value, Bytes)>
 where
-    T: Default,
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
@@ -54,7 +53,7 @@ pub(crate) fn set_up_db<T>(
     pair: &Vec<(<T as Table>::Key, Bytes, <T as Table>::Value, Bytes)>,
 ) -> DatabaseEnv
 where
-    T: Table + Default,
+    T: Table,
     T::Key: Default + Clone,
     T::Value: Default + Clone,
 {

@@ -1,8 +1,9 @@
 use crate::{
     providers::{
         state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
-        SnapshotProvider,
+        StaticFileProvider,
     },
+    to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
     HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, ProviderError,
@@ -10,90 +11,93 @@ use crate::{
     TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
-use reth_interfaces::{db::LogLevel, provider::ProviderResult, RethError, RethResult};
+use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
-    snapshot::HighestSnapshots,
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
     ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, B256, U256,
+    SealedHeader, StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
+    TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
-use revm::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::sync::watch;
 use tracing::trace;
 
 mod metrics;
 mod provider;
 
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+use reth_db::mdbx::DatabaseArguments;
 
 /// A common provider that fetches data from a database.
 ///
 /// This provider implements most provider or provider factory traits.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProviderFactory<DB> {
     /// Database
     db: DB,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
-    /// Snapshot Provider
-    snapshot_provider: Option<Arc<SnapshotProvider>>,
+    /// Static File Provider
+    static_file_provider: StaticFileProvider,
 }
-
-impl<DB: Clone> Clone for ProviderFactory<DB> {
-    fn clone(&self) -> Self {
-        Self {
-            db: self.db.clone(),
-            chain_spec: Arc::clone(&self.chain_spec),
-            snapshot_provider: self.snapshot_provider.clone(),
-        }
-    }
-}
-
-impl<DB: Database> ProviderFactory<DB> {}
 
 impl<DB> ProviderFactory<DB> {
     /// Create new database provider factory.
-    pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { db, chain_spec, snapshot_provider: None }
-    }
-
-    /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
-    /// instance.
-    pub fn new_with_database_path<P: AsRef<Path>>(
-        path: P,
+    pub fn new(
+        db: DB,
         chain_spec: Arc<ChainSpec>,
-        log_level: Option<LogLevel>,
-    ) -> RethResult<ProviderFactory<DatabaseEnv>> {
-        Ok(ProviderFactory::<DatabaseEnv> {
-            db: init_db(path, log_level).map_err(|e| RethError::Custom(e.to_string()))?,
+        static_files_path: PathBuf,
+    ) -> RethResult<ProviderFactory<DB>> {
+        Ok(Self {
+            db,
             chain_spec,
-            snapshot_provider: None,
+            static_file_provider: StaticFileProvider::new(static_files_path)?,
         })
     }
 
-    /// Database provider that comes with a shared snapshot provider.
-    pub fn with_snapshots(
-        mut self,
-        snapshots_path: PathBuf,
-        highest_snapshot_tracker: watch::Receiver<Option<HighestSnapshots>>,
-    ) -> ProviderResult<Self> {
-        self.snapshot_provider = Some(Arc::new(
-            SnapshotProvider::new(snapshots_path)?
-                .with_highest_tracker(Some(highest_snapshot_tracker)),
-        ));
-        Ok(self)
+    /// Enables metrics on the static file provider.
+    pub fn with_static_files_metrics(mut self) -> Self {
+        self.static_file_provider = self.static_file_provider.with_metrics();
+        self
     }
 
     /// Returns reference to the underlying database.
     pub fn db_ref(&self) -> &DB {
         &self.db
+    }
+
+    /// Returns static file provider
+    pub fn static_file_provider(&self) -> StaticFileProvider {
+        self.static_file_provider.clone()
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Consumes Self and returns DB
+    pub fn into_db(self) -> DB {
+        self.db
+    }
+}
+
+impl ProviderFactory<DatabaseEnv> {
+    /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
+    /// instance.
+    pub fn new_with_database_path<P: AsRef<Path>>(
+        path: P,
+        chain_spec: Arc<ChainSpec>,
+        args: DatabaseArguments,
+        static_files_path: PathBuf,
+    ) -> RethResult<Self> {
+        Ok(ProviderFactory::<DatabaseEnv> {
+            db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
+            chain_spec,
+            static_file_provider: StaticFileProvider::new(static_files_path)?,
+        })
     }
 }
 
@@ -101,47 +105,48 @@ impl<DB: Database> ProviderFactory<DB> {
     /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
+    #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
-        let mut provider = DatabaseProvider::new(self.db.tx()?, self.chain_spec.clone());
-
-        if let Some(snapshot_provider) = &self.snapshot_provider {
-            provider = provider.with_snapshot_provider(snapshot_provider.clone());
-        }
-
-        Ok(provider)
+        Ok(DatabaseProvider::new(
+            self.db.tx()?,
+            self.chain_spec.clone(),
+            self.static_file_provider.clone(),
+        ))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
     /// data from the database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
+    #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<DB>> {
-        let mut provider = DatabaseProvider::new_rw(self.db.tx_mut()?, self.chain_spec.clone());
-
-        if let Some(snapshot_provider) = &self.snapshot_provider {
-            provider = provider.with_snapshot_provider(snapshot_provider.clone());
-        }
-
-        Ok(DatabaseProviderRW(provider))
+        Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
+            self.db.tx_mut()?,
+            self.chain_spec.clone(),
+            self.static_file_provider.clone(),
+        )))
     }
 
     /// Storage provider for latest block
+    #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
+        Ok(Box::new(LatestStateProvider::new(self.db.tx()?, self.static_file_provider())))
     }
 
     /// Storage provider for state at that given block
     fn state_provider_by_block_number(
         &self,
+        provider: DatabaseProviderRO<DB>,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        let provider = self.provider()?;
-
         if block_number == provider.best_block_number().unwrap_or_default() &&
             block_number == provider.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(provider.into_tx())));
+            return Ok(Box::new(LatestStateProvider::new(
+                provider.into_tx(),
+                self.static_file_provider(),
+            )))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -152,7 +157,11 @@ impl<DB: Database> ProviderFactory<DB> {
         let storage_history_prune_checkpoint =
             provider.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProvider::new(provider.into_tx(), block_number);
+        let mut state_provider = HistoricalStateProvider::new(
+            provider.into_tx(),
+            block_number,
+            self.static_file_provider(),
+        );
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -179,19 +188,21 @@ impl<DB: Database> ProviderFactory<DB> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider = self.state_provider_by_block_number(block_number)?;
+        let provider = self.provider()?;
+        let state_provider = self.state_provider_by_block_number(provider, block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
         Ok(state_provider)
     }
 
     /// Storage provider for state at that given block hash
     pub fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
-        let block_number = self
-            .provider()?
+        let provider = self.provider()?;
+
+        let block_number = provider
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
-        let state_provider = self.state_provider_by_block_number(block_number)?;
+        let state_provider = self.state_provider_by_block_number(provider, block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block hash");
         Ok(state_provider)
     }
@@ -213,7 +224,12 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.provider()?.header_by_number(num)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Headers,
+            num,
+            |static_file| static_file.header_by_number(num),
+            || self.provider()?.header_by_number(num),
+        )
     }
 
     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
@@ -221,22 +237,44 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.provider()?.header_td_by_number(number)
+        if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
+            // if this block is higher than the final paris(merge) block, return the final paris
+            // difficulty
+            return Ok(Some(td))
+        }
+
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Headers,
+            number,
+            |static_file| static_file.header_td_by_number(number),
+            || self.provider()?.header_td_by_number(number),
+        )
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.provider()?.headers_range(range)
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Headers,
+            to_range(range),
+            |static_file, range, _| static_file.headers_range(range),
+            |range, _| self.provider()?.headers_range(range),
+            |_| true,
+        )
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        self.provider()?.sealed_header(number)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Headers,
+            number,
+            |static_file| static_file.sealed_header(number),
+            || self.provider()?.sealed_header(number),
+        )
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.provider()?.sealed_headers_range(range)
+        self.sealed_headers_while(range, |_| true)
     }
 
     fn sealed_headers_while(
@@ -244,13 +282,24 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.provider()?.sealed_headers_while(range, predicate)
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Headers,
+            to_range(range),
+            |static_file, range, predicate| static_file.sealed_headers_while(range, predicate),
+            |range, predicate| self.provider()?.sealed_headers_while(range, predicate),
+            predicate,
+        )
     }
 }
 
 impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.provider()?.block_hash(number)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Headers,
+            number,
+            |static_file| static_file.block_hash(number),
+            || self.provider()?.block_hash(number),
+        )
     }
 
     fn canonical_hashes_range(
@@ -258,7 +307,13 @@ impl<DB: Database> BlockHashReader for ProviderFactory<DB> {
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.provider()?.canonical_hashes_range(start, end)
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Headers,
+            start..end,
+            |static_file, range, _| static_file.canonical_hashes_range(range.start, range.end),
+            |range, _| self.provider()?.canonical_hashes_range(range.start, range.end),
+            |_| true,
+        )
     }
 }
 
@@ -331,14 +386,24 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        self.provider()?.transaction_by_id(id)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Transactions,
+            id,
+            |static_file| static_file.transaction_by_id(id),
+            || self.provider()?.transaction_by_id(id),
+        )
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.provider()?.transaction_by_id_no_hash(id)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Transactions,
+            id,
+            |static_file| static_file.transaction_by_id_no_hash(id),
+            || self.provider()?.transaction_by_id_no_hash(id),
+        )
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
@@ -391,7 +456,12 @@ impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
 
 impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.provider()?.receipt(id)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Receipts,
+            id,
+            |static_file| static_file.receipt(id),
+            || self.provider()?.receipt(id),
+        )
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
@@ -406,7 +476,13 @@ impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.provider()?.receipts_by_tx_range(range)
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Receipts,
+            to_range(range),
+            |static_file, range, _| static_file.receipts_by_tx_range(range),
+            |range, _| self.provider()?.receipts_by_tx_range(range),
+            |_| true,
+        )
     }
 }
 
@@ -415,7 +491,7 @@ impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
         &self,
         id: BlockHashOrNumber,
         timestamp: u64,
-    ) -> ProviderResult<Option<Vec<Withdrawal>>> {
+    ) -> ProviderResult<Option<Withdrawals>> {
         self.provider()?.withdrawals_by_block(id, timestamp)
     }
 
@@ -435,22 +511,30 @@ impl<DB: Database> StageCheckpointReader for ProviderFactory<DB> {
 }
 
 impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
-    fn fill_env_at(
+    fn fill_env_at<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        self.provider()?.fill_env_at(cfg, block_env, at)
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
+        self.provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
 
-    fn fill_env_with_header(
+    fn fill_env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnv,
+        cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         header: &Header,
-    ) -> ProviderResult<()> {
-        self.provider()?.fill_env_with_header(cfg, block_env, header)
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
+        self.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
 
     fn fill_block_env_at(
@@ -469,12 +553,28 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
         self.provider()?.fill_block_env_with_header(block_env, header)
     }
 
-    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockHashOrNumber) -> ProviderResult<()> {
-        self.provider()?.fill_cfg_env_at(cfg, at)
+    fn fill_cfg_env_at<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnvWithHandlerCfg,
+        at: BlockHashOrNumber,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
+        self.provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
 
-    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> ProviderResult<()> {
-        self.provider()?.fill_cfg_env_with_header(cfg, header)
+    fn fill_cfg_env_with_header<EvmConfig>(
+        &self,
+        cfg: &mut CfgEnvWithHandlerCfg,
+        header: &Header,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<()>
+    where
+        EvmConfig: ConfigureEvmEnv,
+    {
+        self.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }
 }
 
@@ -500,13 +600,16 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{
-        test_utils::create_test_provider_factory, BlockHashReader, BlockNumReader, BlockWriter,
-        HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
+        providers::StaticFileWriter, test_utils::create_test_provider_factory, BlockHashReader,
+        BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
     };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use rand::Rng;
-    use reth_db::{tables, test_utils::ERROR_TEMPDIR, transaction::DbTxMut, DatabaseEnv};
+    use reth_db::{
+        tables,
+        test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
+    };
     use reth_interfaces::{
         provider::ProviderError,
         test_utils::{
@@ -516,7 +619,8 @@ mod tests {
         RethError,
     };
     use reth_primitives::{
-        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, TxNumber, B256,
+        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, StaticFileSegment,
+        TxNumber, B256, U256,
     };
     use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
@@ -550,10 +654,11 @@ mod tests {
     #[test]
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
-        let factory = ProviderFactory::<DatabaseEnv>::new_with_database_path(
+        let factory = ProviderFactory::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
-            None,
+            Default::default(),
+            create_test_static_files_dir(),
         )
         .unwrap();
 
@@ -618,7 +723,7 @@ mod tests {
                 Ok(_)
             );
 
-            let senders = provider.get_or_take::<tables::TxSenders, true>(range.clone());
+            let senders = provider.get_or_take::<tables::TransactionSenders, true>(range.clone());
             assert_eq!(
                 senders,
                 Ok(range
@@ -657,8 +762,6 @@ mod tests {
         // Genesis
         let checkpoint = 0;
         let head = random_header(&mut rng, 0, None);
-        let gap_fill = random_header(&mut rng, 1, Some(head.hash()));
-        let gap_tip = random_header(&mut rng, 2, Some(gap_fill.hash()));
 
         // Empty database
         assert_matches!(
@@ -668,46 +771,14 @@ mod tests {
         );
 
         // Checkpoint and no gap
-        provider
-            .tx_ref()
-            .put::<tables::CanonicalHeaders>(head.number, head.hash())
-            .expect("failed to write canonical");
-        provider
-            .tx_ref()
-            .put::<tables::Headers>(head.number, head.clone().unseal())
-            .expect("failed to write header");
+        let mut static_file_writer =
+            provider.static_file_provider().latest_writer(StaticFileSegment::Headers).unwrap();
+        static_file_writer.append_header(head.header().clone(), U256::ZERO, head.hash()).unwrap();
+        static_file_writer.commit().unwrap();
+        drop(static_file_writer);
 
         let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
-
-        // Checkpoint and gap
-        provider
-            .tx_ref()
-            .put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
-            .expect("failed to write canonical");
-        provider
-            .tx_ref()
-            .put::<tables::Headers>(gap_tip.number, gap_tip.clone().unseal())
-            .expect("failed to write header");
-
-        let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
-        assert_eq!(gap.local_head, head);
-        assert_eq!(gap.target.tip(), gap_tip.parent_hash.into());
-
-        // Checkpoint and gap closed
-        provider
-            .tx_ref()
-            .put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
-            .expect("failed to write canonical");
-        provider
-            .tx_ref()
-            .put::<tables::Headers>(gap_fill.number, gap_fill.clone().unseal())
-            .expect("failed to write header");
-
-        assert_matches!(
-            provider.sync_gap(mode, checkpoint),
-            Err(RethError::Provider(ProviderError::InconsistentHeaderGap))
-        );
     }
 }

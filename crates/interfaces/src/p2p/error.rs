@@ -72,18 +72,29 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
 }
 
 /// Error variants that can happen when sending requests to a session.
+///
+/// Represents errors encountered when sending requests.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
-#[allow(missing_docs)]
 pub enum RequestError {
+    /// Closed channel to the peer.
     #[error("closed channel to the peer")]
+    /// Indicates the channel to the peer is closed.
     ChannelClosed,
+    /// Connection to a peer dropped while handling the request.
     #[error("connection to a peer dropped while handling the request")]
+    /// Represents a dropped connection while handling the request.
     ConnectionDropped,
+    /// Capability message is not supported by the remote peer.
     #[error("capability message is not supported by remote peer")]
+    /// Indicates an unsupported capability message from the remote peer.
     UnsupportedCapability,
+    /// Request timed out while awaiting response.
     #[error("request timed out while awaiting response")]
+    /// Represents a timeout while waiting for a response.
     Timeout,
+    /// Received bad response.
     #[error("received bad response")]
+    /// Indicates a bad response was received.
     BadResponse,
 }
 

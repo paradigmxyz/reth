@@ -7,10 +7,10 @@ use crate::{
     NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
     ReputationChangeKind,
 };
-use async_trait::async_trait;
+use alloy_chains::Chain;
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
-use reth_primitives::{Chain, NodeRecord, PeerId};
+use reth_primitives::{NodeRecord, PeerId};
 use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::net::{IpAddr, SocketAddr};
 
@@ -21,7 +21,6 @@ use std::net::{IpAddr, SocketAddr};
 #[non_exhaustive]
 pub struct NoopNetwork;
 
-#[async_trait]
 impl NetworkInfo for NoopNetwork {
     fn local_addr(&self) -> SocketAddr {
         (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), DEFAULT_DISCOVERY_PORT).into()
@@ -68,7 +67,6 @@ impl PeersInfo for NoopNetwork {
     }
 }
 
-#[async_trait]
 impl Peers for NoopNetwork {
     fn add_peer_kind(&self, _peer: PeerId, _kind: PeerKind, _addr: SocketAddr) {}
 

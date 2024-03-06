@@ -1,9 +1,10 @@
+#![allow(missing_docs, unreachable_pub)]
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use proptest::{
     prelude::*,
-    strategy::{Strategy, ValueTree},
+    strategy::ValueTree,
     test_runner::{basic_result_cache, TestRunner},
 };
 use reth_primitives::trie::Nibbles;
@@ -57,7 +58,7 @@ pub fn prefix_set_lookups(c: &mut Criterion) {
 }
 
 fn prefix_set_bench<T: PrefixSetAbstraction>(
-    group: &mut BenchmarkGroup<WallTime>,
+    group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     (preload, input, expected): (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>),
 ) {
@@ -91,15 +92,14 @@ fn generate_test_data(size: usize) -> (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>) {
     let config = ProptestConfig { result_cache: basic_result_cache, ..Default::default() };
     let mut runner = TestRunner::new(config);
 
-    let mut preload = vec(vec(any::<u8>(), 32), size).new_tree(&mut runner).unwrap().current();
+    let vec_of_nibbles = |range| vec(any_with::<Nibbles>(range), size);
+    let mut preload = vec_of_nibbles(32usize.into()).new_tree(&mut runner).unwrap().current();
     preload.dedup();
     preload.sort();
-    let preload = preload.into_iter().map(Nibbles::from_nibbles_unchecked).collect::<Vec<_>>();
 
-    let mut input = vec(vec(any::<u8>(), 0..=32), size).new_tree(&mut runner).unwrap().current();
+    let mut input = vec_of_nibbles((0..=32usize).into()).new_tree(&mut runner).unwrap().current();
     input.dedup();
     input.sort();
-    let input = input.into_iter().map(Nibbles::from_nibbles_unchecked).collect::<Vec<_>>();
 
     let expected = input
         .iter()

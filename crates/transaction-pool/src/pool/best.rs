@@ -2,11 +2,13 @@ use crate::{
     identifier::TransactionId, pool::pending::PendingTransaction, PoolTransaction,
     TransactionOrdering, ValidPoolTransaction,
 };
+use core::fmt;
 use reth_primitives::B256 as TxHash;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
 };
+
 use tokio::sync::broadcast::{error::TryRecvError, Receiver};
 use tracing::debug;
 
@@ -15,13 +17,14 @@ use tracing::debug;
 ///
 /// This is a wrapper around [`BestTransactions`] that also enforces a specific basefee.
 ///
-/// This iterator guarantees that all transaction it returns satisfy the base fee.
-pub(crate) struct BestTransactionsWithBasefee<T: TransactionOrdering> {
+/// This iterator guarantees that all transaction it returns satisfy both the base fee and blob fee!
+pub(crate) struct BestTransactionsWithFees<T: TransactionOrdering> {
     pub(crate) best: BestTransactions<T>,
     pub(crate) base_fee: u64,
+    pub(crate) base_fee_per_blob_gas: u64,
 }
 
-impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithBasefee<T> {
+impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithFees<T> {
     fn mark_invalid(&mut self, tx: &Self::Item) {
         BestTransactions::mark_invalid(&mut self.best, tx)
     }
@@ -39,7 +42,7 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
     }
 }
 
-impl<T: TransactionOrdering> Iterator for BestTransactionsWithBasefee<T> {
+impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
     type Item = Arc<ValidPoolTransaction<T::Transaction>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -50,6 +53,13 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithBasefee<T> {
                 // tx violates base fee, mark it as invalid and continue
                 crate::traits::BestTransactions::mark_invalid(self, &best);
             } else {
+                // tx is EIP4844 and violates blob fee, mark it as invalid and continue
+                if best.transaction.max_fee_per_blob_gas().is_some_and(|max_fee_per_blob_gas| {
+                    max_fee_per_blob_gas < self.base_fee_per_blob_gas as u128
+                }) {
+                    crate::traits::BestTransactions::mark_invalid(self, &best);
+                    continue
+                };
                 return Some(best)
             }
         }
@@ -75,7 +85,7 @@ pub(crate) struct BestTransactions<T: TransactionOrdering> {
     /// There might be the case where a yielded transactions is invalid, this will track it.
     pub(crate) invalid: HashSet<TxHash>,
     /// Used to receive any new pending transactions that have been added to the pool after this
-    /// iterator was snapshotted
+    /// iterator was static fileted
     ///
     /// These new pending transactions are inserted into this iterator's pool before yielding the
     /// next value
@@ -187,6 +197,70 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                 return Some(best.transaction)
             }
         }
+    }
+}
+
+/// A[`BestTransactions`](crate::traits::BestTransactions) implementation that filters the
+/// transactions of iter with predicate.
+///
+/// Filter out transactions are marked as invalid:
+/// [BestTransactions::mark_invalid](crate::traits::BestTransactions::mark_invalid).
+pub struct BestTransactionFilter<I, P> {
+    pub(crate) best: I,
+    pub(crate) predicate: P,
+}
+
+impl<I, P> BestTransactionFilter<I, P> {
+    /// Create a new [`BestTransactionFilter`] with the given predicate.
+    pub(crate) const fn new(best: I, predicate: P) -> Self {
+        Self { best, predicate }
+    }
+}
+
+impl<I, P> Iterator for BestTransactionFilter<I, P>
+where
+    I: crate::traits::BestTransactions,
+    P: FnMut(&<I as Iterator>::Item) -> bool,
+{
+    type Item = <I as Iterator>::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let best = self.best.next()?;
+            if (self.predicate)(&best) {
+                return Some(best)
+            } else {
+                self.best.mark_invalid(&best);
+            }
+        }
+    }
+}
+
+impl<I, P> crate::traits::BestTransactions for BestTransactionFilter<I, P>
+where
+    I: crate::traits::BestTransactions,
+    P: FnMut(&<I as Iterator>::Item) -> bool + Send,
+{
+    fn mark_invalid(&mut self, tx: &Self::Item) {
+        crate::traits::BestTransactions::mark_invalid(&mut self.best, tx)
+    }
+
+    fn no_updates(&mut self) {
+        self.best.no_updates()
+    }
+
+    fn skip_blobs(&mut self) {
+        self.set_skip_blobs(true)
+    }
+
+    fn set_skip_blobs(&mut self, skip_blobs: bool) {
+        self.best.set_skip_blobs(skip_blobs)
+    }
+}
+
+impl<I: fmt::Debug, P> fmt::Debug for BestTransactionFilter<I, P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BestTransactionFilter").field("best", &self.best).finish()
     }
 }
 

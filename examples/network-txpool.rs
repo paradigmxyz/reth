@@ -35,10 +35,15 @@ async fn main() -> eyre::Result<()> {
 
     // Configure the network
     let config = NetworkConfig::builder(local_key).mainnet_boot_nodes().build(client);
-
+    let transactions_manager_config = config.transactions_manager_config.clone();
     // create the network instance
-    let (_handle, network, txpool, _) =
-        NetworkManager::builder(config).await?.transactions(pool.clone()).split_with_handle();
+    let (_handle, network, txpool, _) = NetworkManager::builder(config)
+        .await?
+        .transactions(pool.clone(), transactions_manager_config)
+        .split_with_handle();
+
+    // this can be used to interact with the `txpool` service directly
+    let _txs_handle = txpool.handle();
 
     // spawn the network task
     tokio::task::spawn(network);
@@ -67,7 +72,6 @@ async fn main() -> eyre::Result<()> {
 #[non_exhaustive]
 struct OkValidator;
 
-#[async_trait::async_trait]
 impl TransactionValidator for OkValidator {
     type Transaction = EthPooledTransaction;
 

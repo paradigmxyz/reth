@@ -1,8 +1,8 @@
 use crate::{
     config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    peers::PeersHandle, protocol::RlpxSubProtocol, FetchClient,
+    peers::PeersHandle, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
+    transactions::TransactionsHandle, FetchClient,
 };
-use async_trait::async_trait;
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
@@ -112,9 +112,9 @@ impl NetworkHandle {
 
     /// Announce a block over devp2p
     ///
-    /// Caution: in PoS this is a noop, since new block are no longer announced over devp2p, but are
-    /// instead sent to node node by the CL. However, they can still be requested over devp2p, but
-    /// broadcasting them is a considered a protocol violation..
+    /// Caution: in PoS this is a noop because new blocks are no longer announced over devp2p.
+    /// Instead they are sent to the node by CL and can be requested over devp2p.
+    /// Broadcasting new blocks is considered a protocol violation.
     pub fn announce_block(&self, block: NewBlock, hash: B256) {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
@@ -137,6 +137,15 @@ impl NetworkHandle {
         })
     }
 
+    /// Send message to get the [`TransactionsHandle`].
+    ///
+    /// Returns `None` if no transaction task is installed.
+    pub async fn transactions_handle(&self) -> Option<TransactionsHandle> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetTransactionsHandle(tx));
+        rx.await.unwrap()
+    }
+
     /// Provides a shareable reference to the [`BandwidthMeter`] stored on the `NetworkInner`.
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         &self.inner.bandwidth_meter
@@ -150,6 +159,25 @@ impl NetworkHandle {
         let (tx, rx) = oneshot::channel();
         self.send_message(NetworkHandleMessage::Shutdown(tx));
         rx.await
+    }
+
+    /// Set network connection state to Active.
+    ///
+    /// New outbound connections will be established if there's capacity.
+    pub fn set_network_active(&self) {
+        self.set_network_conn(NetworkConnectionState::Active);
+    }
+
+    /// Set network connection state to Hibernate.
+    ///
+    /// No new outbound connections will be established.
+    pub fn set_network_hibernate(&self) {
+        self.set_network_conn(NetworkConnectionState::Hibernate);
+    }
+
+    /// Set network connection state.
+    fn set_network_conn(&self, network_conn: NetworkConnectionState) {
+        self.send_message(NetworkHandleMessage::SetNetworkState(network_conn));
     }
 
     /// Whether tx gossip is disabled
@@ -207,7 +235,6 @@ impl PeersInfo for NetworkHandle {
     }
 }
 
-#[async_trait]
 impl Peers for NetworkHandle {
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
     /// set, with the given kind.
@@ -269,7 +296,6 @@ impl Peers for NetworkHandle {
     }
 }
 
-#[async_trait]
 impl NetworkInfo for NetworkHandle {
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
@@ -376,52 +402,68 @@ pub trait NetworkProtocols: Send + Sync {
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
-#[allow(missing_docs)]
 #[derive(Debug)]
 pub(crate) enum NetworkHandleMessage {
-    /// Adds an address for a peer.
+    /// Adds an address for a peer, including its ID, kind, and socket address.
     AddPeerAddress(PeerId, PeerKind, SocketAddr),
     /// Removes a peer from the peerset corresponding to the given kind.
     RemovePeer(PeerId, PeerKind),
-    /// Disconnect a connection to a peer if it exists.
+    /// Disconnects a connection to a peer if it exists, optionally providing a disconnect reason.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
-    /// Add a new listener for [`NetworkEvent`].
+    /// Adds a new listener for `NetworkEvent`.
     EventListener(UnboundedSender<NetworkEvent>),
-    /// Broadcast event to announce a new block to all nodes.
+    /// Broadcasts an event to announce a new block to all nodes.
     AnnounceBlock(NewBlock, B256),
-    /// Sends the list of transactions to the given peer.
-    SendTransaction { peer_id: PeerId, msg: SharedTransactions },
-    /// Sends the list of transactions hashes to the given peer.
-    SendPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
-    /// Send an `eth` protocol request to the peer.
+    /// Sends a list of transactions to the given peer.
+    SendTransaction {
+        /// The ID of the peer to which the transactions are sent.
+        peer_id: PeerId,
+        /// The shared transactions to send.
+        msg: SharedTransactions,
+    },
+    /// Sends a list of transaction hashes to the given peer.
+    SendPooledTransactionHashes {
+        /// The ID of the peer to which the transaction hashes are sent.
+        peer_id: PeerId,
+        /// The new pooled transaction hashes to send.
+        msg: NewPooledTransactionHashes,
+    },
+    /// Sends an `eth` protocol request to the peer.
     EthRequest {
         /// The peer to send the request to.
         peer_id: PeerId,
         /// The request to send to the peer's sessions.
         request: PeerRequest,
     },
-    /// Apply a reputation change to the given peer.
+    /// Applies a reputation change to the given peer.
     ReputationChange(PeerId, ReputationChangeKind),
     /// Returns the client that can be used to interact with the network.
     FetchClient(oneshot::Sender<FetchClient>),
-    /// Apply a status update.
-    StatusUpdate { head: Head },
-    /// Get the current status
+    /// Applies a status update.
+    StatusUpdate {
+        /// The head status to apply.
+        head: Head,
+    },
+    /// Retrieves the current status via a oneshot sender.
     GetStatus(oneshot::Sender<NetworkStatus>),
-    /// Get PeerInfo for the given peerids
+    /// Gets `PeerInfo` for the specified peer IDs.
     GetPeerInfosByIds(Vec<PeerId>, oneshot::Sender<Vec<PeerInfo>>),
-    /// Get PeerInfo from all the peers
+    /// Gets `PeerInfo` from all the peers via a oneshot sender.
     GetPeerInfos(oneshot::Sender<Vec<PeerInfo>>),
-    /// Get PeerInfo for a specific peer
+    /// Gets `PeerInfo` for a specific peer via a oneshot sender.
     GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),
-    /// Get PeerInfo for a specific peer
+    /// Gets `PeerInfo` for a specific peer kind via a oneshot sender.
     GetPeerInfosByPeerKind(PeerKind, oneshot::Sender<Vec<PeerInfo>>),
-    /// Get the reputation for a specific peer
+    /// Gets the reputation for a specific peer via a oneshot sender.
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
-    /// Gracefully shutdown network
+    /// Retrieves the `TransactionsHandle` via a oneshot sender.
+    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle>>),
+    /// Initiates a graceful shutdown of the network via a oneshot sender.
     Shutdown(oneshot::Sender<()>),
-    /// Add a new listener for `DiscoveryEvent`.
+    /// Sets the network state between hibernation and active.
+    SetNetworkState(NetworkConnectionState),
+    /// Adds a new listener for `DiscoveryEvent`.
     DiscoveryListener(UnboundedSender<DiscoveryEvent>),
-    /// Add an additional [RlpxSubProtocol].
+    /// Adds an additional `RlpxSubProtocol`.
     AddRlpxSubProtocol(RlpxSubProtocol),
 }

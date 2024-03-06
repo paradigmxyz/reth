@@ -26,7 +26,7 @@ pub struct GetNodeData(pub Vec<B256>);
 pub struct NodeData(pub Vec<Bytes>);
 
 #[cfg(test)]
-mod test {
+mod tests {
     use reth_primitives::hex;
 
     use crate::{message::RequestPair, GetNodeData, NodeData};

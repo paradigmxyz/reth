@@ -9,8 +9,19 @@ Usage: reth stage run [OPTIONS] --from <FROM> --to <TO> <STAGE>
 Arguments:
   <STAGE>
           The name of the stage to run
-          
-          [possible values: headers, bodies, senders, execution, account-hashing, storage-hashing, hashing, merkle, tx-lookup, account-history, storage-history, total-difficulty]
+
+          Possible values:
+          - headers:         The headers stage within the pipeline
+          - bodies:          The bodies stage within the pipeline
+          - senders:         The senders stage within the pipeline
+          - execution:       The execution stage within the pipeline
+          - account-hashing: The account hashing stage within the pipeline
+          - storage-hashing: The storage hashing stage within the pipeline
+          - hashing:         The hashing stage within the pipeline
+          - merkle:          The Merkle stage within the pipeline
+          - tx-lookup:       The transaction lookup stage within the pipeline
+          - account-history: The account history stage within the pipeline
+          - storage-history: The storage history stage within the pipeline
 
 Options:
       --config <FILE>
@@ -109,7 +120,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/v0.1.0-alpha.13-<SHA>/aarch64-apple-darwin]
+          [default: reth/<VERSION>-<SHA>/<ARCH>]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -120,7 +131,7 @@ Networking:
           Do not persist peers.
 
       --nat <NAT>
-          NAT resolution method (any|none|upnp|publicip|extip:<IP>)
+          NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
           
           [default: any]
 
@@ -139,6 +150,18 @@ Networking:
 
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
+
+      --pooled-tx-response-soft-limit <BYTES>
+          Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request. Spec'd at 2 MiB.
+          
+          <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
+          
+          [default: 2097152]
+
+      --pooled-tx-pack-soft-limit <BYTES>
+          Default soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::PooledTransactions) request. This defaults to less than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when assembling a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response. Default is 128 KiB
+          
+          [default: 131072]
 
 Database:
       --db.log-level <LOG_LEVEL>
@@ -160,6 +183,36 @@ Database:
           Useful when you want to run diagnostics on the database.
 
 Logging:
+      --log.stdout.format <FORMAT>
+          The format to use for logs written to stdout
+          
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.stdout.filter <FILTER>
+          The filter to use for logs written to stdout
+          
+          [default: ]
+
+      --log.file.format <FORMAT>
+          The format to use for logs written to the log file
+          
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.file.filter <FILTER>
+          The filter to use for logs written to the log file
+          
+          [default: debug]
+
       --log.file.directory <PATH>
           The path to put log files in
           
@@ -174,11 +227,6 @@ Logging:
           The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
           
           [default: 5]
-
-      --log.file.filter <FILTER>
-          The filter to use for logs written to the log file
-          
-          [default: debug]
 
       --log.journald
           Write logs to journald

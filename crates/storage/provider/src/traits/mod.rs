@@ -68,3 +68,9 @@ pub use history::HistoryWriter;
 
 mod prune_checkpoint;
 pub use prune_checkpoint::{PruneCheckpointReader, PruneCheckpointWriter};
+
+mod database_provider;
+pub use database_provider::DatabaseProviderFactory;
+
+mod stats;
+pub use stats::StatsReader;

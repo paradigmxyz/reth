@@ -8,27 +8,33 @@ homepage.workspace = true
 repository.workspace = true
 description = "Merkle trie implementation"
 
+[lints]
+workspace = true
+
 [dependencies]
 # reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
+revm.workspace = true
 
+# alloy
 alloy-rlp.workspace = true
-
-# tokio
-tokio = { workspace = true, default-features = false, features = ["sync"] }
+alloy-chains.workspace = true
 
 # tracing
 tracing.workspace = true
 
-# misc 
+# misc
 thiserror.workspace = true
-derive_more = "0.99"
+derive_more.workspace = true
 auto_impl = "1"
-ahash.workspace = true
 
-# test-utils
+# `metrics` feature
+reth-metrics = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
+
+# `test-utils` feature
 triehash = { version = "0.8", optional = true }
 
 [dev-dependencies]
@@ -46,10 +52,12 @@ tokio = { workspace = true, default-features = false, features = ["sync", "rt", 
 tokio-stream.workspace = true
 once_cell.workspace = true
 serde_json.workspace = true
-pretty_assertions = "1.3.0"
+similar-asserts.workspace = true
 criterion.workspace = true
 
 [features]
+default = ["metrics"]
+metrics = ["reth-metrics", "dep:metrics"]
 test-utils = ["triehash"]
 
 [[bench]]

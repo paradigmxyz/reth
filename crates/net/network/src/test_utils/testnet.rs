@@ -4,8 +4,9 @@ use crate::{
     builder::ETH_REQUEST_CHANNEL_CAPACITY,
     error::NetworkError,
     eth_requests::EthRequestHandler,
+    peers::PeersHandle,
     protocol::IntoRlpxSubProtocol,
-    transactions::{TransactionsHandle, TransactionsManager},
+    transactions::{TransactionsHandle, TransactionsManager, TransactionsManagerConfig},
     NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkHandle,
     NetworkManager,
 };
@@ -20,7 +21,7 @@ use reth_provider::{
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore,
-    test_utils::{testing_pool, TestPool},
+    test_utils::{TestPool, TestPoolBuilder},
     EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
@@ -288,28 +289,34 @@ impl<C, Pool> TestnetHandle<C, Pool> {
         &self.peers
     }
 
-    /// Connects all peers with each other
+    /// Connects all peers with each other.
+    ///
+    /// This establishes sessions concurrently between all peers.
+    ///
+    /// Returns once all sessions are established.
     pub async fn connect_peers(&self) {
         if self.peers.len() < 2 {
             return
         }
 
-        let mut streams = Vec::with_capacity(self.peers.len());
-        let mut num_sessions = Vec::with_capacity(self.peers.len());
+        // add an event stream for _each_ peer
+        let streams =
+            self.peers.iter().map(|handle| NetworkEventStream::new(handle.event_listener()));
+
+        // add all peers to each other
         for (idx, handle) in self.peers.iter().enumerate().take(self.peers.len() - 1) {
-            streams.push(NetworkEventStream::new(handle.event_listener()));
-            let mut num = 0;
             for idx in (idx + 1)..self.peers.len() {
                 let neighbour = &self.peers[idx];
                 handle.network.add_peer(*neighbour.peer_id(), neighbour.local_addr());
-                num += 1;
             }
-            num_sessions.push(num);
         }
-        let fut = streams
-            .into_iter()
-            .zip(num_sessions)
-            .map(|(mut stream, num)| async move { stream.take_session_established(num).await });
+
+        // await all sessions to be established
+        let num_sessions_per_peer = self.peers.len() - 1;
+        let fut = streams.into_iter().map(|mut stream| async move {
+            stream.take_session_established(num_sessions_per_peer).await
+        });
+
         futures::future::join_all(fut).await;
     }
 }
@@ -393,7 +400,12 @@ where
     pub fn install_transactions_manager(&mut self, pool: Pool) {
         let (tx, rx) = unbounded_channel();
         self.network.set_transactions(tx);
-        let transactions_manager = TransactionsManager::new(self.handle(), pool.clone(), rx);
+        let transactions_manager = TransactionsManager::new(
+            self.handle(),
+            pool.clone(),
+            rx,
+            TransactionsManagerConfig::default(),
+        );
         self.transactions_manager = Some(transactions_manager);
         self.pool = Some(pool);
     }
@@ -406,8 +418,12 @@ where
         let Self { mut network, request_handler, client, secret_key, .. } = self;
         let (tx, rx) = unbounded_channel();
         network.set_transactions(tx);
-        let transactions_manager =
-            TransactionsManager::new(network.handle().clone(), pool.clone(), rx);
+        let transactions_manager = TransactionsManager::new(
+            network.handle().clone(),
+            pool.clone(),
+            rx,
+            TransactionsManagerConfig::default(),
+        );
         Peer {
             network,
             request_handler,
@@ -423,9 +439,9 @@ impl<C> Peer<C>
 where
     C: BlockReader + HeaderProvider + Clone,
 {
-    /// Installs a new [testing_pool]
+    /// Installs a new [TestPool]
     pub fn install_test_pool(&mut self) {
-        self.install_transactions_manager(testing_pool())
+        self.install_transactions_manager(TestPoolBuilder::default().into())
     }
 }
 
@@ -475,6 +491,12 @@ impl<Pool> PeerHandle<Pool> {
         self.network.peer_id()
     }
 
+    /// Returns the [`PeersHandle`] from the network.
+    pub fn peer_handle(&self) -> &PeersHandle {
+        self.network.peers_handle()
+    }
+
+    /// Returns the local socket as configured for the network.
     pub fn local_addr(&self) -> SocketAddr {
         self.network.local_addr()
     }

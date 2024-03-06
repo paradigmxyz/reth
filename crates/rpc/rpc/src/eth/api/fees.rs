@@ -8,18 +8,20 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
+use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::FeeHistory;
 use reth_transaction_pool::TransactionPool;
 use tracing::debug;
 
-impl<Provider, Pool, Network> EthApi<Provider, Pool, Network>
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Pool: TransactionPool + Clone + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
+    EvmConfig: ConfigureEvmEnv + 'static,
 {
     /// Returns a suggestion for a gas price for legacy transactions.
     ///
@@ -32,11 +34,11 @@ where
         Ok(suggested_tip + U256::from(base_fee))
     }
 
-    /// Returns a suggestion for a gas price for blob transactions.
-    pub(crate) async fn blob_gas_price(&self) -> EthResult<U256> {
+    /// Returns a suggestion for a base fee for blob transactions.
+    pub(crate) async fn blob_base_fee(&self) -> EthResult<U256> {
         self.block(BlockNumberOrTag::Latest)
             .await?
-            .and_then(|h| h.next_block_blob_fee())
+            .and_then(|h: reth_primitives::SealedBlock| h.next_block_blob_fee())
             .ok_or(EthApiError::ExcessBlobGasNotSet)
             .map(U256::from)
     }
@@ -101,12 +103,16 @@ where
         //
         // Treat a request for 1 block as a request for `newest_block..=newest_block`,
         // otherwise `newest_block - 2
-        // SAFETY: We ensured that block count is capped
+        // NOTE: We ensured that block count is capped
         let start_block = end_block_plus - block_count;
 
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
         let mut base_fee_per_gas: Vec<U256> = Vec::new();
         let mut gas_used_ratio: Vec<f64> = Vec::new();
+
+        let mut base_fee_per_blob_gas: Vec<U256> = Vec::new();
+        let mut blob_gas_used_ratio: Vec<f64> = Vec::new();
+
         let mut rewards: Vec<Vec<U256>> = Vec::new();
 
         // Check if the requested range is within the cache bounds
@@ -120,6 +126,9 @@ where
             for entry in &fee_entries {
                 base_fee_per_gas.push(U256::from(entry.base_fee_per_gas));
                 gas_used_ratio.push(entry.gas_used_ratio);
+                base_fee_per_blob_gas
+                    .push(U256::from(entry.base_fee_per_blob_gas.unwrap_or_default()));
+                blob_gas_used_ratio.push(entry.blob_gas_used_ratio);
 
                 if let Some(percentiles) = &reward_percentiles {
                     let mut block_rewards = Vec::with_capacity(percentiles.len());
@@ -137,12 +146,17 @@ where
                 .map(|h| h.timestamp)
                 .unwrap_or_default();
 
+            // Als need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the next
+            // block
             base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
                 last_entry.gas_used,
                 last_entry.gas_limit,
                 last_entry.base_fee_per_gas,
                 self.provider().chain_spec().base_fee_params(last_entry_timestamp),
             )));
+
+            base_fee_per_blob_gas
+                .push(U256::from(last_entry.next_block_blob_fee().unwrap_or_default()));
         } else {
             // read the requested header range
             let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
@@ -153,12 +167,17 @@ where
             for header in &headers {
                 base_fee_per_gas.push(U256::from(header.base_fee_per_gas.unwrap_or_default()));
                 gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
+                base_fee_per_blob_gas.push(U256::from(header.blob_fee().unwrap_or_default()));
+                blob_gas_used_ratio.push(
+                    header.blob_gas_used.unwrap_or_default() as f64 /
+                        reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+                );
 
                 // Percentiles were specified, so we need to collect reward percentile ino
                 if let Some(percentiles) = &reward_percentiles {
                     let (transactions, receipts) = self
                         .cache()
-                        .get_transactions_and_receipts(header.hash)
+                        .get_transactions_and_receipts(header.hash())
                         .await?
                         .ok_or(EthApiError::InvalidBlockRange)?;
                     rewards.push(
@@ -179,12 +198,6 @@ where
             // newest block"
             //
             // The unwrap is safe since we checked earlier that we got at least 1 header.
-
-            // The spec states that `base_fee_per_gas` "[..] includes the next block after the
-            // newest of the returned range, because this value can be derived from the
-            // newest block"
-            //
-            // The unwrap is safe since we checked earlier that we got at least 1 header.
             let last_header = headers.last().expect("is present");
             base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
                 last_header.gas_used,
@@ -192,11 +205,18 @@ where
                 last_header.base_fee_per_gas.unwrap_or_default(),
                 self.provider().chain_spec().base_fee_params(last_header.timestamp),
             )));
+
+            // Same goes for the `base_fee_per_blob_gas`:
+            // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
+            base_fee_per_blob_gas
+                .push(U256::from(last_header.next_block_blob_fee().unwrap_or_default()));
         };
 
         Ok(FeeHistory {
             base_fee_per_gas,
             gas_used_ratio,
+            base_fee_per_blob_gas,
+            blob_gas_used_ratio,
             oldest_block: U256::from(start_block),
             reward: reward_percentiles.map(|_| rewards),
         })

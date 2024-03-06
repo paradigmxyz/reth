@@ -1,13 +1,15 @@
 use crate::{
-    identifier::TransactionId,
-    pool::{best::BestTransactions, size::SizeTracker},
+    identifier::{SenderId, TransactionId},
+    pool::{
+        best::{BestTransactions, BestTransactionsWithFees},
+        size::SizeTracker,
+    },
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
-
-use crate::pool::best::BestTransactionsWithBasefee;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
+    ops::Bound::Unbounded,
     sync::Arc,
 };
 use tokio::sync::broadcast;
@@ -22,8 +24,7 @@ use tokio::sync::broadcast;
 ///
 /// Once an `independent` transaction was executed it *unlocks* the next nonce, if this transaction
 /// is also pending, then this will be moved to the `independent` queue.
-#[allow(missing_debug_implementations)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PendingPool<T: TransactionOrdering> {
     /// How to order transactions.
     ordering: T,
@@ -50,7 +51,7 @@ pub struct PendingPool<T: TransactionOrdering> {
     /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
     size_of: SizeTracker,
     /// Used to broadcast new transactions that have been added to the PendingPool to existing
-    /// snapshots of this pool.
+    /// static_files of this pool.
     new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
 }
 
@@ -114,9 +115,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
     }
 
-    /// Same as `best` but only returns transactions that satisfy the given basefee.
-    pub(crate) fn best_with_basefee(&self, base_fee: u64) -> BestTransactionsWithBasefee<T> {
-        BestTransactionsWithBasefee { best: self.best(), base_fee }
+    /// Same as `best` but only returns transactions that satisfy the given basefee and blobfee.
+    pub(crate) fn best_with_basefee_and_blobfee(
+        &self,
+        base_fee: u64,
+        base_fee_per_blob_gas: u64,
+    ) -> BestTransactionsWithFees<T> {
+        BestTransactionsWithFees { best: self.best(), base_fee, base_fee_per_blob_gas }
     }
 
     /// Same as `best` but also includes the given unlocked transactions.
@@ -304,7 +309,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.update_independents_and_highest_nonces(&tx, &tx_id);
         self.all.insert(tx.clone());
 
-        // send the new transaction to any existing pendingpool snapshot iterators
+        // send the new transaction to any existing pendingpool static file iterators
         if self.new_transaction_notifier.receiver_count() > 0 {
             let _ = self.new_transaction_notifier.send(tx.clone());
         }
@@ -312,36 +317,28 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.by_id.insert(tx_id, tx);
     }
 
-    /// Removes a _mined_ transaction from the pool.
+    /// Removes the transaction from the pool.
     ///
-    /// If the transaction has a descendant transaction it will advance it to the best queue.
-    pub(crate) fn prune_transaction(
+    /// Note: If the transaction has a descendant transaction
+    /// it will advance it to the best queue.
+    pub(crate) fn remove_transaction(
         &mut self,
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         // mark the next as independent if it exists
         if let Some(unlocked) = self.get(&id.descendant()) {
             self.independent_transactions.insert(unlocked.clone());
-        };
-        self.remove_transaction(id)
-    }
-
-    /// Removes the transaction from the pool.
-    ///
-    /// Note: this only removes the given transaction.
-    pub(crate) fn remove_transaction(
-        &mut self,
-        id: &TransactionId,
-    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        }
         let tx = self.by_id.remove(id)?;
         self.size_of -= tx.transaction.size();
         self.all.remove(&tx);
         self.independent_transactions.remove(&tx);
 
         // switch out for the next ancestor if there is one
-        self.highest_nonces.remove(&tx);
-        if let Some(ancestor) = self.ancestor(id) {
-            self.highest_nonces.insert(ancestor.clone());
+        if self.highest_nonces.remove(&tx) {
+            if let Some(ancestor) = self.ancestor(id) {
+                self.highest_nonces.insert(ancestor.clone());
+            }
         }
         Some(tx.transaction)
     }
@@ -409,8 +406,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // loop through the highest nonces set, removing transactions until we reach the limit
             for tx in self.highest_nonces.iter() {
                 // return early if the pool is under limits
-                if original_size - total_size <= limit.max_size &&
-                    original_length - total_removed <= limit.max_txs ||
+                if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
                     non_local_senders == 0
                 {
                     // need to remove remaining transactions before exiting
@@ -439,6 +435,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     end_removed.push(tx);
                 }
             }
+
+            // return if either the pool is under limits or there are no more _eligible_
+            // transactions to remove
+            if !self.exceeds(limit) || non_local_senders == 0 {
+                return
+            }
         }
     }
 
@@ -457,16 +459,28 @@ impl<T: TransactionOrdering> PendingPool<T> {
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let mut removed = Vec::new();
-        self.remove_to_limit(&limit, false, &mut removed);
-
-        if self.size() <= limit.max_size && self.len() <= limit.max_txs {
+        // return early if the pool is already under the limits
+        if !self.exceeds(&limit) {
             return removed
         }
 
-        // now repeat for local transactions
+        // first truncate only non-local transactions, returning if the pool end up under the limit
+        self.remove_to_limit(&limit, false, &mut removed);
+        if !self.exceeds(&limit) {
+            return removed
+        }
+
+        // now repeat for local transactions, since local transactions must be removed now for the
+        // pool to be under the limit
         self.remove_to_limit(&limit, true, &mut removed);
 
         removed
+    }
+
+    /// Returns true if the pool exceeds the given limit
+    #[inline]
+    pub(crate) fn exceeds(&self, limit: &SubPoolLimit) -> bool {
+        limit.is_exceeded(self.len(), self.size())
     }
 
     /// The reported size of all transactions in this pool.
@@ -488,6 +502,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns `true` if the transaction with the given id is already included in this pool.
     pub(crate) fn contains(&self, id: &TransactionId) -> bool {
         self.by_id.contains_key(id)
+    }
+
+    /// Get transactions by sender
+    pub(crate) fn get_txs_by_sender(&self, sender: SenderId) -> Vec<TransactionId> {
+        self.by_id
+            .range((sender.start_bound(), Unbounded))
+            .take_while(move |(other, _)| sender == other.sender)
+            .map(|(tx_id, _)| *tx_id)
+            .collect()
     }
 
     /// Retrieves a transaction with the given ID from the pool, if it exists.
@@ -516,6 +539,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 }
 
 /// A transaction that is ready to be included in a block.
+#[derive(Debug)]
 pub(crate) struct PendingTransaction<T: TransactionOrdering> {
     /// Identifier that tags when transaction was submitted in the pool.
     pub(crate) submission_id: u64,

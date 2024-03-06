@@ -74,10 +74,7 @@ impl TransportReceiverT for Receiver {
 
     /// Returns a Future resolving when the server sent us something back.
     async fn receive(&mut self) -> Result<ReceivedMessage, Self::Error> {
-        match self.inner.next().await {
-            None => Err(IpcError::Closed),
-            Some(val) => Ok(ReceivedMessage::Text(val?)),
-        }
+        self.inner.next().await.map_or(Err(IpcError::Closed), |val| Ok(ReceivedMessage::Text(val?)))
     }
 }
 
@@ -116,7 +113,6 @@ impl IpcTransportClientBuilder {
 
 /// Error variants that can happen in IPC transport.
 #[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
 pub enum IpcError {
     /// Operation not supported
     #[error("operation not supported")]
@@ -128,9 +124,13 @@ pub enum IpcError {
     #[error("failed to connect to socket {path}: {err}")]
     FailedToConnect {
         /// The path of the socket.
+        #[doc(hidden)]
         path: PathBuf,
+        /// The error occurred while connecting.
+        #[doc(hidden)]
         err: io::Error,
     },
+    /// Wrapped IO Error
     #[error(transparent)]
     Io(#[from] io::Error),
 }

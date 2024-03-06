@@ -4,7 +4,7 @@ use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, CallRequest, Filter, Log, RichBlock, SyncStatus,
+    state::StateOverride, BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
 };
 use tracing_futures::Instrument;
 
@@ -59,7 +59,7 @@ where
     /// Handler for: `eth_call`
     async fn call(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,

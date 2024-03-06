@@ -3,9 +3,10 @@
 use crate::{
     EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion, Status, UnauthedP2PStream,
 };
+use alloy_chains::Chain;
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_ecies::util::pk2id;
-use reth_primitives::{Chain, ForkFilter, Head, B256, U256};
+use reth_primitives::{ForkFilter, Head, B256, U256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
@@ -137,7 +138,7 @@ pub mod proto {
         /// Decodes a `TestProtoMessage` from the given message buffer.
         pub fn decode_message(buf: &mut &[u8]) -> Option<Self> {
             if buf.is_empty() {
-                return None;
+                return None
             }
             let id = buf[0];
             buf.advance(1);

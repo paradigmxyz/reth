@@ -138,7 +138,7 @@ impl StateFetcher {
 
         let Some(peer_id) = self.next_peer() else { return PollAction::NoPeersAvailable };
 
-        let request = self.queued_requests.pop_front().expect("not empty; qed");
+        let request = self.queued_requests.pop_front().expect("not empty");
         let request = self.prepare_block_request(peer_id, request);
 
         PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
@@ -429,7 +429,7 @@ pub(crate) enum BlockResponseOutcome {
 mod tests {
     use super::*;
     use crate::{peers::PeersManager, PeersConfig};
-    use reth_primitives::{SealedHeader, B256, B512};
+    use reth_primitives::{SealedHeader, B512};
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]

@@ -28,7 +28,7 @@ async fn test_http_addr_in_use() {
         .start_server(RpcServerConfig::http(Default::default()).with_http_address(addr))
         .await;
     let err = result.unwrap_err();
-    assert!(is_addr_in_use_kind(&err, ServerKind::Http(addr)), "{err:?}");
+    assert!(is_addr_in_use_kind(&err, ServerKind::Http(addr)), "{err}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -40,7 +40,7 @@ async fn test_ws_addr_in_use() {
     let result =
         server.start_server(RpcServerConfig::ws(Default::default()).with_ws_address(addr)).await;
     let err = result.unwrap_err();
-    assert!(is_addr_in_use_kind(&err, ServerKind::WS(addr)), "{err:?}");
+    assert!(is_addr_in_use_kind(&err, ServerKind::WS(addr)), "{err}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

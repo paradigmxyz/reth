@@ -1,3 +1,4 @@
+#![allow(missing_docs, unreachable_pub)]
 mod utils;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -45,7 +46,7 @@ fn bench_get_rand_raw(c: &mut Criterion) {
 
     c.bench_function("bench_get_rand_raw", |b| {
         b.iter(|| unsafe {
-            txn.with_raw_tx_ptr(|txn| {
+            txn.txn_execute(|txn| {
                 let mut i: size_t = 0;
                 for key in &keys {
                     key_val.iov_len = key.len() as size_t;
@@ -56,7 +57,8 @@ fn bench_get_rand_raw(c: &mut Criterion) {
                     i += key_val.iov_len;
                 }
                 black_box(i);
-            });
+            })
+            .unwrap();
         })
     });
 }

@@ -17,11 +17,20 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 
+/// Represents a future outputting unit type and is sendable.
+type ValidationFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// Represents a stream of validation futures.
+type ValidationStream = ReceiverStream<ValidationFuture>;
+
 /// A service that performs validation jobs.
+///
+/// This listens for incoming validation jobs and executes them.
+///
+/// This should be spawned as a task: [ValidationTask::run]
 #[derive(Clone)]
 pub struct ValidationTask {
-    #[allow(clippy::type_complexity)]
-    validation_jobs: Arc<Mutex<ReceiverStream<Pin<Box<dyn Future<Output = ()> + Send>>>>>,
+    validation_jobs: Arc<Mutex<ValidationStream>>,
 }
 
 impl ValidationTask {
@@ -40,12 +49,8 @@ impl ValidationTask {
     ///
     /// This will run as long as the channel is alive and is expected to be spawned as a task.
     pub async fn run(self) {
-        loop {
-            let task = self.validation_jobs.lock().await.next().await;
-            match task {
-                None => return,
-                Some(task) => task.await,
-            }
+        while let Some(task) = self.validation_jobs.lock().await.next().await {
+            task.await;
         }
     }
 }
@@ -89,6 +94,19 @@ impl TransactionValidationTaskExecutor<()> {
     /// Convenience method to create a [EthTransactionValidatorBuilder]
     pub fn eth_builder(chain_spec: Arc<ChainSpec>) -> EthTransactionValidatorBuilder {
         EthTransactionValidatorBuilder::new(chain_spec)
+    }
+}
+
+impl<V> TransactionValidationTaskExecutor<V> {
+    /// Maps the given validator to a new type.
+    pub fn map<F, T>(self, mut f: F) -> TransactionValidationTaskExecutor<T>
+    where
+        F: FnMut(V) -> T,
+    {
+        TransactionValidationTaskExecutor {
+            validator: f(self.validator),
+            to_validation_task: self.to_validation_task,
+        }
     }
 }
 
@@ -148,7 +166,6 @@ impl<V> TransactionValidationTaskExecutor<V> {
     }
 }
 
-#[async_trait::async_trait]
 impl<V> TransactionValidator for TransactionValidationTaskExecutor<V>
 where
     V: TransactionValidator + Clone + 'static,

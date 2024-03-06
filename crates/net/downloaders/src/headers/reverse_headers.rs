@@ -65,7 +65,7 @@ impl From<HeadersResponseError> for ReverseHeadersDownloaderError {
 /// the batches of headers that this downloader yields will start at the chain tip and move towards
 /// the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
-#[allow(missing_debug_implementations)]
+#[derive(Debug)]
 pub struct ReverseHeadersDownloader<H: HeadersClient> {
     /// Consensus client used to validate headers
     consensus: Arc<dyn Consensus>,
@@ -258,7 +258,7 @@ where
                 validated.last().or_else(|| self.lowest_validated_header())
             {
                 if let Err(error) = self.validate(validated_header, &parent) {
-                    trace!(target: "downloaders::headers", ?error ,"Failed to validate header");
+                    trace!(target: "downloaders::headers", %error ,"Failed to validate header");
                     return Err(
                         HeadersResponseError { request, peer_id: Some(peer_id), error }.into()
                     )
@@ -278,7 +278,7 @@ where
         {
             // Every header must be valid on its own
             if let Err(error) = self.consensus.validate_header(last_header) {
-                trace!(target: "downloaders::headers", ?error, "Failed to validate header");
+                trace!(target: "downloaders::headers", %error, "Failed to validate header");
                 return Err(HeadersResponseError {
                     request,
                     peer_id: Some(peer_id),
@@ -294,7 +294,7 @@ where
             // detached head error.
             if let Err(error) = self.consensus.validate_header_against_parent(last_header, head) {
                 // Replace the last header with a detached variant
-                error!(target: "downloaders::headers", ?error, number = last_header.number, hash = ?last_header.hash, "Header cannot be attached to known canonical chain");
+                error!(target: "downloaders::headers", %error, number = last_header.number, hash = ?last_header.hash(), "Header cannot be attached to known canonical chain");
                 return Err(HeadersDownloaderError::DetachedHead {
                     local_head: Box::new(head.clone()),
                     header: Box::new(last_header.clone()),
@@ -529,7 +529,7 @@ where
     fn penalize_peer(&self, peer_id: Option<PeerId>, error: &DownloadError) {
         // Penalize the peer for bad response
         if let Some(peer_id) = peer_id {
-            trace!(target: "downloaders::headers", ?peer_id, ?error, "Penalizing peer");
+            trace!(target: "downloaders::headers", ?peer_id, %error, "Penalizing peer");
             self.client.report_bad_message(peer_id);
         }
     }
@@ -775,7 +775,7 @@ where
                     match this.on_sync_target_outcome(outcome) {
                         Ok(()) => break,
                         Err(ReverseHeadersDownloaderError::Response(error)) => {
-                            trace!(target: "downloaders::headers", ?error, "invalid sync target response");
+                            trace!(target: "downloaders::headers", %error, "invalid sync target response");
                             if error.is_channel_closed() {
                                 // download channel closed which means the network was dropped
                                 return Poll::Ready(None)
@@ -892,6 +892,7 @@ where
 }
 
 /// A future that returns a list of [`Header`] on success.
+#[derive(Debug)]
 struct HeadersRequestFuture<F> {
     request: Option<HeadersRequest>,
     fut: F,
@@ -927,6 +928,7 @@ impl HeadersRequestOutcome {
 }
 
 /// Wrapper type to order responses
+#[derive(Debug)]
 struct OrderedHeadersResponse {
     headers: Vec<Header>,
     request: HeadersRequest,
@@ -1223,7 +1225,6 @@ mod tests {
     use crate::headers::test_utils::child_header;
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
-    use reth_primitives::SealedHeader;
 
     /// Tests that `replace_number` works the same way as Option::replace
     #[test]

@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-use crate::bodies::test_utils::create_raw_bodies;
+use crate::{bodies::test_utils::create_raw_bodies, file_codec::BlockFileCodec};
 use futures::SinkExt;
 use reth_interfaces::test_utils::{generators, generators::random_block_range};
 use reth_primitives::{BlockBody, SealedHeader, B256};
@@ -12,12 +12,6 @@ use tokio_util::codec::FramedWrite;
 
 mod bodies_client;
 pub use bodies_client::TestBodiesClient;
-
-mod file_client;
-pub use file_client::{FileClient, FileClientError};
-
-mod file_codec;
-pub(crate) use file_codec::BlockFileCodec;
 
 /// Metrics scope used for testing.
 pub(crate) const TEST_SCOPE: &str = "downloaders.test";

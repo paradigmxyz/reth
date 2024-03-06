@@ -1,3 +1,4 @@
+use super::txpool::PendingFees;
 use crate::{
     identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction,
@@ -7,8 +8,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-
-use super::txpool::PendingFees;
 
 /// A set of validated blob transactions in the pool that are __not pending__.
 ///
@@ -81,12 +80,48 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         Some(tx.transaction)
     }
 
-    /// Returns all transactions that satisfy the given basefee and blob_fee.
+    /// Returns all transactions that satisfy the given basefee and blobfee.
+    ///
+    /// Note: This does not remove any the transactions from the pool.
     pub(crate) fn satisfy_attributes(
         &self,
-        _best_transactions_attributes: BestTransactionsAttributes,
+        best_transactions_attributes: BestTransactionsAttributes,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        Vec::new()
+        let mut transactions = Vec::new();
+        {
+            // short path if blob_fee is None in provided best transactions attributes
+            if let Some(blob_fee_to_satisfy) =
+                best_transactions_attributes.blob_fee.map(|fee| fee as u128)
+            {
+                let mut iter = self.by_id.iter().peekable();
+
+                while let Some((id, tx)) = iter.next() {
+                    if tx.transaction.max_fee_per_blob_gas().unwrap_or_default() <
+                        blob_fee_to_satisfy ||
+                        tx.transaction.max_fee_per_gas() <
+                            best_transactions_attributes.basefee as u128
+                    {
+                        // does not satisfy the blob fee or base fee
+                        // still parked in blob pool -> skip descendant transactions
+                        'this: while let Some((peek, _)) = iter.peek() {
+                            if peek.sender != id.sender {
+                                break 'this
+                            }
+                            iter.next();
+                        }
+                    } else {
+                        transactions.push(tx.transaction.clone());
+                    }
+                }
+            }
+        }
+        transactions
+    }
+
+    /// Returns true if the pool exceeds the given limit
+    #[inline]
+    pub(crate) fn exceeds(&self, limit: &SubPoolLimit) -> bool {
+        limit.is_exceeded(self.len(), self.size())
     }
 
     /// The reported size of all transactions in this pool.
@@ -189,7 +224,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
         let mut removed = Vec::new();
 
-        while self.size() > limit.max_size && self.len() > limit.max_txs {
+        while self.exceeds(&limit) {
             let tx = self.all.last().expect("pool is not empty");
             let id = *tx.transaction.id();
             removed.push(self.remove_transaction(&id).expect("transaction exists"));

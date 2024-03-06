@@ -2,8 +2,12 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{BlockId, Bytes, B256};
 use reth_rpc_types::{
     state::StateOverride,
-    trace::{filter::TraceFilter, parity::*},
-    BlockOverrides, CallRequest, Index,
+    trace::{
+        filter::TraceFilter,
+        opcode::{BlockOpcodeGas, TransactionOpcodeGas},
+        parity::*,
+    },
+    BlockOverrides, Index, TransactionRequest,
 };
 use std::collections::HashSet;
 
@@ -15,7 +19,7 @@ pub trait TraceApi {
     #[method(name = "call")]
     async fn trace_call(
         &self,
-        call: CallRequest,
+        call: TransactionRequest,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
         state_overrides: Option<StateOverride>,
@@ -28,7 +32,7 @@ pub trait TraceApi {
     #[method(name = "callMany")]
     async fn trace_call_many(
         &self,
-        calls: Vec<(CallRequest, HashSet<TraceType>)>,
+        calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>>;
 
@@ -91,4 +95,18 @@ pub trait TraceApi {
         &self,
         hash: B256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>>;
+
+    /// Returns all opcodes with their count and combined gas usage for the given transaction in no
+    /// particular order.
+    #[method(name = "transactionOpcodeGas")]
+    async fn trace_transaction_opcode_gas(
+        &self,
+        tx_hash: B256,
+    ) -> RpcResult<Option<TransactionOpcodeGas>>;
+
+    /// Returns the opcodes of all transactions in the given block.
+    ///
+    /// This is the same as `trace_transactionOpcodeGas` but for all transactions in a block.
+    #[method(name = "blockOpcodeGas")]
+    async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>>;
 }

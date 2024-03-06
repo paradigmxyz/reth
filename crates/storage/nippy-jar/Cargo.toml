@@ -8,10 +8,15 @@ homepage.workspace = true
 repository.workspace = true
 description = "Immutable data store format"
 
+[lints]
+workspace = true
+
 [lib]
 name = "reth_nippy_jar"
 
 [dependencies]
+# reth
+reth-primitives.workspace = true
 
 # filter
 ph = "0.8.0"
@@ -30,7 +35,7 @@ serde = { version = "1.0",  features = ["derive"] }
 tracing = "0.1.0"
 anyhow = "1.0"
 thiserror.workspace = true
-derive_more = "0.99"
+derive_more.workspace = true
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["small_rng"] }

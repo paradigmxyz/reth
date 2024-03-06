@@ -4,11 +4,11 @@ Execution stage
 
 ```bash
 $ reth stage dump execution --help
-Usage: reth stage dump execution [OPTIONS] --output-db <OUTPUT_PATH> --from <FROM> --to <TO>
+Usage: reth stage dump execution [OPTIONS] --output-datadir <OUTPUT_PATH> --from <FROM> --to <TO>
 
 Options:
-      --output-db <OUTPUT_PATH>
-          The path to the new database folder.
+      --output-datadir <OUTPUT_PATH>
+          The path to the new datadir folder.
 
   -f, --from <FROM>
           From which block
@@ -34,6 +34,36 @@ Options:
           Print help (see a summary with '-h')
 
 Logging:
+      --log.stdout.format <FORMAT>
+          The format to use for logs written to stdout
+          
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.stdout.filter <FILTER>
+          The filter to use for logs written to stdout
+          
+          [default: ]
+
+      --log.file.format <FORMAT>
+          The format to use for logs written to the log file
+          
+          [default: terminal]
+
+          Possible values:
+          - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
+          - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
+          - terminal: Represents terminal-friendly formatting for logs
+
+      --log.file.filter <FILTER>
+          The filter to use for logs written to the log file
+          
+          [default: debug]
+
       --log.file.directory <PATH>
           The path to put log files in
           
@@ -48,11 +78,6 @@ Logging:
           The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
           
           [default: 5]
-
-      --log.file.filter <FILTER>
-          The filter to use for logs written to the log file
-          
-          [default: debug]
 
       --log.journald
           Write logs to journald

@@ -1,11 +1,17 @@
 //! Compatibility functions for rpc `Transaction` type.
 mod signature;
 mod typed;
+use alloy_rpc_types::{
+    other::OtherFields,
+    request::{TransactionInput, TransactionRequest},
+};
 use reth_primitives::{
     BlockNumber, Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
     TransactionSignedEcRecovered, TxType, B256, U128, U256, U64,
 };
-use reth_rpc_types::{AccessListItem, CallInput, CallRequest, Transaction};
+#[cfg(feature = "optimism")]
+use reth_rpc_types::optimism::OptimismTransactionFields;
+use reth_rpc_types::{AccessListItem, Transaction};
 use signature::from_primitive_signature;
 pub use typed::*;
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
@@ -118,7 +124,7 @@ fn fill(
         nonce: U64::from(signed_tx.nonce()),
         from: signer,
         to,
-        value: signed_tx.value().into(),
+        value: signed_tx.value(),
         gas_price,
         max_fee_per_gas,
         max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas().map(U128::from),
@@ -138,11 +144,14 @@ fn fill(
         blob_versioned_hashes,
         // Optimism fields
         #[cfg(feature = "optimism")]
-        optimism: reth_rpc_types::OptimismTransactionFields {
+        other: OptimismTransactionFields {
             source_hash: signed_tx.source_hash(),
             mint: signed_tx.mint().map(U128::from),
             is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
-        },
+        }
+        .into(),
+        #[cfg(not(feature = "optimism"))]
+        other: Default::default(),
     }
 }
 
@@ -162,8 +171,8 @@ pub fn from_primitive_access_list(
     )
 }
 
-/// Convert [TransactionSignedEcRecovered] to [CallRequest]
-pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequest {
+/// Convert [TransactionSignedEcRecovered] to [TransactionRequest]
+pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> TransactionRequest {
     let from = tx.signer();
     let to = tx.transaction.to();
     let gas = tx.transaction.gas_limit();
@@ -184,20 +193,22 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> CallRequ
     };
     let max_priority_fee_per_gas = tx.transaction.max_priority_fee_per_gas();
 
-    CallRequest {
+    TransactionRequest {
         from: Some(from),
         to,
         gas_price: gas_price.map(U256::from),
         max_fee_per_gas: max_fee_per_gas.map(U256::from),
         max_priority_fee_per_gas: max_priority_fee_per_gas.map(U256::from),
         gas: Some(U256::from(gas)),
-        value: Some(value.into()),
-        input: CallInput::new(input),
+        value: Some(value),
+        input: TransactionInput::new(input),
         nonce: Some(U64::from(nonce)),
         chain_id: chain_id.map(U64::from),
         access_list,
         max_fee_per_blob_gas: max_fee_per_blob_gas.map(U256::from),
         blob_versioned_hashes,
         transaction_type: Some(tx_type.into()),
+        sidecar: None,
+        other: OtherFields::default(),
     }
 }

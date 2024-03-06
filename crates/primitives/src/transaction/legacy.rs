@@ -1,4 +1,4 @@
-use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, TxValue, B256};
+use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
@@ -33,7 +33,7 @@ pub struct TxLegacy {
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
     /// to the newly created account; formally Tv.
-    pub value: TxValue,
+    pub value: U256,
     /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
     /// Some). pub init: An unlimited size byte array specifying the
     /// EVM-code for the account initialisation procedure CREATE,
@@ -51,21 +51,19 @@ impl TxLegacy {
         mem::size_of::<u128>() + // gas_price
         mem::size_of::<u64>() + // gas_limit
         self.to.size() + // to
-        mem::size_of::<TxValue>() + // value
+        mem::size_of::<U256>() + // value
         self.input.len() // input
     }
 
     /// Outputs the length of the transaction's fields, without a RLP header or length of the
     /// eip155 fields.
     pub(crate) fn fields_len(&self) -> usize {
-        let mut len = 0;
-        len += self.nonce.length();
-        len += self.gas_price.length();
-        len += self.gas_limit.length();
-        len += self.to.length();
-        len += self.value.length();
-        len += self.input.0.length();
-        len
+        self.nonce.length() +
+            self.gas_price.length() +
+            self.gas_limit.length() +
+            self.to.length() +
+            self.value.length() +
+            self.input.0.length()
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header or
@@ -81,6 +79,11 @@ impl TxLegacy {
 
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash.
+    ///
+    /// This encodes the transaction as:
+    /// `rlp(nonce, gas_price, gas_limit, to, value, input, v, r, s)`
+    ///
+    /// The `v` value is encoded according to EIP-155 if the `chain_id` is not `None`.
     pub(crate) fn encode_with_signature(&self, signature: &Signature, out: &mut dyn bytes::BufMut) {
         let payload_length =
             self.fields_len() + signature.payload_len_with_eip155_chain_id(self.chain_id);
@@ -105,6 +108,9 @@ impl TxLegacy {
 
     /// Encodes EIP-155 arguments into the desired buffer. Only encodes values for legacy
     /// transactions.
+    ///
+    /// If a `chain_id` is `Some`, this encodes the `chain_id`, followed by two zeroes, as defined
+    /// by [EIP-155](https://eips.ethereum.org/EIPS/eip-155).
     pub(crate) fn encode_eip155_fields(&self, out: &mut dyn bytes::BufMut) {
         // if this is a legacy transaction without a chain ID, it must be pre-EIP-155
         // and does not need to encode the chain ID for the signature hash encoding
@@ -131,6 +137,12 @@ impl TxLegacy {
     }
 
     /// Encodes the legacy transaction in RLP for signing, including the EIP-155 fields if possible.
+    ///
+    /// If a `chain_id` is `Some`, this encodes the transaction as:
+    /// `rlp(nonce, gas_price, gas_limit, to, value, input, chain_id, 0, 0)`
+    ///
+    /// Otherwise, this encodes the transaction as:
+    /// `rlp(nonce, gas_price, gas_limit, to, value, input)`
     pub(crate) fn encode_for_signing(&self, out: &mut dyn bytes::BufMut) {
         Header { list: true, payload_length: self.fields_len() + self.eip155_fields_len() }
             .encode(out);
@@ -179,7 +191,7 @@ mod tests {
             gas_price: 0xfa56ea00,
             gas_limit: 119902,
             to: TransactionKind::Call( hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
-            value: 0x1c6bf526340000u64.into(),
+            value: U256::from(0x1c6bf526340000u64),
             input:  hex!("f7d8c88300000000000000000000000000000000000000000000000000000000000cee6100000000000000000000000000000000000000000000000000000000000ac3e1").into(),
         });
 

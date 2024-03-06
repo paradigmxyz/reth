@@ -2,29 +2,42 @@
 ///
 /// For custom stages, use [`StageId::Other`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[allow(missing_docs)]
 pub enum StageId {
+    /// Static File stage in the process.
+    StaticFile,
+    /// Header stage in the process.
     Headers,
-    TotalDifficulty,
+    /// Bodies stage in the process.
     Bodies,
+    /// Sender recovery stage in the process.
     SenderRecovery,
+    /// Execution stage in the process.
     Execution,
+    /// Merkle unwind stage in the process.
     MerkleUnwind,
+    /// Account hashing stage in the process.
     AccountHashing,
+    /// Storage hashing stage in the process.
     StorageHashing,
+    /// Merkle execute stage in the process.
     MerkleExecute,
+    /// Transaction lookup stage in the process.
     TransactionLookup,
+    /// Index storage history stage in the process.
     IndexStorageHistory,
+    /// Index account history stage in the process.
     IndexAccountHistory,
+    /// Finish stage in the process.
     Finish,
+    /// Other custom stage with a provided string identifier.
     Other(&'static str),
 }
 
 impl StageId {
     /// All supported Stages
     pub const ALL: [StageId; 13] = [
+        StageId::StaticFile,
         StageId::Headers,
-        StageId::TotalDifficulty,
         StageId::Bodies,
         StageId::SenderRecovery,
         StageId::Execution,
@@ -41,8 +54,8 @@ impl StageId {
     /// Return stage id formatted as string.
     pub fn as_str(&self) -> &str {
         match self {
+            StageId::StaticFile => "StaticFile",
             StageId::Headers => "Headers",
-            StageId::TotalDifficulty => "TotalDifficulty",
             StageId::Bodies => "Bodies",
             StageId::SenderRecovery => "SenderRecovery",
             StageId::Execution => "Execution",
@@ -81,8 +94,8 @@ mod tests {
 
     #[test]
     fn stage_id_as_string() {
+        assert_eq!(StageId::StaticFile.to_string(), "StaticFile");
         assert_eq!(StageId::Headers.to_string(), "Headers");
-        assert_eq!(StageId::TotalDifficulty.to_string(), "TotalDifficulty");
         assert_eq!(StageId::Bodies.to_string(), "Bodies");
         assert_eq!(StageId::SenderRecovery.to_string(), "SenderRecovery");
         assert_eq!(StageId::Execution.to_string(), "Execution");

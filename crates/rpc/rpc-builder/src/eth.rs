@@ -7,15 +7,16 @@ use reth_rpc::{
         gas_oracle::GasPriceOracleConfig,
         EthFilterConfig, FeeHistoryCacheConfig, RPC_DEFAULT_GAS_CAP,
     },
-    BlockingTaskPool, EthApi, EthFilter, EthPubSub,
+    EthApi, EthFilter, EthPubSub,
 };
+use reth_tasks::pool::BlockingTaskPool;
 use serde::{Deserialize, Serialize};
 
 /// All handlers for the `eth` namespace
 #[derive(Debug, Clone)]
-pub struct EthHandlers<Provider, Pool, Network, Events> {
+pub struct EthHandlers<Provider, Pool, Network, Events, EvmConfig> {
     /// Main `eth_` request handler
-    pub api: EthApi<Provider, Pool, Network>,
+    pub api: EthApi<Provider, Pool, Network, EvmConfig>,
     /// The async caching layer used by the eth handlers
     pub cache: EthStateCache,
     /// Polling based filter handler available on all transports

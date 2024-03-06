@@ -1,19 +1,16 @@
 use crate::{
     compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
-    logs_bloom,
-    proofs::calculate_receipt_root_ref,
-    Bloom, Log, PruneSegmentError, TxType, B256,
+    logs_bloom, Bloom, Log, PruneSegmentError, TxType, B256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{Buf, BufMut, BytesMut};
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::strategy::Strategy;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact, CompactZstd};
 use std::{
     cmp::Ordering,
     ops::{Deref, DerefMut},
 };
-
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::strategy::Strategy;
 
 /// Receipt containing result of transaction execution.
 #[main_codec(no_arbitrary, zstd)]
@@ -96,22 +93,21 @@ impl Receipts {
     }
 
     /// Retrieves the receipt root for all recorded receipts from index.
-    #[cfg(not(feature = "optimism"))]
     pub fn root_slow(&self, index: usize) -> Option<B256> {
-        Some(calculate_receipt_root_ref(
+        Some(crate::proofs::calculate_receipt_root_ref(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
         ))
     }
 
     /// Retrieves the receipt root for all recorded receipts from index.
     #[cfg(feature = "optimism")]
-    pub fn root_slow(
+    pub fn optimism_root_slow(
         &self,
         index: usize,
         chain_spec: &crate::ChainSpec,
         timestamp: u64,
     ) -> Option<B256> {
-        Some(calculate_receipt_root_ref(
+        Some(crate::proofs::calculate_receipt_root_ref_optimism(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
             chain_spec,
             timestamp,
@@ -120,15 +116,13 @@ impl Receipts {
 
     /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
     pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, PruneSegmentError> {
-        let Some(block_r) = self.last() else {
-            return Ok(vec![]);
-        };
+        let Some(block_r) = self.last() else { return Ok(vec![]) };
         let mut out = Vec::with_capacity(block_r.len());
         for (id, tx_r) in block_r.iter().enumerate() {
             if let Some(receipt) = tx_r.as_ref() {
                 out.push((id as u64, receipt.cumulative_gas_used));
             } else {
-                return Err(PruneSegmentError::ReceiptsPruned);
+                return Err(PruneSegmentError::ReceiptsPruned)
             }
         }
         Ok(out)
@@ -501,6 +495,8 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         }
 
         match self.receipt.tx_type {
+            TxType::Legacy => unreachable!("legacy already handled"),
+
             TxType::EIP2930 => {
                 out.put_u8(0x01);
             }
@@ -514,7 +510,6 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
             TxType::DEPOSIT => {
                 out.put_u8(0x7E);
             }
-            _ => unreachable!("legacy handled; qed."),
         }
         out.put_slice(payload.as_ref());
     }
@@ -548,7 +543,6 @@ mod tests {
     use super::*;
     use crate::hex_literal::hex;
     use alloy_primitives::{address, b256, bytes, Bytes};
-    use alloy_rlp::{Decodable, Encodable};
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]

@@ -5,12 +5,12 @@ use crate::{
     version::ParseVersionError,
     DisconnectReason, EthMessageID, EthVersion,
 };
-use reth_primitives::{Chain, GotExpected, GotExpectedBoxed, ValidationError, B256};
+use alloy_chains::Chain;
+use reth_primitives::{GotExpected, GotExpectedBoxed, ValidationError, B256};
 use std::io;
 
 /// Errors when sending/receiving messages
 #[derive(thiserror::Error, Debug)]
-
 pub enum EthStreamError {
     #[error(transparent)]
     /// Error of the underlying P2P connection.

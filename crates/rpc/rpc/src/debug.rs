@@ -2,51 +2,44 @@ use crate::{
     eth::{
         error::{EthApiError, EthResult},
         revm_utils::{
-            clone_into_empty_db, inspect, inspect_and_return_db, prepare_call_env,
-            replay_transactions_until, transact, EvmOverrides,
+            inspect, inspect_and_return_db, prepare_call_env, replay_transactions_until, transact,
+            EvmOverrides,
         },
-        EthTransactions, TransactionSource,
+        EthTransactions,
     },
     result::{internal_rpc_err, ToRpcResult},
-    BlockingTaskGuard, EthApiSpec,
+    EthApiSpec,
 };
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
-    revm::env::tx_env_with_recovered,
-    revm_primitives::{
-        db::{DatabaseCommit, DatabaseRef},
-        BlockEnv, CfgEnv,
-    },
-    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256,
+    revm::env::tx_env_with_recovered, Address, Block, BlockId, BlockNumberOrTag, Bytes,
+    TransactionSignedEcRecovered, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
 };
-use reth_revm::{
-    database::{StateProviderDatabase, SubState},
-    tracing::{
-        js::{JsDbRequest, JsInspector},
-        FourByteInspector, TracingInspector, TracingInspectorConfig,
-    },
-};
+use reth_revm::database::{StateProviderDatabase, SubState};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
     },
-    BlockError, Bundle, CallRequest, RichBlock, StateContext,
+    BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
 };
-use reth_tasks::TaskSpawner;
+use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
-    db::{CacheDB, EmptyDB},
-    primitives::Env,
+    db::CacheDB,
+    primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
+};
+use revm_inspectors::tracing::{
+    js::{JsInspector, TransactionContext},
+    FourByteInspector, TracingInspector, TracingInspectorConfig,
 };
 use std::sync::Arc;
-use tokio::sync::{mpsc, AcquireError, OwnedSemaphorePermit};
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
 ///
@@ -59,14 +52,8 @@ pub struct DebugApi<Provider, Eth> {
 
 impl<Provider, Eth> DebugApi<Provider, Eth> {
     /// Create a new instance of the [DebugApi]
-    pub fn new(
-        provider: Provider,
-        eth: Eth,
-        task_spawner: Box<dyn TaskSpawner>,
-        blocking_task_guard: BlockingTaskGuard,
-    ) -> Self {
-        let inner =
-            Arc::new(DebugApiInner { provider, eth_api: eth, task_spawner, blocking_task_guard });
+    pub fn new(provider: Provider, eth: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
+        let inner = Arc::new(DebugApiInner { provider, eth_api: eth, blocking_task_guard });
         Self { inner }
     }
 }
@@ -88,7 +75,7 @@ where
         &self,
         at: BlockId,
         transactions: Vec<TransactionSignedEcRecovered>,
-        cfg: CfgEnv,
+        cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
@@ -97,16 +84,29 @@ where
         self.inner
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
+                let block_hash = at.as_block_hash();
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
-                let mut transactions = transactions.into_iter().peekable();
-                while let Some(tx) = transactions.next() {
+                let mut transactions = transactions.into_iter().enumerate().peekable();
+                while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
                     let tx = tx_env_with_recovered(&tx);
-                    let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
-                    let (result, state_changes) =
-                        this.trace_transaction(opts.clone(), env, at, &mut db).map_err(|err| {
+                    let env = EnvWithHandlerCfg {
+                        env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                        handler_cfg: cfg.handler_cfg,
+                    };
+                    let (result, state_changes) = this
+                        .trace_transaction(
+                            opts.clone(),
+                            env,
+                            &mut db,
+                            Some(TransactionContext {
+                                block_hash,
+                                tx_hash: Some(tx_hash),
+                                tx_index: Some(index),
+                            }),
+                        )
+                        .map_err(|err| {
                             results.push(TraceResult::Error {
                                 error: err.to_string(),
                                 tx_hash: Some(tx_hash),
@@ -213,12 +213,13 @@ where
             None => return Err(EthApiError::TransactionNotFound),
             Some(res) => res,
         };
-        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash.into()).await?;
+        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash().into()).await?;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
         let state_at: BlockId = block.parent_hash.into();
-        let block_txs = block.body;
+        let block_hash = block.hash();
+        let block_txs = block.into_transactions_ecrecovered();
 
         let this = self.clone();
         self.inner
@@ -229,7 +230,7 @@ where
 
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 // replay all transactions prior to the targeted transaction
-                replay_transactions_until(
+                let index = replay_transactions_until(
                     &mut db,
                     cfg.clone(),
                     block_env.clone(),
@@ -237,17 +238,34 @@ where
                     tx.hash,
                 )?;
 
-                let env = Env { cfg, block: block_env, tx: tx_env_with_recovered(&tx) };
-                this.trace_transaction(opts, env, state_at, &mut db).map(|(trace, _)| trace)
+                let env = EnvWithHandlerCfg {
+                    env: Env::boxed(cfg.cfg_env.clone(), block_env, tx_env_with_recovered(&tx)),
+                    handler_cfg: cfg.handler_cfg,
+                };
+
+                this.trace_transaction(
+                    opts,
+                    env,
+                    &mut db,
+                    Some(TransactionContext {
+                        block_hash: Some(block_hash),
+                        tx_index: Some(index),
+                        tx_hash: Some(tx.hash),
+                    }),
+                )
+                .map(|(trace, _)| trace)
             })
             .await
     }
 
     /// The debug_traceCall method lets you run an `eth_call` within the context of the given block
     /// execution using the final state of parent block as the base.
+    ///
+    /// Differences compare to `eth_call`:
+    ///  - `debug_traceCall` executes with __enabled__ basefee check, `eth_call` does not: <https://github.com/paradigmxyz/reth/issues/6240>
     pub async fn debug_trace_call(
         &self,
-        call: CallRequest,
+        call: TransactionRequest,
         block_id: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
     ) -> EthResult<GethTrace> {
@@ -325,29 +343,16 @@ where
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
 
-                    // for JS tracing we need to setup all async work before we can start tracing
-                    // because JSTracer and all JS types are not Send
                     let (_, _, at) = self.inner.eth_api.evm_env_at(at).await?;
-                    let state = self.inner.eth_api.state_at(at)?;
-                    let db = CacheDB::new(StateProviderDatabase::new(state));
-                    let has_state_overrides = overrides.has_state();
-
-                    // If the caller provided state overrides we need to clone the DB so the js
-                    // service has access these modifications
-                    let mut maybe_override_db = None;
-                    if has_state_overrides {
-                        maybe_override_db = Some(clone_into_empty_db(&db));
-                    }
-
-                    let to_db_service = self.spawn_js_trace_service(at, maybe_override_db)?;
 
                     let res = self
                         .inner
                         .eth_api
                         .spawn_with_call_at(call, at, overrides, move |db, env| {
-                            let mut inspector = JsInspector::new(code, config, to_db_service)?;
-                            let (res, _) = inspect(db, env.clone(), &mut inspector)?;
-                            Ok(inspector.json_result(res, &env)?)
+                            let mut inspector = JsInspector::new(code, config)?;
+                            let (res, _, db) =
+                                inspect_and_return_db(db, env.clone(), &mut inspector)?;
+                            Ok(inspector.json_result(res, &env, &db)?)
                         })
                         .await?;
 
@@ -377,7 +382,8 @@ where
     }
 
     /// The debug_traceCallMany method lets you run an `eth_callMany` within the context of the
-    /// given block execution using the first n transactions in the given block as base
+    /// given block execution using the first n transactions in the given block as base.
+    /// Each following bundle increments block number by 1 and block timestamp by 12 seconds
     pub async fn debug_trace_call_many(
         &self,
         bundles: Vec<Bundle>,
@@ -392,7 +398,7 @@ where
         let transaction_index = transaction_index.unwrap_or_default();
 
         let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let ((cfg, block_env, _), block) = futures::try_join!(
+        let ((cfg, mut block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(target_block),
             self.inner.eth_api.block_by_id_with_senders(target_block),
         )?;
@@ -407,10 +413,13 @@ where
         let mut at = block.parent_hash;
         let mut replay_block_txs = true;
 
-        // but if all transactions are to be replayed, we can use the state at the block itself
+        // if a transaction index is provided, we need to replay the transactions until the index
         let num_txs = transaction_index.index().unwrap_or(block.body.len());
-        if num_txs == block.body.len() {
-            at = block.hash;
+        // but if all transactions are to be replayed, we can use the state at the block itself
+        // this works with the exception of the PENDING block, because its state might not exist if
+        // built locally
+        if !target_block.is_pending() && num_txs == block.body.len() {
+            at = block.hash();
             replay_block_txs = false;
         }
 
@@ -430,7 +439,10 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let tx = tx_env_with_recovered(&tx);
-                        let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
+                        let env = EnvWithHandlerCfg {
+                            env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                            handler_cfg: cfg.handler_cfg,
+                        };
                         let (res, _) = transact(&mut db, env)?;
                         db.commit(res.state);
                     }
@@ -459,12 +471,8 @@ where
                             overrides,
                         )?;
 
-                        let (trace, state) = this.trace_transaction(
-                            tracing_options.clone(),
-                            env,
-                            target_block,
-                            &mut db,
-                        )?;
+                        let (trace, state) =
+                            this.trace_transaction(tracing_options.clone(), env, &mut db, None)?;
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
@@ -473,6 +481,9 @@ where
                         }
                         results.push(trace);
                     }
+                    // Increment block_env number and timestamp for the next bundle
+                    block_env.number += U256::from(1);
+                    block_env.timestamp += U256::from(12);
 
                     all_bundles.push(results);
                 }
@@ -491,9 +502,9 @@ where
     fn trace_transaction(
         &self,
         opts: GethDebugTracingOptions,
-        env: Env,
-        at: BlockId,
+        env: EnvWithHandlerCfg,
         db: &mut SubState<StateProviderBox>,
+        transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -550,19 +561,15 @@ where
                 },
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
-
-                    // We need to clone the database because the JS tracer will need to access the
-                    // current state via the spawned service
-                    let js_db = clone_into_empty_db(db);
-                    // we spawn the database service that will be used by the JS tracer
-                    // transaction because the service needs access to the committed state changes
-                    let to_db_service = self.spawn_js_trace_service(at, Some(js_db))?;
-
-                    let mut inspector = JsInspector::new(code, config, to_db_service)?;
-                    let (res, env) = inspect(db, env, &mut inspector)?;
+                    let mut inspector = JsInspector::with_transaction_context(
+                        code,
+                        config,
+                        transaction_context.unwrap_or_default(),
+                    )?;
+                    let (res, env, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
                     let state = res.state.clone();
-                    let result = inspector.json_result(res, &env)?;
+                    let result = inspector.json_result(res, &env, db)?;
                     Ok((GethTrace::JS(result), state))
                 }
             }
@@ -579,88 +586,6 @@ where
         let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
 
         Ok((frame.into(), res.state))
-    }
-
-    /// Spawns [Self::js_trace_db_service_task] on a new task and returns a channel to send requests
-    /// to it.
-    ///
-    /// Note: This blocks until the service is ready to receive requests.
-    fn spawn_js_trace_service(
-        &self,
-        at: BlockId,
-        db: Option<CacheDB<EmptyDB>>,
-    ) -> EthResult<mpsc::Sender<JsDbRequest>> {
-        let (to_db_service, rx) = mpsc::channel(1);
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        let this = self.clone();
-        // this needs to be on a blocking task because it only does blocking work besides waiting
-        // for db requests
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            this.js_trace_db_service_task(at, rx, ready_tx, db).await
-        }));
-        // wait for initialization
-        ready_rx.recv().map_err(|_| {
-            EthApiError::InternalJsTracerError("js tracer initialization failed".to_string())
-        })??;
-        Ok(to_db_service)
-    }
-
-    /// A services that handles database requests issued from inside the JavaScript tracing engine.
-    ///
-    /// If this traces with modified state, this takes a `db` parameter that contains the modified
-    /// in memory state. This is required because [StateProviderBox] can not be cloned or shared
-    /// across threads.
-    async fn js_trace_db_service_task(
-        self,
-        at: BlockId,
-        rx: mpsc::Receiver<JsDbRequest>,
-        on_ready: std::sync::mpsc::Sender<EthResult<()>>,
-        db: Option<CacheDB<EmptyDB>>,
-    ) {
-        let state = match self.inner.eth_api.state_at(at) {
-            Ok(state) => {
-                let _ = on_ready.send(Ok(()));
-                state
-            }
-            Err(err) => {
-                let _ = on_ready.send(Err(err));
-                return
-            }
-        };
-
-        let db = if let Some(db) = db {
-            let CacheDB { accounts, contracts, logs, block_hashes, .. } = db;
-            CacheDB {
-                accounts,
-                contracts,
-                logs,
-                block_hashes,
-                db: StateProviderDatabase::new(state),
-            }
-        } else {
-            CacheDB::new(StateProviderDatabase::new(state))
-        };
-
-        let mut stream = ReceiverStream::new(rx);
-        while let Some(req) = stream.next().await {
-            match req {
-                JsDbRequest::Basic { address, resp } => {
-                    let acc = db.basic_ref(address).map_err(|err| err.to_string());
-                    let _ = resp.send(acc);
-                }
-                JsDbRequest::Code { code_hash, resp } => {
-                    let code = db
-                        .code_by_hash_ref(code_hash)
-                        .map(|code| code.bytecode)
-                        .map_err(|err| err.to_string());
-                    let _ = resp.send(code);
-                }
-                JsDbRequest::StorageAt { address, index, resp } => {
-                    let value = db.storage_ref(address, index).map_err(|err| err.to_string());
-                    let _ = resp.send(value);
-                }
-            }
-        }
     }
 }
 
@@ -701,7 +626,7 @@ where
         if let Some(mut block) = block {
             // In RPC withdrawals are always present
             if block.withdrawals.is_none() {
-                block.withdrawals = Some(vec![]);
+                block.withdrawals = Some(Withdrawals::default());
             }
             block.encode(&mut res);
         }
@@ -710,13 +635,12 @@ where
     }
 
     /// Handler for `debug_getRawTransaction`
+    ///
+    /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
+    ///
     /// Returns the bytes of the transaction for the given hash.
-    async fn raw_transaction(&self, hash: B256) -> RpcResult<Bytes> {
-        let tx = self.inner.eth_api.transaction_by_hash(hash).await?;
-        Ok(tx
-            .map(TransactionSource::into_recovered)
-            .map(|tx| tx.envelope_encoded())
-            .unwrap_or_default())
+    async fn raw_transaction(&self, hash: B256) -> RpcResult<Option<Bytes>> {
+        Ok(self.inner.eth_api.raw_transaction_by_hash(hash).await?)
     }
 
     /// Handler for `debug_getRawTransactions`
@@ -733,18 +657,19 @@ where
 
     /// Handler for `debug_getRawReceipts`
     async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
-        let receipts =
-            self.inner.provider.receipts_by_block_id(block_id).to_rpc_result()?.unwrap_or_default();
-        let mut all_receipts = Vec::with_capacity(receipts.len());
-
-        for receipt in receipts {
-            let mut buf = Vec::new();
-            let receipt = receipt.with_bloom();
-            receipt.encode(&mut buf);
-            all_receipts.push(buf.into());
-        }
-
-        Ok(all_receipts)
+        Ok(self
+            .inner
+            .provider
+            .receipts_by_block_id(block_id)
+            .to_rpc_result()?
+            .unwrap_or_default()
+            .into_iter()
+            .map(|receipt| {
+                let mut buf = Vec::new();
+                receipt.with_bloom().encode(&mut buf);
+                Bytes::from(buf)
+            })
+            .collect())
     }
 
     /// Handler for `debug_getBadBlocks`
@@ -804,7 +729,7 @@ where
     /// Handler for `debug_traceCall`
     async fn debug_trace_call(
         &self,
-        request: CallRequest,
+        request: TransactionRequest,
         block_number: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace> {
@@ -1054,6 +979,4 @@ struct DebugApiInner<Provider, Eth> {
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls
     blocking_task_guard: BlockingTaskGuard,
-    /// The type that can spawn tasks which would otherwise block.
-    task_spawner: Box<dyn TaskSpawner>,
 }

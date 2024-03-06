@@ -5,7 +5,7 @@ use futures::{Sink, SinkExt};
 use reth_codecs::derive_arbitrary;
 use reth_ecies::stream::ECIESStream;
 use reth_primitives::bytes::{Buf, BufMut};
-use std::fmt::Display;
+use std::{fmt::Display, future::Future};
 use thiserror::Error;
 use tokio::io::AsyncWrite;
 use tokio_util::codec::{Encoder, Framed};
@@ -104,9 +104,9 @@ impl TryFrom<u8> for DisconnectReason {
     }
 }
 
-/// The [`Encodable`] implementation for [`DisconnectReason`] encodes the disconnect reason in a
-/// single-element RLP list.
 impl Encodable for DisconnectReason {
+    /// The [`Encodable`] implementation for [`DisconnectReason`] encodes the disconnect reason in
+    /// a single-element RLP list.
     fn encode(&self, out: &mut dyn BufMut) {
         vec![*self as u8].encode(out);
     }
@@ -115,9 +115,9 @@ impl Encodable for DisconnectReason {
     }
 }
 
-/// The [`Decodable`] implementation for [`DisconnectReason`] supports either a disconnect reason
-/// encoded a single byte or a RLP list containing the disconnect reason.
 impl Decodable for DisconnectReason {
+    /// The [`Decodable`] implementation for [`DisconnectReason`] supports either a disconnect
+    /// reason encoded a single byte or a RLP list containing the disconnect reason.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
             return Err(RlpError::InputTooShort)
@@ -149,19 +149,17 @@ impl Decodable for DisconnectReason {
 /// This trait is meant to allow higher level protocols like `eth` to disconnect from a peer, using
 /// lower-level disconnect functions (such as those that exist in the `p2p` protocol) if the
 /// underlying stream supports it.
-#[async_trait::async_trait]
 pub trait CanDisconnect<T>: Sink<T> + Unpin {
     /// Disconnects from the underlying stream, using a [`DisconnectReason`] as disconnect
     /// information if the stream implements a protocol that can carry the additional disconnect
     /// metadata.
-    async fn disconnect(
+    fn disconnect(
         &mut self,
         reason: DisconnectReason,
-    ) -> Result<(), <Self as Sink<T>>::Error>;
+    ) -> impl Future<Output = Result<(), <Self as Sink<T>>::Error>> + Send;
 }
 
 // basic impls for things like Framed<TcpStream, etc>
-#[async_trait::async_trait]
 impl<T, I, U> CanDisconnect<I> for Framed<T, U>
 where
     T: AsyncWrite + Unpin + Send,
@@ -175,7 +173,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<S> CanDisconnect<bytes::Bytes> for ECIESStream<S>
 where
     S: AsyncWrite + Unpin + Send,

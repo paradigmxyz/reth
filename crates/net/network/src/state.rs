@@ -12,6 +12,8 @@ use crate::{
     peers::{PeerAction, PeersManager},
     FetchClient,
 };
+use rand::seq::SliceRandom;
+
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
@@ -59,8 +61,6 @@ pub struct NetworkState<C> {
     client: C,
     /// Network discovery.
     discovery: Discovery,
-    /// The genesis hash of the network we're on
-    genesis_hash: B256,
     /// The type that handles requests.
     ///
     /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
@@ -77,7 +77,6 @@ where
         client: C,
         discovery: Discovery,
         peers_manager: PeersManager,
-        genesis_hash: B256,
         num_active_peers: Arc<AtomicUsize>,
     ) -> Self {
         let state_fetcher = StateFetcher::new(peers_manager.handle(), num_active_peers);
@@ -87,7 +86,6 @@ where
             queued_messages: Default::default(),
             client,
             discovery,
-            genesis_hash,
             state_fetcher,
         }
     }
@@ -110,11 +108,6 @@ where
     /// Returns a new [`FetchClient`]
     pub(crate) fn fetch_client(&self) -> FetchClient {
         self.state_fetcher.client()
-    }
-
-    /// Configured genesis hash.
-    pub fn genesis_hash(&self) -> B256 {
-        self.genesis_hash
     }
 
     /// How many peers we're currently connected to.
@@ -176,7 +169,12 @@ where
 
         let number = msg.block.block.header.number;
         let mut count = 0;
-        for (peer_id, peer) in self.active_peers.iter_mut() {
+
+        // Shuffle to propagate to a random sample of peers on every block announcement
+        let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
+        peers.shuffle(&mut rand::thread_rng());
+
+        for (peer_id, peer) in peers.into_iter() {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
@@ -549,7 +547,6 @@ mod tests {
             queued_messages: Default::default(),
             client: NoopProvider::default(),
             discovery: Discovery::noop(),
-            genesis_hash: Default::default(),
             state_fetcher: StateFetcher::new(handle, Default::default()),
         }
     }

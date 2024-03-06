@@ -1,6 +1,6 @@
 use crate::ProviderFactory;
 use reth_db::{
-    test_utils::{create_test_rw_db, TempDatabase},
+    test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
     DatabaseEnv,
 };
 use reth_primitives::{ChainSpec, MAINNET};
@@ -27,5 +27,6 @@ pub fn create_test_provider_factory_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
 ) -> ProviderFactory<Arc<TempDatabase<DatabaseEnv>>> {
     let db = create_test_rw_db();
-    ProviderFactory::new(db, chain_spec)
+    ProviderFactory::new(db, chain_spec, create_test_static_files_dir())
+        .expect("create provider factory with static_files")
 }

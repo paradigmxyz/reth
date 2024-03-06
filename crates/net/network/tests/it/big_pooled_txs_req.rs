@@ -11,8 +11,8 @@ use reth_transaction_pool::{
     test_utils::{testing_pool, MockTransaction},
     TransactionPool,
 };
-use tokio::sync::oneshot;
 
+use tokio::sync::oneshot;
 // peer0: `GetPooledTransactions` requestor
 // peer1: `GetPooledTransactions` responder
 #[tokio::test(flavor = "multi_thread")]
@@ -44,7 +44,7 @@ async fn test_large_tx_req() {
 
     // insert generated txs into responding peer's pool
     let pool1 = testing_pool();
-    pool1.add_external_transactions(txs).await.unwrap();
+    pool1.add_external_transactions(txs).await;
 
     // install transactions managers
     net.peers_mut()[0].install_transactions_manager(testing_pool());

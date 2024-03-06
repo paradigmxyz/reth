@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Account storage entry.
 ///
-/// `key` is the subkey when used as a value in the `StorageChangeSet` table.
+/// `key` is the subkey when used as a value in the `StorageChangeSets` table.
 #[derive_arbitrary(compact)]
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct StorageEntry {
@@ -23,7 +23,7 @@ impl StorageEntry {
 
 impl From<(B256, U256)> for StorageEntry {
     fn from((key, value): (B256, U256)) -> Self {
-        StorageEntry { key, value }
+        Self { key, value }
     }
 }
 

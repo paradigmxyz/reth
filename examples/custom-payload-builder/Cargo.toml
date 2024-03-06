@@ -1,0 +1,19 @@
+[package]
+name = "custom-payload-builder"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-primitives.workspace = true
+reth-node-api.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-payload-builder.workspace = true
+reth-node-ethereum.workspace = true
+reth-ethereum-payload-builder.workspace = true
+
+tracing.workspace = true
+futures-util.workspace = true
+eyre.workspace = true

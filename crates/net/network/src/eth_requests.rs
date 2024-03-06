@@ -1,6 +1,9 @@
 //! Blocks/Headers management for the p2p network.
 
-use crate::{metrics::EthRequestHandlerMetrics, peers::PeersHandle};
+use crate::{
+    budget::DEFAULT_BUDGET_TRY_DRAIN_STREAM, metrics::EthRequestHandlerMetrics, peers::PeersHandle,
+    poll_nested_stream_with_budget,
+};
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
@@ -98,7 +101,7 @@ where
         };
 
         let skip = skip as u64;
-        let mut total_bytes = APPROX_HEADER_SIZE;
+        let mut total_bytes = 0;
 
         for _ in 0..limit {
             if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
@@ -128,13 +131,11 @@ where
                 }
 
                 headers.push(header);
-
                 if headers.len() >= MAX_HEADERS_SERVE {
                     break
                 }
 
                 total_bytes += APPROX_HEADER_SIZE;
-
                 if total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
@@ -166,7 +167,7 @@ where
         self.metrics.received_bodies_requests.increment(1);
         let mut bodies = Vec::new();
 
-        let mut total_bytes = APPROX_BODY_SIZE;
+        let mut total_bytes = 0;
 
         for hash in request.0 {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
@@ -177,14 +178,12 @@ where
                 };
 
                 bodies.push(body);
-
-                total_bytes += APPROX_BODY_SIZE;
-
-                if total_bytes > SOFT_RESPONSE_LIMIT {
+                if bodies.len() >= MAX_BODIES_SERVE {
                     break
                 }
 
-                if bodies.len() >= MAX_BODIES_SERVE {
+                total_bytes += APPROX_BODY_SIZE;
+                if total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
             } else {
@@ -203,26 +202,24 @@ where
     ) {
         let mut receipts = Vec::new();
 
-        let mut total_bytes = APPROX_RECEIPT_SIZE;
+        let mut total_bytes = 0;
 
         for hash in request.0 {
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
-                receipts.push(
-                    receipts_by_block
-                        .into_iter()
-                        .map(|receipt| receipt.with_bloom())
-                        .collect::<Vec<_>>(),
-                );
+                let receipt = receipts_by_block
+                    .into_iter()
+                    .map(|receipt| receipt.with_bloom())
+                    .collect::<Vec<_>>();
 
-                total_bytes += APPROX_RECEIPT_SIZE;
-
-                if total_bytes > SOFT_RESPONSE_LIMIT {
+                receipts.push(receipt);
+                if receipts.len() >= MAX_RECEIPTS_SERVE {
                     break
                 }
 
-                if receipts.len() >= MAX_RECEIPTS_SERVE {
+                total_bytes += APPROX_RECEIPT_SIZE;
+                if total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
             } else {
@@ -246,11 +243,13 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        loop {
-            match this.incoming_requests.poll_next_unpin(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(None) => return Poll::Ready(()),
-                Poll::Ready(Some(incoming)) => match incoming {
+        let maybe_more_incoming_requests = poll_nested_stream_with_budget!(
+            "net::eth",
+            "Incoming eth requests stream",
+            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            this.incoming_requests.poll_next_unpin(cx),
+            |incoming| {
+                match incoming {
                     IncomingEthRequest::GetBlockHeaders { peer_id, request, response } => {
                         this.on_headers_request(peer_id, request, response)
                     }
@@ -261,9 +260,18 @@ where
                     IncomingEthRequest::GetReceipts { peer_id, request, response } => {
                         this.on_receipts_request(peer_id, request, response)
                     }
-                },
-            }
+                }
+            },
+        );
+
+        // stream is fully drained and import futures pending
+        if maybe_more_incoming_requests {
+            // make sure we're woken up again
+            cx.waker().wake_by_ref();
+            return Poll::Pending
         }
+
+        Poll::Pending
     }
 }
 
@@ -284,38 +292,49 @@ impl Borrow<(PeerId, GetBlockHeaders)> for RespondedGetBlockHeaders {
 
 /// All `eth` request related to blocks delegated by the network.
 #[derive(Debug)]
-#[allow(missing_docs)]
 pub enum IncomingEthRequest {
     /// Request Block headers from the peer.
     ///
     /// The response should be sent through the channel.
     GetBlockHeaders {
+        /// The ID of the peer to request block headers from.
         peer_id: PeerId,
+        /// The specific block headers requested.
         request: GetBlockHeaders,
+        /// The channel sender for the response containing block headers.
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     },
-    /// Request Block headers from the peer.
+    /// Request Block bodies from the peer.
     ///
     /// The response should be sent through the channel.
     GetBlockBodies {
+        /// The ID of the peer to request block bodies from.
         peer_id: PeerId,
+        /// The specific block bodies requested.
         request: GetBlockBodies,
+        /// The channel sender for the response containing block bodies.
         response: oneshot::Sender<RequestResult<BlockBodies>>,
     },
     /// Request Node Data from the peer.
     ///
     /// The response should be sent through the channel.
     GetNodeData {
+        /// The ID of the peer to request node data from.
         peer_id: PeerId,
+        /// The specific node data requested.
         request: GetNodeData,
+        /// The channel sender for the response containing node data.
         response: oneshot::Sender<RequestResult<NodeData>>,
     },
     /// Request Receipts from the peer.
     ///
     /// The response should be sent through the channel.
     GetReceipts {
+        /// The ID of the peer to request receipts from.
         peer_id: PeerId,
+        /// The specific receipts requested.
         request: GetReceipts,
+        /// The channel sender for the response containing receipts.
         response: oneshot::Sender<RequestResult<Receipts>>,
     },
 }

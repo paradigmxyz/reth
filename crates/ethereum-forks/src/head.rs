@@ -1,4 +1,5 @@
 use alloy_primitives::{BlockNumber, B256, U256};
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -8,9 +9,8 @@ use std::fmt;
 ///
 /// Note: This is a slimmed down version of Header, primarily for communicating the highest block
 /// with the P2P network and the RPC.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Head {
     /// The number of the head block.
     pub number: BlockNumber,
@@ -44,11 +44,7 @@ impl Head {
         total_difficulty: U256,
         timestamp: u64,
     ) {
-        self.number = number;
-        self.hash = hash;
-        self.difficulty = difficulty;
-        self.total_difficulty = total_difficulty;
-        self.timestamp = timestamp;
+        *self = Self { number, hash, difficulty, total_difficulty, timestamp };
     }
 
     /// Checks if the head block is an empty block (i.e., has default values).
@@ -61,7 +57,7 @@ impl fmt::Display for Head {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Head Block:\n Number: {}\n Hash: {:?}\n Difficulty: {:?}\n Total Difficulty: {:?}\n Timestamp: {}",
+            "Head Block:\n Number: {}\n Hash: {}\n Difficulty: {:?}\n Total Difficulty: {:?}\n Timestamp: {}",
             self.number, self.hash, self.difficulty, self.total_difficulty, self.timestamp
         )
     }

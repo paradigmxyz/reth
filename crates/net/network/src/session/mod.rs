@@ -53,6 +53,9 @@ pub use handle::{
 use reth_eth_wire::multiplex::RlpxProtocolMultiplexer;
 pub use reth_network_api::{Direction, PeerInfo};
 
+/// Maximum allowed graceful disconnects at a time.
+const MAX_GRACEFUL_DISCONNECTS: usize = 15;
+
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
 pub struct SessionId(usize);
@@ -110,6 +113,8 @@ pub struct SessionManager {
     bandwidth_meter: BandwidthMeter,
     /// Metrics for the session manager.
     metrics: SessionManagerMetrics,
+    /// Tracks the number of active graceful disconnects for incoming connections.
+    graceful_disconnects_counter: GracefulDisconnects,
 }
 
 // === impl SessionManager ===
@@ -151,6 +156,7 @@ impl SessionManager {
             bandwidth_meter,
             extra_protocols,
             metrics: Default::default(),
+            graceful_disconnects_counter: Default::default(),
         }
     }
 
@@ -310,12 +316,18 @@ impl SessionManager {
         stream: TcpStream,
         reason: DisconnectReason,
     ) {
+        let counter = self.graceful_disconnects_counter.clone();
+        if counter.exceeds_limit() {
+            // simply drop the connection if there are too many active disconnects already
+            return
+        }
         let secret_key = self.secret_key;
 
         self.spawn(async move {
             if let Ok(stream) = get_eciess_stream(stream, secret_key, Direction::Incoming).await {
                 let _ = UnauthedP2PStream::new(stream).send_disconnect(reason).await;
             }
+            drop(counter)
         });
     }
 
@@ -383,7 +395,7 @@ impl SessionManager {
                         remote_addr,
                         error,
                     } => {
-                        trace!(target: "net::session",  ?peer_id, ?error,"closed session.");
+                        trace!(target: "net::session", ?peer_id, %error,"closed session.");
                         self.remove_active_session(&peer_id);
                         Poll::Ready(SessionEvent::SessionClosedOnConnectionError {
                             remote_addr,
@@ -556,7 +568,7 @@ impl SessionManager {
             } => {
                 trace!(
                     target: "net::session",
-                    ?error,
+                    %error,
                     ?session_id,
                     ?remote_addr,
                     ?peer_id,
@@ -566,10 +578,9 @@ impl SessionManager {
                 Poll::Ready(SessionEvent::OutgoingConnectionError { remote_addr, peer_id, error })
             }
             PendingSessionEvent::EciesAuthError { remote_addr, session_id, error, direction } => {
-                self.remove_pending_session(&session_id);
                 trace!(
                     target: "net::session",
-                    ?error,
+                    %error,
                     ?session_id,
                     ?remote_addr,
                     "ecies auth failed"
@@ -621,6 +632,18 @@ impl SessionManager {
             }
         }
         infos
+    }
+}
+
+/// Keep track of graceful disconnects for incoming connections.
+#[derive(Debug, Clone, Default)]
+struct GracefulDisconnects(Arc<()>);
+
+impl GracefulDisconnects {
+    /// Returns true if the number of graceful disconnects exceeds the limit
+    /// [MAX_GRACEFUL_DISCONNECTS]
+    fn exceeds_limit(&self) -> bool {
+        Arc::strong_count(&self.0) > MAX_GRACEFUL_DISCONNECTS
     }
 }
 
@@ -730,11 +753,13 @@ pub enum SessionEvent {
 }
 
 /// Errors that can occur during handshaking/authenticating the underlying streams.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PendingSessionHandshakeError {
     /// The pending session failed due to an error while establishing the `eth` stream
+    #[error(transparent)]
     Eth(EthStreamError),
     /// The pending session failed due to an error while establishing the ECIES stream
+    #[error(transparent)]
     Ecies(ECIESError),
 }
 

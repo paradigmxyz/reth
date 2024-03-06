@@ -1,5 +1,5 @@
 use super::access_list::AccessList;
-use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, TxValue, B256};
+use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
@@ -46,7 +46,7 @@ pub struct TxEip1559 {
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
     /// to the newly created account; formally Tv.
-    pub value: TxValue,
+    pub value: U256,
     /// The accessList specifies a list of addresses and storage keys;
     /// these addresses and storage keys are added into the `accessed_addresses`
     /// and `accessed_storage_keys` global sets (introduced in EIP-2929).
@@ -110,17 +110,15 @@ impl TxEip1559 {
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
     pub(crate) fn fields_len(&self) -> usize {
-        let mut len = 0;
-        len += self.chain_id.length();
-        len += self.nonce.length();
-        len += self.max_priority_fee_per_gas.length();
-        len += self.max_fee_per_gas.length();
-        len += self.gas_limit.length();
-        len += self.to.length();
-        len += self.value.length();
-        len += self.input.0.length();
-        len += self.access_list.length();
-        len
+        self.chain_id.length() +
+            self.nonce.length() +
+            self.max_priority_fee_per_gas.length() +
+            self.max_fee_per_gas.length() +
+            self.gas_limit.length() +
+            self.to.length() +
+            self.value.length() +
+            self.input.0.length() +
+            self.access_list.length()
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
@@ -138,6 +136,10 @@ impl TxEip1559 {
 
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash that for eip2718 does not require rlp header
+    ///
+    /// This encodes the transaction as:
+    /// `rlp(chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit to, value, input,
+    /// access_list, y_parity, r, s)`
     pub(crate) fn encode_with_signature(
         &self,
         signature: &Signature,
@@ -186,12 +188,18 @@ impl TxEip1559 {
         mem::size_of::<u128>() + // max_fee_per_gas
         mem::size_of::<u128>() + // max_priority_fee_per_gas
         self.to.size() + // to
-        mem::size_of::<TxValue>() + // value
+        mem::size_of::<U256>() + // value
         self.access_list.size() + // access_list
         self.input.len() // input
     }
 
     /// Encodes the legacy transaction in RLP for signing.
+    ///
+    /// This encodes the transaction as:
+    /// `tx_type || rlp(chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit, to,
+    /// value, input, access_list)`
+    ///
+    /// Note that there is no rlp header before the transaction type byte.
     pub(crate) fn encode_for_signing(&self, out: &mut dyn bytes::BufMut) {
         out.put_u8(self.tx_type() as u8);
         Header { list: true, payload_length: self.fields_len() }.encode(out);
@@ -236,7 +244,7 @@ mod tests {
             nonce: 0x42,
             gas_limit: 44386,
             to: TransactionKind::Call( hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
-            value: 0_u64.into(),
+            value: U256::ZERO,
             input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
             max_fee_per_gas: 0x4a817c800,
             max_priority_fee_per_gas: 0x3b9aca00,

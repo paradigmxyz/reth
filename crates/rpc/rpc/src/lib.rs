@@ -22,8 +22,6 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(missing_debug_implementations, missing_docs, unreachable_pub, rustdoc::all)]
-#![deny(unused_must_use, rust_2018_idioms)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod admin;
@@ -39,7 +37,6 @@ mod trace;
 mod txpool;
 mod web3;
 pub use admin::AdminApi;
-pub use blocking_pool::{BlockingTaskGuard, BlockingTaskPool};
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
 pub use eth::{EthApi, EthApiSpec, EthFilter, EthPubSub, EthSubscriptionIdProvider};
@@ -51,5 +48,4 @@ pub use rpc::RPCApi;
 pub use trace::TraceApi;
 pub use txpool::TxPoolApi;
 pub use web3::Web3Api;
-pub mod blocking_pool;
 pub mod result;
