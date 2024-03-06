@@ -1274,7 +1274,7 @@ mod tests {
 
                 state.append(&mut accounts.clone());
                 let expected_root = state_root_prehashed(
-                    state.clone().into_iter().map(|(key, balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
+                    state.iter().map(|(&key, &balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
                 );
                 assert_eq!(expected_root, state_root);
                 trie_updates.flush(tx.tx_ref()).unwrap();
