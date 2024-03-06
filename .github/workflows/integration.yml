@@ -25,7 +25,6 @@ jobs:
       RUST_BACKTRACE: 1
     strategy:
       matrix:
-        partition: [1, 2]
         network: ["ethereum", "optimism"]
     timeout-minutes: 60
     steps:
@@ -42,7 +41,6 @@ jobs:
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
             --workspace --exclude examples --exclude ef-tests \
-            --partition hash:${{ matrix.partition }}/2 \
             -E "kind(test)"
 
   sync:
