@@ -233,7 +233,7 @@ pub struct TransactionLookupConfig {
 
 impl Default for TransactionLookupConfig {
     fn default() -> Self {
-        Self { chunk_size: 5_000_000}
+        Self { chunk_size: 5_000_000 }
     }
 }
 
@@ -247,7 +247,7 @@ pub struct EtlConfig {
 
 impl Default for EtlConfig {
     fn default() -> Self {
-        Self { etl_file_size: 500 * (1024 * 1024)}
+        Self { etl_file_size: 500 * (1024 * 1024) }
     }
 }
 

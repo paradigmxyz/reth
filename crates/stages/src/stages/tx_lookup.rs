@@ -404,7 +404,12 @@ mod tests {
 
     impl Default for TransactionLookupTestRunner {
         fn default() -> Self {
-            Self { db: TestStageDB::default(), chunk_size: 1000, etl_file_size: 500 * 1024 * 1024, prune_mode: None }
+            Self {
+                db: TestStageDB::default(),
+                chunk_size: 1000,
+                etl_file_size: 500 * 1024 * 1024,
+                prune_mode: None,
+            }
         }
     }
 
@@ -451,7 +456,11 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            TransactionLookupStage { chunk_size: self.chunk_size, etl_file_size: self.etl_file_size, prune_mode: self.prune_mode }
+            TransactionLookupStage {
+                chunk_size: self.chunk_size,
+                etl_file_size: self.etl_file_size,
+                prune_mode: self.prune_mode,
+            }
         }
     }
 

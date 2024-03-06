@@ -422,7 +422,7 @@ mod tests {
                     HeaderSyncMode::Tip(self.channel.1.clone()),
                     self.consensus.clone(),
                     Arc::new(TempDir::new().unwrap()),
-                    500*(1024*1024),
+                    500 * (1024 * 1024),
                 )
             }
         }

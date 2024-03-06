@@ -183,7 +183,15 @@ impl<Provider, H, B> OnlineStages<Provider, H, B> {
         temp_dir: Arc<TempDir>,
         etl_file_size: usize,
     ) -> Self {
-        Self { provider, header_mode, consensus, header_downloader, body_downloader, temp_dir, etl_file_size }
+        Self {
+            provider,
+            header_mode,
+            consensus,
+            header_downloader,
+            body_downloader,
+            temp_dir,
+            etl_file_size,
+        }
     }
 }
 
