@@ -113,6 +113,9 @@ pub enum EthApiError {
     /// Evm generic purpose error.
     #[error("Revm error: {0}")]
     EvmCustom(String),
+    /// Error encountered when converting a transaction type
+    #[error("Transaction conversion error")]
+    TransactionConversionError,
 }
 
 /// Eth Optimism Api Error
@@ -146,7 +149,8 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
-            EthApiError::InvalidTracerConfig => invalid_params_rpc_err(error.to_string()),
+            EthApiError::InvalidTracerConfig |
+            EthApiError::TransactionConversionError => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
             EthApiError::PrevrandaoNotSet |

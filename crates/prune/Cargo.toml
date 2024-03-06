@@ -17,12 +17,8 @@ reth-primitives.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true
-reth-snapshot.workspace = true
 reth-tokio-util.workspace = true
 reth-config.workspace = true
-
-# async
-tokio = { workspace = true, features = ["sync"] }
 
 # metrics
 reth-metrics.workspace = true

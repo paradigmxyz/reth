@@ -19,5 +19,5 @@ crates/metrics              @onbjerg
 crates/tracing              @onbjerg
 crates/tasks                @mattsse
 crates/prune                @shekhirin @joshieDo
-crates/snapshot             @joshieDo
+crates/static-file          @joshieDo @shekhirin
 .github/                    @onbjerg @gakonst @DaniPopes

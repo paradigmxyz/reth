@@ -17,13 +17,13 @@ name = "reth_libmdbx"
 [dependencies]
 bitflags.workspace = true
 byteorder = "1"
-derive_more = "0.99"
+derive_more.workspace = true
 indexmap = "2"
 libc = "0.2"
 parking_lot.workspace = true
 thiserror.workspace = true
 dashmap = { version = "5.5.3", features = ["inline"], optional = true }
-tracing = { workspace = true, optional = true }
+tracing.workspace = true
 
 ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }
 
@@ -33,7 +33,7 @@ libffi = "3.2.0"
 [features]
 default = []
 return-borrowed = []
-read-tx-timeouts = ["dashmap", "dashmap/inline", "tracing"]
+read-tx-timeouts = ["dashmap", "dashmap/inline"]
 
 [dev-dependencies]
 pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }

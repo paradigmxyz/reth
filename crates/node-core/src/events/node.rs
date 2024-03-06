@@ -14,6 +14,7 @@ use reth_primitives::{
 };
 use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
+use reth_static_file::StaticFileProducerEvent;
 use std::{
     fmt::{Display, Formatter},
     future::Future,
@@ -22,7 +23,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::time::Interval;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
@@ -116,7 +117,7 @@ impl<DB> NodeState<DB> {
 
                 if let Some(current_stage) = self.current_stage.as_mut() {
                     current_stage.checkpoint = checkpoint;
-                    current_stage.eta.update(checkpoint);
+                    current_stage.eta.update(stage_id, checkpoint);
 
                     let target = OptionalField(current_stage.target);
                     let stage_progress = OptionalField(
@@ -233,8 +234,22 @@ impl<DB> NodeState<DB> {
 
     fn handle_pruner_event(&self, event: PrunerEvent) {
         match event {
+            PrunerEvent::Started { tip_block_number } => {
+                info!(tip_block_number, "Pruner started");
+            }
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
                 info!(tip_block_number, ?elapsed, ?stats, "Pruner finished");
+            }
+        }
+    }
+
+    fn handle_static_file_producer_event(&self, event: StaticFileProducerEvent) {
+        match event {
+            StaticFileProducerEvent::Started { targets } => {
+                info!(?targets, "Static File Producer started");
+            }
+            StaticFileProducerEvent::Finished { targets, elapsed } => {
+                info!(?targets, ?elapsed, "Static File Producer finished");
             }
         }
     }
@@ -282,6 +297,8 @@ pub enum NodeEvent {
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
     /// A pruner event
     Pruner(PrunerEvent),
+    /// A static_file_producer event
+    StaticFileProducer(StaticFileProducerEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -311,6 +328,12 @@ impl From<ConsensusLayerHealthEvent> for NodeEvent {
 impl From<PrunerEvent> for NodeEvent {
     fn from(event: PrunerEvent) -> Self {
         NodeEvent::Pruner(event)
+    }
+}
+
+impl From<StaticFileProducerEvent> for NodeEvent {
+    fn from(event: StaticFileProducerEvent) -> Self {
+        NodeEvent::StaticFileProducer(event)
     }
 }
 
@@ -430,6 +453,9 @@ where
                 NodeEvent::Pruner(event) => {
                     this.state.handle_pruner_event(event);
                 }
+                NodeEvent::StaticFileProducer(event) => {
+                    this.state.handle_static_file_producer_event(event);
+                }
             }
         }
 
@@ -453,18 +479,27 @@ struct Eta {
 
 impl Eta {
     /// Update the ETA given the checkpoint, if possible.
-    fn update(&mut self, checkpoint: StageCheckpoint) {
+    fn update(&mut self, stage: StageId, checkpoint: StageCheckpoint) {
         let Some(current) = checkpoint.entities() else { return };
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
-            let processed_since_last = current.processed - self.last_checkpoint.processed;
+            let Some(processed_since_last) =
+                current.processed.checked_sub(self.last_checkpoint.processed)
+            else {
+                self.eta = None;
+                debug!(target: "reth::cli", %stage, ?current, ?self.last_checkpoint, "Failed to calculate the ETA: processed entities is less than the last checkpoint");
+                return
+            };
             let elapsed = last_checkpoint_time.elapsed();
             let per_second = processed_since_last as f64 / elapsed.as_secs_f64();
 
-            self.eta = Duration::try_from_secs_f64(
-                ((current.total - current.processed) as f64) / per_second,
-            )
-            .ok();
+            let Some(remaining) = current.total.checked_sub(current.processed) else {
+                self.eta = None;
+                debug!(target: "reth::cli", %stage, ?current, "Failed to calculate the ETA: total entities is less than processed entities");
+                return
+            };
+
+            self.eta = Duration::try_from_secs_f64(remaining as f64 / per_second).ok();
         }
 
         self.last_checkpoint = current;

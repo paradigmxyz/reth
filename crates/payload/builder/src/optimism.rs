@@ -1,13 +1,21 @@
 use crate::EthPayloadBuilderAttributes;
 use alloy_rlp::{Encodable, Error as DecodeError};
-use reth_node_api::PayloadBuilderAttributes;
+use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
-    Address, ChainSpec, Header, TransactionSigned, Withdrawals, B256, U256,
+    Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, TransactionSigned,
+    Withdrawals, B256, U256,
 };
-use reth_rpc_types::engine::{OptimismPayloadAttributes, PayloadId};
-use reth_rpc_types_compat::engine::payload::convert_standalone_withdraw_to_withdrawal;
+use reth_rpc_types::engine::{
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, OptimismExecutionPayloadEnvelopeV3,
+    OptimismPayloadAttributes, PayloadId,
+};
+use reth_rpc_types_compat::engine::payload::{
+    block_to_payload_v3, convert_block_to_payload_field_v2,
+    convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
+};
+use std::sync::Arc;
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +157,126 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
         }
 
         (cfg_with_handler_cfg, block_env)
+    }
+}
+
+/// Contains the built payload.
+#[derive(Debug, Clone)]
+pub struct OptimismBuiltPayload {
+    /// Identifier of the payload
+    pub(crate) id: PayloadId,
+    /// The built block
+    pub(crate) block: SealedBlock,
+    /// The fees of the block
+    pub(crate) fees: U256,
+    /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
+    /// empty.
+    pub(crate) sidecars: Vec<BlobTransactionSidecar>,
+    /// The rollup's chainspec.
+    pub(crate) chain_spec: Arc<ChainSpec>,
+    /// The payload attributes.
+    pub(crate) attributes: OptimismPayloadBuilderAttributes,
+}
+
+// === impl BuiltPayload ===
+
+impl OptimismBuiltPayload {
+    /// Initializes the payload with the given initial block.
+    pub fn new(
+        id: PayloadId,
+        block: SealedBlock,
+        fees: U256,
+        chain_spec: Arc<ChainSpec>,
+        attributes: OptimismPayloadBuilderAttributes,
+    ) -> Self {
+        Self { id, block, fees, sidecars: Vec::new(), chain_spec, attributes }
+    }
+
+    /// Returns the identifier of the payload.
+    pub fn id(&self) -> PayloadId {
+        self.id
+    }
+
+    /// Returns the built block(sealed)
+    pub fn block(&self) -> &SealedBlock {
+        &self.block
+    }
+
+    /// Fees of the block
+    pub fn fees(&self) -> U256 {
+        self.fees
+    }
+
+    /// Adds sidecars to the payload.
+    pub fn extend_sidecars(&mut self, sidecars: Vec<BlobTransactionSidecar>) {
+        self.sidecars.extend(sidecars)
+    }
+}
+
+impl BuiltPayload for OptimismBuiltPayload {
+    fn block(&self) -> &SealedBlock {
+        &self.block
+    }
+
+    fn fees(&self) -> U256 {
+        self.fees
+    }
+}
+
+impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
+    fn block(&self) -> &SealedBlock {
+        (**self).block()
+    }
+
+    fn fees(&self) -> U256 {
+        (**self).fees()
+    }
+}
+
+// V1 engine_getPayloadV1 response
+impl From<OptimismBuiltPayload> for ExecutionPayloadV1 {
+    fn from(value: OptimismBuiltPayload) -> Self {
+        try_block_to_payload_v1(value.block)
+    }
+}
+
+// V2 engine_getPayloadV2 response
+impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV2 {
+    fn from(value: OptimismBuiltPayload) -> Self {
+        let OptimismBuiltPayload { block, fees, .. } = value;
+
+        ExecutionPayloadEnvelopeV2 {
+            block_value: fees,
+            execution_payload: convert_block_to_payload_field_v2(block),
+        }
+    }
+}
+
+impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
+    fn from(value: OptimismBuiltPayload) -> Self {
+        let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
+
+        let parent_beacon_block_root =
+            if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
+                attributes.parent_beacon_block_root().unwrap_or(B256::ZERO)
+            } else {
+                B256::ZERO
+            };
+        OptimismExecutionPayloadEnvelopeV3 {
+            execution_payload: block_to_payload_v3(block.clone()),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            parent_beacon_block_root,
+        }
     }
 }
 

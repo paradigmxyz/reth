@@ -11,12 +11,6 @@ description = "Ethereum network support"
 [lints]
 workspace = true
 
-[package.metadata.cargo-udeps.ignore]
-normal = [
-    # Used for diagrams in docs
-    "aquamarine",
-]
-
 [dependencies]
 # reth
 reth-interfaces.workspace = true
@@ -61,7 +55,6 @@ fnv = "1.0"
 thiserror.workspace = true
 parking_lot.workspace = true
 linked_hash_set = "0.1"
-linked-hash-map = "0.5.6"
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 derive_more.workspace = true

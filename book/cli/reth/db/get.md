@@ -4,19 +4,12 @@ Gets the content of a table for the given key
 
 ```bash
 $ reth db get --help
-Usage: reth db get [OPTIONS] <TABLE> <KEY> [SUBKEY]
+Usage: reth db get [OPTIONS] <COMMAND>
 
-Arguments:
-  <TABLE>
-          The table name
-          
-          NOTE: The dupsort tables are not supported now.
-
-  <KEY>
-          The key to get content for
-
-  [SUBKEY]
-          The subkey to get content for
+Commands:
+  mdbx         Gets the content of a database table for the given key
+  static-file  Gets the content of a static file segment for the given key
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
       --datadir <DATA_DIR>
@@ -29,9 +22,6 @@ Options:
           - macOS: `$HOME/Library/Application Support/reth/`
           
           [default: default]
-
-      --raw
-          Output bytes instead of human-readable decoded value
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.

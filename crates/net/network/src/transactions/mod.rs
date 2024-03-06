@@ -1,34 +1,8 @@
 //! Transactions management for the p2p network.
-//!
-//! `TransactionFetcher` is responsible for rate limiting and retry logic for fetching
-//! transactions. Upon receiving an announcement, functionality of the `TransactionFetcher` is
-//! used for filtering out hashes 1) for which the tx is already known and 2) unknown but the hash
-//! is already seen in a previous announcement. The hashes that remain from an announcement are
-//! then packed into a request with respect to the [`EthVersion`] of the announcement. Any hashes
-//! that don't fit into the request, are buffered in the `TransactionFetcher`. If on the other
-//! hand, space remains, hashes that the peer has previously announced are taken out of buffered
-//! hashes to fill the request up. The [`GetPooledTransactions`] request is then sent to the
-//! peer's session, this marks the peer as active with respect to
-//! `MAX_CONCURRENT_TX_REQUESTS_PER_PEER`.
-//!
-//! When a peer buffers hashes in the `TransactionsManager::on_new_pooled_transaction_hashes`
-//! pipeline, it is stored as fallback peer for those hashes. When [`TransactionsManager`] is
-//! polled, it checks if any of fallback peer is idle. If so, it packs a request for that peer,
-//! filling it from the buffered hashes. It does so until there are no more idle peers or until
-//! the hashes buffer is empty.
-//!
-//! If a [`GetPooledTransactions`] request resolves with an error, the hashes in the request are
-//! buffered with respect to `MAX_REQUEST_RETRIES_PER_TX_HASH`. So is the case if the request
-//! resolves with partial success, that is some of the requested hashes are not in the response,
-//! these are then buffered.
-//!
-//! Most healthy peers will send the same hashes in their announcements, as RLPx is a gossip
-//! protocol. This means it's unlikely, that a valid hash, will be buffered for very long
-//! before it's re-tried. Nonetheless, the capacity of the buffered hashes cache must be large
-//! enough to buffer many hashes during network failure, to allow for recovery.
 
 use crate::{
     cache::LruCache,
+    duration_metered_exec,
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
@@ -224,7 +198,7 @@ pub struct TransactionsManager<Pool> {
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
+    transactions_by_peers: HashMap<TxHash, HashSet<PeerId>>,
     /// Transactions that are currently imported into the `Pool`.
     ///
     /// The import process includes:
@@ -281,7 +255,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
 
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-        let transaction_fetcher = TransactionFetcher::default().with_transaction_fetcher_config(
+        let transaction_fetcher = TransactionFetcher::with_transaction_fetcher_config(
             &transactions_manager_config.transaction_fetcher_config,
         );
 
@@ -289,11 +263,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         // over the network
         let pending = pool.pending_transactions_listener();
         let pending_pool_imports_info = PendingPoolImportsInfo::default();
-
         let metrics = TransactionsManagerMetrics::default();
-        metrics
-            .capacity_inflight_requests
-            .increment(transaction_fetcher.info.max_inflight_requests as u64);
         metrics
             .capacity_pending_pool_imports
             .increment(pending_pool_imports_info.max_pending_pool_imports as u64);
@@ -341,19 +311,6 @@ where
     Pool: TransactionPool + 'static,
 {
     #[inline]
-    fn update_fetch_metrics(&self) {
-        let tx_fetcher = &self.transaction_fetcher;
-
-        self.metrics.inflight_transaction_requests.set(tx_fetcher.inflight_requests.len() as f64);
-
-        let hashes_pending_fetch = tx_fetcher.hashes_pending_fetch.len() as f64;
-        let total_hashes = tx_fetcher.hashes_fetch_inflight_and_pending_fetch.len() as f64;
-
-        self.metrics.hashes_pending_fetch.set(hashes_pending_fetch);
-        self.metrics.hashes_inflight_transaction_requests.set(total_hashes - hashes_pending_fetch);
-    }
-
-    #[inline]
     fn update_poll_metrics(&self, start: Instant, poll_durations: TxManagerPollDurations) {
         let metrics = &self.metrics;
 
@@ -369,7 +326,7 @@ where
 
         // update metrics for whole poll function
         metrics.duration_poll_tx_manager.set(start.elapsed().as_secs_f64());
-        // update poll metrics for nested streams
+        // update metrics for nested expressions
         metrics.acc_duration_poll_network_events.set(acc_network_events.as_secs_f64());
         metrics.acc_duration_poll_pending_pool_imports.set(acc_pending_imports.as_secs_f64());
         metrics.acc_duration_poll_transaction_events.set(acc_tx_events.as_secs_f64());
@@ -690,7 +647,10 @@ where
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
-        // 2. filter out known hashes
+        // 2. filter out transactions pending import to pool
+        partially_valid_msg.retain_by_hash(|hash| !self.transactions_by_peers.contains_key(hash));
+
+        // 3. filter out known hashes
         //
         // known txns have already been successfully fetched or received over gossip.
         //
@@ -712,7 +672,7 @@ where
             return
         }
 
-        // 3. filter out invalid entries (spam)
+        // 4. filter out invalid entries (spam)
         //
         // validates messages with respect to the given network, e.g. allowed tx types
         //
@@ -741,7 +701,7 @@ where
             return
         }
 
-        // 4. filter out already seen unknown hashes
+        // 5. filter out already seen unknown hashes
         //
         // seen hashes are already in the tx fetcher, pending fetch.
         //
@@ -827,11 +787,8 @@ where
         //
         // get handle to peer's session again, at this point we know it exists
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
-        let metrics = &self.metrics;
         if let Some(failed_to_request_hashes) =
-            self.transaction_fetcher.request_transactions_from_peer(hashes_to_request, peer, || {
-                metrics.egress_peer_channel_full.increment(1)
-            })
+            self.transaction_fetcher.request_transactions_from_peer(hashes_to_request, peer)
         {
             let conn_eth_version = peer.version;
 
@@ -861,11 +818,6 @@ where
                     .map(PooledTransactionsElement::try_from_broadcast)
                     .filter_map(Result::ok)
                     .collect::<PooledTransactions>();
-
-                // mark the transactions as received
-                self.transaction_fetcher.remove_hashes_from_transaction_fetcher(
-                    non_blob_txs.iter().map(|tx| *tx.hash()),
-                );
 
                 self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
 
@@ -988,6 +940,10 @@ where
 
         let mut transactions = transactions.0;
 
+        // mark the transactions as received
+        self.transaction_fetcher
+            .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| *tx.hash()));
+
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
 
         // track that the peer knows these transaction, but only if this is a new broadcast.
@@ -1037,7 +993,7 @@ where
                 match self.transactions_by_peers.entry(*tx.hash()) {
                     Entry::Occupied(mut entry) => {
                         // transaction was already inserted
-                        entry.get_mut().push(peer_id);
+                        entry.get_mut().insert(peer_id);
                     }
                     Entry::Vacant(entry) => {
                         if !self.bad_imports.contains(tx.hash()) {
@@ -1045,7 +1001,7 @@ where
                             let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
                             new_txs.push(pool_transaction);
 
-                            entry.insert(vec![peer_id]);
+                            entry.insert(HashSet::from([peer_id]));
                         } else {
                             trace!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
@@ -1150,11 +1106,10 @@ where
                 self.report_peer_bad_transactions(peer_id);
             }
         }
-        self.transaction_fetcher.remove_hashes_from_transaction_fetcher([hash]);
         self.bad_imports.insert(hash);
     }
 
-    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns  
+    /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns
     /// `false` if [`TransactionsManager`] is operating close to full capacity.
     fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         self.pending_pool_imports_info
@@ -1163,33 +1118,13 @@ where
     }
 }
 
-/// Measures the duration of executing the given code block. The duration is added to the given
-/// accumulator value passed as a mutable reference.
-macro_rules! duration_metered_exec {
-    ($code:block, $acc:ident) => {
-        let start = Instant::now();
-
-        $code;
-
-        *$acc += start.elapsed();
-    };
-}
-
-#[derive(Debug, Default)]
-struct TxManagerPollDurations {
-    acc_network_events: Duration,
-    acc_pending_imports: Duration,
-    acc_tx_events: Duration,
-    acc_imported_txns: Duration,
-    acc_fetch_events: Duration,
-    acc_pending_fetch: Duration,
-    acc_cmds: Duration,
-}
-
 /// An endless future. Preemption ensure that future is non-blocking, nonetheless. See
 /// [`crate::NetworkManager`] for more context on the design pattern.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
+//
+// spawned in `NodeConfig::start_network`(reth_node_core::NodeConfig) and
+// `NetworkConfig::start_network`(reth_network::NetworkConfig)
 impl<Pool> Future for TransactionsManager<Pool>
 where
     Pool: TransactionPool + Unpin + 'static,
@@ -1212,7 +1147,7 @@ where
             let acc = &mut poll_durations.acc_network_events;
             duration_metered_exec!(
                 {
-                    // advance network/peer related events
+                    // Advance network/peer related events (update peers map).
                     if let Poll::Ready(Some(event)) = this.network_events.poll_next_unpin(cx) {
                         this.on_network_event(event);
                         some_ready = true;
@@ -1224,6 +1159,10 @@ where
             let acc = &mut poll_durations.acc_pending_fetch;
             duration_metered_exec!(
                 {
+                    // Tries to drain hashes pending fetch cache if the tx manager currently has
+                    // capacity for this (fetch txns).
+                    //
+                    // Sends at most one request.
                     if this.has_capacity_for_fetching_pending_hashes() {
                         // try drain transaction hashes pending fetch
                         let info = &this.pending_pool_imports_info;
@@ -1231,14 +1170,9 @@ where
                         let has_capacity_wrt_pending_pool_imports =
                             |divisor| info.has_capacity(max_pending_pool_imports / divisor);
 
-                        let metrics = &this.metrics;
-                        let metrics_increment_egress_peer_channel_full =
-                            || metrics.egress_peer_channel_full.increment(1);
-
                         this.transaction_fetcher.on_fetch_pending_hashes(
                             &this.peers,
                             has_capacity_wrt_pending_pool_imports,
-                            metrics_increment_egress_peer_channel_full,
                         );
                     }
                 },
@@ -1248,7 +1182,7 @@ where
             let acc = &mut poll_durations.acc_cmds;
             duration_metered_exec!(
                 {
-                    // advance commands
+                    // Advance commands (propagate/fetch/serve txns).
                     if let Poll::Ready(Some(cmd)) = this.command_rx.poll_next_unpin(cx) {
                         this.on_command(cmd);
                         some_ready = true;
@@ -1260,7 +1194,20 @@ where
             let acc = &mut poll_durations.acc_tx_events;
             duration_metered_exec!(
                 {
-                    // advance incoming transaction events
+                    // Advance incoming transaction events (stream new txns/announcements from
+                    // network manager and queue for import to pool/fetch txns).
+                    //
+                    // This will potentially remove hashes from hashes pending fetch, it the event
+                    // is an announcement (if same hashes are announced that didn't fit into a
+                    // previous request).
+                    //
+                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+                    // (128 KiB / 10 bytes > 13k transactions).
+                    //
+                    // If this is an event with `Transactions` message, since transactions aren't
+                    // validated until they are inserted into the pool, this can potentially queue
+                    // >13k transactions for insertion to pool. More if the message size is bigger
+                    // than the soft limit on a `Transactions` broadcast message, which is 128 KiB.
                     if let Poll::Ready(Some(event)) = this.transaction_events.poll_next_unpin(cx) {
                         this.on_network_tx_event(event);
                         some_ready = true;
@@ -1272,9 +1219,18 @@ where
             let acc = &mut poll_durations.acc_fetch_events;
             duration_metered_exec!(
                 {
-                    this.update_fetch_metrics();
+                    this.transaction_fetcher.update_metrics();
 
-                    // advance fetching transaction events
+                    // Advance fetching transaction events (flush transaction fetcher and queue for
+                    // import to pool).
+                    //
+                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+                    // (2 MiB / 10 bytes > 200k transactions).
+                    //
+                    // Since transactions aren't validated until they are inserted into the pool,
+                    // this can potentially queue >200k transactions for insertion to pool. More
+                    // if the message size is bigger than the soft limit on a `PooledTransactions`
+                    // response which is 2 MiB.
                     if let Poll::Ready(Some(fetch_event)) =
                         this.transaction_fetcher.poll_next_unpin(cx)
                     {
@@ -1290,11 +1246,14 @@ where
                                 trace!(target: "net::tx", ?peer_id, %error, "requesting transactions from peer failed");
                                 this.on_request_error(peer_id, error);
                             }
+                            FetchEvent::EmptyResponse { peer_id } => {
+                                trace!(target: "net::tx", ?peer_id, "peer returned empty response");
+                            }
                         }
                         some_ready = true;
                     }
 
-                    this.update_fetch_metrics();
+                    this.transaction_fetcher.update_metrics();
                 },
                 acc
             );
@@ -1302,7 +1261,20 @@ where
             let acc = &mut poll_durations.acc_pending_imports;
             duration_metered_exec!(
                 {
-                    // Advance all imports
+                    // Advance pool imports (flush txns to pool).
+                    //
+                    // Note, this is done in batches. A batch is filled from one `Transactions`
+                    // broadcast messages or one `PooledTransactions` response at a time. The
+                    // minimum batch size is 1 transaction (and might often be the case with blob
+                    // transactions).
+                    //
+                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+                    // (2 MiB / 10 bytes > 200k transactions).
+                    //
+                    // Since transactions aren't validated until they are inserted into the pool,
+                    // this can potentially validate >200k transactions. More if the message size
+                    // is bigger than the soft limit on a `PooledTransactions` response which is
+                    // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
                     if let Poll::Ready(Some(batch_import_res)) =
                         this.pool_imports.poll_next_unpin(cx)
                     {
@@ -1336,9 +1308,11 @@ where
             let acc = &mut poll_durations.acc_imported_txns;
             duration_metered_exec!(
                 {
-                    // drain new __pending__ transactions handle and propagate transactions.
-                    // we drain this to batch the transactions in a single message.
-                    // we don't expect this buffer to be large, since only pending transactions are
+                    // Drain new __pending__ transactions handle and propagate transactions.
+                    //
+                    // We drain this to batch the transactions in a single message.
+                    //
+                    // We don't expect this buffer to be large, since only pending transactions are
                     // emitted here.
                     let mut new_txs = Vec::new();
                     while let Poll::Ready(Some(hash)) =
@@ -1609,6 +1583,17 @@ impl Default for PendingPoolImportsInfo {
     fn default() -> Self {
         Self::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS)
     }
+}
+
+#[derive(Debug, Default)]
+struct TxManagerPollDurations {
+    acc_network_events: Duration,
+    acc_pending_imports: Duration,
+    acc_tx_events: Duration,
+    acc_imported_txns: Duration,
+    acc_fetch_events: Duration,
+    acc_pending_fetch: Duration,
+    acc_cmds: Duration,
 }
 
 #[cfg(test)]
@@ -1916,10 +1901,11 @@ mod tests {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
-        assert_eq!(
-            *handle1.peer_id(),
-            transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
-        );
+        assert!(transactions
+            .transactions_by_peers
+            .get(&signed_tx.hash())
+            .unwrap()
+            .contains(handle1.peer_id()));
 
         // advance the transaction manager future
         poll_fn(|cx| {
@@ -2059,15 +2045,17 @@ mod tests {
 
         // peer_1 is idle
         assert!(tx_fetcher.is_idle(&peer_id_1));
+        assert_eq!(tx_fetcher.active_peers.len(), 0);
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true, || ());
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
         assert!(tx_fetcher.hashes_pending_fetch.is_empty());
         // as long as request is in inflight peer_1 is not idle
         assert!(!tx_fetcher.is_idle(&peer_id_1));
+        assert_eq!(tx_fetcher.active_peers.len(), 1);
 
         // mock session of peer_1 receives request
         let req = to_mock_session_rx
@@ -2077,7 +2065,9 @@ mod tests {
         let PeerRequest::GetPooledTransactions { request, response } = req else { unreachable!() };
         let GetPooledTransactions(hashes) = request;
 
-        assert_eq!(hashes, seen_hashes);
+        let hashes = hashes.into_iter().collect::<HashSet<_>>();
+
+        assert_eq!(hashes, seen_hashes.into_iter().collect::<HashSet<_>>());
 
         // fail request to peer_1
         response
@@ -2089,6 +2079,7 @@ mod tests {
 
         // request has resolved, peer_1 is idle again
         assert!(tx_fetcher.is_idle(&peer_id));
+        assert_eq!(tx_fetcher.active_peers.len(), 0);
         // failing peer_1's request buffers requested hashes for retry
         assert_eq!(tx_fetcher.hashes_pending_fetch.len(), 2);
 
@@ -2101,6 +2092,9 @@ mod tests {
         tx_manager.on_new_pooled_transaction_hashes(peer_id_2, msg);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
+
+        // peer_2 should be in active_peers.
+        assert_eq!(tx_fetcher.active_peers.len(), 1);
 
         // since hashes are already seen, no changes to length of unknown hashes
         assert_eq!(tx_fetcher.hashes_fetch_inflight_and_pending_fetch.len(), 2);
@@ -2123,5 +2117,6 @@ mod tests {
         // `MAX_REQUEST_RETRIES_PER_TX_HASH`, 2, for hashes reached so this time won't be buffered
         // for retry
         assert!(tx_fetcher.hashes_pending_fetch.is_empty());
+        assert_eq!(tx_fetcher.active_peers.len(), 0);
     }
 }

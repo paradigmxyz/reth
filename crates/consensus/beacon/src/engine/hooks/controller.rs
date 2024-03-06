@@ -10,7 +10,6 @@ use tracing::debug;
 
 #[derive(Debug)]
 pub(crate) struct PolledHook {
-    #[allow(dead_code)]
     pub(crate) name: &'static str,
     pub(crate) event: EngineHookEvent,
     pub(crate) db_access_level: EngineHookDBAccessLevel,
@@ -151,6 +150,8 @@ impl EngineHooksController {
             );
 
             return Poll::Ready(Ok(result))
+        } else {
+            debug!(target: "consensus::engine::hooks", hook = hook.name(), "Next hook is not ready");
         }
 
         Poll::Pending

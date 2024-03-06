@@ -321,13 +321,23 @@ where
             let encoded_len = transaction.encoded_length();
             let tx = transaction.to_recovered_transaction().into_signed();
             let pooled = if tx.is_eip4844() {
+                // for EIP-4844 transactions, we need to fetch the blob sidecar from the blob store
                 if let Some(blob) = self.get_blob_transaction(tx) {
                     PooledTransactionsElement::BlobTransaction(blob)
                 } else {
                     continue
                 }
             } else {
-                PooledTransactionsElement::from(tx)
+                match PooledTransactionsElement::try_from(tx) {
+                    Ok(element) => element,
+                    Err(err) => {
+                        debug!(
+                            target: "txpool", %err,
+                            "failed to convert transaction to pooled element; skipping",
+                        );
+                        continue
+                    }
+                }
             };
 
             size += encoded_len;
@@ -351,7 +361,7 @@ where
             if tx.is_eip4844() {
                 self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
             } else {
-                Some(PooledTransactionsElement::from(tx))
+                PooledTransactionsElement::try_from(tx).ok()
             }
         })
     }
@@ -784,26 +794,18 @@ where
 
     /// Delete a blob from the blob store
     pub(crate) fn delete_blob(&self, blob: TxHash) {
-        if let Err(err) = self.blob_store.delete(blob) {
-            warn!(target: "txpool", %err, "[{:?}] failed to delete blobs", blob);
-            self.blob_store_metrics.blobstore_failed_deletes.increment(1);
-        }
-        self.update_blob_store_metrics();
+        let _ = self.blob_store.delete(blob);
     }
 
     /// Delete all blobs from the blob store
     pub(crate) fn delete_blobs(&self, txs: Vec<TxHash>) {
-        let num = txs.len();
-        if let Err(err) = self.blob_store.delete_all(txs) {
-            warn!(target: "txpool", %err,?num, "failed to delete blobs");
-            self.blob_store_metrics.blobstore_failed_deletes.increment(num as u64);
-        }
-        self.update_blob_store_metrics();
+        let _ = self.blob_store.delete_all(txs);
     }
 
     /// Cleans up the blob store
     pub(crate) fn cleanup_blobs(&self) {
-        self.blob_store.cleanup();
+        let stat = self.blob_store.cleanup();
+        self.blob_store_metrics.blobstore_failed_deletes.increment(stat.delete_failed as u64);
         self.update_blob_store_metrics();
     }
 

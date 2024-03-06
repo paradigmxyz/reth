@@ -2,9 +2,7 @@
 
 use crate::core::cli::runner::CliContext;
 use clap::{Parser, Subcommand};
-
 mod build_block;
-pub mod engine_api_store;
 mod execution;
 mod in_memory_merkle;
 mod merkle;
@@ -13,7 +11,7 @@ mod replay_engine;
 /// `reth debug` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Subcommands,
 }
 

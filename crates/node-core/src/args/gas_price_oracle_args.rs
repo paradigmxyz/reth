@@ -8,7 +8,7 @@ use reth_rpc_builder::constants::{
 
 /// Parameters to configure Gas Price Oracle
 #[derive(Debug, Clone, Copy, Args, PartialEq, Eq)]
-#[clap(next_help_heading = "Gas Price Oracle")]
+#[command(next_help_heading = "Gas Price Oracle")]
 pub struct GasPriceOracleArgs {
     /// Number of recent blocks to check for gas price
     #[arg(long = "gpo.blocks", default_value_t = DEFAULT_GAS_PRICE_BLOCKS)]
@@ -59,7 +59,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 
