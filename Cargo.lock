@@ -2121,7 +2121,7 @@ dependencies = [
  "aes-gcm",
  "arrayvec",
  "delay_map",
- "enr 0.10.0",
+ "enr",
  "fnv",
  "futures",
  "hashlink",
@@ -2313,24 +2313,6 @@ checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
 
 [[package]]
 name = "enr"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe81b5c06ecfdbc71dd845216f225f53b62a10cb8a16c946836a3467f701d05b"
-dependencies = [
- "base64 0.21.7",
- "bytes",
- "hex",
- "k256",
- "log",
- "rand 0.8.5",
- "rlp",
- "serde",
- "sha3",
- "zeroize",
-]
-
-[[package]]
-name = "enr"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a3d8dc56e02f954cac8eb489772c552c473346fc34f67412bb6244fd647f7e4"
@@ -2486,9 +2468,9 @@ dependencies = [
 
 [[package]]
 name = "ethers-core"
-version = "2.0.13"
+version = "2.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aab3cef6cc1c9fd7f787043c81ad3052eff2b96a3878ef1526aa446311bdbfc9"
+checksum = "82d80cc6ad30b14a48ab786523af33b37f28a8623fc06afd55324816ef18fb1f"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -2504,7 +2486,7 @@ dependencies = [
  "rlp",
  "serde",
  "serde_json",
- "strum 0.25.0",
+ "strum 0.26.1",
  "tempfile",
  "thiserror",
  "tiny-keccak",
@@ -2513,16 +2495,16 @@ dependencies = [
 
 [[package]]
 name = "ethers-providers"
-version = "2.0.13"
+version = "2.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb6b15393996e3b8a78ef1332d6483c11d839042c17be58decc92fa8b1c3508a"
+checksum = "6434c9a33891f1effc9c75472e12666db2fa5a0fec4b29af6221680a6fe83ab2"
 dependencies = [
  "async-trait",
  "auto_impl",
  "base64 0.21.7",
  "bytes",
  "const-hex",
- "enr 0.9.1",
+ "enr",
  "ethers-core",
  "futures-channel",
  "futures-core",
@@ -3205,7 +3187,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.6",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -5786,7 +5768,7 @@ version = "0.1.0-alpha.21"
 dependencies = [
  "alloy-rlp",
  "discv5",
- "enr 0.10.0",
+ "enr",
  "generic-array",
  "parking_lot 0.12.1",
  "rand 0.8.5",
@@ -5810,7 +5792,7 @@ dependencies = [
  "alloy-chains",
  "alloy-rlp",
  "data-encoding",
- "enr 0.10.0",
+ "enr",
  "linked_hash_set",
  "parking_lot 0.12.1",
  "reth-net-common",
@@ -6086,7 +6068,7 @@ dependencies = [
  "auto_impl",
  "criterion",
  "derive_more",
- "enr 0.10.0",
+ "enr",
  "ethers-core",
  "ethers-providers",
  "fnv",
