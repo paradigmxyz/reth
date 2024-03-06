@@ -24,12 +24,12 @@ use reth_node_core::{
         types::engine::PayloadStatusEnum,
     },
 };
-use reth_node_ethereum::{EthEngineTypes, node::EthereumNode};
+use reth_node_ethereum::{node::EthereumNode, EthEngineTypes};
 use reth_primitives::{
-    Block,
-    BlockWithSenders,
-    ChainSpec, constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT}, EMPTY_OMMER_ROOT_HASH, genesis::GenesisAllocator, GOERLI, Header, MAINNET, proofs,
-    ReceiptWithBloom, SealedBlock, Transaction, TransactionKind, TransactionSigned, TxLegacy,
+    constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
+    genesis::GenesisAllocator,
+    proofs, Block, BlockWithSenders, ChainSpec, Header, ReceiptWithBloom, SealedBlock, Transaction,
+    TransactionKind, TransactionSigned, TxLegacy, EMPTY_OMMER_ROOT_HASH, GOERLI,
 };
 use reth_provider::{
     BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateSubscriptions,
@@ -39,9 +39,9 @@ use reth_revm::{
     database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
     processor::EVMProcessor, State,
 };
-use reth_rpc_types::{BlockNumberOrTag, engine::PayloadStatus};
+use reth_rpc_types::{engine::PayloadStatus, BlockNumberOrTag};
 use reth_tasks::TaskManager;
-use reth_tracing::{RethTracer, Tracer, tracing::trace};
+use reth_tracing::{tracing::trace, RethTracer, Tracer};
 
 /// create an account and add it to the genesis block.
 fn genesis_and_account(genesis: Genesis) -> (Genesis, KeyPair, Address) {
