@@ -1199,20 +1199,20 @@ where
         // yield back control to tokio. See `NetworkManager` for more context on the design
         // pattern.
 
-                            // Advance pool imports (flush txns to pool).
-                    //
-                    // Note, this is done in batches. A batch is filled from one `Transactions`
-                    // broadcast messages or one `PooledTransactions` response at a time. The
-                    // minimum batch size is 1 transaction (and might often be the case with blob
-                    // transactions).
-                    //
-                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes
-                    // (2 MiB / 10 bytes > 200k transactions).
-                    //
-                    // Since transactions aren't validated until they are inserted into the pool,
-                    // this can potentially validate >200k transactions. More if the message size
-                    // is bigger than the soft limit on a `PooledTransactions` response which is
-                    // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
+        // Advance pool imports (flush txns to pool).
+        //
+        // Note, this is done in batches. A batch is filled from one `Transactions`
+        // broadcast messages or one `PooledTransactions` response at a time. The
+        // minimum batch size is 1 transaction (and might often be the case with blob
+        // transactions).
+        //
+        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+        // (2 MiB / 10 bytes > 200k transactions).
+        //
+        // Since transactions aren't validated until they are inserted into the pool,
+        // this can potentially validate >200k transactions. More if the message size
+        // is bigger than the soft limit on a `PooledTransactions` response which is
+        // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
         let acc = &mut poll_durations.acc_pending_imports;
         let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
             acc,
@@ -1223,7 +1223,7 @@ where
             |batch_results| this.on_batch_import_result(batch_results)
         );
 
-// Advance network/peer related events (update peers map).
+        // Advance network/peer related events (update peers map).
         let acc = &mut poll_durations.acc_network_events;
         let maybe_more_network_events = metered_poll_nested_stream_with_budget!(
             acc,
@@ -1234,13 +1234,14 @@ where
             |event| this.on_network_event(event)
         );
 
-                       // Advances new __pending__ transactions, transactions that were successfully inserted into pending set in pool (are
-        // valid), and propagates them (inform peers which transactions we have seen).
-                    //
-                    // We try to drain this to batch the transactions in a single message.
-                    //
-                    // We don't expect this buffer to be large, since only pending transactions are
-                    // emitted here.
+        // Advances new __pending__ transactions, transactions that were successfully inserted into
+        // pending set in pool (are valid), and propagates them (inform peers which
+        // transactions we have seen).
+        //
+        // We try to drain this to batch the transactions in a single message.
+        //
+        // We don't expect this buffer to be large, since only pending transactions are
+        // emitted here.
         let mut new_txs = Vec::new();
         let acc = &mut poll_durations.acc_imported_txns;
         let maybe_more_pending_txns = metered_poll_nested_stream_with_budget!(
@@ -1255,16 +1256,16 @@ where
             this.on_new_pending_transactions(new_txs);
         }
 
-                    // Advance inflight fetch requests (flush transaction fetcher and queue for
-                    // import to pool).
-                    //
-                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes
-                    // (2 MiB / 10 bytes > 200k transactions).
-                    //
-                    // Since transactions aren't validated until they are inserted into the pool,
-                    // this can potentially queue >200k transactions for insertion to pool. More
-                    // if the message size is bigger than the soft limit on a `PooledTransactions`
-                    // response which is 2 MiB.
+        // Advance inflight fetch requests (flush transaction fetcher and queue for
+        // import to pool).
+        //
+        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+        // (2 MiB / 10 bytes > 200k transactions).
+        //
+        // Since transactions aren't validated until they are inserted into the pool,
+        // this can potentially queue >200k transactions for insertion to pool. More
+        // if the message size is bigger than the soft limit on a `PooledTransactions`
+        // response which is 2 MiB.
         let acc = &mut poll_durations.acc_fetch_events;
         let maybe_more_tx_fetch_events = metered_poll_nested_stream_with_budget!(
             acc,
@@ -1275,20 +1276,20 @@ where
             |event| this.on_fetch_event(event),
         );
 
-                    // Advance incoming transaction events (stream new txns/announcements from
-                    // network manager and queue for import to pool/fetch txns).
-                    //
-                    // This will potentially remove hashes from hashes pending fetch, it the event
-                    // is an announcement (if same hashes are announced that didn't fit into a
-                    // previous request).
-                    //
-                    // The smallest decodable transaction is an empty legacy transaction, 10 bytes
-                    // (128 KiB / 10 bytes > 13k transactions).
-                    //
-                    // If this is an event with `Transactions` message, since transactions aren't
-                    // validated until they are inserted into the pool, this can potentially queue
-                    // >13k transactions for insertion to pool. More if the message size is bigger
-                    // than the soft limit on a `Transactions` broadcast message, which is 128 KiB.
+        // Advance incoming transaction events (stream new txns/announcements from
+        // network manager and queue for import to pool/fetch txns).
+        //
+        // This will potentially remove hashes from hashes pending fetch, it the event
+        // is an announcement (if same hashes are announced that didn't fit into a
+        // previous request).
+        //
+        // The smallest decodable transaction is an empty legacy transaction, 10 bytes
+        // (128 KiB / 10 bytes > 13k transactions).
+        //
+        // If this is an event with `Transactions` message, since transactions aren't
+        // validated until they are inserted into the pool, this can potentially queue
+        // >13k transactions for insertion to pool. More if the message size is bigger
+        // than the soft limit on a `Transactions` broadcast message, which is 128 KiB.
         let acc = &mut poll_durations.acc_tx_events;
         let maybe_more_tx_events = metered_poll_nested_stream_with_budget!(
             acc,
@@ -1299,10 +1300,10 @@ where
             |event| this.on_network_tx_event(event),
         );
 
-                    // Tries to drain hashes pending fetch cache if the tx manager currently has
-                    // capacity for this (fetch txns).
-                    //
-                    // Sends at most one request.
+        // Tries to drain hashes pending fetch cache if the tx manager currently has
+        // capacity for this (fetch txns).
+        //
+        // Sends at most one request.
         let acc = &mut poll_durations.acc_pending_fetch;
         duration_metered_exec!(
             {
