@@ -156,10 +156,7 @@ impl PeersManager {
             handle_rx: UnboundedReceiverStream::new(handle_rx),
             queued_actions: Default::default(),
             reputation_weights,
-            refill_slots_interval: tokio::time::interval_at(
-                now + refill_slots_interval,
-                refill_slots_interval,
-            ),
+            refill_slots_interval: tokio::time::interval(refill_slots_interval),
             release_interval: tokio::time::interval_at(now + unban_interval, unban_interval),
             connection_info,
             ban_list,
@@ -1585,7 +1582,11 @@ mod tests {
             low: Duration::from_millis(200),
             ..Default::default()
         };
-        let config = PeersConfig { backoff_durations, ..Default::default() };
+        let config = PeersConfig {
+            backoff_durations,
+            refill_slots_interval: Duration::from_millis(200),
+            ..Default::default()
+        };
         let mut peers = PeersManager::new(config);
         peers.add_peer(peer, socket_addr, None);
 
