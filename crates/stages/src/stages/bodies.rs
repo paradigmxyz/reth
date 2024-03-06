@@ -25,7 +25,7 @@ use tracing::*;
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
 ///
-/// The body stage downloads block bodies for all block headers stored locally in the database.
+/// The body stage downloads block bodies for all block headers stored locally in storage.
 ///
 /// # Empty blocks
 ///
@@ -33,7 +33,7 @@ use tracing::*;
 /// no transactions will not have a block body downloaded for them, since it would be meaningless to
 /// do so.
 ///
-/// This also means that if there is no body for the block in the database (assuming the
+/// This also means that if there is no body for the block in storage (assuming the
 /// block number <= the synced block of this stage), then the block can be considered empty.
 ///
 /// # Tables
