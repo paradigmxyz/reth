@@ -18,13 +18,13 @@ use reth_db::database_metrics::DatabaseMetadata;
 use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder, remote_client::RemoteClient,
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder, remote_client::{CertificateCheckSettings, RemoteClient},
 };
 use reth_interfaces::consensus::Consensus;
 use reth_node_core::{args::BitfinityArgs, events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
-use reth_primitives::{stage::StageId, ChainSpec, B256};
-use reth_provider::{BlockNumReader, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
+use reth_primitives::{ChainSpec, B256};
+use reth_provider::{BlockNumReader, HeaderSyncMode, ProviderFactory};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
@@ -118,21 +118,18 @@ impl ImportCommand {
         &self,
         config: Config,
         provider_factory: ProviderFactory<DB>,
-        db: Arc<DB>,
+        _db: Arc<DB>,
     ) -> eyre::Result<()>
     where
         DB: Database + DatabaseMetadata + Clone + Unpin + 'static,
     {
         let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
-        info!(target: "reth::cli", "Consensus engine initialized");
-
-        // create a new FileClient
-        info!(target: "reth::cli", "Importing chain file");
+        debug!(target: "reth::cli", "Consensus engine initialized");
 
         // Get the local block number
         let start_block = provider_factory.provider()?.last_block_number()? + 1;
 
-        info!(target: "reth::cli", "Starting block: {}", start_block);
+        debug!(target: "reth::cli", "Starting block: {}", start_block);
 
         let remote_client = Arc::new(
             RemoteClient::from_rpc_url(
@@ -140,6 +137,10 @@ impl ImportCommand {
                 start_block,
                 self.bitfinity.end_block,
                 self.bitfinity.batch_size,
+                Some(CertificateCheckSettings{
+                    evmc_principal: self.bitfinity.evmc_principal.clone(),
+                    ic_root_key: self.bitfinity.ic_root_key.clone(),
+                }),
             )
             .await?,
         );
@@ -152,9 +153,9 @@ impl ImportCommand {
             return Ok(());
         };
 
-        info!(target: "reth::cli", "Chain file imported");
+        info!(target: "reth::cli", "Chain blocks imported");
 
-        let (mut pipeline, events) = self.build_import_pipeline(
+        let (mut pipeline, _events) = self.build_import_pipeline(
             config,
             provider_factory.clone(),
             &consensus,
@@ -165,19 +166,19 @@ impl ImportCommand {
         pipeline.set_tip(tip);
         debug!(target: "reth::cli", ?tip, "Tip manually set");
 
-        let provider = provider_factory.provider()?;
+        // let provider = provider_factory.provider()?;
 
-        let latest_block_number =
-            provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-        tokio::spawn(reth_node_core::events::node::handle_events(
-            None,
-            latest_block_number,
-            events,
-            db.clone(),
-        ));
+        // let latest_block_number =
+        //     provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
+        // tokio::spawn(reth_node_core::events::node::handle_events(
+        //     None,
+        //     latest_block_number,
+        //     events,
+        //     db.clone(),
+        // ));
 
         // Run pipeline
-        info!(target: "reth::cli", "Starting sync pipeline");
+        debug!(target: "reth::cli", "Starting sync pipeline");
         pipeline.run().await?;
 
         info!(target: "reth::cli", "Finishing up");

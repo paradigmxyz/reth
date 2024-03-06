@@ -1,3 +1,9 @@
+use candid::Principal;
+use did::certified::CertifiedResult;
+use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
+use ic_cbor::{CertificateToCbor, HashTreeToCbor};
+use ic_certificate_verification::VerifyCertificate;
+use ic_certification::{Certificate, HashTree, LookupResult};
 use itertools::Either;
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use reth_interfaces::p2p::{
@@ -14,10 +20,11 @@ use reth_primitives::{
 };
 use rlp::Encodable;
 
-use std::{self, collections::HashMap};
+use std::{self, cmp::min, collections::HashMap};
 use thiserror::Error;
 
 use tracing::{debug, error, info, trace, warn};
+
 
 /// Front-end API for fetching chain data from remote sources.
 ///
@@ -39,13 +46,26 @@ pub struct RemoteClient {
 /// An error that can occur when constructing and using a [`RemoteClient`].
 #[derive(Debug, Error)]
 pub enum RemoteClientError {
-    /// An error occurred when decoding blocks, headers, or rlp headers from the file.
+    /// An error occurred when decoding blocks, headers, or rlp headers.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
 
     /// An error occurred when fetching blocks, headers, or rlp headers from the remote provider.
     #[error("provider error occurred: {0}")]
     ProviderError(String),
+
+    /// Certificate check error
+    #[error("certification check error: {0}")]
+    CertificateError(String),
+}
+
+/// Setting for checking last certified block
+#[derive(Debug)]
+pub struct CertificateCheckSettings {
+    /// Principal of the EVM canister
+    pub evmc_principal: String,
+    /// Root key of the IC network
+    pub ic_root_key: String,
 }
 
 impl RemoteClient {
@@ -55,33 +75,38 @@ impl RemoteClient {
         start_block: u64,
         end_block: Option<u64>,
         batch_size: usize,
+        certificate_settings: Option<CertificateCheckSettings>,
     ) -> Result<Self, RemoteClientError> {
         let mut headers = HashMap::new();
         let mut hash_to_number = HashMap::new();
         let mut bodies = HashMap::new();
 
         let reqwest_client = ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc.to_string());
+        let provider = ethereum_json_rpc_client::EthJsonRpcClient::new(reqwest_client);
 
-        let provider = ethereum_json_rpc_client::EthJsonRcpClient::new(reqwest_client);
+        let block_checker = match certificate_settings {
+            None => None,
+            Some(settings) => Some(BlockCertificateChecker::new(&provider, settings).await?),
+        };
 
-        const MAX_BLOCKS: usize = 10_000;
+        const MAX_BLOCKS: u64 = 10_000;
 
-        let latest_block = provider
+        let last_block = provider
             .get_block_number()
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
 
-        debug!(target: "downloaders::file", latest_block, "Latest block from rpc");
+        let mut end_block = min(end_block.unwrap_or(last_block), start_block + MAX_BLOCKS);
+        if let Some(block_checker) = &block_checker {
+            end_block = min(end_block, block_checker.get_block_number());
+        }
 
-        let end_block =
-            std::cmp::min(end_block.unwrap_or(latest_block), start_block + MAX_BLOCKS as u64);
-
-        debug!(target: "downloaders::file", start_block, end_block, "Fetching blocks");
+        info!(target: "downloaders::remote", start_block, end_block, "Fetching blocks");
 
         for begin_block in (start_block..=end_block).step_by(batch_size) {
             let count = std::cmp::min(batch_size as u64, end_block - begin_block);
 
-            debug!(target: "downloaders::file", begin_block, count, "Fetching blocks");
+            debug!(target: "downloaders::remote", begin_block, count, "Fetching blocks");
 
             let blocks_to_fetch =
                 (begin_block..(begin_block + count)).map(Into::into).collect::<Vec<_>>();
@@ -90,7 +115,7 @@ impl RemoteClient {
                 .get_full_blocks_by_number(blocks_to_fetch, batch_size)
                 .await
                 .map_err(|e| {
-                    error!(target: "downloaders::file", begin_block, "Error fetching block: {}", e);
+                    error!(target: "downloaders::remote", begin_block, "Error fetching block: {}", e);
                     RemoteClientError::ProviderError(format!(
                         "Error fetching block {}: {}",
                         begin_block, e
@@ -101,9 +126,12 @@ impl RemoteClient {
                 .map(did::Block::<did::Transaction>::from)
                 .collect::<Vec<_>>();
 
-            trace!(target: "downloaders::file", blocks = full_blocks.len(), "Fetched blocks");
+            trace!(target: "downloaders::remote", blocks = full_blocks.len(), "Fetched blocks");
 
             for block in full_blocks {
+                if let Some(block_checker) = &block_checker {
+                    block_checker.check_block(&block)?;
+                }
                 let header =
                     reth_primitives::Block::decode(&mut block.rlp_bytes().to_vec().as_slice())?;
 
@@ -122,7 +150,7 @@ impl RemoteClient {
             }
         }
 
-        info!(blocks = headers.len(), "Initialized file client");
+        info!(blocks = headers.len(), "Initialized remote client");
 
         Ok(Self { headers, hash_to_number, bodies })
     }
@@ -159,19 +187,90 @@ impl RemoteClient {
         true
     }
 
-    /// Use the provided bodies as the file client's block body buffer.
+    /// Use the provided bodies as the remote client's block body buffer.
     pub fn with_bodies(mut self, bodies: HashMap<BlockHash, BlockBody>) -> Self {
         self.bodies = bodies;
         self
     }
 
-    /// Use the provided headers as the file client's block body buffer.
+    /// Use the provided headers as the remote client's block body buffer.
     pub fn with_headers(mut self, headers: HashMap<BlockNumber, Header>) -> Self {
         self.headers = headers;
         for (number, header) in &self.headers {
             self.hash_to_number.insert(header.hash_slow(), *number);
         }
         self
+    }
+}
+
+struct BlockCertificateChecker {
+    certified_data: CertifiedResult<did::Block<did::H256>>,
+    evmc_principal: Principal,
+    ic_root_key: Vec<u8>
+}
+
+impl BlockCertificateChecker {
+    async fn new(client: &EthJsonRpcClient<ReqwestClient>, certificate_settings: CertificateCheckSettings) -> Result<Self, RemoteClientError> {
+        let evmc_principal = Principal::from_text(certificate_settings.evmc_principal).map_err(|e| RemoteClientError::CertificateError(format!("failed to parse principal: {e}")))?;
+        let ic_root_key = hex::decode(&certificate_settings.ic_root_key).map_err(|e| RemoteClientError::CertificateError(format!("failed to parse IC root key: {e}")))?;
+        let certified_data = client.get_last_certified_block().await.map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
+        Ok(Self{certified_data: CertifiedResult{
+            data: did::Block::from(certified_data.data),
+            certificate: certified_data.certificate,
+            witness: certified_data.witness
+        }, evmc_principal, ic_root_key})
+    }
+
+    fn get_block_number(&self) -> u64 {
+        self.certified_data.data.number.0.as_u64()
+    }
+
+    fn check_block(&self, block: &did::Block<did::Transaction>) -> Result<(), RemoteClientError> {
+        if block.number < self.certified_data.data.number {
+            return Ok(());
+        }
+
+        if block.number > self.certified_data.data.number {
+            return Err(RemoteClientError::CertificateError(format!("cannot execute block {} after the latest certified", block.number)));
+        }
+
+        if block.hash != self.certified_data.data.hash {
+            return Err(RemoteClientError::CertificateError(format!("state hash doesn't correspond to certified block, have {}, want {}",
+                block.hash, self.certified_data.data.hash)));
+        }
+
+        let certificate = Certificate::from_cbor(&self.certified_data.certificate)
+            .map_err(|e| RemoteClientError::CertificateError(format!("failed to parse certificate: {e}")))?;
+        certificate.verify(self.evmc_principal.as_ref(), &self.ic_root_key)
+            .map_err(|e| RemoteClientError::CertificateError(format!("certificate validation error: {e}")))?;
+
+        let tree = HashTree::from_cbor(&self.certified_data.witness)
+            .map_err(|e| RemoteClientError::CertificateError(format!("failed to parse witness: {e}")))?;
+        Self::validate_tree(self.evmc_principal.as_ref(), &certificate, &tree);
+
+        Ok(())
+    }
+
+    fn validate_tree(canister_id: &[u8], certificate: &Certificate, tree: &HashTree) -> bool {
+        let certified_data_path = [
+            "canister".as_bytes(),
+            canister_id,
+            "certified_data".as_bytes(),
+        ];
+
+        let witness = match certificate.tree.lookup_path(&certified_data_path) {
+            LookupResult::Found(witness) => witness,
+            _ => {
+                return false;
+            }
+        };
+
+        let digest = tree.digest();
+        if witness != digest {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -185,7 +284,7 @@ impl HeadersClient for RemoteClient {
     ) -> Self::Output {
         // this just searches the buffer, and fails if it can't find the header
         let mut headers = Vec::new();
-        trace!(target: "downloaders::file", request=?request, "Getting headers");
+        trace!(target: "downloaders::remote", request=?request, "Getting headers");
 
         let start_num = match request.start {
             BlockHashOrNumber::Hash(hash) => match self.hash_to_number.get(&hash) {
@@ -209,7 +308,7 @@ impl HeadersClient for RemoteClient {
             }
         };
 
-        trace!(target: "downloaders::file", range=?range, "Getting headers with range");
+        trace!(target: "downloaders::remote", range=?range, "Getting headers with range");
 
         for block_number in range {
             match self.headers.get(&block_number).cloned() {
@@ -251,12 +350,12 @@ impl BodiesClient for RemoteClient {
 
 impl DownloadClient for RemoteClient {
     fn report_bad_message(&self, _peer_id: PeerId) {
-        warn!("Reported a bad message on a file client, the file may be corrupted or invalid");
+        warn!("Reported a bad message on a remote client, the client may be corrupted or invalid");
         // noop
     }
 
     fn num_connected_peers(&self) -> usize {
-        // no such thing as connected peers when we are just using a file
+        // no such thing as connected peers when we are just using a remote
         1
     }
 }
@@ -268,14 +367,14 @@ mod tests {
     #[tokio::test]
     async fn remote_client_from_rpc_url() {
         let client =
-            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5).await.unwrap();
+            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
         assert!(client.max_block().is_some());
     }
 
     #[tokio::test]
     async fn test_headers_client() {
         let client =
-            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5).await.unwrap();
+            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
         let headers = client
             .get_headers_with_priority(
                 HeadersRequest {
@@ -293,7 +392,7 @@ mod tests {
     #[tokio::test]
     async fn test_bodies_client() {
         let client =
-            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5).await.unwrap();
+            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
         let headers = client
             .get_headers_with_priority(
                 HeadersRequest {

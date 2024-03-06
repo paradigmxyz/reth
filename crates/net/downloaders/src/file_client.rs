@@ -8,7 +8,7 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256
 };
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;

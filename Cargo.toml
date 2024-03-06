@@ -273,13 +273,17 @@ similar-asserts = "1.5.0"
 test-fuzz = "5"
 
 # Bitfinity Deps
-lightspeed_scheduler = { version = "0.57.0", features = ["tracing"] }
-rlp = "0.5"
-ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.10.x", features = [
+candid = "0.10"
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.13.x" }
+ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.13.x", features = [
     "reqwest",
 ] }
-did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.10.x" }
-
+ic-cbor = "2.3"
+ic-certificate-verification = "2.3"
+ic-certification = "2.3"
+hex = "0.4"
+lightspeed_scheduler = { version = "0.57.0", features = ["tracing"] }
+rlp = "0.5"
 
 [workspace.metadata.cargo-udeps.ignore]
 # ignored because this is mutually exclusive with the optimism payload builder via feature flags
