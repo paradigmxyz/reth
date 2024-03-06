@@ -549,7 +549,7 @@ mod tests {
         test_utils::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
         DEFAULT_DISCOVERY_PORT, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
     };
-    use enr::{EnrBuilder, EnrPublicKey};
+    use enr::EnrPublicKey;
     use rand::{thread_rng, Rng, RngCore};
     use reth_primitives::{hex, ForkHash};
 
@@ -780,7 +780,7 @@ mod tests {
         let fork_id: ForkId = ForkId { hash: ForkHash([220, 233, 108, 45]), next: 0u64 };
 
         let enr = {
-            let mut builder = EnrBuilder::new("v4");
+            let mut builder = Enr::builder();
             builder.ip(ip.into());
             builder.tcp4(tcp);
             let mut buf = Vec::new();
@@ -879,7 +879,7 @@ mod tests {
         let tcp = 3000;
 
         let enr = {
-            let mut builder = EnrBuilder::new("v4");
+            let mut builder = Enr::builder();
             builder.ip(ip.into());
             builder.tcp4(tcp);
             EnrWrapper::new(builder.build(&key).unwrap())

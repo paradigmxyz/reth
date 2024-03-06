@@ -203,12 +203,8 @@ alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "975a52
 alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "975a52a" }
 
 # TODO: Remove
-ethers-core = { version = "2.0", default-features = false }
-ethers-providers = { version = "2.0", default-features = false }
-
-discv5 = { git = "https://github.com/sigp/discv5", rev = "f289bbd4c57d499bb1bdb393af3c249600a1c662" }
-# Fork of rust-igd with ipv6 support
-igd-next = "0.14.3"
+ethers-core = { version = "2.0.14", default-features = false }
+ethers-providers = { version = "2.0.14", default-features = false }
 
 # js
 boa_engine = "0.17"
@@ -255,6 +251,10 @@ futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"
 
+# p2p
+discv5 = "0.4"
+igd-next = "0.14.3"
+
 # rpc
 jsonrpsee = { version = "0.20" }
 jsonrpsee-core = { version = "0.20" }
@@ -266,7 +266,7 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
     "rand-std",
     "recovery",
 ] }
-enr = { version = "0.9", default-features = false, features = ["k256"] }
+enr = { version = "0.10", default-features = false, features = ["k256"] }
 
 # for eip-4844
 c-kzg = "0.4.2"

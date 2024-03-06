@@ -37,7 +37,7 @@ use discv5::{
     },
     ConnectionDirection, ConnectionState,
 };
-use enr::{Enr, EnrBuilder};
+use enr::Enr;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{
@@ -533,7 +533,7 @@ impl Discv4Service {
 
         // for EIP-868 construct an ENR
         let local_eip_868_enr = {
-            let mut builder = EnrBuilder::new("v4");
+            let mut builder = Enr::builder();
             builder.ip(local_node_record.address);
             if local_node_record.address.is_ipv4() {
                 builder.udp4(local_node_record.udp_port);
