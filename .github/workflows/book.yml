@@ -5,9 +5,12 @@ name: book
 on:
   push:
     branches: [main]
+    paths-ignore: ["etc/**"]
   pull_request:
     branches: [main]
+    paths-ignore: ["etc/**"]
   merge_group:
+    paths-ignore: ["etc/**"]
 
 jobs:
   test:
