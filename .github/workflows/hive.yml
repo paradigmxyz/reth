@@ -193,6 +193,8 @@ jobs:
           hive --sim "${{ matrix.sim }}$" --sim.limit "${{matrix.limit}}/${{join(matrix.include, '|')}}" --client reth
 
       - name: Create github issue if sim failed
+        env:
+          GH_TOKEN: ${{ github.token }}
         if: ${{ failure() }}
         run: |
           echo "Simulator failed, creating issue"
