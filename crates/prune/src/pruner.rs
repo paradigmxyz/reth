@@ -177,11 +177,6 @@ impl<DB: Database> Pruner<DB> {
 
         if !limiter.at_limit() {
             for (segment, purpose) in segments {
-                if limiter.at_limit() {
-                    done = false;
-                    break
-                }
-
                 if let Some((to_block, prune_mode)) = segment
                     .mode()
                     .map(|mode| {
@@ -240,6 +235,11 @@ impl<DB: Database> Pruner<DB> {
                     }
                 } else {
                     debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
+                }
+
+                if limiter.at_limit() {
+                    done = false;
+                    break
                 }
             }
         }
