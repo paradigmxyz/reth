@@ -1,8 +1,10 @@
+use once_cell::sync::Lazy;
 /// GPO reexports
 pub use reth_rpc::eth::gas_oracle::{
     DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
     DEFAULT_MAX_GAS_PRICE,
 };
+use std::cmp::max;
 
 /// The default port for the http server
 pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
@@ -20,7 +22,8 @@ pub const DEFAULT_MAX_BLOCKS_PER_FILTER: u64 = 100_000;
 pub const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 
 /// The default maximum number of concurrently executed tracing calls
-pub const DEFAULT_MAX_TRACING_REQUESTS: u32 = 25;
+pub static DEFAULT_MAX_TRACING_REQUESTS: Lazy<u32> =
+    Lazy::new(|| (max(std::thread::available_parallelism().unwrap().into(), 4) - 2) as u32);
 
 /// The default IPC endpoint
 #[cfg(windows)]

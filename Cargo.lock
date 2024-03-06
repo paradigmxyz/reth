@@ -6561,6 +6561,7 @@ dependencies = [
  "hyper",
  "jsonrpsee",
  "metrics",
+ "once_cell",
  "reth-beacon-consensus",
  "reth-interfaces",
  "reth-ipc",
