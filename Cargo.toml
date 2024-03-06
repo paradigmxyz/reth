@@ -199,7 +199,7 @@ ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
 
-discv5 = { git = "https://github.com/sigp/discv5", rev = "f289bbd4c57d499bb1bdb393af3c249600a1c662" }
+discv5 = "0.4"
 # Fork of rust-igd with ipv6 support
 igd-next = "0.14.3"
 

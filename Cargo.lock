@@ -2191,14 +2191,15 @@ dependencies = [
 
 [[package]]
 name = "discv5"
-version = "0.3.1"
-source = "git+https://github.com/sigp/discv5?rev=f289bbd4c57d499bb1bdb393af3c249600a1c662#f289bbd4c57d499bb1bdb393af3c249600a1c662"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bac33cb3f99889a57e56a8c6ccb77aaf0cfc7787602b7af09783f736d77314e1"
 dependencies = [
  "aes 0.7.5",
  "aes-gcm",
  "arrayvec",
  "delay_map",
- "enr 0.9.1",
+ "enr 0.10.0",
  "fnv",
  "futures",
  "hashlink",
@@ -2214,7 +2215,6 @@ dependencies = [
  "socket2 0.4.10",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "uint",
  "zeroize",
 ]
@@ -2397,7 +2397,6 @@ checksum = "fe81b5c06ecfdbc71dd845216f225f53b62a10cb8a16c946836a3467f701d05b"
 dependencies = [
  "base64 0.21.7",
  "bytes",
- "ed25519-dalek",
  "hex",
  "k256",
  "log",
@@ -2416,6 +2415,7 @@ checksum = "2a3d8dc56e02f954cac8eb489772c552c473346fc34f67412bb6244fd647f7e4"
 dependencies = [
  "base64 0.21.7",
  "bytes",
+ "ed25519-dalek",
  "hex",
  "k256",
  "log",
