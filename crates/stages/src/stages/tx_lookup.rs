@@ -21,8 +21,8 @@ use tracing::*;
 
 /// The transaction lookup stage.
 ///
-/// This stage walks over the bodies table, and sets the transaction hash of each transaction in a
-/// block to the corresponding `BlockNumber` at each block. This is written to the
+/// This stage walks over existing transactions, and sets the transaction hash of each transaction
+/// in a block to the corresponding `BlockNumber` at each block. This is written to the
 /// [`tables::TransactionHashNumbers`] This is used for looking up changesets via the transaction
 /// hash.
 ///

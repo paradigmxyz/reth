@@ -458,7 +458,8 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
                 }
             }
         } else {
-            // We database for Receipts, if there is any kind of receipt pruning/filtering.
+            // We use database for Receipts, if there is any kind of receipt pruning/filtering,
+            // since it is not supported by static files.
             let mut cursor = tx.cursor_write::<tables::Receipts>()?;
             let mut reverse_walker = cursor.walk_back(None)?;
 

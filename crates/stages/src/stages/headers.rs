@@ -33,17 +33,15 @@ use tracing::*;
 
 /// The headers stage.
 ///
-/// The headers stage downloads all block headers from the highest block in the local database to
+/// The headers stage downloads all block headers from the highest block in storage to
 /// the perceived highest block on the network.
 ///
-/// The headers are processed and data is inserted into these tables:
+/// The headers are processed and data is inserted into static files, as well as into the
+/// [`HeaderNumbers`][reth_db::tables::HeaderNumbers] table.
 ///
-/// - [`HeaderNumbers`][reth_db::tables::HeaderNumbers]
-/// - [`Headers`][reth_db::tables::Headers]
-/// - [`CanonicalHeaders`][reth_db::tables::CanonicalHeaders]
-///
-/// NOTE: This stage downloads headers in reverse. Upon returning the control flow to the pipeline,
-/// the stage checkpoint is not updated until this stage is done.
+/// NOTE: This stage downloads headers in reverse and pushes them to the ETL [`Collector`]. It then
+/// proceeds to push them sequentially to static files. The stage checkpoint is not updated until
+/// this stage is done.
 #[derive(Debug)]
 pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     /// Database handle.
@@ -89,11 +87,10 @@ where
         }
     }
 
-    /// Write downloaded headers to the given transaction from ETL.
+    /// Write downloaded headers to storage from ETL.
     ///
-    /// Writes to the following tables:
-    /// [`tables::Headers`], [`tables::CanonicalHeaders`], [`tables::HeaderTerminalDifficulties`]
-    /// and [`tables::HeaderNumbers`].
+    /// Writes to static files ( `Header | HeaderTD | HeaderHash` ) and [`tables::HeaderNumbers`]
+    /// database table.
     fn write_headers<DB: Database>(
         &mut self,
         tx: &<DB as Database>::TXMut,
