@@ -194,11 +194,11 @@ The transaction lookup stage builds an index of transaction hashes to their sequ
 # but lowers memory usage
 chunk_size = 5000000
 
-# The size of temporary file for ETL data collector.
+# The size of temporary file in bytes for ETL data collector.
 #
 # Lower threshold corresponds to more frequent flushes,
 # but lowers temporary storage usage
-etl_file-size = 524288000
+etl_file_size = 524_288_000 # 500 * 1024 * 1024
 ```
 
 ### `index_account_history`

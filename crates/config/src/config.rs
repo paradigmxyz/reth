@@ -227,7 +227,7 @@ impl Default for MerkleConfig {
 pub struct TransactionLookupConfig {
     /// The maximum number of transactions to process before writing to disk.
     pub chunk_size: u64,
-    /// Size of temporary file during etl stage.
+    /// The size of temporary file in bytes for ETL data collector.
     pub etl_file_size: usize,
 }
 
