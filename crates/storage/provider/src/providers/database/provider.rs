@@ -706,8 +706,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             };
 
             // withdrawal can be missing
-            let shanghai_is_active =
-                chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp);
+            let shanghai_is_active = chain_spec.is_shanghai_active_at_timestamp(header.timestamp);
             let mut withdrawals = Some(Withdrawals::default());
             if shanghai_is_active {
                 if let Some((block_number, _)) = block_withdrawals.as_ref() {

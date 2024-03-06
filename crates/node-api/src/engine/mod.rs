@@ -119,7 +119,7 @@ pub fn validate_withdrawals_presence(
     timestamp: u64,
     has_withdrawals: bool,
 ) -> Result<(), AttributesValidationError> {
-    let is_shanghai = chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp);
+    let is_shanghai = chain_spec.is_shanghai_active_at_timestamp(timestamp);
 
     match version {
         EngineApiMessageVersion::V1 => {
