@@ -15,7 +15,7 @@ where
     let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
         let storage_root = storage_root(storage);
         let account = TrieAccount::from((account, storage_root));
-        (address, alloy_rlp::encode(&account))
+        (address, alloy_rlp::encode(account))
     });
     triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts)
 }
@@ -36,7 +36,7 @@ where
     let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
         let storage_root = storage_root_prehashed(storage);
         let account = TrieAccount::from((account, storage_root));
-        (address, alloy_rlp::encode(&account))
+        (address, alloy_rlp::encode(account))
     });
 
     triehash::trie_root::<KeccakHasher, _, _, _>(encoded_accounts)
