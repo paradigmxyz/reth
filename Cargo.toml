@@ -96,6 +96,13 @@ homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
 exclude = [".github/"]
 
+# Speed up tests.
+[profile.dev.package]
+proptest.opt-level = 3
+rand_xorshift.opt-level = 3
+rand_chacha.opt-level = 3
+unarray.opt-level = 3
+
 # Meant for testing - all optimizations, but with debug assertions and overflow checks.
 [profile.hivetests]
 inherits = "test"

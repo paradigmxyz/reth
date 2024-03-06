@@ -38,10 +38,10 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
-            --locked --features "${{ matrix.network }}" \
+            --locked --features "asm-keccak ${{ matrix.network }}" \
             --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/2 \
-            -E "kind(lib) | kind(bin) | kind(proc-macro)"
+            -E "!kind(test)"
 
   state:
     name: Ethereum state tests
@@ -65,7 +65,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo nextest run --release -p ef-tests --features ef-tests
+      - run: cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
 
   doc:
     name: doc tests (${{ matrix.network }})
