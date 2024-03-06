@@ -159,7 +159,9 @@ mod tests {
                 .take(to_block as usize)
                 .map(|block| block.body.len())
                 .sum::<usize>()
-                .min(next_tx_number_to_prune as usize + input.limiter.units_limit().unwrap())
+                .min(
+                    next_tx_number_to_prune as usize + input.limiter.deleted_units_limit().unwrap(),
+                )
                 .sub(1);
 
             let provider = db.factory.provider_rw().unwrap();

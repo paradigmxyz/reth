@@ -133,7 +133,7 @@ impl<DB: Database> Pruner<DB> {
                 %tip_block_number,
                 ?elapsed,
                 ?deleted_segments,
-                delete_limit=?limiter.units_limit(),
+                delete_limit=?limiter.deleted_units_limit(),
                 ?progress,
                 ?stats,
                 "Pruner interrupted by limit on deleted segments"

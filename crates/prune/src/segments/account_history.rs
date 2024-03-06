@@ -188,7 +188,7 @@ mod tests {
                     .iter()
                     .enumerate()
                     .skip_while(|(i, (block_number, _))| {
-                        *i < input.limiter.units_limit().unwrap() / 2 * run &&
+                        *i < input.limiter.deleted_units_limit().unwrap() / 2 * run &&
                             *block_number <= to_block as usize
                     })
                     .next()

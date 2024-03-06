@@ -227,7 +227,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip_while(|(i, (block_number, _, _))| {
-                    if let Some(limit) = input.limiter.units_limit() {
+                    if let Some(limit) = input.limiter.deleted_units_limit() {
                         if *i >= limit / 2 * run {
                             return false
                         }

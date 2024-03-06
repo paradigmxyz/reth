@@ -48,7 +48,7 @@ impl<DB: Database> Segment<DB> for Headers {
             input.limiter,
             NonZeroUsize::new(3).unwrap(),
         );
-        if let Some(limit) = limiter.units_limit() {
+        if let Some(limit) = limiter.deleted_units_limit() {
             if limit == 0 {
                 // Nothing to do, `input.delete_limit` is less than 3, so we can't prune all
                 // headers-related tables up to the same height
@@ -184,7 +184,7 @@ mod tests {
 
             let last_pruned_block_number = to_block.min(
                 next_block_number_to_prune +
-                    input.limiter.units_limit().unwrap() as BlockNumber / 3 -
+                    input.limiter.deleted_units_limit().unwrap() as BlockNumber / 3 -
                     1,
             );
 

@@ -2524,7 +2524,7 @@ fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {
 #[derive(Debug, Clone, Copy)]
 pub struct PruneLimiter {
     /// Maximum units to delete from the database in one prune job.
-    units_limit: Option<usize>,
+    deleted_units_limit: Option<usize>,
     /// Current number of units (entries or segments) that have been deleted from database during
     /// the prune job.
     deleted_units_count: usize,
@@ -2539,29 +2539,29 @@ pub struct PruneLimiter {
 impl PruneLimiter {
     /// Returns a new instance.
     pub const fn new(
-        units_limit: Option<usize>,
+        deleted_units_limit: Option<usize>,
         job_timeout: Option<Duration>,
         start: Instant,
     ) -> Self {
-        Self { units_limit, deleted_units_count: 0, job_timeout, start, timed_out: false }
+        Self { deleted_units_limit, deleted_units_count: 0, job_timeout, start, timed_out: false }
     }
 
     /// Returns a new instance with a fraction of the limit on units of the old instance.
     pub fn new_with_fraction_of_units_limit(old: Self, denominator: NonZeroUsize) -> Self {
-        let Self { units_limit, job_timeout, start, .. } = old;
+        let Self { deleted_units_limit, job_timeout, start, .. } = old;
 
-        Self::new(units_limit.map(|limit| limit / denominator), job_timeout, start)
+        Self::new(deleted_units_limit.map(|limit| limit / denominator), job_timeout, start)
     }
 
     /// Returns a new instance without a time out.
-    pub fn new_without_timeout(segment_limit: usize) -> Self {
-        Self::new(Some(segment_limit), None, Instant::now())
+    pub fn new_without_timeout(deleted_units_limit: usize) -> Self {
+        Self::new(Some(deleted_units_limit), None, Instant::now())
     }
 
     /// Returns the maximum units that can be deleted from the database in one prune job. `None`
     /// is equivalent to unlimited units.
-    pub fn units_limit(&self) -> Option<usize> {
-        self.units_limit
+    pub fn deleted_units_limit(&self) -> Option<usize> {
+        self.deleted_units_limit
     }
 
     /// Returns max time one prune job can run. `None` is equivalent to unlimited time.
@@ -2581,9 +2581,9 @@ impl PruneLimiter {
 
     /// Returns true if prune limit is reached.
     pub fn at_limit(&mut self) -> bool {
-        let Self { units_limit, deleted_units_count, job_timeout, start, .. } = self;
+        let Self { deleted_units_limit, deleted_units_count, job_timeout, start, .. } = self;
 
-        if let Some(limit) = segment_limit {
+        if let Some(limit) = deleted_units_limit {
             if limit == deleted_units_count {
                 return true
             }

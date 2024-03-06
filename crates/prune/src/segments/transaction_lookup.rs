@@ -43,8 +43,9 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         }
         .into_inner();
         let tx_range = start..=
-            (Some(end).min(input.limiter.units_limit().map(|limit| start + limit as u64 - 1)))
-                .unwrap();
+            (Some(end)
+                .min(input.limiter.deleted_units_limit().map(|limit| start + limit as u64 - 1)))
+            .unwrap();
         let tx_range_end = *tx_range.end();
 
         // Retrieve transactions in the range and calculate their hashes in parallel
@@ -167,7 +168,9 @@ mod tests {
                 .take(to_block as usize)
                 .map(|block| block.body.len())
                 .sum::<usize>()
-                .min(next_tx_number_to_prune as usize + input.limiter.units_limit().unwrap())
+                .min(
+                    next_tx_number_to_prune as usize + input.limiter.deleted_units_limit().unwrap(),
+                )
                 .sub(1);
 
             let last_pruned_block_number = blocks
