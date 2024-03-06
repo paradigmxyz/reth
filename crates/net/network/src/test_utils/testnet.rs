@@ -491,10 +491,12 @@ impl<Pool> PeerHandle<Pool> {
         self.network.peer_id()
     }
 
+    /// Returns the [`PeersHandle`] from the network.
     pub fn peer_handle(&self) -> &PeersHandle {
         self.network.peers_handle()
     }
 
+    /// Returns the local socket as configured for the network.
     pub fn local_addr(&self) -> SocketAddr {
         self.network.local_addr()
     }

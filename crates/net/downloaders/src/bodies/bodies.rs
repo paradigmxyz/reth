@@ -360,7 +360,7 @@ where
                         this.buffer_bodies_response(response);
                     }
                     Err(error) => {
-                        tracing::debug!(target: "downloaders::bodies", ?error, "Request failed");
+                        tracing::debug!(target: "downloaders::bodies", %error, "Request failed");
                         this.clear();
                         return Poll::Ready(Some(Err(error)))
                     }
@@ -386,7 +386,7 @@ where
                     }
                     Ok(None) => break 'inner,
                     Err(error) => {
-                        tracing::error!(target: "downloaders::bodies", ?error, "Failed to download from next request");
+                        tracing::error!(target: "downloaders::bodies", %error, "Failed to download from next request");
                         this.clear();
                         return Poll::Ready(Some(Err(error)))
                     }
@@ -596,12 +596,11 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
-    use futures_util::stream::StreamExt;
-    use reth_db::test_utils::create_test_rw_db;
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
     use reth_primitives::{BlockBody, B256, MAINNET};
     use reth_provider::ProviderFactory;
-    use std::{collections::HashMap, sync::Arc};
+    use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of
     // first-downloaded
@@ -619,7 +618,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
@@ -658,7 +657,7 @@ mod tests {
             BodiesDownloaderBuilder::default().with_request_limit(request_limit).build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone()),
+                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
             );
         downloader.set_download_range(0..=199).expect("failed to set download range");
 
@@ -687,7 +686,7 @@ mod tests {
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone()),
+                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
             );
 
         let mut range_start = 0;
@@ -717,7 +716,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default().with_stream_batch_size(100).build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
         );
 
         // Set and download the first range
@@ -757,7 +756,7 @@ mod tests {
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone()),
+                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
             );
 
         // Set and download the entire range
@@ -788,7 +787,7 @@ mod tests {
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone()),
+                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
             );
 
         // Download the requested range

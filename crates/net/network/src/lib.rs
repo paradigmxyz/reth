@@ -114,6 +114,7 @@
 /// Common helpers for network testing.
 pub mod test_utils;
 
+mod budget;
 mod builder;
 mod cache;
 pub mod config;
@@ -148,6 +149,6 @@ pub use session::{
     PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
     SessionLimits, SessionManager, SessionsConfig,
 };
-pub use transactions::{AnnouncementFilter, FilterAnnouncement, ValidateTx68};
+pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};

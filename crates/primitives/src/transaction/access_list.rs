@@ -1,5 +1,4 @@
-use crate::{Address, B256};
-use alloy_primitives::U256;
+use crate::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
 use std::{

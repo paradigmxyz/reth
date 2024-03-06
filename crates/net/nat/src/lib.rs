@@ -9,6 +9,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use igd_next::aio::tokio::search_gateway;
@@ -244,14 +245,14 @@ async fn resolve_external_ip_upnp() -> Option<IpAddr> {
     search_gateway(Default::default())
         .await
         .map_err(|err| {
-            debug!(target: "net::nat", ?err, "Failed to resolve external IP via UPnP: failed to find gateway");
+            debug!(target: "net::nat", %err, "Failed to resolve external IP via UPnP: failed to find gateway");
             err
         })
         .ok()?
         .get_external_ip()
         .await
         .map_err(|err| {
-            debug!(target: "net::nat", ?err, "Failed to resolve external IP via UPnP");
+            debug!(target: "net::nat", %err, "Failed to resolve external IP via UPnP");
             err
         })
         .ok()

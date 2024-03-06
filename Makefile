@@ -85,8 +85,10 @@ op-build-native-%:
 # No jemalloc on Windows
 build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
 
-# asm keccak optimizations not enabled
-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
+# Disable asm-keccak optimizations and jemalloc.
+# Some aarch64 systems use larger page sizes and jemalloc doesn't play well.
+# See: https://github.com/paradigmxyz/reth/issues/6742
+build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak jemalloc jemalloc-prof,$(FEATURES))
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std

@@ -41,7 +41,7 @@ impl<C> DatabaseAccountTrieCursor<C> {
 
 impl<C> TrieCursor for DatabaseAccountTrieCursor<C>
 where
-    C: DbCursorRO<tables::AccountsTrie>,
+    C: DbCursorRO<tables::AccountsTrie> + Send + Sync,
 {
     /// Seeks an exact match for the provided key in the account trie.
     fn seek_exact(
@@ -83,7 +83,7 @@ impl<C> DatabaseStorageTrieCursor<C> {
 
 impl<C> TrieCursor for DatabaseStorageTrieCursor<C>
 where
-    C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie>,
+    C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie> + Send + Sync,
 {
     /// Seeks an exact match for the given key in the storage trie.
     fn seek_exact(
@@ -117,14 +117,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_db::{
-        cursor::{DbCursorRO, DbCursorRW},
-        tables,
-        transaction::DbTxMut,
-    };
+    use reth_db::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_primitives::{
         hex_literal::hex,
-        trie::{BranchNodeCompact, StorageTrieEntry, StoredBranchNode},
+        trie::{StorageTrieEntry, StoredBranchNode},
     };
     use reth_provider::test_utils::create_test_provider_factory;
 
@@ -176,14 +172,11 @@ mod tests {
         let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
         let hashed_address = B256::random();
-        let key = vec![0x2, 0x3];
+        let key = StoredNibblesSubKey::from(vec![0x2, 0x3]);
         let value = BranchNodeCompact::new(1, 1, 1, vec![B256::random()], None);
 
         cursor
-            .upsert(
-                hashed_address,
-                StorageTrieEntry { nibbles: key.clone().into(), node: value.clone() },
-            )
+            .upsert(hashed_address, StorageTrieEntry { nibbles: key.clone(), node: value.clone() })
             .unwrap();
 
         let mut cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);

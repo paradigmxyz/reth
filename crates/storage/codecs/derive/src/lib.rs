@@ -5,10 +5,11 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![allow(unreachable_pub, missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use proc_macro::{self, TokenStream, TokenTree};
+use proc_macro::{TokenStream, TokenTree};
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, DeriveInput};
 

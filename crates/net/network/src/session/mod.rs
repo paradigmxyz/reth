@@ -395,7 +395,7 @@ impl SessionManager {
                         remote_addr,
                         error,
                     } => {
-                        trace!(target: "net::session",  ?peer_id, ?error,"closed session.");
+                        trace!(target: "net::session", ?peer_id, %error,"closed session.");
                         self.remove_active_session(&peer_id);
                         Poll::Ready(SessionEvent::SessionClosedOnConnectionError {
                             remote_addr,
@@ -568,7 +568,7 @@ impl SessionManager {
             } => {
                 trace!(
                     target: "net::session",
-                    ?error,
+                    %error,
                     ?session_id,
                     ?remote_addr,
                     ?peer_id,
@@ -578,10 +578,9 @@ impl SessionManager {
                 Poll::Ready(SessionEvent::OutgoingConnectionError { remote_addr, peer_id, error })
             }
             PendingSessionEvent::EciesAuthError { remote_addr, session_id, error, direction } => {
-                self.remove_pending_session(&session_id);
                 trace!(
                     target: "net::session",
-                    ?error,
+                    %error,
                     ?session_id,
                     ?remote_addr,
                     "ecies auth failed"
@@ -754,11 +753,13 @@ pub enum SessionEvent {
 }
 
 /// Errors that can occur during handshaking/authenticating the underlying streams.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PendingSessionHandshakeError {
     /// The pending session failed due to an error while establishing the `eth` stream
+    #[error(transparent)]
     Eth(EthStreamError),
     /// The pending session failed due to an error while establishing the ECIES stream
+    #[error(transparent)]
     Ecies(ECIESError),
 }
 

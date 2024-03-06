@@ -1,0 +1,230 @@
+name: Assertoor Tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  get_tests:
+    name: "Run assertoor tests on reth pairs"
+    runs-on: ubuntu-latest
+    outputs:
+      test_result: ${{ steps.test_result.outputs.test_result }}
+      test_status: ${{ steps.test_result.outputs.test_status }}
+      failed_test_status: ${{ steps.test_result.outputs.failed_test_status }}
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    - name: Setup Kurtosis
+      shell: bash
+      run: |
+        echo "deb [trusted=yes] https://apt.fury.io/kurtosis-tech/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
+        sudo apt update
+        sudo apt install kurtosis-cli
+        kurtosis analytics disable
+
+    - name: Run Kurtosis
+      shell: bash
+      id: services
+      run: |
+        export github_sha=${{ github.sha }}
+        export github_repository=${{ github.repository }} 
+
+        cat etc/assertoor/assertoor-template.yaml | envsubst > etc/assertoor/assertoor.yaml
+
+        kurtosis run github.com/kurtosis-tech/ethereum-package --enclave assertoor-${{ github.run_id }} --args-file etc/assertoor/assertoor.yaml
+
+        enclave_dump=$(kurtosis enclave inspect assertoor-${{ github.run_id }})
+
+        assertoor_url=$(echo "$enclave_dump" | grep assertoor | grep http | sed 's/.*\(http:\/\/[0-9.:]\+\).*/\1/')
+        echo "assertoor_url: ${assertoor_url}"
+        echo "assertoor_url=${assertoor_url}" >> $GITHUB_OUTPUT
+
+    - name: Await test completion
+      shell: bash
+      id: test_result
+      run: |
+        assertoor_url="${{ steps.services.outputs.assertoor_url }}"
+
+        YELLOW='\033[1;33m'
+        GRAY='\033[0;37m'
+        GREEN='\033[0;32m'
+        RED='\033[0;31m'
+        NC='\033[0m'
+
+        # print assertor logs
+        assertoor_container=$(docker container list | grep assertoor | sed 's/^\([^ ]\+\) .*$/\1/')
+        docker logs -f $assertoor_container &
+
+        # helper to fetch task status for specific test id
+        get_tasks_status() {
+          tasks=$(curl -s ${assertoor_url}/api/v1/test_run/$1 | jq -c ".data.tasks[] | {index, parent_index, name, title, status, result}")
+          declare -A task_graph_map
+          task_graph_map[0]=""
+
+          while read task; do
+            task_id=$(echo "$task" | jq -r ".index")
+            task_parent=$(echo "$task" | jq -r ".parent_index")
+            task_name=$(echo "$task" | jq -r ".name")
+            task_title=$(echo "$task" | jq -r ".title")
+            task_status=$(echo "$task" | jq -r ".status")
+            task_result=$(echo "$task" | jq -r ".result")
+
+            task_graph="${task_graph_map[$task_parent]}"
+            task_graph_map[$task_id]="$task_graph |"
+            if [ ! -z "$task_graph" ]; then
+              task_graph="${task_graph}- "
+            fi
+
+            if [ "$task_status" == "pending" ]; then
+              task_status="${GRAY}pending ${NC}"
+            elif [ "$task_status" == "running" ]; then
+              task_status="${YELLOW}running ${NC}"
+            elif [ "$task_status" == "complete" ]; then
+              task_status="${GREEN}complete${NC}"
+            fi
+
+            if [ "$task_result" == "none" ]; then
+              task_result="${GRAY}none   ${NC}"
+            elif [ "$task_result" == "success" ]; then
+              task_result="${GREEN}success${NC}"
+            elif [ "$task_result" == "failure" ]; then
+              task_result="${RED}failure${NC}"
+            fi
+            
+            echo -e " $(printf '%-4s' "$task_id")\t$task_status\t$task_result\t$(printf '%-50s' "$task_graph$task_name") \t$task_title"
+          done <<< $(echo "$tasks")
+        }
+
+        # poll & check test status
+        final_test_result=""
+        failed_test_id=""
+        while true
+        do
+          pending_tests=0
+          failed_tests=0
+          total_tests=0
+          running_test=""
+
+          status_lines=()
+          task_lines=""
+          status_lines+=("$(date +'%Y-%m-%d %H:%M:%S')  Test Status:")
+
+          tests=$(curl -s ${assertoor_url}/api/v1/test_runs | jq -c ".data[] | {run_id, test_id, name, status}")
+          while read test; do
+            if [ -z "$test" ]; then
+              continue
+            fi
+            run_id=$(echo "$test" | jq -r ".run_id")
+            test_id=$(echo "$test" | jq -r ".test_id")
+            test_name=$(echo "$test" | jq -r ".name")
+            test_status=$(echo "$test" | jq -r ".status")
+
+            if [ "$test_status" == "pending" ]; then
+              pending_tests=$(expr $pending_tests + 1)
+              status_name="${GRAY}pending${NC}"
+            elif [ "$test_status" == "running" ]; then
+              pending_tests=$(expr $pending_tests + 1)
+              running_test="$run_id"
+              status_name="${YELLOW}running${NC}"
+
+            elif [ "$test_status" == "success" ]; then
+              status_name="${GREEN}success${NC}"
+            elif [ "$test_status" == "failure" ]; then
+              failed_tests=$(expr $failed_tests + 1)
+              failed_test_id="$run_id"
+              status_name="${RED}failure${NC}"
+            else
+              status_name="$test_status"
+            fi
+            status_lines+=("  $(printf '%-3s' "$test_id") $status_name \t$test_name")
+            total_tests=$(expr $total_tests + 1)
+          done <<< $(echo "$tests")
+
+          for status_line in "${status_lines[@]}"
+          do
+            echo -e "$status_line"
+          done
+
+          if ! [ -z "$running_test" ]; then
+            task_lines=$(get_tasks_status "$running_test")
+            echo "Active Test Task Status:"
+            echo "$task_lines"
+          fi
+
+          if [ $failed_tests -gt 0 ]; then 
+            final_test_result="failure"
+            break
+          fi
+          if [ $total_tests -gt 0 ] && [ $pending_tests -le 0 ]; then
+            final_test_result="success"
+            break
+          fi
+
+          sleep 60
+        done
+
+        # save test results & status to github output
+        echo "test_result=$(echo "$final_test_result")" >> $GITHUB_OUTPUT
+        echo "test_status<<EOF" >> $GITHUB_OUTPUT
+        for status_line in "${status_lines[@]}"
+        do
+          echo -e "$status_line" >> $GITHUB_OUTPUT
+        done
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        if ! [ -z "$failed_test_id" ]; then
+          echo "failed_test_status<<EOF" >> $GITHUB_OUTPUT
+          get_tasks_status "$failed_test_id" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        else
+          echo "failed_test_status=" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Generate dump and remove kurtosis enclave
+      shell: bash
+      run: |
+        mkdir -p ./temp/dump
+        cd ./temp/dump
+        cp ../../etc/assertoor/assertoor.yaml ./kurtosis-params.yaml
+
+        kurtosis enclave dump assertoor-${{ github.run_id }}
+        kurtosis enclave rm -f assertoor-${{ github.run_id }}
+
+    - name: Upload dump artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: "kurtosis-enclave-dump-${{ github.run_id }}"
+        path: ./temp/dump
+    
+    - name: Return test result
+      shell: bash
+      run: |
+        test_result="${{ steps.test_result.outputs.test_result }}"
+        test_status=$(
+        cat <<"EOF"
+        ${{ steps.test_result.outputs.test_status }}
+        EOF
+        )
+        failed_test_status=$(
+        cat <<"EOF"
+        ${{ steps.test_result.outputs.failed_test_status }}
+        EOF
+        )
+
+        echo "Test Result:  $test_result"
+        echo "$test_status"
+
+        if ! [ "$test_result" == "success" ]; then
+          echo ""
+          echo "Failed Test Task Status:"
+          echo "$failed_test_status"
+
+          echo ""
+          echo "See 'Await test completion' task for detailed logs about this failure!"
+          echo ""
+
+          exit 1 # fail action
+        fi
+

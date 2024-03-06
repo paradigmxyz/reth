@@ -8,7 +8,7 @@ use reth_net_nat::NatResolver;
 use reth_network::{
     transactions::{
         TransactionFetcherConfig, TransactionsManagerConfig,
-        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST,
+        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
     HelloMessageWithProtocols, NetworkConfigBuilder,
@@ -19,7 +19,7 @@ use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
-#[clap(next_help_heading = "Networking")]
+#[command(next_help_heading = "Networking")]
 pub struct NetworkArgs {
     /// Disable the discovery service.
     #[command(flatten)]
@@ -95,7 +95,7 @@ pub struct NetworkArgs {
     /// than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when
     /// assembling a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response. Default
     /// is 128 KiB.
-    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST)]
+    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 }
 
@@ -190,7 +190,7 @@ impl Default for NetworkArgs {
             max_inbound_peers: None,
             soft_limit_byte_size_pooled_transactions_response:
                 SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-            soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST,
+            soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         }
     }
 }
@@ -211,11 +211,11 @@ pub struct DiscoveryArgs {
     pub disable_discv4_discovery: bool,
 
     /// The UDP address to use for P2P discovery/networking
-    #[arg(long = "discovery.addr", name = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
+    #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
     pub addr: Ipv4Addr,
 
     /// The UDP port to use for P2P discovery/networking
-    #[arg(long = "discovery.port", name = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
+    #[arg(id = "discovery.port", long = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
 }
 
@@ -262,7 +262,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

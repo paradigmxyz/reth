@@ -92,14 +92,13 @@ fn main() {
     // Enable debugging on debug builds
     #[cfg(debug_assertions)]
     {
-        cc_builder.define("MDBX_DEBUG", "1");
-        cc_builder.define("MDBX_ENABLE_PROFGC", "1");
+        cc_builder.define("MDBX_DEBUG", "1").define("MDBX_ENABLE_PROFGC", "1");
     }
 
     // Disables debug logging on optimized builds
     #[cfg(not(debug_assertions))]
     {
-        cc_builder.define("NDEBUG", None).define("MDBX_DEBUG", "0");
+        cc_builder.define("MDBX_DEBUG", "0").define("NDEBUG", None);
     }
 
     cc_builder.file(mdbx.join("mdbx.c")).compile("libmdbx.a");

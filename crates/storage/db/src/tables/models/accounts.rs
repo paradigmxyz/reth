@@ -11,7 +11,7 @@ use reth_codecs::{derive_arbitrary, Compact};
 use reth_primitives::{Account, Address, BlockNumber, Buf};
 use serde::{Deserialize, Serialize};
 
-/// Account as it is saved inside [`AccountChangeSet`][crate::tables::AccountChangeSet].
+/// Account as it is saved inside [`AccountChangeSets`][crate::tables::AccountChangeSets].
 ///
 /// [`Address`] is the subkey.
 #[derive_arbitrary(compact)]
@@ -57,7 +57,7 @@ impl Compact for AccountBeforeTx {
 }
 
 /// [`BlockNumber`] concatenated with [`Address`]. Used as the key for
-/// [`StorageChangeSet`](crate::tables::StorageChangeSet)
+/// [`StorageChangeSets`](crate::tables::StorageChangeSets)
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
 #[derive(
@@ -73,7 +73,7 @@ impl BlockNumberAddress {
         (*range.start(), Address::ZERO).into()..(*range.end() + 1, Address::ZERO).into()
     }
 
-    /// Return the transition id
+    /// Return the block number
     pub fn block_number(&self) -> BlockNumber {
         self.0 .0
     }
@@ -99,12 +99,12 @@ impl Encode for BlockNumberAddress {
     type Encoded = [u8; 28];
 
     fn encode(self) -> Self::Encoded {
-        let tx = self.0 .0;
+        let block_number = self.0 .0;
         let address = self.0 .1;
 
         let mut buf = [0u8; 28];
 
-        buf[..8].copy_from_slice(&tx.to_be_bytes());
+        buf[..8].copy_from_slice(&block_number.to_be_bytes());
         buf[8..].copy_from_slice(address.as_slice());
         buf
     }
@@ -129,7 +129,7 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
-    fn test_tx_number_address() {
+    fn test_block_number_address() {
         let num = 1u64;
         let hash = Address::from_str("ba5e000000000000000000000000000000000000").unwrap();
         let key = BlockNumberAddress((num, hash));
@@ -146,7 +146,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tx_number_address_rand() {
+    fn test_block_number_address_rand() {
         let mut bytes = [0u8; 28];
         thread_rng().fill(bytes.as_mut_slice());
         let key = BlockNumberAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();

@@ -6,8 +6,8 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
+    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
-    runner::CliContext,
     utils::get_single_header,
 };
 use backon::{ConstantBuilder, Retryable};
@@ -67,10 +67,10 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     network: NetworkArgs,
 
     /// The number of retries per request
@@ -105,7 +105,11 @@ impl Command {
                 self.network.discovery.addr,
                 self.network.discovery.port,
             )))
-            .build(ProviderFactory::new(db, self.chain.clone()))
+            .build(ProviderFactory::new(
+                db,
+                self.chain.clone(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+            )?)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -125,7 +129,7 @@ impl Command {
         // initialize the database
         let db =
             Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
-        let factory = ProviderFactory::new(&db, self.chain.clone());
+        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files_path())?;
         let provider_rw = factory.provider_rw()?;
 
         // Configure and build network

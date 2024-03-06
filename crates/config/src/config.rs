@@ -4,7 +4,7 @@ use reth_discv4::Discv4Config;
 use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
 use reth_primitives::PruneModes;
 use secp256k1::SecretKey;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{path::PathBuf, time::Duration};
 
 /// Configuration for the reth node.
@@ -52,8 +52,6 @@ impl Config {
 pub struct StageConfig {
     /// Header stage configuration.
     pub headers: HeadersConfig,
-    /// Total Difficulty stage configuration
-    pub total_difficulty: TotalDifficultyConfig,
     /// Body stage configuration.
     pub bodies: BodiesConfig,
     /// Sender Recovery stage configuration.
@@ -104,21 +102,6 @@ impl Default for HeadersConfig {
             downloader_min_concurrent_requests: 5,
             downloader_max_buffered_responses: 100,
         }
-    }
-}
-
-/// Total difficulty stage configuration
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
-#[serde(default)]
-pub struct TotalDifficultyConfig {
-    /// The maximum number of total difficulty entries to sum up before committing progress to the
-    /// database.
-    pub commit_threshold: u64,
-}
-
-impl Default for TotalDifficultyConfig {
-    fn default() -> Self {
-        Self { commit_threshold: 100_000 }
     }
 }
 
@@ -186,6 +169,10 @@ pub struct ExecutionConfig {
     /// The maximum cumulative amount of gas to process before the execution stage commits.
     pub max_cumulative_gas: Option<u64>,
     /// The maximum time spent on blocks processing before the execution stage commits.
+    #[serde(
+        serialize_with = "humantime_serde::serialize",
+        deserialize_with = "deserialize_duration"
+    )]
     pub max_duration: Option<Duration>,
 }
 
@@ -238,13 +225,13 @@ impl Default for MerkleConfig {
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct TransactionLookupConfig {
-    /// The maximum number of transactions to process before committing progress to the database.
-    pub commit_threshold: u64,
+    /// The maximum number of transactions to process before writing to disk.
+    pub chunk_size: u64,
 }
 
 impl Default for TransactionLookupConfig {
     fn default() -> Self {
-        Self { commit_threshold: 5_000_000 }
+        Self { chunk_size: 5_000_000 }
     }
 }
 
@@ -279,9 +266,28 @@ impl Default for PruneConfig {
     }
 }
 
+/// Helper type to support older versions of Duration deserialization.
+fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum AnyDuration {
+        #[serde(deserialize_with = "humantime_serde::deserialize")]
+        Human(Option<Duration>),
+        Duration(Option<Duration>),
+    }
+
+    AnyDuration::deserialize(deserializer).map(|d| match d {
+        AnyDuration::Human(duration) | AnyDuration::Duration(duration) => duration,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::Config;
+    use std::time::Duration;
 
     const EXTENSION: &str = "toml";
 
@@ -313,6 +319,18 @@ mod tests {
         })
     }
 
+    #[test]
+    fn test_load_execution_stage() {
+        with_tempdir("config-load-test", |config_path| {
+            let mut config = Config::default();
+            config.stages.execution.max_duration = Some(Duration::from_secs(10 * 60));
+            confy::store_path(config_path, &config).unwrap();
+
+            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            assert_eq!(config, loaded_config);
+        })
+    }
+
     // ensures config deserialization is backwards compatible
     #[test]
     fn test_backwards_compatibility() {
@@ -323,9 +341,6 @@ downloader_min_concurrent_requests = 5
 downloader_max_buffered_responses = 100
 downloader_request_limit = 1000
 commit_threshold = 10000
-
-[stages.total_difficulty]
-commit_threshold = 100000
 
 [stages.bodies]
 downloader_request_limit = 200
@@ -353,7 +368,7 @@ commit_threshold = 100000
 clean_threshold = 50000
 
 [stages.transaction_lookup]
-commit_threshold = 5000000
+chunk_size = 5000000
 
 [stages.index_account_history]
 commit_threshold = 100000
@@ -429,5 +444,192 @@ storage_history = { distance = 16384 }
 '0xdac17f958d2ee523a2206206994597c13d831ec7' = { distance = 1000 }
 #";
         let _conf: Config = toml::from_str(alpha_0_0_11).unwrap();
+
+        let alpha_0_0_18 = r"#
+[stages.headers]
+downloader_max_concurrent_requests = 100
+downloader_min_concurrent_requests = 5
+downloader_max_buffered_responses = 100
+downloader_request_limit = 1000
+commit_threshold = 10000
+
+[stages.total_difficulty]
+commit_threshold = 100000
+
+[stages.bodies]
+downloader_request_limit = 200
+downloader_stream_batch_size = 1000
+downloader_max_buffered_blocks_size_bytes = 2147483648
+downloader_min_concurrent_requests = 5
+downloader_max_concurrent_requests = 100
+
+[stages.sender_recovery]
+commit_threshold = 5000000
+
+[stages.execution]
+max_blocks = 500000
+max_changes = 5000000
+max_cumulative_gas = 1500000000000
+[stages.execution.max_duration]
+secs = 600
+nanos = 0
+
+[stages.account_hashing]
+clean_threshold = 500000
+commit_threshold = 100000
+
+[stages.storage_hashing]
+clean_threshold = 500000
+commit_threshold = 100000
+
+[stages.merkle]
+clean_threshold = 50000
+
+[stages.transaction_lookup]
+commit_threshold = 5000000
+
+[stages.index_account_history]
+commit_threshold = 100000
+
+[stages.index_storage_history]
+commit_threshold = 100000
+
+[peers]
+refill_slots_interval = '5s'
+trusted_nodes = []
+connect_trusted_nodes_only = false
+max_backoff_count = 5
+ban_duration = '12h'
+
+[peers.connection_info]
+max_outbound = 100
+max_inbound = 30
+max_concurrent_outbound_dials = 10
+
+[peers.reputation_weights]
+bad_message = -16384
+bad_block = -16384
+bad_transactions = -16384
+already_seen_transactions = 0
+timeout = -4096
+bad_protocol = -2147483648
+failed_to_connect = -25600
+dropped = -4096
+bad_announcement = -1024
+
+[peers.backoff_durations]
+low = '30s'
+medium = '3m'
+high = '15m'
+max = '1h'
+
+[sessions]
+session_command_buffer = 32
+session_event_buffer = 260
+
+[sessions.limits]
+
+[sessions.initial_internal_request_timeout]
+secs = 20
+nanos = 0
+
+[sessions.protocol_breach_request_timeout]
+secs = 120
+nanos = 0
+#";
+        let conf: Config = toml::from_str(alpha_0_0_18).unwrap();
+        assert_eq!(conf.stages.execution.max_duration, Some(Duration::from_secs(10 * 60)));
+
+        let alpha_0_0_19 = r"#
+[stages.headers]
+downloader_max_concurrent_requests = 100
+downloader_min_concurrent_requests = 5
+downloader_max_buffered_responses = 100
+downloader_request_limit = 1000
+commit_threshold = 10000
+
+[stages.total_difficulty]
+commit_threshold = 100000
+
+[stages.bodies]
+downloader_request_limit = 200
+downloader_stream_batch_size = 1000
+downloader_max_buffered_blocks_size_bytes = 2147483648
+downloader_min_concurrent_requests = 5
+downloader_max_concurrent_requests = 100
+
+[stages.sender_recovery]
+commit_threshold = 5000000
+
+[stages.execution]
+max_blocks = 500000
+max_changes = 5000000
+max_cumulative_gas = 1500000000000
+max_duration = '10m'
+
+[stages.account_hashing]
+clean_threshold = 500000
+commit_threshold = 100000
+
+[stages.storage_hashing]
+clean_threshold = 500000
+commit_threshold = 100000
+
+[stages.merkle]
+clean_threshold = 50000
+
+[stages.transaction_lookup]
+commit_threshold = 5000000
+
+[stages.index_account_history]
+commit_threshold = 100000
+
+[stages.index_storage_history]
+commit_threshold = 100000
+
+[peers]
+refill_slots_interval = '5s'
+trusted_nodes = []
+connect_trusted_nodes_only = false
+max_backoff_count = 5
+ban_duration = '12h'
+
+[peers.connection_info]
+max_outbound = 100
+max_inbound = 30
+max_concurrent_outbound_dials = 10
+
+[peers.reputation_weights]
+bad_message = -16384
+bad_block = -16384
+bad_transactions = -16384
+already_seen_transactions = 0
+timeout = -4096
+bad_protocol = -2147483648
+failed_to_connect = -25600
+dropped = -4096
+bad_announcement = -1024
+
+[peers.backoff_durations]
+low = '30s'
+medium = '3m'
+high = '15m'
+max = '1h'
+
+[sessions]
+session_command_buffer = 32
+session_event_buffer = 260
+
+[sessions.limits]
+
+[sessions.initial_internal_request_timeout]
+secs = 20
+nanos = 0
+
+[sessions.protocol_breach_request_timeout]
+secs = 120
+nanos = 0
+#";
+        let _conf: Config = toml::from_str(alpha_0_0_19).unwrap();
     }
 }

@@ -11,7 +11,7 @@ use reth_primitives::{
     ChainSpecBuilder, Header as RethHeader, SealedHeader, StorageEntry, Withdrawals, B256, B64,
     U256,
 };
-use serde::{self, Deserialize};
+use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
 
 /// The definition of a blockchain test.
@@ -161,7 +161,7 @@ impl State {
                 bytecode_hash: code_hash,
             };
             tx.put::<tables::PlainAccountState>(address, reth_account)?;
-            tx.put::<tables::HashedAccount>(hashed_address, reth_account)?;
+            tx.put::<tables::HashedAccounts>(hashed_address, reth_account)?;
             if let Some(code_hash) = code_hash {
                 tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.clone()))?;
             }
@@ -171,7 +171,7 @@ impl State {
                     address,
                     StorageEntry { key: storage_key, value: *v },
                 )?;
-                tx.put::<tables::HashedStorage>(
+                tx.put::<tables::HashedStorages>(
                     hashed_address,
                     StorageEntry { key: keccak256(storage_key), value: *v },
                 )
@@ -408,7 +408,6 @@ pub type AccessList = Vec<AccessListItem>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
 
     #[test]
     fn header_deserialize() {

@@ -13,11 +13,10 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use async_trait::async_trait;
 use reth_eth_wire::{DisconnectReason, EthVersion, Status};
 use reth_primitives::{NodeRecord, PeerId};
 use reth_rpc_types::NetworkStatus;
-use std::{net::SocketAddr, sync::Arc, time::Instant};
+use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
@@ -32,13 +31,12 @@ pub mod reputation;
 pub mod noop;
 
 /// Provides general purpose information about the network.
-#[async_trait]
 pub trait NetworkInfo: Send + Sync {
     /// Returns the [`SocketAddr`] that listens for incoming connections.
     fn local_addr(&self) -> SocketAddr;
 
     /// Returns the current status of the network being ran by the local node.
-    async fn network_status(&self) -> Result<NetworkStatus, NetworkError>;
+    fn network_status(&self) -> impl Future<Output = Result<NetworkStatus, NetworkError>> + Send;
 
     /// Returns the chain id
     fn chain_id(&self) -> u64;
@@ -66,7 +64,6 @@ pub trait PeersInfo: Send + Sync {
 }
 
 /// Provides an API for managing the peers of the network.
-#[async_trait]
 pub trait Peers: PeersInfo {
     /// Adds a peer to the peer set.
     fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
@@ -82,31 +79,42 @@ pub trait Peers: PeersInfo {
     fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr);
 
     /// Returns the rpc [PeerInfo] for all connected [PeerKind::Trusted] peers.
-    async fn get_trusted_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
-        self.get_peers_by_kind(PeerKind::Trusted).await
+    fn get_trusted_peers(
+        &self,
+    ) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send {
+        self.get_peers_by_kind(PeerKind::Trusted)
     }
 
     /// Returns the rpc [PeerInfo] for all connected [PeerKind::Basic] peers.
-    async fn get_basic_peers(&self) -> Result<Vec<PeerInfo>, NetworkError> {
-        self.get_peers_by_kind(PeerKind::Basic).await
+    fn get_basic_peers(&self) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send {
+        self.get_peers_by_kind(PeerKind::Basic)
     }
 
     /// Returns the rpc [PeerInfo] for all connected peers with the given kind.
-    async fn get_peers_by_kind(&self, kind: PeerKind) -> Result<Vec<PeerInfo>, NetworkError>;
+    fn get_peers_by_kind(
+        &self,
+        kind: PeerKind,
+    ) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send;
 
     /// Returns the rpc [PeerInfo] for all connected peers.
-    async fn get_all_peers(&self) -> Result<Vec<PeerInfo>, NetworkError>;
+    fn get_all_peers(&self) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send;
 
     /// Returns the rpc [PeerInfo] for the given peer id.
     ///
     /// Returns `None` if the peer is not connected.
-    async fn get_peer_by_id(&self, peer_id: PeerId) -> Result<Option<PeerInfo>, NetworkError>;
+    fn get_peer_by_id(
+        &self,
+        peer_id: PeerId,
+    ) -> impl Future<Output = Result<Option<PeerInfo>, NetworkError>> + Send;
 
     /// Returns the rpc [PeerInfo] for the given peers if they are connected.
     ///
     /// Note: This only returns peers that are connected, unconnected peers are ignored but keeping
     /// the order in which they were requested.
-    async fn get_peers_by_id(&self, peer_ids: Vec<PeerId>) -> Result<Vec<PeerInfo>, NetworkError>;
+    fn get_peers_by_id(
+        &self,
+        peer_ids: Vec<PeerId>,
+    ) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send;
 
     /// Removes a peer from the peer set that corresponds to given kind.
     fn remove_peer(&self, peer: PeerId, kind: PeerKind);
@@ -121,7 +129,10 @@ pub trait Peers: PeersInfo {
     fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind);
 
     /// Get the reputation of a peer.
-    async fn reputation_by_id(&self, peer_id: PeerId) -> Result<Option<Reputation>, NetworkError>;
+    fn reputation_by_id(
+        &self,
+        peer_id: PeerId,
+    ) -> impl Future<Output = Result<Option<Reputation>, NetworkError>> + Send;
 }
 
 /// Represents the kind of peer

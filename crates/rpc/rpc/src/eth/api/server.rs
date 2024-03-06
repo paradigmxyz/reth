@@ -153,10 +153,26 @@ where
         Ok(EthApi::ommer_by_block_and_index(self, number, index).await?)
     }
 
+    /// Handler for: `eth_getRawTransactionByHash`
+    async fn raw_transaction_by_hash(&self, hash: B256) -> Result<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getRawTransactionByHash");
+        Ok(EthTransactions::raw_transaction_by_hash(self, hash).await?)
+    }
+
     /// Handler for: `eth_getTransactionByHash`
     async fn transaction_by_hash(&self, hash: B256) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
         Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
+    }
+
+    /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
+    async fn raw_transaction_by_block_hash_and_index(
+        &self,
+        hash: B256,
+        index: Index,
+    ) -> Result<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getRawTransactionByBlockHashAndIndex");
+        Ok(EthApi::raw_transaction_by_block_and_tx_index(self, hash, index).await?)
     }
 
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
@@ -167,6 +183,16 @@ where
     ) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
         Ok(EthApi::transaction_by_block_and_tx_index(self, hash, index).await?)
+    }
+
+    /// Handler for: `eth_getRawTransactionByBlockNumberAndIndex`
+    async fn raw_transaction_by_block_number_and_index(
+        &self,
+        number: BlockNumberOrTag,
+        index: Index,
+    ) -> Result<Option<Bytes>> {
+        trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getRawTransactionByBlockNumberAndIndex");
+        Ok(EthApi::raw_transaction_by_block_and_tx_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionByBlockNumberAndIndex`
@@ -229,13 +255,13 @@ where
     /// Handler for: `eth_getHeaderByNumber`
     async fn header_by_number(&self, block_number: BlockNumberOrTag) -> Result<Option<Header>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
-        Ok(EthApi::block_header(self, block_number).await?)
+        Ok(EthApi::rpc_block_header(self, block_number).await?)
     }
 
     /// Handler for: `eth_getHeaderByHash`
     async fn header_by_hash(&self, hash: B256) -> Result<Option<Header>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
-        Ok(EthApi::block_header(self, hash).await?)
+        Ok(EthApi::rpc_block_header(self, hash).await?)
     }
 
     /// Handler for: `eth_call`
@@ -298,10 +324,10 @@ where
         return Ok(EthApi::gas_price(self).await?)
     }
 
-    /// Handler for: `eth_blobGasPrice`
-    async fn blob_gas_price(&self) -> Result<U256> {
-        trace!(target: "rpc::eth", "Serving eth_blobGasPrice");
-        return Ok(EthApi::blob_gas_price(self).await?)
+    /// Handler for: `eth_blobBaseFee`
+    async fn blob_base_fee(&self) -> Result<U256> {
+        trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
+        return Ok(EthApi::blob_base_fee(self).await?)
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`
@@ -411,7 +437,7 @@ mod tests {
             cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
             FeeHistoryCacheConfig,
         },
-        BlockingTaskPool, EthApi,
+        EthApi,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_interfaces::test_utils::{generators, generators::Rng};
@@ -427,6 +453,7 @@ mod tests {
     };
     use reth_rpc_api::EthApiServer;
     use reth_rpc_types::FeeHistory;
+    use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
     fn build_test_eth_api<
