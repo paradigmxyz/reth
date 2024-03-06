@@ -1,11 +1,6 @@
-//! This example shows how to run a custom dev node programmatically and submit a transaction
-//! through rpc.
-
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 use futures_util::StreamExt;
 use reth::{
-    builder::{NodeBuilder, NodeHandle},
+    builder::{components::FullNodeComponents, FullNode, NodeBuilder, NodeHandle},
     providers::CanonStateSubscriptions,
     rpc::eth::EthTransactions,
     tasks::TaskManager,
@@ -15,8 +10,8 @@ use reth_node_ethereum::EthereumNode;
 use reth_primitives::{b256, hex, ChainSpec, Genesis};
 use std::sync::Arc;
 
-#[tokio::main]
-async fn main() -> eyre::Result<()> {
+#[tokio::test]
+async fn can_run_dev_node() -> eyre::Result<()> {
     let tasks = TaskManager::current();
 
     // create node config
@@ -25,12 +20,17 @@ async fn main() -> eyre::Result<()> {
         .with_rpc(RpcServerArgs::default().with_http())
         .with_chain(custom_chain());
 
-    let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
         .node(EthereumNode::default())
         .launch()
         .await?;
 
+    assert_chain_advances(node).await;
+    Ok(())
+}
+
+async fn assert_chain_advances<Node: FullNodeComponents>(mut node: FullNode<Node>) {
     let mut notifications = node.provider.canonical_state_stream();
 
     // submit tx through rpc
@@ -38,7 +38,7 @@ async fn main() -> eyre::Result<()> {
 
     let eth_api = node.rpc_registry.eth_api();
 
-    let hash = eth_api.send_raw_transaction(raw_tx.into()).await?;
+    let hash = eth_api.send_raw_transaction(raw_tx.into()).await.unwrap();
 
     let expected = b256!("b1c6512f4fc202c04355fbda66755e0e344b152e633010e8fd75ecec09b63398");
 
@@ -50,12 +50,12 @@ async fn main() -> eyre::Result<()> {
     let tx = head.tip().transactions().next().unwrap();
     assert_eq!(tx.hash(), hash);
     println!("mined transaction: {hash}");
-    Ok(())
 }
 
 fn custom_chain() -> Arc<ChainSpec> {
     let custom_genesis = r#"
 {
+    
     "nonce": "0x42",
     "timestamp": "0x0",
     "extraData": "0x5343",
