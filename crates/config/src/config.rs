@@ -70,6 +70,8 @@ pub struct StageConfig {
     pub index_account_history: IndexHistoryConfig,
     /// Index Storage History stage configuration.
     pub index_storage_history: IndexHistoryConfig,
+    /// Common ETL related configuration.
+    pub etl: EtlConfig,
 }
 
 /// Header stage configuration.
@@ -227,17 +229,29 @@ impl Default for MerkleConfig {
 pub struct TransactionLookupConfig {
     /// The maximum number of transactions to process before writing to disk.
     pub chunk_size: u64,
-    /// The size of temporary file in bytes for ETL data collector.
-    pub etl_file_size: usize,
 }
 
 impl Default for TransactionLookupConfig {
     fn default() -> Self {
-        Self { chunk_size: 5_000_000, etl_file_size: 500 * 1024 * 1024 }
+        Self { chunk_size: 5_000_000}
     }
 }
 
-/// History History stage configuration.
+/// Common ETL related configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct EtlConfig {
+    /// The size of temporary file in bytes for ETL data collector.
+    pub etl_file_size: usize,
+}
+
+impl Default for EtlConfig {
+    fn default() -> Self {
+        Self { etl_file_size: 500 * (1024 * 1024)}
+    }
+}
+
+/// History stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct IndexHistoryConfig {

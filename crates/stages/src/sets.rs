@@ -101,6 +101,7 @@ impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
         header_downloader: H,
         body_downloader: B,
         executor_factory: EF,
+        etl_file_size: usize,
     ) -> Result<Self, StageError>
     where
         EF: ExecutorFactory,
@@ -113,6 +114,7 @@ impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
                 header_downloader,
                 body_downloader,
                 Arc::new(TempDir::new()?),
+                etl_file_size,
             ),
             executor_factory,
         })
@@ -166,6 +168,8 @@ pub struct OnlineStages<Provider, H, B> {
     body_downloader: B,
     /// Temporary directory for ETL usage on headers stage.
     temp_dir: Arc<TempDir>,
+    /// The size of temporary files in bytes for ETL data collector.
+    etl_file_size: usize,
 }
 
 impl<Provider, H, B> OnlineStages<Provider, H, B> {
@@ -177,8 +181,9 @@ impl<Provider, H, B> OnlineStages<Provider, H, B> {
         header_downloader: H,
         body_downloader: B,
         temp_dir: Arc<TempDir>,
+        etl_file_size: usize,
     ) -> Self {
-        Self { provider, header_mode, consensus, header_downloader, body_downloader, temp_dir }
+        Self { provider, header_mode, consensus, header_downloader, body_downloader, temp_dir, etl_file_size }
     }
 }
 
@@ -204,6 +209,7 @@ where
         header_downloader: H,
         consensus: Arc<dyn Consensus>,
         temp_dir: Arc<TempDir>,
+        etl_file_size: usize,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(HeaderStage::new(
@@ -212,6 +218,7 @@ where
                 mode,
                 consensus.clone(),
                 temp_dir.clone(),
+                etl_file_size,
             ))
             .add_stage(bodies)
     }
@@ -232,6 +239,7 @@ where
                 self.header_mode,
                 self.consensus.clone(),
                 self.temp_dir.clone(),
+                self.etl_file_size,
             ))
             .add_stage(BodyStage::new(self.body_downloader))
     }

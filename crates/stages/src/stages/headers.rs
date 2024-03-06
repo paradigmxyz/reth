@@ -78,6 +78,7 @@ where
         mode: HeaderSyncMode,
         consensus: Arc<dyn Consensus>,
         tempdir: Arc<TempDir>,
+        etl_file_size: usize,
     ) -> Self {
         Self {
             provider: database,
@@ -85,8 +86,8 @@ where
             mode,
             consensus,
             sync_gap: None,
-            hash_collector: Collector::new(tempdir.clone(), 100 * (1024 * 1024)),
-            header_collector: Collector::new(tempdir, 100 * (1024 * 1024)),
+            hash_collector: Collector::new(tempdir.clone(), etl_file_size),
+            header_collector: Collector::new(tempdir, etl_file_size),
             is_etl_ready: false,
         }
     }
@@ -421,6 +422,7 @@ mod tests {
                     HeaderSyncMode::Tip(self.channel.1.clone()),
                     self.consensus.clone(),
                     Arc::new(TempDir::new().unwrap()),
+                    500*(1024*1024),
                 )
             }
         }

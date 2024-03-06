@@ -179,6 +179,9 @@ impl ImportCommand {
             reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
 
         let max_block = file_client.max_block().unwrap_or(0);
+
+        let etl_file_size = config.stages.etl.etl_file_size;
+
         let mut pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty
@@ -191,6 +194,7 @@ impl ImportCommand {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
+                    etl_file_size,
                 )?
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,

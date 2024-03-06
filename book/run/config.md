@@ -193,12 +193,6 @@ The transaction lookup stage builds an index of transaction hashes to their sequ
 # Lower thresholds correspond to more frequent disk I/O (writes),
 # but lowers memory usage
 chunk_size = 5000000
-
-# The size of temporary file in bytes for ETL data collector.
-#
-# Lower threshold corresponds to more frequent flushes,
-# but lowers temporary storage usage
-etl_file_size = 524_288_000 # 500 * 1024 * 1024
 ```
 
 ### `index_account_history`
@@ -225,6 +219,19 @@ The storage history indexing stage builds an index of what blocks a particular s
 # Lower thresholds correspond to more frequent disk I/O (writes),
 # but lowers memory usage
 commit_threshold = 100000
+```
+
+### `etl`
+
+The storage history indexing stage builds an index of what blocks a particular storage slot changed.
+
+```toml
+[stages.etl]
+# The size of temporary file in bytes for ETL data collector.
+#
+# Lower threshold corresponds to more frequent flushes,
+# but lowers temporary storage usage
+etl_file_size = 524_288_000 # 500 * 1024 * 1024
 ```
 
 ## The `[peers]` section
