@@ -28,7 +28,6 @@ async fn can_run_dev_node() -> eyre::Result<()> {
 
     assert_chain_advances(node).await;
     Ok(())
-
 }
 
 async fn assert_chain_advances<Node: FullNodeComponents>(mut node: FullNode<Node>) {
