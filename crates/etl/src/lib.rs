@@ -34,8 +34,8 @@ use tempfile::{NamedTempFile, TempDir};
 /// (load) in a sorted manner.
 ///
 /// Used mainly to insert data into `MDBX` in a sorted manner. This is important because performance
-/// and storage space degrades greatly if the data is inserted unsorted (eg. tables with hashes as keys.) as
-/// opposed to append & sorted insert. Some benchmarks can be found [here](https://github.com/paradigmxyz/reth/pull/1130#issuecomment-1418642755).
+/// and storage space degrades greatly if the data is inserted unsorted (eg. tables with hashes as
+/// keys.) as opposed to append & sorted insert. Some benchmarks can be found [here](https://github.com/paradigmxyz/reth/pull/1130#issuecomment-1418642755).
 #[derive(Debug)]
 pub struct Collector<K, V>
 where
