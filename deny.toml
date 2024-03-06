@@ -72,11 +72,6 @@ expression = "LicenseRef-ring"
 license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 [[licenses.clarify]]
-name = "webpki"
-expression = "LicenseRef-webpki"
-license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
-
-[[licenses.clarify]]
 name = "rustls-webpki"
 expression = "LicenseRef-rustls-webpki"
 license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
