@@ -79,7 +79,7 @@ impl<DB: Database> Pruner<DB> {
             self.previous_tip_block_number = Some(tip_block_number);
 
             debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PruneProgress::new_finished())
+            return Ok(PruneProgress::finished())
         }
 
         self.listeners.notify(PrunerEvent::Started { tip_block_number });

@@ -163,7 +163,7 @@ impl PruneOutput {
     /// Returns a [PruneOutput] with `done = true`, `pruned = 0` and `checkpoint = None`.
     /// Use when no pruning is needed.
     pub(crate) const fn done() -> Self {
-        Self { progress: PruneProgress::new_finished(), pruned: 0, checkpoint: None }
+        Self { progress: PruneProgress::finished(), pruned: 0, checkpoint: None }
     }
 
     /// Returns a [PruneOutput] with `done = false`, `pruned = 0` and `checkpoint = None`.

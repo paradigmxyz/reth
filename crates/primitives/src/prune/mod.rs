@@ -131,26 +131,26 @@ impl PruneProgress {
         if done {
             Self::Finished
         } else if timeout {
-            Self::new_timed_out()
+            Self::timed_out()
         } else {
-            Self::new_segment_limit_reached()
+            Self::segment_limit_reached()
         }
     }
 
     /// Returns a new instance of variant [`Finished`](Self::Finished).
-    pub const fn new_finished() -> Self {
+    pub const fn finished() -> Self {
         Self::Finished
     }
 
     /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
     /// [`PruneInterruptReason::Timeout`].
-    pub const fn new_timed_out() -> Self {
+    pub const fn timed_out() -> Self {
         Self::HasMoreData(PruneInterruptReason::Timeout)
     }
 
     /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
     /// [`PruneInterruptReason::LimitSegmentsDeleted`].
-    pub const fn new_segment_limit_reached() -> Self {
+    pub const fn segment_limit_reached() -> Self {
         Self::HasMoreData(PruneInterruptReason::LimitSegmentsDeleted)
     }
 

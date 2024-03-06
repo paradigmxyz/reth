@@ -301,9 +301,9 @@ mod tests {
 
         let limiter = PruneLimiter::new_without_timeout(1000);
 
-        test_prune(&test_rig, 998, 1, (PruneProgress::new_segment_limit_reached(), 500), limiter);
-        test_prune(&test_rig, 998, 2, (PruneProgress::new_finished(), 499), limiter);
-        test_prune(&test_rig, 1200, 3, (PruneProgress::new_finished(), 202), limiter);
+        test_prune(&test_rig, 998, 1, (PruneProgress::segment_limit_reached(), 500), limiter);
+        test_prune(&test_rig, 998, 2, (PruneProgress::finished(), 499), limiter);
+        test_prune(&test_rig, 1200, 3, (PruneProgress::finished(), 202), limiter);
     }
 
     #[test]
