@@ -215,7 +215,7 @@ impl<DB: Database> Pruner<DB> {
                         .set(to_block as f64);
 
                     done = done && output.progress.is_done();
-                    limiter.increment_deleted_units_count();
+                    limiter.increment_deleted_units_count_by(output.pruned);
 
                     debug!(
                         target: "pruner",
