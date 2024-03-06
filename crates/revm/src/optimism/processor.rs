@@ -127,7 +127,7 @@ where
             }
 
             // An optimism block should never contain blob transactions.
-            if matches!(transaction.tx_type(), TxType::EIP4844) {
+            if matches!(transaction.tx_type(), TxType::Eip4844) {
                 return Err(BlockExecutionError::OptimismBlockExecution(
                     OptimismBlockExecutionError::BlobTransactionRejected,
                 ))

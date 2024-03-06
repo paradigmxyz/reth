@@ -293,9 +293,9 @@ impl MockTransaction {
         #[allow(unreachable_patterns)]
         match tx_type {
             TxType::Legacy => Self::legacy(),
-            TxType::EIP2930 => Self::eip2930(),
-            TxType::EIP1559 => Self::eip1559(),
-            TxType::EIP4844 => Self::eip4844(),
+            TxType::Eip2930 => Self::eip2930(),
+            TxType::Eip1559 => Self::eip1559(),
+            TxType::Eip4844 => Self::eip4844(),
 
             _ => unreachable!("Invalid transaction type"),
         }
@@ -703,9 +703,9 @@ impl PoolTransaction for MockTransaction {
     fn tx_type(&self) -> u8 {
         match self {
             MockTransaction::Legacy { .. } => TxType::Legacy.into(),
-            MockTransaction::Eip1559 { .. } => TxType::EIP1559.into(),
-            MockTransaction::Eip4844 { .. } => TxType::EIP4844.into(),
-            MockTransaction::Eip2930 { .. } => TxType::EIP2930.into(),
+            MockTransaction::Eip1559 { .. } => TxType::Eip1559.into(),
+            MockTransaction::Eip4844 { .. } => TxType::Eip4844.into(),
+            MockTransaction::Eip2930 { .. } => TxType::Eip2930.into(),
         }
     }
 

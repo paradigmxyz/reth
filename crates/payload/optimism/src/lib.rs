@@ -326,7 +326,7 @@ mod builder {
             }
 
             // A sequencer's block should never contain blob transactions.
-            if matches!(sequencer_tx.tx_type(), TxType::EIP4844) {
+            if matches!(sequencer_tx.tx_type(), TxType::Eip4844) {
                 return Err(PayloadBuilderError::other(
                     OptimismPayloadBuilderError::BlobTransactionRejected,
                 ))
@@ -426,7 +426,7 @@ mod builder {
                 }
 
                 // A sequencer's block should never contain blob transactions.
-                if pool_tx.tx_type() == TxType::EIP4844 as u8 {
+                if pool_tx.tx_type() == TxType::Eip4844 as u8 {
                     return Err(PayloadBuilderError::other(
                         OptimismPayloadBuilderError::BlobTransactionRejected,
                     ))
