@@ -824,7 +824,7 @@ mod tests {
             insert_account(tx.tx_ref(), *address, *account, storage)
         }
         tx.commit().unwrap();
-        let expected = state_root(state.into_iter());
+        let expected = state_root(state);
 
         let tx = factory.provider_rw().unwrap();
         let got = StateRoot::from_tx(tx.tx_ref()).root().unwrap();
