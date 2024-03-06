@@ -1098,6 +1098,30 @@ where
         }
     }
 
+    /// Processes a batch import results.
+    fn on_batch_import_result(&mut self, batch_results: Vec<PoolResult<TxHash>>) {
+        for res in batch_results {
+            match res {
+                Ok(hash) => {
+                    self.on_good_import(hash);
+                }
+                Err(err) => {
+                    // if we're _currently_ syncing and the transaction is bad we
+                    // ignore it, otherwise we penalize the peer that sent the bad
+                    // transaction with the assumption that the peer should have
+                    // known that this transaction is bad. (e.g. consensus
+                    // rules)
+                    if err.is_bad_transaction() && !self.network.is_syncing() {
+                        debug!(target: "net::tx", %err, "bad pool transaction import");
+                        self.on_bad_import(err.hash);
+                        continue
+                    }
+                    self.on_good_import(err.hash);
+                }
+            }
+        }
+    }
+
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
         self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
         self.metrics.reported_bad_transactions.increment(1);
@@ -1182,28 +1206,7 @@ where
             "Pool imports stream",
             DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
             this.pool_imports.poll_next_unpin(cx),
-            |batch_import_res: Vec<PoolResult<TxHash>>| {
-                for res in batch_import_res {
-                    match res {
-                        Ok(hash) => {
-                            this.on_good_import(hash);
-                        }
-                        Err(err) => {
-                            // if we're _currently_ syncing and the transaction is bad we
-                            // ignore it, otherwise we penalize the peer that sent the bad
-                            // transaction with the assumption that the peer should have
-                            // known that this transaction is bad. (e.g. consensus
-                            // rules)
-                            if err.is_bad_transaction() && !this.network.is_syncing() {
-                                debug!(target: "net::tx", %err, "bad pool transaction import");
-                                this.on_bad_import(err.hash);
-                                continue
-                            }
-                            this.on_good_import(err.hash);
-                        }
-                    }
-                }
-            }
+            |batch_results| this.on_batch_import_result(batch_results)
         );
 
         // advance network/peer related events (update peers)
@@ -1304,7 +1307,7 @@ where
             "Commands channel",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
             this.command_rx.poll_next_unpin(cx),
-            |cmd| { this.on_command(cmd) }
+            |cmd| this.on_command(cmd)
         );
 
         this.transaction_fetcher.update_metrics();
