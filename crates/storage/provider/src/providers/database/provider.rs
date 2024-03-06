@@ -2525,7 +2525,7 @@ fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {
 pub struct PruneLimiter {
     /// Maximum units to delete from the database in one prune job.
     units_limit: Option<usize>,
-    /// Current number of units (entries or segments) that have been deleted from database during 
+    /// Current number of units (entries or segments) that have been deleted from database during
     /// the prune job.
     deleted_units_count: usize,
     /// The max time one prune job can run.
@@ -2581,13 +2581,7 @@ impl PruneLimiter {
 
     /// Returns true if prune limit is reached.
     pub fn at_limit(&mut self) -> bool {
-        let Self {
-            units_limit,
-            deleted_units_count,
-            job_timeout,
-            start,
-            ..
-        } = self;
+        let Self { units_limit, deleted_units_count, job_timeout, start, .. } = self;
 
         if let Some(limit) = segment_limit {
             if limit == deleted_units_count {

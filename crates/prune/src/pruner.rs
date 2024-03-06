@@ -244,11 +244,7 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
-        Ok((
-            stats,
-            limiter.deleted_units_count(),
-            PruneProgress::new(done, limiter.is_timed_out()),
-        ))
+        Ok((stats, limiter.deleted_units_count(), PruneProgress::new(done, limiter.is_timed_out())))
     }
 
     /// Returns pre-configured segments that needs to be pruned according to the highest
