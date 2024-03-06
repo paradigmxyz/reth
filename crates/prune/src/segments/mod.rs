@@ -150,7 +150,7 @@ impl PruneInput {
 /// Segment pruning output, see [Segment::prune].
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct PruneOutput {
-    /// [`PruneProgress::new_finished()`] if pruning has been completed up to the target block, and
+    /// [`PruneProgress::Finished`] if pruning has been completed up to the target block, and
     /// [`PruneProgress::HasMoreData`] if there's more data to prune in further runs.
     pub(crate) progress: PruneProgress,
     /// Number of entries pruned, i.e. deleted from the database.
