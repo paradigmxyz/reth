@@ -1273,7 +1273,7 @@ where
             "Transaction fetch events",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
             this.transaction_fetcher.poll_next_unpin(cx),
-            |fetch_event| this.on_fetch_event(event),
+            |event| this.on_fetch_event(event),
         );
 
         // try drain incoming transaction events (stream new txns/announcements from network
