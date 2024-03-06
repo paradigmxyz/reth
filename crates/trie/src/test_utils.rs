@@ -1,4 +1,4 @@
-use alloy_rlp::{encode_fixed_size, Encodable};
+use alloy_rlp::encode_fixed_size;
 use reth_primitives::{
     proofs::triehash::KeccakHasher, trie::TrieAccount, Account, Address, B256, U256,
 };
@@ -13,18 +13,16 @@ where
     S: IntoIterator<Item = (B256, U256)>,
 {
     let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
-        let storage_root = storage_root(storage.into_iter());
-        let mut out = Vec::new();
-        TrieAccount::from((account, storage_root)).encode(&mut out);
-        (address, out)
+        let storage_root = storage_root(storage);
+        let account = TrieAccount::from((account, storage_root));
+        (address, alloy_rlp::encode(&account))
     });
-
     triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts)
 }
 
 /// Compute the storage root for a given account using [triehash::sec_trie_root].
 pub fn storage_root<I: IntoIterator<Item = (B256, U256)>>(storage: I) -> B256 {
-    let encoded_storage = storage.into_iter().map(|(k, v)| (k, encode_fixed_size(&v).to_vec()));
+    let encoded_storage = storage.into_iter().map(|(k, v)| (k, encode_fixed_size(&v)));
     triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage)
 }
 
@@ -37,9 +35,8 @@ where
 {
     let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
         let storage_root = storage_root_prehashed(storage);
-        let mut out = Vec::new();
-        TrieAccount::from((account, storage_root)).encode(&mut out);
-        (address, out)
+        let account = TrieAccount::from((account, storage_root));
+        (address, alloy_rlp::encode(&account))
     });
 
     triehash::trie_root::<KeccakHasher, _, _, _>(encoded_accounts)
@@ -47,6 +44,6 @@ where
 
 /// Compute the storage root for a given account with prehashed slots using [triehash::trie_root].
 pub fn storage_root_prehashed<I: IntoIterator<Item = (B256, U256)>>(storage: I) -> B256 {
-    let encoded_storage = storage.into_iter().map(|(k, v)| (k, encode_fixed_size(&v).to_vec()));
+    let encoded_storage = storage.into_iter().map(|(k, v)| (k, encode_fixed_size(&v)));
     triehash::trie_root::<KeccakHasher, _, _, _>(encoded_storage)
 }
