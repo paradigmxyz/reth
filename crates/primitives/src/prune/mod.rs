@@ -95,6 +95,7 @@ pub enum PruneProgress {
     /// Pruning has been finished.
     Finished,
 }
+
 /// Reason for interrupting a prune job.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PruneInterruptReason {
