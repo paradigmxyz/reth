@@ -6,7 +6,7 @@ use crate::server::{
 };
 use futures::{FutureExt, Stream, StreamExt};
 use jsonrpsee::{
-    core::{TEN_MB_SIZE_BYTES},
+    core::TEN_MB_SIZE_BYTES,
     server::{IdProvider, RandomIntegerIdProvider},
     BoundedSubscriptions, MethodSink, Methods,
 };
@@ -45,8 +45,7 @@ pub struct IpcServer<B = Identity> {
     service_builder: tower::ServiceBuilder<B>,
 }
 
-impl IpcServer<Identity>
-{
+impl IpcServer<Identity> {
     /// Returns the configured [Endpoint]
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
@@ -150,8 +149,7 @@ impl IpcServer<Identity>
                     };
 
                     let (tx, rx) = mpsc::channel::<String>(message_buffer_capacity as usize);
-                    let method_sink =
-                        MethodSink::new_with_limit(tx, max_response_body_size);
+                    let method_sink = MethodSink::new_with_limit(tx, max_response_body_size);
                     let tower_service = TowerService {
                         inner: ServiceData {
                             methods: methods.clone(),
@@ -537,11 +535,7 @@ impl<B> Builder<B> {
     /// }
     /// ```
     pub fn set_middleware<T>(self, service_builder: tower::ServiceBuilder<T>) -> Builder<T> {
-        Builder {
-            settings: self.settings,
-            id_provider: self.id_provider,
-            service_builder,
-        }
+        Builder { settings: self.settings, id_provider: self.id_provider, service_builder }
     }
 
     /// Finalize the configuration of the server. Consumes the [`Builder`].
@@ -560,7 +554,6 @@ impl<B> Builder<B> {
         }
     }
 }
-
 
 /// Server handle.
 ///
@@ -652,7 +645,7 @@ mod tests {
     #[tokio::test]
     async fn test_rpc_request() {
         let endpoint = dummy_endpoint();
-        let server = Builder::default().build(&endpoint).unwrap();
+        let server = Builder::default().build(&endpoint);
         let mut module = RpcModule::new(());
         let msg = r#"{"jsonrpc":"2.0","id":83,"result":"0x7a69"}"#;
         module.register_method("eth_chainId", move |_, _| msg).unwrap();
@@ -667,7 +660,7 @@ mod tests {
     #[tokio::test]
     async fn test_ipc_modules() {
         let endpoint = dummy_endpoint();
-        let server = Builder::default().build(&endpoint).unwrap();
+        let server = Builder::default().build(&endpoint);
         let mut module = RpcModule::new(());
         let msg = r#"{"admin":"1.0","debug":"1.0","engine":"1.0","eth":"1.0","ethash":"1.0","miner":"1.0","net":"1.0","rpc":"1.0","txpool":"1.0","web3":"1.0"}"#;
         module.register_method("rpc_modules", move |_, _| msg).unwrap();
@@ -682,7 +675,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_rpc_subscription() {
         let endpoint = dummy_endpoint();
-        let server = Builder::default().build(&endpoint).unwrap();
+        let server = Builder::default().build(&endpoint);
         let (tx, _rx) = broadcast::channel::<usize>(16);
 
         let mut module = RpcModule::new(tx.clone());
