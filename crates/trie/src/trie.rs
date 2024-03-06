@@ -867,7 +867,7 @@ mod tests {
         let tx = factory.provider_rw().unwrap();
 
         let account3_storage_root = StorageRoot::from_tx(tx.tx_ref(), address3).root().unwrap();
-        let expected_root = storage_root_prehashed(storage.into_iter());
+        let expected_root = storage_root_prehashed(storage);
         assert_eq!(expected_root, account3_storage_root);
     }
 

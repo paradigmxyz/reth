@@ -36,7 +36,7 @@ where
     S: IntoIterator<Item = (B256, U256)>,
 {
     let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
-        let storage_root = storage_root_prehashed(storage.into_iter());
+        let storage_root = storage_root_prehashed(storage);
         let mut out = Vec::new();
         TrieAccount::from((account, storage_root)).encode(&mut out);
         (address, out)
