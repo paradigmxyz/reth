@@ -124,7 +124,7 @@ impl PruneInterruptReason {
 }
 
 impl PruneProgress {
-    /// Creates new `PruneProgress` that summarises prune job.
+    /// Creates new [PruneProgress] that summarises prune job.
     ///
     /// If `done == true`, returns [`PruneProgress::Finished`], otherwise
     /// [PruneProgress::HasMoreData] is returned.
