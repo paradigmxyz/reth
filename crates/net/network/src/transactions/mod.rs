@@ -1122,6 +1122,22 @@ where
         }
     }
 
+    /// Processes a [`FetchEvent`].
+    fn on_fetch_event(&mut self, fetch_event: FetchEvent) {
+        match fetch_event {
+            FetchEvent::TransactionsFetched { peer_id, transactions } => {
+                self.import_transactions(peer_id, transactions, TransactionSource::Response);
+            }
+            FetchEvent::FetchError { peer_id, error } => {
+                trace!(target: "net::tx", ?peer_id, %error, "requesting transactions from peer failed");
+                self.on_request_error(peer_id, error);
+            }
+            FetchEvent::EmptyResponse { peer_id } => {
+                trace!(target: "net::tx", ?peer_id, "peer returned empty response");
+            }
+        }
+    }
+
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
         self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
         self.metrics.reported_bad_transactions.increment(1);
@@ -1245,24 +1261,7 @@ where
             "Transaction fetch events",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
             this.transaction_fetcher.poll_next_unpin(cx),
-            |fetch_event| {
-                match fetch_event {
-                    FetchEvent::TransactionsFetched { peer_id, transactions } => {
-                        this.import_transactions(
-                            peer_id,
-                            transactions,
-                            TransactionSource::Response,
-                        );
-                    }
-                    FetchEvent::FetchError { peer_id, error } => {
-                        trace!(target: "net::tx", ?peer_id, %error, "requesting transactions from peer failed");
-                        this.on_request_error(peer_id, error);
-                    }
-                    FetchEvent::EmptyResponse { peer_id } => {
-                        trace!(target: "net::tx", ?peer_id, "peer returned empty response");
-                    }
-                }
-            }
+            |fetch_event| this.on_fetch_event(event),
         );
 
         // try drain incoming transaction events (stream new txns/announcements from network
