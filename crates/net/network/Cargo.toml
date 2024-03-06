@@ -37,6 +37,7 @@ pin-project.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
+futures-test = "0.3.30"
 
 # io
 serde = { workspace = true, optional = true }
