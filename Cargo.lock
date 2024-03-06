@@ -6267,19 +6267,27 @@ name = "reth-node-ethereum"
 version = "0.1.0-alpha.21"
 dependencies = [
  "eyre",
+ "futures-util",
  "reth-basic-payload-builder",
  "reth-db",
  "reth-ethereum-payload-builder",
+ "reth-interfaces",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
+ "reth-node-core",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
+ "reth-rpc-engine-api",
  "reth-rpc-types",
+ "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
+ "secp256k1 0.27.0",
  "serde",
+ "tokio",
 ]
 
 [[package]]

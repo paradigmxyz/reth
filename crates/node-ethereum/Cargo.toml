@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-primitives={workspace = true, features = ["test-utils"]}
 reth-payload-builder.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-ethereum-payload-builder.workspace = true
@@ -30,3 +30,11 @@ serde.workspace = true
 
 [dev-dependencies]
 reth-db.workspace = true
+reth-tasks.workspace = true
+reth-interfaces = { workspace= true, features = ["test-utils"]}
+tokio.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-node-core.workspace = true
+futures-util.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
+reth-revm.workspace = true
