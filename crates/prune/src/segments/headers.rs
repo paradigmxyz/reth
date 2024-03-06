@@ -75,8 +75,14 @@ impl<DB: Database> Segment<DB> for Headers {
 
         let (done, pruned, last_pruned_block, timed_out) = results.into_iter().fold(
             (true, 0, 0, true),
-            |(total_done, total_pruned, _, some_timed_out), (progress, pruned, last_pruned_block)| {
-                (total_done && progress.is_done(), total_pruned + pruned, last_pruned_block, some_timed_out & progress.is_timed_out())
+            |(total_done, total_pruned, _, some_timed_out),
+             (progress, pruned, last_pruned_block)| {
+                (
+                    total_done && progress.is_done(),
+                    total_pruned + pruned,
+                    last_pruned_block,
+                    some_timed_out & progress.is_timed_out(),
+                )
             },
         );
 

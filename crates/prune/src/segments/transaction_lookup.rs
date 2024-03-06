@@ -66,15 +66,15 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         let mut last_pruned_transaction = None;
         let (pruned, is_timed_out) = {
             let (pruned, progress) = provider
-            .prune_table_with_iterator::<tables::TransactionHashNumbers>(
-                hashes,
-                input.limiter,
-                |row| {
-                    last_pruned_transaction =
-                        Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
-                },
-            )?;
-            
+                .prune_table_with_iterator::<tables::TransactionHashNumbers>(
+                    hashes,
+                    input.limiter,
+                    |row| {
+                        last_pruned_transaction =
+                            Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
+                    },
+                )?;
+
             (pruned, progress.is_timed_out())
         };
         let done = tx_range_end == end;
