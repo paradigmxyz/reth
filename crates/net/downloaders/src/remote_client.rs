@@ -46,7 +46,7 @@ pub struct RemoteClient {
 /// An error that can occur when constructing and using a [`RemoteClient`].
 #[derive(Debug, Error)]
 pub enum RemoteClientError {
-    /// An error occurred when decoding blocks, headers, or rlp headers from the file.
+    /// An error occurred when decoding blocks, headers, or rlp headers.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
 
@@ -101,12 +101,12 @@ impl RemoteClient {
             end_block = min(end_block, block_checker.get_block_number());
         }
 
-        debug!(target: "downloaders::file", start_block, end_block, "Fetching blocks");
+        info!(target: "downloaders::remote", start_block, end_block, "Fetching blocks");
 
         for begin_block in (start_block..=end_block).step_by(batch_size) {
             let count = std::cmp::min(batch_size as u64, end_block - begin_block);
 
-            debug!(target: "downloaders::file", begin_block, count, "Fetching blocks");
+            debug!(target: "downloaders::remote", begin_block, count, "Fetching blocks");
 
             let blocks_to_fetch =
                 (begin_block..(begin_block + count)).map(Into::into).collect::<Vec<_>>();
@@ -115,7 +115,7 @@ impl RemoteClient {
                 .get_full_blocks_by_number(blocks_to_fetch, batch_size)
                 .await
                 .map_err(|e| {
-                    error!(target: "downloaders::file", begin_block, "Error fetching block: {}", e);
+                    error!(target: "downloaders::remote", begin_block, "Error fetching block: {}", e);
                     RemoteClientError::ProviderError(format!(
                         "Error fetching block {}: {}",
                         begin_block, e
@@ -126,7 +126,7 @@ impl RemoteClient {
                 .map(did::Block::<did::Transaction>::from)
                 .collect::<Vec<_>>();
 
-            trace!(target: "downloaders::file", blocks = full_blocks.len(), "Fetched blocks");
+            trace!(target: "downloaders::remote", blocks = full_blocks.len(), "Fetched blocks");
 
             for block in full_blocks {
                 if let Some(block_checker) = &block_checker {
@@ -150,7 +150,7 @@ impl RemoteClient {
             }
         }
 
-        info!(blocks = headers.len(), "Initialized file client");
+        info!(blocks = headers.len(), "Initialized remote client");
 
         Ok(Self { headers, hash_to_number, bodies })
     }
@@ -187,13 +187,13 @@ impl RemoteClient {
         true
     }
 
-    /// Use the provided bodies as the file client's block body buffer.
+    /// Use the provided bodies as the remote client's block body buffer.
     pub fn with_bodies(mut self, bodies: HashMap<BlockHash, BlockBody>) -> Self {
         self.bodies = bodies;
         self
     }
 
-    /// Use the provided headers as the file client's block body buffer.
+    /// Use the provided headers as the remote client's block body buffer.
     pub fn with_headers(mut self, headers: HashMap<BlockNumber, Header>) -> Self {
         self.headers = headers;
         for (number, header) in &self.headers {
@@ -284,7 +284,7 @@ impl HeadersClient for RemoteClient {
     ) -> Self::Output {
         // this just searches the buffer, and fails if it can't find the header
         let mut headers = Vec::new();
-        trace!(target: "downloaders::file", request=?request, "Getting headers");
+        trace!(target: "downloaders::remote", request=?request, "Getting headers");
 
         let start_num = match request.start {
             BlockHashOrNumber::Hash(hash) => match self.hash_to_number.get(&hash) {
@@ -308,7 +308,7 @@ impl HeadersClient for RemoteClient {
             }
         };
 
-        trace!(target: "downloaders::file", range=?range, "Getting headers with range");
+        trace!(target: "downloaders::remote", range=?range, "Getting headers with range");
 
         for block_number in range {
             match self.headers.get(&block_number).cloned() {
@@ -350,12 +350,12 @@ impl BodiesClient for RemoteClient {
 
 impl DownloadClient for RemoteClient {
     fn report_bad_message(&self, _peer_id: PeerId) {
-        warn!("Reported a bad message on a file client, the file may be corrupted or invalid");
+        warn!("Reported a bad message on a remote client, the client may be corrupted or invalid");
         // noop
     }
 
     fn num_connected_peers(&self) -> usize {
-        // no such thing as connected peers when we are just using a file
+        // no such thing as connected peers when we are just using a remote
         1
     }
 }
