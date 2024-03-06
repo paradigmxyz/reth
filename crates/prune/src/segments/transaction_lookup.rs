@@ -4,7 +4,7 @@ use crate::{
 };
 use rayon::prelude::*;
 use reth_db::{database::Database, tables};
-use reth_primitives::{PruneMode, PruneSegment};
+use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, TransactionsProvider};
 use tracing::{instrument, trace};
 
@@ -64,7 +64,8 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         }
 
         let mut last_pruned_transaction = None;
-        let (pruned, progress) = provider
+        let (pruned, is_timed_out) = {
+            let (pruned, progress) = provider
             .prune_table_with_iterator::<tables::TransactionHashNumbers>(
                 hashes,
                 input.limiter,
@@ -73,6 +74,9 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
                         Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
                 },
             )?;
+            
+            (pruned, progress.is_timed_out())
+        };
         let done = tx_range_end == end;
         trace!(target: "pruner", %pruned, %done, "Pruned transaction lookup");
 
@@ -84,10 +88,10 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             // If there's more transaction lookup entries to prune, set the checkpoint block number
             // to previous, so we could finish pruning its transaction lookup entries on the next
             // run.
-            .checked_sub(if progress.is_done() { 0 } else { 1 });
+            .checked_sub(if done { 0 } else { 1 });
 
         Ok(PruneOutput {
-            progress,
+            progress: PruneProgress::new(done, is_timed_out),
             pruned,
             checkpoint: Some(PruneOutputCheckpoint {
                 block_number: last_pruned_block,
