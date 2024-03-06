@@ -64,7 +64,6 @@ exceptions = [
     { allow = ["MPL-2.0"], name = "attohttpc" },
     { allow = ["MPL-2.0"], name = "option-ext" },
     { allow = ["MPL-2.0"], name = "webpki-roots" },
-
 ]
 
 [[licenses.clarify]]
