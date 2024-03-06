@@ -152,7 +152,7 @@ impl TestStageDB {
 
     fn insert_headers_inner<'a, I, const TD: bool>(&self, headers: I) -> ProviderResult<()>
     where
-        I: Iterator<Item = &'a SealedHeader>,
+        I: IntoIterator<Item = &'a SealedHeader>,
     {
         let provider = self.factory.static_file_provider();
         let mut writer = provider.latest_writer(reth_primitives::StaticFileSegment::Headers)?;
@@ -176,7 +176,7 @@ impl TestStageDB {
     /// that are supposed to be populated by the headers stage.
     pub fn insert_headers<'a, I>(&self, headers: I) -> ProviderResult<()>
     where
-        I: Iterator<Item = &'a SealedHeader>,
+        I: IntoIterator<Item = &'a SealedHeader>,
     {
         self.insert_headers_inner::<I, false>(headers)
     }
@@ -186,7 +186,7 @@ impl TestStageDB {
     /// Superset functionality of [TestStageDB::insert_headers].
     pub fn insert_headers_with_td<'a, I>(&self, headers: I) -> ProviderResult<()>
     where
-        I: Iterator<Item = &'a SealedHeader>,
+        I: IntoIterator<Item = &'a SealedHeader>,
     {
         self.insert_headers_inner::<I, true>(headers)
     }
@@ -200,7 +200,7 @@ impl TestStageDB {
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
     pub fn insert_blocks<'a, I>(&self, blocks: I, storage_kind: StorageKind) -> ProviderResult<()>
     where
-        I: Iterator<Item = &'a SealedBlock>,
+        I: IntoIterator<Item = &'a SealedBlock>,
     {
         let provider = self.factory.static_file_provider();
 
