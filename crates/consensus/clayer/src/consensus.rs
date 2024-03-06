@@ -764,6 +764,14 @@ where
             self.announce_block.insert(blockhash, msg.info().seq_num);
             let _ = self.service_mut().announce_block(blockhash);
 
+            self.broadcast_pbft_message(
+                state.view,
+                state.seq_num,
+                PbftMessageType::AnnounceBlock,
+                blockhash,
+                state,
+            )?;
+
             let state_seq_num = state.seq_num;
             let latest_header = self.client.latest_header().ok().flatten();
             if let Some(latest_header) = latest_header {
