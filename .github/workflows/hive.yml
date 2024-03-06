@@ -29,7 +29,9 @@ jobs:
         with:
           context: .
           tags: ghcr.io/paradigmxyz/reth:latest
-          build-args: BUILD_PROFILE=hivetests,FEATURES=asm-keccak
+          build-args: |
+            BUILD_PROFILE=hivetests
+            FEATURES=asm-keccak
           outputs: type=docker,dest=./artifacts/reth_image.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
