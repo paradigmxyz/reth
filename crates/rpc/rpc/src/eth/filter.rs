@@ -297,9 +297,10 @@ where
     /// Returns logs matching given filter object.
     ///
     /// Handler for `eth_getLogs`
-    async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
+    async fn logs(&self, filter: Filter) -> RpcResult<FilterChanges> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        Ok(self.inner.logs_for_filter(filter).await?)
+        let logs = self.inner.logs_for_filter(filter).await?;
+        Ok(FilterChanges::Logs(logs))
     }
 }
 
