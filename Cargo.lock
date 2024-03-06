@@ -5876,6 +5876,7 @@ dependencies = [
  "itertools 0.12.0",
  "jsonrpsee",
  "jsonwebtoken",
+ "lru-cache",
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "reqwest",

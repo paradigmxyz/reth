@@ -1,6 +1,7 @@
 use alloy_rlp::Decodable;
 use reth_eth_wire::{ClayerConsensusMessage, ClayerConsensusMessageHeader};
-use reth_provider::{ConsensusNumberReader, ConsensusNumberWriter};
+use reth_primitives::B256;
+use reth_provider::{BlockReaderIdExt, ConsensusNumberReader, ConsensusNumberWriter};
 use reth_rpc_types::PeerId;
 use tracing::info;
 
@@ -14,6 +15,9 @@ pub enum ConsensusEvent {
     PeerConnected(PeerId),
     PeerDisconnected(PeerId),
     PeerMessage(PeerId, ClayerConsensusMessage),
+    BlockValid(B256),
+    BlockInvalid(B256),
+    BlockCommit((B256, u64, bool)),
 }
 
 pub fn parse_consensus_message(
@@ -38,16 +42,22 @@ fn parse_consensus_message_header(
     })
 }
 
-pub fn handle_consensus_event<CDB>(
-    consensus: &mut ClayerConsensusEngine<CDB>,
+pub fn handle_consensus_event<Client, CDB>(
+    consensus: &mut ClayerConsensusEngine<Client, CDB>,
     incoming_event: ConsensusEvent,
     state: &mut PbftState,
 ) -> Result<bool, PbftError>
 where
     CDB: ConsensusNumberReader + ConsensusNumberWriter + 'static,
+    Client: BlockReaderIdExt + 'static,
 {
     match incoming_event {
-        ConsensusEvent::PeerMessage(_, message) => {
+        ConsensusEvent::BlockValid(block_id) => consensus.on_block_valid(block_id, state)?,
+        ConsensusEvent::BlockInvalid(block_id) => consensus.on_block_invalid(block_id)?,
+        ConsensusEvent::BlockCommit((block_id, timestamp, committing)) => {
+            consensus.on_block_commit(block_id, timestamp, committing, state)?
+        }
+        ConsensusEvent::PeerMessage(peer_id, message) => {
             let header: ClayerConsensusMessageHeader =
                 parse_consensus_message_header(&message.header_bytes)?;
             let verified_signer_id = header.signer_id.clone();
@@ -60,7 +70,7 @@ where
                     pbft_signer_id, verified_signer_id, parsed_message
                 )));
             }
-            consensus.on_peer_message(parsed_message, state)?
+            consensus.on_peer_message(peer_id, parsed_message, state)?
         }
         ConsensusEvent::PeerConnected(peer_id) => {
             info!(target: "consensus::cl","Received PeerConnected message with peer ID: {:?}", peer_id);

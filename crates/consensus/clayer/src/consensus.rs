@@ -4,12 +4,13 @@ pub use config::*;
 mod logs;
 pub use logs::*;
 mod message;
+use lru_cache::LruCache;
 pub use message::*;
 mod pbft_error;
 pub use pbft_error::*;
 mod state;
 use reth_db::models::consensus::ConsensusBytes;
-use reth_provider::{ConsensusNumberReader, ConsensusNumberWriter};
+use reth_provider::{BlockReaderIdExt, ConsensusNumberReader, ConsensusNumberWriter};
 use reth_rpc_types::{engine::PayloadId, ExecutionPayloadV1, ExecutionPayloadV2, PeerId};
 pub use state::*;
 mod validators;
@@ -23,7 +24,9 @@ use reth_eth_wire::{
     PbftSignedVote,
 };
 use reth_interfaces::clayer::{ClayerConsensusEvent, ClayerConsensusMessageAgentTrait};
-use reth_primitives::{keccak256, public_key_to_address, sign_message, SealedHeader, B256, B64};
+use reth_primitives::{
+    keccak256, public_key_to_address, sign_message, BlockId, SealedHeader, B256, B64,
+};
 use std::{
     collections::{HashSet, VecDeque},
     sync::Arc,
@@ -65,11 +68,6 @@ impl ClayerConsensusMessageAgentTrait for ClayerConsensusMessagingAgent {
         self.inner.write().push_received_cache(peer_id, data);
     }
 
-    /// push data received from self into cache
-    fn push_received_cache_first(&self, peer_id: PeerId, msg: reth_primitives::Bytes) {
-        self.inner.write().push_received_cache_first(peer_id, msg);
-    }
-
     /// push network event(PeerConnected, PeerDisconnected)
     fn push_network_event(&self, peer_id: PeerId, connect: bool) {
         self.inner.write().push_network_event(peer_id, connect);
@@ -79,10 +77,9 @@ impl ClayerConsensusMessageAgentTrait for ClayerConsensusMessagingAgent {
         self.inner.write().pop_event()
     }
 
-    // /// replace pop_event
-    // fn receiver(&self) -> crossbeam_channel::Receiver<ClayerConsensusEvent> {
-    //     self.inner.write().receiver()
-    // }
+    fn push_block_event(&self, event: ClayerConsensusEvent) {
+        self.inner.write().push_block_event(event);
+    }
 
     /// broadcast consensus
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
@@ -121,12 +118,6 @@ impl ClayerConsensusMessagingAgentInner {
         // let _ = self.cache_tx.send(ClayerConsensusEvent::PeerMessage(peer_id, data));
     }
 
-    /// push data received from self into cache
-    fn push_received_cache_first(&mut self, peer_id: PeerId, data: reth_primitives::Bytes) {
-        self.queued.push_front(ClayerConsensusEvent::PeerMessage(peer_id, data));
-        // let _ = self.cache_tx.send(ClayerConsensusEvent::PeerMessage(peer_id, data));
-    }
-
     /// push network event(PeerConnected, PeerDisconnected)
     fn push_network_event(&mut self, peer_id: PeerId, connect: bool) {
         self.queued.push_back(ClayerConsensusEvent::PeerNetWork(peer_id, connect));
@@ -143,9 +134,9 @@ impl ClayerConsensusMessagingAgentInner {
         self.queued.pop_front()
     }
 
-    // fn receiver(&mut self) -> crossbeam_channel::Receiver<ClayerConsensusEvent> {
-    //     self.cache_re.clone()
-    // }
+    fn push_block_event(&mut self, event: ClayerConsensusEvent) {
+        self.queued.push_front(event);
+    }
 
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes) {
         if let Some(sender) = &self.sender {
@@ -163,20 +154,35 @@ impl ClayerConsensusMessagingAgentInner {
     }
 }
 
-pub struct ClayerConsensusEngine<CDB> {
+pub struct ClayerConsensusEngine<Client, CDB> {
     /// Log of messages this node has received and accepted
     pub msg_log: PbftLog,
     service: ApiService,
     agent: ClayerConsensusMessagingAgent,
     db: Arc<CDB>,
+    client: Client,
+    announce_block: LruCache<B256, u64>,
 }
 
-impl<CDB> ClayerConsensusEngine<CDB>
+impl<Client, CDB> ClayerConsensusEngine<Client, CDB>
 where
     CDB: ConsensusNumberReader + ConsensusNumberWriter + 'static,
+    Client: BlockReaderIdExt + 'static,
 {
-    pub fn new(agent: ClayerConsensusMessagingAgent, service: ApiService, db: Arc<CDB>) -> Self {
-        Self { msg_log: PbftLog::default(), service, agent, db }
+    pub fn new(
+        agent: ClayerConsensusMessagingAgent,
+        service: ApiService,
+        db: Arc<CDB>,
+        client: Client,
+    ) -> Self {
+        Self {
+            msg_log: PbftLog::default(),
+            service,
+            agent,
+            db,
+            client,
+            announce_block: LruCache::new(10),
+        }
     }
 
     pub fn initialize(&mut self, block: ClayerBlock, config: &PbftConfig, state: &mut PbftState) {
@@ -230,6 +236,7 @@ where
     /// node is view changing, ignore all messages that aren't `ViewChange`s or `NewView`s.
     pub fn on_peer_message(
         &mut self,
+        peer_id: PeerId,
         msg: ParsedMessage,
         state: &mut PbftState,
     ) -> Result<(), PbftError> {
@@ -252,7 +259,9 @@ where
         //  if the node is a member of the PBFT network or not；
         if !state.is_validator() {
             match msg_type {
-                PbftMessageType::AnnounceBlock => self.handle_announceblock_response(&msg)?,
+                PbftMessageType::AnnounceBlock => {
+                    self.handle_announceblock_response(&msg, state)?
+                }
                 _ => {
                     warn!(target: "consensus::cl","Received message with validiator type: {:?}", msg_type)
                 }
@@ -276,10 +285,10 @@ where
             PbftMessageType::Commit => self.handle_commit(msg, state)?,
             PbftMessageType::ViewChange => self.handle_view_change(&msg, state)?,
             PbftMessageType::NewView => self.handle_new_view(&msg, state)?,
-            PbftMessageType::SealRequest => self.handle_seal_request(msg, state)?,
+            PbftMessageType::SealRequest => self.handle_seal_request(peer_id, msg, state)?,
             PbftMessageType::Seal => self.handle_seal_response(&msg, state)?,
             PbftMessageType::BlockNew => self.handle_block_new(msg, state)?,
-            PbftMessageType::AnnounceBlock => self.handle_announceblock_response(&msg)?,
+            PbftMessageType::AnnounceBlock => self.handle_announceblock_response(&msg, state)?,
             _ => {
                 warn!(target: "consensus::cl","Received message with unknown type: {:?}", msg_type)
             }
@@ -483,12 +492,18 @@ where
                         err.to_string(),
                     )
                 })?;
+                self.agent.push_block_event(ClayerConsensusEvent::BlockCommit((
+                    block_id,
+                    payload.execution_payload.payload_inner.timestamp,
+                    true,
+                )));
+
                 state.switch_phase(PbftPhase::Finishing(false))?;
                 // Stop the commit timeout, since the network has agreed to commit the block
                 state.commit_timeout.stop();
 
-                state.last_block_timestamp = payload.execution_payload.payload_inner.timestamp;
-                self.on_block_commit(block_id, state)?;
+                // state.last_block_timestamp = payload.execution_payload.payload_inner.timestamp;
+                // self.on_block_commit(block_id, state)?;
 
                 //broadcast new block hash
                 self.broadcast_pbft_message(
@@ -659,6 +674,7 @@ where
     /// node will not be able to build the requseted seal, so just ignore the message.
     fn handle_seal_request(
         &mut self,
+        peer_id: PeerId,
         msg: ParsedMessage,
         state: &mut PbftState,
     ) -> Result<(), PbftError> {
@@ -666,6 +682,12 @@ where
             return self.send_seal_response(state, &msg.info().signer_id);
         } else if state.seq_num == msg.info().seq_num {
             self.msg_log.add_message(msg);
+        } else if state.seq_num > msg.info().seq_num + 1 {
+            //for sync seal
+            let result = self.load_seal(msg.get_pbft().block_id)?;
+            if let Some(seal) = result {
+                return self.send_seal_response_v2(state, &peer_id, &seal);
+            }
         }
         Ok(())
     }
@@ -680,9 +702,11 @@ where
         state: &mut PbftState,
     ) -> Result<(), PbftError> {
         let seal = msg.get_seal();
+        trace!(target: "consensus::cl","{}:trace sync: Received seal response for block {:?}", state, hex::encode(&seal.block_id));
 
         // If the node has already committed the block, ignore
         if let PbftPhase::Finishing(_) = state.phase {
+            trace!(target: "consensus::cl","{}:trace sync: Received seal response for block {:?}, but return ok", state, hex::encode(&seal.block_id));
             return Ok(());
         }
 
@@ -730,18 +754,44 @@ where
     }
 
     /// Handle a `announceblock` message
-    ///announceblock
-    fn handle_announceblock_response(&mut self, msg: &ParsedMessage) -> Result<(), PbftError> {
+    fn handle_announceblock_response(
+        &mut self,
+        msg: &ParsedMessage,
+        state: &mut PbftState,
+    ) -> Result<(), PbftError> {
         let blockhash = msg.get_block_id();
+        if !self.announce_block.contains_key(&blockhash) {
+            self.announce_block.insert(blockhash, msg.info().seq_num);
+            let _ = self.service_mut().announce_block(blockhash);
 
-        //self.broadcast_consensus(peers, data)
-        match self.service_mut().announce_block(blockhash) {
-            Ok(_) => Ok(()),
-            Err(_e) => {
-                //Err(PbftError::ServiceError("announceblock".to_string(), "error".to_string()))
-                Ok(())
+            let state_seq_num = state.seq_num;
+            let latest_header = self.client.latest_header().ok().flatten();
+            if let Some(latest_header) = latest_header {
+                let latest_number = latest_header.header.number;
+
+                trace!(target: "consensus::cl", "trace sync:announceblock {} latest_number {} state_seq_num {}",msg.info().seq_num,latest_number,state_seq_num);
+            }
+        };
+
+        Ok(())
+    }
+
+    pub fn sync_seal(&mut self, state: &mut PbftState) -> Result<(), PbftError> {
+        let state_seq_num = state.seq_num;
+        let latest_db_header = self.client.latest_header().ok().flatten();
+        if let Some(latest_db_header) = latest_db_header {
+            if latest_db_header.number >= state_seq_num {
+                for seq in state_seq_num..=latest_db_header.number {
+                    let header = self.client.sealed_header_by_id(BlockId::from(seq)).ok().flatten();
+                    if let Some(header) = header {
+                        trace!(target: "consensus::cl", "trace sync:seal reqeust {} {} latest_number {} state_seq_num {}",header.number,header.hash,latest_db_header.number,state_seq_num);
+                        self.send_seal_request(state, header.hash)?;
+                        self.msg_log.add_validated_block(clayer_block_from_header(&header));
+                    }
+                }
             }
         }
+        Ok(())
     }
 
     /// Handle a `BlockNew` update from the Validator
@@ -898,7 +948,7 @@ where
         // it is waiting for a commit message, catch-up will have to be done after the message is
         // received)
         let is_waiting = matches!(state.phase, PbftPhase::Finishing(_));
-        //block.block_num == state.seq_num + 1  &&  state.phase ！= PbftPhase::Finishing  同步区块
+        // block.block_num == state.seq_num + 1  &&  state.phase ！= PbftPhase::Finishing
         if block.block_num() > state.seq_num && !is_waiting {
             self.catchup(state, &seal, true)?;
         } else if block.block_num() == state.seq_num {
@@ -952,7 +1002,7 @@ where
         seal: &PbftSeal,
         catchup_again: bool,
     ) -> Result<(), PbftError> {
-        info!(target: "consensus::cl","{}: Attempting to commit block {} using catch-up", state, state.seq_num);
+        info!(target: "consensus::cl","{}: Attempting to commit block {} using catch-up. trace sync:seal {}", state, state.seq_num,seal);
 
         let messages = seal.commit_votes.iter().try_fold(Vec::new(), |mut msgs, vote| {
             msgs.push(ParsedMessage::from_signed_vote(vote)?);
@@ -971,20 +1021,50 @@ where
             self.msg_log.add_message(message.clone());
         }
 
-        // Commit the block, stop the idle timeout, and skip straight to Finishing
-        let payload = self.service.commit_block(seal.block_id.clone()).map_err(|err| {
-            PbftError::ServiceError(
-                format!(
-                    "Failed to commit block with catch-up {:?} / {:?}",
-                    state.seq_num,
-                    hex::encode(&seal.block_id)
-                ),
-                err.to_string(),
-            )
-        })?;
+        let latest_header = self.client.latest_header().ok().flatten();
+        let latest_number = if let Some(latest_header) = latest_header {
+            latest_header.header.number
+        } else {
+            return Err(PbftError::InternalError(format!(
+                "Failed to get latest header with catch-up"
+            )));
+        };
+
+        let header = self.client.header_by_id(BlockId::from(seal.block_id.clone())).ok().flatten();
+        let timestamp = if let Some(header) = header {
+            header.timestamp
+        } else {
+            return Err(PbftError::InternalError(format!(
+                "Failed to get header with catch-up {}",
+                seal.info.seq_num,
+            )));
+        };
+        trace!(target: "consensus::cl","trace sync: catch-up latest_number {} state.seq_num {} seal seq_num {}", latest_number, state.seq_num,seal.info.seq_num);
+
+        // // Commit the block, stop the idle timeout, and skip straight to Finishing
+        // let _ = self.service.commit_block(seal.block_id.clone()).map_err(|err| {
+        //     PbftError::ServiceError(
+        //         format!(
+        //             "Failed to commit block with catch-up {:?} / {:?}",
+        //             state.seq_num,
+        //             hex::encode(&seal.block_id)
+        //         ),
+        //         err.to_string(),
+        //     )
+        // })?;
+
+        self.agent.push_block_event(ClayerConsensusEvent::BlockCommit((
+            seal.block_id.clone(),
+            timestamp,
+            false,
+        )));
+
         state.idle_timeout.stop();
         state.phase = PbftPhase::Finishing(catchup_again);
-        state.last_block_timestamp = payload.execution_payload.payload_inner.timestamp;
+
+        // state.last_block_timestamp = payload.execution_payload.payload_inner.timestamp;
+        // self.on_block_commit(seal.block_id.clone(), state)?;
+        self.save_seal(seal)?;
 
         Ok(())
     }
@@ -997,11 +1077,12 @@ where
     pub fn on_block_commit(
         &mut self,
         block_id: B256,
+        timestamp: u64,
+        committing: bool,
         state: &mut PbftState,
     ) -> Result<(), PbftError> {
-        info!(target: "consensus::cl","{}: Got BlockCommit for {}", state, hex::encode(&block_id));
-
         let is_catching_up = matches!(state.phase, PbftPhase::Finishing(true));
+        info!(target: "consensus::cl","{}: Got BlockCommit for {} from committing({}) is_catching_up {}", state, hex::encode(&block_id),committing,is_catching_up);
 
         // If there are any blocks in the log at this sequence number other than the one that was
         // just committed, reject them
@@ -1029,12 +1110,15 @@ where
         state.mode = PbftMode::Normal;
         state.phase = PbftPhase::PrePreparing;
         state.chain_head = block_id.clone();
+        state.last_block_timestamp = timestamp;
 
         // create the seal
-        let seal = self.build_seal(state).map_err(|err| {
-            PbftError::InternalError(format!("Failed to build requested seal due to: {}", err))
-        })?;
-        self.save_seal(&seal)?;
+        if committing {
+            let seal = self.build_seal(state).map_err(|err| {
+                PbftError::InternalError(format!("Failed to build requested seal due to: {}", err))
+            })?;
+            self.save_seal(&seal)?;
+        }
 
         // If node(s) are waiting for a seal to commit the last block, send it now
         let requesters = self
@@ -1045,7 +1129,7 @@ where
             .collect::<Vec<_>>();
 
         for req in requesters {
-            self.send_seal_response_v2(state, &req, &seal).unwrap_or_else(|err| {
+            self.send_seal_response(state, &req).unwrap_or_else(|err| {
                 error!(target: "consensus::cl","Failed to send seal response due to: {:?}", err);
             });
         }
@@ -1120,7 +1204,7 @@ where
                 )
             })?;
         }
-        info!(target: "consensus::cl","==================================on_block_commit over======================================");
+        info!(target: "consensus::cl","==================================on_block_commit over {}======================================",state.seq_num-1);
         Ok(())
     }
 
@@ -1810,7 +1894,7 @@ where
             self.agent.broadcast_consensus(state.validators.member_ids().clone(), msg_bytes);
 
             // Send to self
-            self.on_peer_message(msg, state)
+            self.on_peer_message(state.id.clone(), msg, state)
         }
     }
 
@@ -2011,6 +2095,20 @@ where
         self.on_block_new(block, state)?;
         Ok(())
     }
+
+    fn send_seal_request(
+        &mut self,
+        state: &mut PbftState,
+        block_id: B256,
+    ) -> Result<(), PbftError> {
+        self.broadcast_pbft_message(
+            state.view,
+            state.seq_num,
+            PbftMessageType::SealRequest,
+            block_id,
+            state,
+        )
+    }
 }
 
 fn execution_payload_from_payload(payload: &ExecutionPayloadWrapperV2) -> ClayerExecutionPayload {
@@ -2082,25 +2180,25 @@ fn execution_payload_to_payload(payload: &ClayerExecutionPayload) -> ExecutionPa
 }
 
 /// for initialize, broadcast_bootstrap_commit
-pub fn clayer_block_from_genesis(genesis_header: &SealedHeader) -> ClayerBlock {
+pub fn clayer_block_from_header(header: &SealedHeader) -> ClayerBlock {
     let block = ClayerExecutionPayload {
-        parent_hash: genesis_header.parent_hash,
+        parent_hash: header.parent_hash,
         fee_recipient: reth_primitives::Address::ZERO,
-        state_root: genesis_header.state_root,
-        receipts_root: genesis_header.receipts_root,
-        logs_bloom: genesis_header.logs_bloom,
+        state_root: header.state_root,
+        receipts_root: header.receipts_root,
+        logs_bloom: header.logs_bloom,
         prev_randao: B256::ZERO,
-        block_number: genesis_header.number,
-        gas_limit: genesis_header.gas_limit,
-        gas_used: genesis_header.gas_used,
-        timestamp: genesis_header.timestamp,
-        extra_data: genesis_header.extra_data.clone(),
-        base_fee_per_gas: if let Some(base_fee_per_gas) = genesis_header.base_fee_per_gas {
+        block_number: header.number,
+        gas_limit: header.gas_limit,
+        gas_used: header.gas_used,
+        timestamp: header.timestamp,
+        extra_data: header.extra_data.clone(),
+        base_fee_per_gas: if let Some(base_fee_per_gas) = header.base_fee_per_gas {
             reth_primitives::U256::from(base_fee_per_gas)
         } else {
             reth_primitives::U256::from(0)
         },
-        block_hash: genesis_header.hash,
+        block_hash: header.hash,
         transactions: Vec::new(),
         withdrawals: Vec::new(),
         block_value: reth_primitives::U256::from(0),

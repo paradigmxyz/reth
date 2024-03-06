@@ -110,6 +110,7 @@ where
     pub fn build(self) -> ClTask<Client, CDB>
     where
         CDB: ConsensusNumberReader + ConsensusNumberWriter + 'static,
+        Client: BlockReaderIdExt + Clone + 'static,
     {
         let Self {
             chain_spec,

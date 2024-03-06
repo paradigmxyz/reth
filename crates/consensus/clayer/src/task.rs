@@ -1,5 +1,5 @@
 use crate::consensus::{
-    clayer_block_from_genesis, clayer_block_from_seal, ClayerConsensusMessagingAgent, PbftConfig,
+    clayer_block_from_header, clayer_block_from_seal, ClayerConsensusMessagingAgent, PbftConfig,
     PbftError, PbftMode, PbftState,
 };
 
@@ -61,6 +61,7 @@ pub struct ClTask<Client, CDB> {
 impl<Client, CDB> ClTask<Client, CDB>
 where
     CDB: ConsensusNumberReader + ConsensusNumberWriter + 'static,
+    Client: BlockReaderIdExt + Clone + 'static,
 {
     /// Creates a new instance of the task
     pub(crate) fn new(
@@ -106,6 +107,7 @@ where
         let pbft_config = self.pbft_config.clone();
 
         let cdb = self.storages.clone();
+        let client = self.client.clone();
 
         let startup_latest_header = self.startup_latest_header.clone();
         let thread_join_handle = std::thread::spawn(move || {
@@ -116,6 +118,7 @@ where
                 consensus_agent.clone(),
                 ApiService::new(Arc::new(api)),
                 cdb,
+                client,
             );
 
             // let receiver = consensus_agent.receiver();
@@ -130,7 +133,7 @@ where
                 }
             };
             let block = if startup_latest_header.number == 0 {
-                clayer_block_from_genesis(&startup_latest_header)
+                clayer_block_from_header(&startup_latest_header)
             } else {
                 if let Some(seal) = seal {
                     clayer_block_from_seal(&startup_latest_header, seal)
@@ -140,7 +143,7 @@ where
                         panic!("block {} no seal", startup_latest_header.number);
                     } else {
                         //todo for sync node
-                        clayer_block_from_genesis(&startup_latest_header)
+                        clayer_block_from_header(&startup_latest_header)
                     }
                 }
             };
@@ -169,6 +172,15 @@ where
                             };
                             e
                         }
+                        ClayerConsensusEvent::BlockValid(block_id) => {
+                            Some(ConsensusEvent::BlockValid(block_id))
+                        }
+                        ClayerConsensusEvent::BlockInvalid(block_id) => {
+                            Some(ConsensusEvent::BlockInvalid(block_id))
+                        }
+                        ClayerConsensusEvent::BlockCommit((block_id, timestamp, committing)) => {
+                            Some(ConsensusEvent::BlockCommit((block_id, timestamp, committing)))
+                        }
                     };
                     if let Some(incoming_event) = incoming_event {
                         match handle_consensus_event(&mut consensus_engine, incoming_event, state) {
@@ -181,6 +193,7 @@ where
                         }
                     }
                 } else {
+                    log_any_error(consensus_engine.sync_seal(state));
                     sleep(pbft_config.update_recv_timeout);
                 }
 

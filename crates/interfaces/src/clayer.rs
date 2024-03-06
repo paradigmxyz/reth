@@ -1,3 +1,4 @@
+use reth_primitives::B256;
 use reth_rpc_types::PeerId;
 use tokio::sync::mpsc::Receiver;
 
@@ -8,6 +9,12 @@ pub enum ClayerConsensusEvent {
     PeerNetWork(PeerId, bool),
     /// Consensus message
     PeerMessage(PeerId, reth_primitives::Bytes),
+    /// Consensus OnBlockValid
+    BlockValid(B256),
+    /// Consensus OnBlockInvalid
+    BlockInvalid(B256),
+    /// Consensus OnBlockCommit
+    BlockCommit((B256, u64, bool)),
 }
 
 /// Consensus layer interface
@@ -18,15 +25,14 @@ pub trait ClayerConsensusMessageAgentTrait: Send + Sync + Clone {
     fn pending_consensus_listener(&self) -> Receiver<(Vec<PeerId>, reth_primitives::Bytes)>;
     /// push data received from network into cache
     fn push_received_cache(&self, peer_id: PeerId, data: reth_primitives::Bytes);
-    /// push data received from self into cache
-    fn push_received_cache_first(&self, peer_id: PeerId, msg: reth_primitives::Bytes);
+
     /// push network event(PeerConnected, PeerDisconnected)
     fn push_network_event(&self, peer_id: PeerId, connect: bool);
     /// pop network event(PeerConnected, PeerDisconnected)
     fn pop_event(&self) -> Option<ClayerConsensusEvent>;
 
-    // /// replace pop_event
-    // fn receiver(&self) -> crossbeam_channel::Receiver<ClayerConsensusEvent>;
+    /// push block event
+    fn push_block_event(&self, event: ClayerConsensusEvent);
 
     /// broadcast consensus
     fn broadcast_consensus(&self, peers: Vec<PeerId>, data: reth_primitives::Bytes);
