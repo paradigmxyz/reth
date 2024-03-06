@@ -199,10 +199,6 @@ ethers-providers = { version = "2.0", default-features = false }
 ethers-signers = { version = "2.0", default-features = false }
 ethers-middleware = { version = "2.0", default-features = false }
 
-discv5 = "0.4"
-# Fork of rust-igd with ipv6 support
-igd-next = "0.14.3"
-
 # js
 boa_engine = "0.17"
 boa_gc = "0.17"
@@ -247,6 +243,10 @@ async-trait = "0.1.68"
 futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"
+
+# p2p
+discv5 = "0.4"
+igd-next = "0.14.3"
 
 # rpc
 jsonrpsee = { version = "0.20" }
