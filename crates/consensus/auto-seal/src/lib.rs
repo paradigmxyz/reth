@@ -23,6 +23,7 @@ use reth_interfaces::{
 use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
+    eip4844::calculate_excess_blob_gas,
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
     ChainSpec, Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
     EMPTY_OMMER_ROOT_HASH, U256,
@@ -302,6 +303,27 @@ impl StorageInner {
             extra_data: Default::default(),
             parent_beacon_block_root: None,
         };
+
+        if chain_spec.is_cancun_active_at_timestamp(timestamp) {
+            let parent = self.headers.get(&self.best_block);
+            header.parent_beacon_block_root =
+                parent.and_then(|parent| parent.parent_beacon_block_root);
+            header.blob_gas_used = Some(0);
+
+            let (parent_excess_blob_gas, parent_blob_gas_used) = match parent {
+                Some(parent_block)
+                    if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) =>
+                {
+                    (
+                        parent_block.excess_blob_gas.unwrap_or_default(),
+                        parent_block.blob_gas_used.unwrap_or_default(),
+                    )
+                }
+                _ => (0, 0),
+            };
+            header.excess_blob_gas =
+                Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+        }
 
         header.transactions_root = if transactions.is_empty() {
             EMPTY_TRANSACTIONS
