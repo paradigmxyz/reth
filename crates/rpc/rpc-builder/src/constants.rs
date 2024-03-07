@@ -22,8 +22,9 @@ pub const DEFAULT_MAX_BLOCKS_PER_FILTER: u64 = 100_000;
 pub const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 
 /// The default maximum number of concurrently executed tracing calls
-pub static DEFAULT_MAX_TRACING_REQUESTS: Lazy<u32> =
-    Lazy::new(|| (max(std::thread::available_parallelism().unwrap().into(), 4) - 2) as u32);
+pub static DEFAULT_MAX_TRACING_REQUESTS: Lazy<usize> = Lazy::new(|| {
+    std::thread::available_parallelism().map_or(25, |x| max(usize::from(x).saturating_sub(2), 2))
+});
 
 /// The default IPC endpoint
 #[cfg(windows)]

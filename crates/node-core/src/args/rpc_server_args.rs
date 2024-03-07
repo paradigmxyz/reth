@@ -149,7 +149,7 @@ pub struct RpcServerArgs {
 
     /// Maximum number of concurrent tracing requests.
     #[arg(long, value_name = "COUNT", default_value_t = *constants::DEFAULT_MAX_TRACING_REQUESTS)]
-    pub rpc_max_tracing_requests: u32,
+    pub rpc_max_tracing_requests: usize,
 
     /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
     #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
