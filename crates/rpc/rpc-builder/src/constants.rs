@@ -20,11 +20,15 @@ pub const DEFAULT_MAX_BLOCKS_PER_FILTER: u64 = 100_000;
 /// The default maximum of logs in a single response.
 pub const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 
-/// The default maximum number of concurrent tracing requests
-/// should be max(std::thread::available_parallelism() - x, 2) where x could be 2-4.
-/// so that the other essential tasks are not starved.
+/// The default maximum number tracing requests we're allowing concurrently.
+/// Tracing is mostly CPU bound so we're limiting the number of concurrent requests to something
+/// lower that the number of cores, in order to minimize the impact on the rest of the system.
 pub fn default_max_tracing_requests() -> usize {
-    std::thread::available_parallelism().map_or(25, |x| max(usize::from(x).saturating_sub(2), 2))
+    // We reserve 2 cores for the rest of the system
+    const RESERVED: usize = 2;
+
+    std::thread::available_parallelism()
+        .map_or(25, |cpus| max(cpus.get().saturating_sub(RESERVED), RESERVED))
 }
 
 /// The default IPC endpoint
