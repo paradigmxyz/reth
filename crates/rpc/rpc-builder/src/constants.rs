@@ -1,4 +1,3 @@
-use once_cell::sync::Lazy;
 /// GPO reexports
 pub use reth_rpc::eth::gas_oracle::{
     DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
@@ -24,12 +23,9 @@ pub const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 /// The default maximum number of concurrent tracing requests
 /// should be max(std::thread::available_parallelism() - x, 2) where x could be 2-4.
 /// so that the other essential tasks are not starved.
-fn default_max_tracing_requests() -> usize {
+pub fn default_max_tracing_requests() -> usize {
     std::thread::available_parallelism().map_or(25, |x| max(usize::from(x).saturating_sub(2), 2))
 }
-
-/// The default maximum number of concurrently executed tracing calls
-pub static DEFAULT_MAX_TRACING_REQUESTS: Lazy<usize> = Lazy::new(default_max_tracing_requests);
 
 /// The default IPC endpoint
 #[cfg(windows)]

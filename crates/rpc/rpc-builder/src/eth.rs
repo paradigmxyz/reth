@@ -1,5 +1,5 @@
 use crate::constants::{
-    DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_TRACING_REQUESTS,
+    default_max_tracing_requests, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
 };
 use reth_rpc::{
     eth::{
@@ -69,7 +69,7 @@ impl Default for EthConfig {
         Self {
             cache: EthStateCacheConfig::default(),
             gas_oracle: GasPriceOracleConfig::default(),
-            max_tracing_requests: *DEFAULT_MAX_TRACING_REQUESTS,
+            max_tracing_requests: default_max_tracing_requests(),
             max_blocks_per_filter: DEFAULT_MAX_BLOCKS_PER_FILTER,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
