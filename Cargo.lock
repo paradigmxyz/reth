@@ -6062,6 +6062,7 @@ dependencies = [
  "humantime-serde",
  "itertools 0.12.1",
  "linked_hash_set",
+ "log",
  "metrics",
  "parking_lot 0.12.1",
  "pin-project",

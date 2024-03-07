@@ -63,6 +63,7 @@ schnellru.workspace = true
 itertools.workspace = true
 tempfile = { workspace = true, optional = true }
 smallvec.workspace = true
+log = "0.4.21"
 
 [dev-dependencies]
 # reth

@@ -213,8 +213,7 @@ impl PeersManager {
 
     /// Invoked when a new _incoming_ tcp connection is accepted.
     ///
-    /// returns an error if the inbound ip address is on the ban list or
-    /// we have reached our limit for max inbound connections
+    /// returns an error if the inbound ip address is on the ban list
     pub(crate) fn on_incoming_pending_session(
         &mut self,
         addr: IpAddr,
@@ -222,10 +221,6 @@ impl PeersManager {
         if self.ban_list.is_banned_ip(&addr) {
             return Err(InboundConnectionError::IpBanned)
         }
-        if !self.connection_info.has_in_capacity() {
-            return Err(InboundConnectionError::ExceedsLimit(self.connection_info.max_inbound))
-        }
-        // keep track of new connection
         self.connection_info.inc_in();
         Ok(())
     }
@@ -284,6 +279,14 @@ impl PeersManager {
                     return
                 }
                 value.state = PeerConnectionState::In;
+                // if a peer is not trusted and we don't have capacity for more inbound connections,
+                // disconnecting the peer
+                if !value.is_trusted() && !self.connection_info.has_in_capacity() {
+                    self.queued_actions.push_back(PeerAction::Disconnect {
+                        peer_id,
+                        reason: Some(DisconnectReason::TooManyPeers),
+                    });
+                }
             }
             Entry::Vacant(entry) => {
                 // peer is missing in the table, we add it but mark it as to be removed after
@@ -292,6 +295,14 @@ impl PeersManager {
                 peer.remove_after_disconnect = true;
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
+
+                // disconnect the peer if we don't have capacity for more inbound connections
+                if !self.connection_info.has_in_capacity() {
+                    self.queued_actions.push_back(PeerAction::Disconnect {
+                        peer_id,
+                        reason: Some(DisconnectReason::TooManyPeers),
+                    });
+                }
             }
         }
     }
@@ -875,7 +886,7 @@ impl ConnectionInfo {
 
     ///  Returns `true` if there's still capacity for a new incoming connection.
     fn has_in_capacity(&self) -> bool {
-        self.num_inbound < self.max_inbound
+        self.num_inbound <= self.max_inbound
     }
 
     fn decr_state(&mut self, state: PeerConnectionState) {
@@ -1241,18 +1252,6 @@ impl PeersConfig {
         self
     }
 
-    /// Maximum occupied slots for outbound connections.
-    pub fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
-        self.connection_info.num_outbound = num_outbound;
-        self
-    }
-
-    /// Maximum occupied slots for inbound connections.
-    pub fn with_max_pending_inbound(mut self, num_inbound: usize) -> Self {
-        self.connection_info.num_inbound = num_inbound;
-        self
-    }
-
     /// Maximum allowed outbound connections.
     pub fn with_max_outbound(mut self, max_outbound: usize) -> Self {
         self.connection_info.max_outbound = max_outbound;
@@ -1420,7 +1419,6 @@ impl Default for PeerBackoffDurations {
 
 #[derive(Debug, Error)]
 pub enum InboundConnectionError {
-    ExceedsLimit(usize),
     IpBanned,
 }
 
@@ -2166,9 +2164,6 @@ mod tests {
             Ok(_) => panic!(),
             Err(err) => match err {
                 super::InboundConnectionError::IpBanned {} => {}
-                super::InboundConnectionError::ExceedsLimit { .. } => {
-                    panic!()
-                }
             },
         }
     }
