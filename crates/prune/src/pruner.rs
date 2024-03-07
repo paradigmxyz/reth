@@ -170,7 +170,7 @@ impl<DB: Database> Pruner<DB> {
 
                 if let Some(checkpoint) = output.checkpoint {
                     segment.save_checkpoint(
-                        provider_factory.provider_ro()?,
+                        provider_factory.provider_rw()?,
                         checkpoint.as_prune_checkpoint(prune_mode),
                     )?;
                 }
