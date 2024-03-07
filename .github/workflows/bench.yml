@@ -2,12 +2,9 @@
 
 on:
   pull_request:
-    paths-ignore: ["etc/**"]
   merge_group:
-    paths-ignore: ["etc/**"]
   push:
     branches: [main]
-    paths-ignore: ["etc/**"]
 
 env:
   CARGO_TERM_COLOR: always
