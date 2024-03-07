@@ -101,10 +101,9 @@ impl<DB: Database> Pruner<DB> {
             .min(self.prune_max_blocks_per_run);
         let delete_limit = self.delete_limit * blocks_since_last_run;
 
-        let provider = self.provider_factory.provider_rw()?;
+        let provider_factory = &self.provider_factory;
         let (stats, delete_limit, progress) =
-            self.prune_segments(&provider, tip_block_number, delete_limit)?;
-        provider.commit()?;
+            self.prune_segments(provider_factory, tip_block_number, delete_limit)?;
 
         self.previous_tip_block_number = Some(tip_block_number);
 
@@ -133,7 +132,7 @@ impl<DB: Database> Pruner<DB> {
     /// [PruneProgress].
     fn prune_segments(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider_factory: &ProvideFactory<DB>,
         tip_block_number: BlockNumber,
         mut delete_limit: usize,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
@@ -167,13 +166,15 @@ impl<DB: Database> Pruner<DB> {
                 );
 
                 let segment_start = Instant::now();
-                let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
-                let output = segment
-                    .prune(provider, PruneInput { previous_checkpoint, to_block, delete_limit })?;
+                let output = segment.prune(provider, PruneInput { to_block, delete_limit })?;
+
                 if let Some(checkpoint) = output.checkpoint {
-                    segment
-                        .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
+                    segment.save_checkpoint(
+                        provider_factory.provider_ro()?,
+                        checkpoint.as_prune_checkpoint(prune_mode),
+                    )?;
                 }
+
                 self.metrics
                     .get_prune_segment_metrics(segment.segment())
                     .duration_seconds

@@ -32,9 +32,11 @@ impl<DB: Database> Segment<DB> for AccountHistory {
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &ProviderFactory<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
+        let previous_checkpoint = self.provider_factory.provider_ro()?.provider.get_prune_checkpoint(segment.segment())?;
+
         let range = match input.get_next_block_range() {
             Some(range) => range,
             None => {
@@ -45,7 +47,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
-        let (pruned_changesets, done) = provider
+        let (pruned_changesets, done) = provider_factory.provider_rw()?
             .prune_table_with_range::<tables::AccountChangeSets>(
                 range,
                 input.delete_limit / 2,
@@ -61,7 +63,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             .unwrap_or(range_end);
 
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountsHistory, _>(
-            provider,
+            provider_factory,
             last_changeset_pruned_block,
             |a, b| a.key == b.key,
             |key| ShardedKey::last(key.key),
