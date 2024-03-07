@@ -1,12 +1,16 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use itertools::Itertools;
 use num_traits::Zero;
 use reth_db::{
-    cursor::DbDupCursorRO,
+    codecs::CompactU256,
+    cursor::{DbCursorRO, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     models::BlockNumberAddress,
+    table::Decompress,
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_etl::Collector;
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
@@ -14,10 +18,15 @@ use reth_primitives::{
         CheckpointBlockRange, EntitiesCheckpoint, StageCheckpoint, StageId,
         StorageHashingCheckpoint,
     },
-    StorageEntry,
+    BufMut, StorageEntry, B256, U256,
 };
 use reth_provider::{DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
-use std::{collections::BTreeMap, fmt::Debug};
+use std::{
+    collections::BTreeMap,
+    fmt::Debug,
+    sync::{mpsc, Arc},
+};
+use tempfile::TempDir;
 use tracing::*;
 
 /// Storage hashing stage hashes plain storage.
@@ -68,104 +77,47 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset, along with their storages.
         if to_block - from_block > self.clean_threshold || from_block == 1 {
-            let stage_checkpoint = input
-                .checkpoint
-                .and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint());
+            // clear table, load all accounts and hash it
+            tx.clear::<tables::HashedStorages>()?;
+            let mut storage = tx.cursor_read::<tables::PlainStorageState>()?;
 
-            let (mut current_key, mut current_subkey) = match stage_checkpoint {
-                Some(StorageHashingCheckpoint {
-                         address: address @ Some(_),
-                         storage,
-                         block_range: CheckpointBlockRange { from, to },
-                         ..
-                     })
-                // Checkpoint is only valid if the range of transitions didn't change.
-                // An already hashed storage may have been changed with the new range,
-                // and therefore should be hashed again.
-                if from == from_block && to == to_block =>
-                    {
-                        debug!(target: "sync::stages::storage_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner storage hashing checkpoint");
+            // channels used to return result of account hashing
+            let mut channels = Vec::new();
+            for chunk in &storage.walk(None)?.chunks(100) {
+                // An _unordered_ channel to receive results from a rayon job
+                let (tx, rx) = mpsc::channel();
+                channels.push(rx);
 
-                        (address, storage)
+                let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+                // Spawn the hashing task onto the global rayon pool
+                rayon::spawn(move || {
+                    for (address, slot) in chunk.into_iter() {
+                        let mut addr_key = Vec::with_capacity(64);
+                        addr_key.put_slice(keccak256(address).as_slice());
+                        addr_key.put_slice(keccak256(slot.key).as_slice());
+                        let _ = tx.send((addr_key, CompactU256::from(slot.value)));
                     }
-                _ => {
-                    // clear table, load all accounts and hash it
-                    tx.clear::<tables::HashedStorages>()?;
+                });
+            }
 
-                    (None, None)
-                }
-            };
-
-            let mut keccak_address = None;
-
-            let mut hashed_batch = BTreeMap::new();
-            let mut remaining = self.commit_threshold as usize;
-            {
-                let mut storage = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-                while !remaining.is_zero() {
-                    hashed_batch.extend(
-                        storage
-                            .walk_dup(current_key, current_subkey)?
-                            .take(remaining)
-                            .map(|res| {
-                                res.map(|(address, slot)| {
-                                    // Address caching for the first iteration when current_key
-                                    // is None
-                                    let keccak_address =
-                                        if let Some(keccak_address) = keccak_address {
-                                            keccak_address
-                                        } else {
-                                            keccak256(address)
-                                        };
-
-                                    // TODO cache map keccak256(slot.key) ?
-                                    ((keccak_address, keccak256(slot.key)), slot.value)
-                                })
-                            })
-                            .collect::<Result<BTreeMap<_, _>, _>>()?,
-                    );
-
-                    remaining = self.commit_threshold as usize - hashed_batch.len();
-
-                    if let Some((address, slot)) = storage.next_dup()? {
-                        // There's still some remaining elements on this key, so we need to save
-                        // the cursor position for the next
-                        // iteration
-                        (current_key, current_subkey) = (Some(address), Some(slot.key));
-                    } else {
-                        // Go to the next key
-                        (current_key, current_subkey) = storage
-                            .next_no_dup()?
-                            .map(|(key, storage_entry)| (key, storage_entry.key))
-                            .unzip();
-
-                        // Cache keccak256(address) for the next key if it exists
-                        if let Some(address) = current_key {
-                            keccak_address = Some(keccak256(address));
-                        } else {
-                            // We have reached the end of table
-                            break
-                        }
-                    }
+            let mut collector = Collector::new(500_000 * 1024 * 1024);
+            // Iterate over channels and append the hashed accounts.
+            for channel in channels {
+                while let Ok((key, v)) = channel.recv() {
+                    collector.insert(key, v)?;
                 }
             }
 
-            // iterate and put presorted hashed slots
-            hashed_batch.into_iter().try_for_each(|((addr, key), value)| {
-                tx.put::<tables::HashedStorages>(addr, StorageEntry { key, value })
-            })?;
-
-            if current_key.is_some() {
-                let checkpoint = input.checkpoint().with_storage_hashing_stage_checkpoint(
-                    StorageHashingCheckpoint {
-                        address: current_key,
-                        storage: current_subkey,
-                        block_range: CheckpointBlockRange { from: from_block, to: to_block },
-                        progress: stage_checkpoint_progress(provider)?,
+            let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
+            for item in collector.iter()? {
+                let (addr_key, value) = item?;
+                cursor.append_dup(
+                    B256::from_slice(&addr_key[..32]),
+                    StorageEntry {
+                        key: B256::from_slice(&addr_key[32..]),
+                        value: CompactU256::decompress(value)?.into(),
                     },
-                );
-
-                return Ok(ExecOutput { checkpoint, done: false })
+                )?;
             }
         } else {
             // Aggregate all changesets and and make list of storages that have been

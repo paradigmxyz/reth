@@ -6,8 +6,9 @@ use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable,
+    RawKey, RawTable, RawValue,
 };
+use reth_etl::Collector;
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
@@ -15,6 +16,7 @@ use reth_primitives::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, StageCheckpoint,
         StageId,
     },
+    Account, B256,
 };
 use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
 use std::{
@@ -155,96 +157,44 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // genesis accounts are not in changeset.
         if to_block - from_block > self.clean_threshold || from_block == 1 {
             let tx = provider.tx_ref();
-            let stage_checkpoint = input
-                .checkpoint
-                .and_then(|checkpoint| checkpoint.account_hashing_stage_checkpoint());
+            
+            // clear table, load all accounts and hash it
+            tx.clear::<tables::HashedAccounts>()?;
 
-            let start_address = match stage_checkpoint {
-                Some(AccountHashingCheckpoint { address: address @ Some(_), block_range: CheckpointBlockRange { from, to }, .. })
-                    // Checkpoint is only valid if the range of transitions didn't change.
-                    // An already hashed account may have been changed with the new range,
-                    // and therefore should be hashed again.
-                    if from == from_block && to == to_block =>
-                {
-                    debug!(target: "sync::stages::account_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner account hashing checkpoint");
+            let mut accounts_cursor = tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
 
-                    address
-                }
-                _ => {
-                    // clear table, load all accounts and hash it
-                    tx.clear::<tables::HashedAccounts>()?;
+            // channels used to return result of account hashing
+            let mut channels = Vec::new();
+            for chunk in &accounts_cursor.walk(None)?.chunks(100) {
+                // An _unordered_ channel to receive results from a rayon job
+                let (tx, rx) = mpsc::channel();
+                channels.push(rx);
 
-                    None
+                let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+                // Spawn the hashing task onto the global rayon pool
+                rayon::spawn(move || {
+                    for (address, account) in chunk.into_iter() {
+                        let address = address.key().unwrap();
+                        let _ = tx.send((RawKey::new(keccak256(address)), account));
+                    }
+                });
+            }
+            let mut collector = Collector::new(500_000 * 1024 * 1024);
+
+            // Iterate over channels and append the hashed accounts.
+            for channel in channels {
+                while let Ok((key, v)) = channel.recv() {
+                    collector.insert(key, v)?;
                 }
             }
-            .take()
-            .map(RawKey::new);
-
-            let next_address = {
-                let mut accounts_cursor =
-                    tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
-
-                // channels used to return result of account hashing
-                let mut channels = Vec::new();
-                for chunk in &accounts_cursor
-                    .walk(start_address.clone())?
-                    .take(self.commit_threshold as usize)
-                    .chunks(
-                        max(self.commit_threshold as usize, rayon::current_num_threads()) /
-                            rayon::current_num_threads(),
-                    )
-                {
-                    // An _unordered_ channel to receive results from a rayon job
-                    let (tx, rx) = mpsc::channel();
-                    channels.push(rx);
-
-                    let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
-                    // Spawn the hashing task onto the global rayon pool
-                    rayon::spawn(move || {
-                        for (address, account) in chunk.into_iter() {
-                            let address = address.key().unwrap();
-                            let _ = tx.send((RawKey::new(keccak256(address)), account));
-                        }
-                    });
-                }
-                let mut hashed_batch = Vec::with_capacity(self.commit_threshold as usize);
-
-                // Iterate over channels and append the hashed accounts.
-                for channel in channels {
-                    while let Ok(hashed) = channel.recv() {
-                        hashed_batch.push(hashed);
-                    }
-                }
-                // sort it all in parallel
-                hashed_batch.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
-
-                let mut hashed_account_cursor =
-                    tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
-
-                // iterate and put presorted hashed accounts
-                if start_address.is_none() {
-                    hashed_batch
-                        .into_iter()
-                        .try_for_each(|(k, v)| hashed_account_cursor.append(k, v))?;
-                } else {
-                    hashed_batch
-                        .into_iter()
-                        .try_for_each(|(k, v)| hashed_account_cursor.insert(k, v))?;
-                }
-                // next key of iterator
-                accounts_cursor.next()?
-            };
-
-            if let Some((next_address, _)) = &next_address {
-                let checkpoint = input.checkpoint().with_account_hashing_stage_checkpoint(
-                    AccountHashingCheckpoint {
-                        address: Some(next_address.key().unwrap()),
-                        block_range: CheckpointBlockRange { from: from_block, to: to_block },
-                        progress: stage_checkpoint_progress(provider)?,
-                    },
-                );
-
-                return Ok(ExecOutput { checkpoint, done: false })
+            
+            let mut hashed_account_cursor =
+                tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
+            
+            for item in collector.iter()? {
+                let (key, value) = item?;
+                hashed_account_cursor
+                    .append(RawKey::<B256>::from_vec(key), RawValue::<Account>::from_vec(value))?;
             }
         } else {
             // Aggregate all transition changesets and make a list of accounts that have been
