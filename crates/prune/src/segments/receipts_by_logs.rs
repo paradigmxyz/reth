@@ -174,7 +174,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                     .saturating_sub(if done { 0 } else { 1 }),
             );
 
-            if limiter.is_at_limit() {
+            if limiter.is_limit_reached() {
                 done &= end_block == to_block;
                 break
             }

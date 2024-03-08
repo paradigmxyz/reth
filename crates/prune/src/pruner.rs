@@ -165,7 +165,7 @@ impl<DB: Database> Pruner<DB> {
         let mut done = true;
         let mut stats = PrunerStats::new();
 
-        if !limiter.is_at_limit() {
+        if !limiter.is_limit_reached() {
             for (segment, purpose) in segments {
                 if let Some((to_block, prune_mode)) = segment
                     .mode()
@@ -219,7 +219,7 @@ impl<DB: Database> Pruner<DB> {
 
                     if output.pruned > 0 {
                         // sets `is_timed_out`
-                        let _ = limiter.is_at_limit();
+                        let _ = limiter.is_limit_reached();
 
                         stats.insert(segment.segment(), (output.progress, output.pruned));
                     }
@@ -227,7 +227,7 @@ impl<DB: Database> Pruner<DB> {
                     debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
                 }
 
-                if limiter.is_at_limit() {
+                if limiter.is_limit_reached() {
                     break
                 }
             }
