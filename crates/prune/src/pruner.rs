@@ -108,8 +108,7 @@ impl<DB: Database> Pruner<DB> {
             }))
             .min(self.prune_max_blocks_per_run);
         let delete_limit = self.delete_limit * blocks_since_last_run;
-        let timeout = self.timeout;
-        let limiter = PruneLimiter::new(Some(delete_limit), timeout, start);
+        let limiter = PruneLimiter::new(Some(delete_limit), self.timeout, start);
 
         let provider = self.provider_factory.provider_rw()?;
         let (stats, deleted_segments, progress) =
