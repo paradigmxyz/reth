@@ -797,7 +797,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut keys = keys.into_iter();
 
-        if !limiter.at_limit() {
+        if !limiter.is_at_limit() {
             for key in &mut keys {
                 let row = cursor.seek_exact(key.clone())?;
                 if let Some(row) = row {
@@ -806,7 +806,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                     delete_callback(row);
                 }
 
-                if limiter.at_limit() {
+                if limiter.is_at_limit() {
                     break
                 }
             }
@@ -830,7 +830,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
 
-        if !limiter.at_limit() {
+        if !limiter.is_at_limit() {
             while let Some(row) = walker.next().transpose()? {
                 if !skip_filter(&row) {
                     walker.delete_current()?;
@@ -838,7 +838,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                     delete_callback(row);
                 }
 
-                if limiter.at_limit() {
+                if limiter.is_at_limit() {
                     break
                 }
             }

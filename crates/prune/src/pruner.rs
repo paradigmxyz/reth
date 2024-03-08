@@ -120,39 +120,26 @@ impl<DB: Database> Pruner<DB> {
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
+        let message = 
         if progress.is_timed_out() {
-            debug!(
-                target: "pruner",
-                %tip_block_number,
-                ?elapsed,
-                timeout=?limiter.timeout(),
-                ?deleted_segments,
-                ?progress,
-                ?stats,
-                ,
-            );
+            "Pruner interrupted by timeout"
         } else if progress.is_entries_limit_reached() {
-            debug!(
-                target: "pruner",
-                %tip_block_number,
-                ?elapsed,
-                ?deleted_segments,
-                delete_limit=?limiter.deleted_entries_limit(),
-                ?progress,
-                ?stats,
-                "Pruner interrupted by limit on deleted segments"
-            );
+            "Pruner interrupted by limit on deleted segments"
         } else {
-            debug!(
-                target: "pruner",
-                %tip_block_number,
-                ?elapsed,
-                ?deleted_segments,
-                ?progress,
-                ?stats,
-                "Pruner finished",
-            );
-        }
+            "Pruner finished"
+        };
+
+        debug!(
+            target: "pruner",
+            %tip_block_number,
+            ?elapsed,
+            timeout=?limiter.timeout(),
+            ?deleted_segments,
+            delete_limit=?limiter.deleted_entries_limit(),
+            ?progress,
+            ?stats,
+            message,
+        );
 
         self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
 
@@ -179,7 +166,7 @@ impl<DB: Database> Pruner<DB> {
         let mut done = true;
         let mut stats = PrunerStats::new();
 
-        if !limiter.at_limit() {
+        if !limiter.is_at_limit() {
             for (segment, purpose) in segments {
                 if let Some((to_block, prune_mode)) = segment
                     .mode()
@@ -233,7 +220,7 @@ impl<DB: Database> Pruner<DB> {
 
                     if output.pruned > 0 {
                         // sets `is_timed_out`
-                        let _ = limiter.at_limit();
+                        let _ = limiter.is_at_limit();
 
                         stats.insert(segment.segment(), (output.progress, output.pruned));
                     }
@@ -241,7 +228,7 @@ impl<DB: Database> Pruner<DB> {
                     debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
                 }
 
-                if limiter.at_limit() {
+                if limiter.is_at_limit() {
                     break
                 }
             }
