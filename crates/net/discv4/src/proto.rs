@@ -565,10 +565,7 @@ mod tests {
                 udp_port: rng.gen(),
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = NodeEndpoint::decode(&mut buf.as_ref()).unwrap();
+            let decoded = NodeEndpoint::decode(&mut alloy_rlp::encode(msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -585,10 +582,7 @@ mod tests {
                 udp_port: rng.gen(),
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = NodeEndpoint::decode(&mut buf.as_ref()).unwrap();
+            let decoded = NodeEndpoint::decode(&mut alloy_rlp::encode(msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -606,10 +600,7 @@ mod tests {
                 enr_sq: None,
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = Ping::decode(&mut buf.as_ref()).unwrap();
+            let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -627,10 +618,7 @@ mod tests {
                 enr_sq: Some(rng.gen()),
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = Ping::decode(&mut buf.as_ref()).unwrap();
+            let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -648,10 +636,7 @@ mod tests {
                 enr_sq: None,
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = Pong::decode(&mut buf.as_ref()).unwrap();
+            let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -669,10 +654,7 @@ mod tests {
                 enr_sq: Some(rng.gen()),
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = Pong::decode(&mut buf.as_ref()).unwrap();
+            let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }

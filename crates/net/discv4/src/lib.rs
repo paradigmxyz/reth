@@ -40,10 +40,7 @@ use discv5::{
 use enr::Enr;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
-use reth_primitives::{
-    bytes::{Bytes, BytesMut},
-    hex, ForkId, PeerId, B256,
-};
+use reth_primitives::{bytes::Bytes, hex, ForkId, PeerId, B256};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -377,9 +374,7 @@ impl Discv4 {
     ///
     /// If the key already exists, this will update it.
     pub fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
-        let mut buf = BytesMut::new();
-        value.encode(&mut buf);
-        self.set_eip868_rlp_pair(key, buf.freeze())
+        self.set_eip868_rlp_pair(key, Bytes::from(alloy_rlp::encode(&value)))
     }
 
     #[inline]
