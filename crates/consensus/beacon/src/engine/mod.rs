@@ -788,7 +788,7 @@ where
     /// Record latency metrics for one call to make a block canonical
     /// Takes start time of the call and result of the make canonical call
     ///
-    /// Handles cases for error, already canonical and commmitted blocks
+    /// Handles cases for error, already canonical and committed blocks
     fn record_make_canonical_latency(
         &self,
         start: Instant,

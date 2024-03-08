@@ -1120,7 +1120,7 @@ mod tests {
         let nippy = NippyJar::load_without_header(file_path).unwrap();
         assert_eq!(initial_rows, nippy.rows);
 
-        // Data was written successfuly
+        // Data was written successfully
         let new_data_size =
             File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
         assert_eq!(new_data_size, initial_data_size + col1[2].len() + col2[2].len());
@@ -1170,7 +1170,7 @@ mod tests {
         let nippy = NippyJar::load_without_header(file_path).unwrap();
         assert_eq!(initial_rows, nippy.rows);
 
-        // Data was written successfuly
+        // Data was written successfully
         let new_data_size =
             File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
         assert_eq!(new_data_size, initial_data_size + col1[2].len() + col2[2].len());
@@ -1230,7 +1230,7 @@ mod tests {
         // Load and add 1 row
         {
             let nippy = NippyJar::load_without_header(file_path).unwrap();
-            // Check if it was committed successfuly
+            // Check if it was committed successfully
             assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
             assert_eq!(nippy.rows, 1);
 

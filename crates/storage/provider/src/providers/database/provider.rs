@@ -94,7 +94,7 @@ impl<DB: Database> DatabaseProviderRW<DB> {
     }
 }
 
-/// A provider struct that fetchs data from the database.
+/// A provider struct that fetches data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
 #[derive(Debug)]
 pub struct DatabaseProvider<TX> {

@@ -382,7 +382,7 @@ mod builder {
                 }
             };
 
-            // to realease the db reference drop evm.
+            // to release the db reference drop evm.
             drop(evm);
             // commit changes
             db.commit(state);

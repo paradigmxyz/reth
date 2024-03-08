@@ -683,7 +683,7 @@ impl From<PoolError> for EthApiError {
 /// Errors returned from a sign request.
 #[derive(Debug, thiserror::Error)]
 pub enum SignError {
-    /// Error occured while trying to sign data.
+    /// Error occurred while trying to sign data.
     #[error("could not sign")]
     CouldNotSign,
     /// Signer for requested account not found.
