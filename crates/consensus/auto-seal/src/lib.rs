@@ -451,7 +451,7 @@ impl StorageInner {
 
         let mut blob_gas_used = None;
         if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            let mut sum_blob_gas_used  = 0;
+            let mut sum_blob_gas_used = 0;
             for tx in &body.transactions {
                 if let Some(blob_tx) = tx.transaction.as_eip4844() {
                     sum_blob_gas_used += blob_tx.blob_gas();
