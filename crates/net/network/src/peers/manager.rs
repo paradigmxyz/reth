@@ -376,10 +376,9 @@ impl PeersManager {
                     }
 
                     // also be less strict with the reputation slashing for trusted peers
-                    if reputation_change < 0 {
-                        // we use max here because reputation change is negative
-                        reputation_change =
-                            reputation_change.max(MAX_TRUSTED_PEER_REPUTATION_CHANGE);
+                    if reputation_change < MAX_TRUSTED_PEER_REPUTATION_CHANGE {
+                        // this caps the reputation change to the maximum allowed for trusted peers
+                        reputation_change = MAX_TRUSTED_PEER_REPUTATION_CHANGE;
                     }
                 }
                 peer.apply_reputation(reputation_change)
