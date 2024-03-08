@@ -1,7 +1,7 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
-    prefix_set::{PrefixSet, PrefixSetLoader, PrefixSetMut, TriePrefixSets},
+    prefix_set::{PrefixSet, PrefixSetLoader, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
     stats::TrieTracker,
     trie_cursor::TrieCursorFactory,
@@ -214,30 +214,31 @@ where
         let mut tracker = TrieTracker::default();
         let mut trie_updates = TrieUpdates::default();
 
-        let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
 
         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
             Some(state) => {
+                let hash_builder = state.hash_builder.with_updates(retain_updates);
                 let walker = TrieWalker::from_stack(
                     trie_cursor,
                     state.walker_stack,
                     self.prefix_sets.account_prefix_set,
-                );
-                (
-                    state.hash_builder,
-                    AccountNodeIter::new(walker, hashed_account_cursor)
-                        .with_last_account_key(state.last_account_key),
                 )
+                .with_updates(retain_updates);
+                let node_iter =
+                    AccountNodeIter::from_factory(walker, self.hashed_cursor_factory.clone())?
+                        .with_last_account_key(state.last_account_key);
+                (hash_builder, node_iter)
             }
             None => {
-                let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set);
-                (HashBuilder::default(), AccountNodeIter::new(walker, hashed_account_cursor))
+                let hash_builder = HashBuilder::default().with_updates(retain_updates);
+                let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
+                    .with_updates(retain_updates);
+                let node_iter =
+                    AccountNodeIter::from_factory(walker, self.hashed_cursor_factory.clone())?;
+                (hash_builder, node_iter)
             }
         };
-
-        account_node_iter.walker.set_updates(retain_updates);
-        hash_builder.set_updates(retain_updates);
 
         let mut account_rlp = Vec::with_capacity(128);
         let mut hashed_entries_walked = 0;
@@ -283,11 +284,9 @@ where
                         storage_root_calculator.root()?
                     };
 
-                    let account = TrieAccount::from((account, storage_root));
-
                     account_rlp.clear();
+                    let account = TrieAccount::from((account, storage_root));
                     account.encode(&mut account_rlp as &mut dyn BufMut);
-
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
                     // Decide if we need to return intermediate progress.
@@ -319,13 +318,10 @@ where
 
         let root = hash_builder.root();
 
-        let (_, walker_updates) = account_node_iter.walker.split();
-        let (_, hash_builder_updates) = hash_builder.split();
-
-        trie_updates.extend(walker_updates);
-        trie_updates.extend_with_account_updates(hash_builder_updates);
-        trie_updates.extend_with_deletes(
-            self.prefix_sets.destroyed_accounts.into_iter().map(TrieKey::StorageTrie),
+        trie_updates.finalize_state_updates(
+            account_node_iter.walker,
+            hash_builder,
+            self.prefix_sets.destroyed_accounts,
         );
 
         let stats = tracker.finish();
@@ -357,8 +353,8 @@ pub struct StorageRoot<T, H> {
     pub hashed_address: B256,
     /// The set of storage slot prefixes that have changed.
     pub prefix_set: PrefixSet,
-    #[cfg(feature = "metrics")]
     /// Storage root metrics.
+    #[cfg(feature = "metrics")]
     metrics: TrieRootMetrics,
 }
 
@@ -390,7 +386,7 @@ impl<T, H> StorageRoot<T, H> {
             trie_cursor_factory,
             hashed_cursor_factory,
             hashed_address,
-            prefix_set: PrefixSetMut::default().freeze(),
+            prefix_set: PrefixSet::default(),
             #[cfg(feature = "metrics")]
             metrics,
         }
@@ -475,7 +471,13 @@ where
         Ok(root)
     }
 
-    fn calculate(
+    /// Walks the hashed storage table entries for a given address and calculates the storage root.
+    ///
+    /// # Returns
+    ///
+    /// The storage root, number of walked entries and trie updates
+    /// for a given address if requested.
+    pub fn calculate(
         self,
         retain_updates: bool,
     ) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
@@ -518,12 +520,12 @@ where
 
         let root = hash_builder.root();
 
-        let (_, hash_builder_updates) = hash_builder.split();
-        let (_, walker_updates) = storage_node_iter.walker.split();
-
         let mut trie_updates = TrieUpdates::default();
-        trie_updates.extend(walker_updates);
-        trie_updates.extend_with_storage_updates(self.hashed_address, hash_builder_updates);
+        trie_updates.finalize_storage_updates(
+            self.hashed_address,
+            storage_node_iter.walker,
+            hash_builder,
+        );
 
         let stats = tracker.finish();
 
@@ -548,8 +550,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{
-        state_root, state_root_prehashed, storage_root, storage_root_prehashed,
+    use crate::{
+        prefix_set::PrefixSetMut,
+        test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
     };
     use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{
@@ -788,7 +791,7 @@ mod tests {
                 tx.commit().unwrap();
                 let tx =  factory.provider_rw().unwrap();
 
-                let expected = state_root(state.into_iter());
+                let expected = state_root(state);
 
                 let threshold = 10;
                 let mut got = None;

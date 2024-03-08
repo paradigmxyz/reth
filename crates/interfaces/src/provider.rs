@@ -162,7 +162,7 @@ pub enum ConsistentViewError {
     Syncing(BlockNumber),
     /// Error thrown on inconsistent database view.
     #[error("inconsistent database state: {tip:?}")]
-    InconsistentView {
+    Inconsistent {
         /// The tip diff.
         tip: GotExpected<Option<B256>>,
     },
