@@ -9,7 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
-use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_interfaces::RethResult;
@@ -300,10 +299,8 @@ impl BasicPayloadJobGeneratorConfig {
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
-        let mut extradata = Vec::with_capacity(RETH_CLIENT_VERSION.as_bytes().len() + 1);
-        RETH_CLIENT_VERSION.as_bytes().encode(&mut extradata);
         Self {
-            extradata: extradata.into(),
+            extradata: alloy_rlp::encode(RETH_CLIENT_VERSION.as_bytes()).into(),
             max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             // 12s slot time

@@ -206,9 +206,7 @@ impl Header {
     /// Heavy function that will calculate hash of data and will *not* save the change to metadata.
     /// Use [`Header::seal`], [`SealedHeader`] and unlock if you need hash to be persistent.
     pub fn hash_slow(&self) -> B256 {
-        let mut out = Vec::new();
-        self.encode(&mut out);
-        keccak256(&out)
+        keccak256(alloy_rlp::encode(self))
     }
 
     /// Checks if the header is empty - has no transactions and no ommers
