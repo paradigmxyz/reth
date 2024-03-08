@@ -84,7 +84,7 @@ impl<DB: Database> Pruner<DB> {
             self.previous_tip_block_number = Some(tip_block_number);
 
             debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PruneProgress::finished())
+            return Ok(PruneProgress::new_finished())
         }
 
         self.listeners.notify(PrunerEvent::Started { tip_block_number });
@@ -120,8 +120,7 @@ impl<DB: Database> Pruner<DB> {
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        let message = 
-        if progress.is_timed_out() {
+        let message = if progress.is_timed_out() {
             "Pruner interrupted by timeout"
         } else if progress.is_entries_limit_reached() {
             "Pruner interrupted by limit on deleted segments"

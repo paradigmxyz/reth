@@ -108,18 +108,12 @@ pub enum PruneInterruptReason {
 impl PruneInterruptReason {
     /// Returns `true` if reason is timeout.
     pub fn is_timeout(&self) -> bool {
-        match self {
-            Self::Timeout => true,
-            Self::LimitEntriesDeleted => false,
-        }
+        matches!(self, Self::Timeout)
     }
 
     /// Returns `true` if reason is reaching limit on deleted entries.
     pub fn is_entries_limit_reached(&self) -> bool {
-        match self {
-            Self::Timeout => false,
-            Self::LimitEntriesDeleted => true,
-        }
+        matches!(self, Self::LimitEntriesDeleted)
     }
 }
 
@@ -132,50 +126,41 @@ impl PruneProgress {
         if done {
             Self::Finished
         } else if timeout {
-            Self::timed_out()
+            Self::new_timed_out()
         } else {
-            Self::entries_limit_reached()
+            Self::new_entries_limit_reached()
         }
     }
 
     /// Returns a new instance of variant [`Finished`](Self::Finished).
-    pub const fn finished() -> Self {
+    pub const fn new_finished() -> Self {
         Self::Finished
     }
 
     /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
     /// [`PruneInterruptReason::Timeout`].
-    pub const fn timed_out() -> Self {
+    pub const fn new_timed_out() -> Self {
         Self::HasMoreData(PruneInterruptReason::Timeout)
     }
 
     /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
     /// [`PruneInterruptReason::LimitEntriesDeleted`].
-    pub const fn entries_limit_reached() -> Self {
+    pub const fn new_entries_limit_reached() -> Self {
         Self::HasMoreData(PruneInterruptReason::LimitEntriesDeleted)
     }
 
     /// Returns `true` if prune job is done.
     pub fn is_done(&self) -> bool {
-        match self {
-            Self::Finished => true,
-            Self::HasMoreData(_) => false,
-        }
+        matches!(self, Self::Finished)
     }
 
     /// Returns `true` if prune job was interrupted by timeout.
     pub fn is_timed_out(&self) -> bool {
-        match self {
-            Self::Finished => false,
-            Self::HasMoreData(reason) => reason.is_timeout(),
-        }
+        matches!(self, Self::HasMoreData(reason) if reason.is_timeout())
     }
 
     /// Returns `true` if prune job was interrupted by reaching limit on deleted entries.
     pub fn is_entries_limit_reached(&self) -> bool {
-        match self {
-            Self::Finished => false,
-            Self::HasMoreData(reason) => reason.is_entries_limit_reached(),
-        }
+        matches!(self, Self::HasMoreData(reason) if reason.is_entries_limit_reached())
     }
 }

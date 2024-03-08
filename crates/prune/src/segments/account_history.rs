@@ -253,8 +253,8 @@ mod tests {
                 );
             };
 
-        test_prune(998, 1, (PruneProgress::entries_limit_reached(), 1000));
-        test_prune(998, 2, (PruneProgress::finished(), 998));
-        test_prune(1400, 3, (PruneProgress::finished(), 804));
+        test_prune(998, 1, (PruneProgress::new_entries_limit_reached(), 1000));
+        test_prune(998, 2, (PruneProgress::new_finished(), 998));
+        test_prune(1400, 3, (PruneProgress::new_finished(), 804));
     }
 }

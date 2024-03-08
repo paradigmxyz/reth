@@ -216,8 +216,8 @@ mod tests {
             );
         };
 
-        test_prune(3, (PruneProgress::entries_limit_reached(), 9));
-        test_prune(3, (PruneProgress::finished(), 3));
+        test_prune(3, (PruneProgress::new_entries_limit_reached(), 9));
+        test_prune(3, (PruneProgress::new_finished(), 3));
     }
 
     #[test]
