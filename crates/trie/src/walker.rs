@@ -308,7 +308,7 @@ mod tests {
         let mut walker = TrieWalker::new(&mut trie, Default::default());
         assert!(walker.key().unwrap().is_empty());
 
-        // We're traversing the path in lexigraphical order.
+        // We're traversing the path in lexicographical order.
         for expected in expected {
             let got = walker.advance().unwrap();
             assert_eq!(got.unwrap(), Nibbles::from_nibbles_unchecked(expected.clone()));

@@ -149,7 +149,7 @@ impl BlockIndices {
     }
 
     /// Update all block hashes. iterate over present and new list of canonical hashes and compare
-    /// them. Remove all missmatches, disconnect them and return all chains that needs to be
+    /// them. Remove all mismatches, disconnect them and return all chains that needs to be
     /// removed.
     pub(crate) fn update_block_hashes(
         &mut self,
@@ -211,7 +211,7 @@ impl BlockIndices {
             }
         }
 
-        // remove childs of removed blocks
+        // remove children of removed blocks
         (
             removed.into_iter().fold(BTreeSet::new(), |mut fold, (number, hash)| {
                 fold.extend(self.remove_block(number, hash));

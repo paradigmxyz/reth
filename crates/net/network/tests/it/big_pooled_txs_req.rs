@@ -13,7 +13,7 @@ use reth_transaction_pool::{
 };
 
 use tokio::sync::oneshot;
-// peer0: `GetPooledTransactions` requestor
+// peer0: `GetPooledTransactions` requester
 // peer1: `GetPooledTransactions` responder
 #[tokio::test(flavor = "multi_thread")]
 async fn test_large_tx_req() {

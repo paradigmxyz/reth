@@ -80,7 +80,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         &mut self.jar.user_header
     }
 
-    /// Gets total writter rows in jar.
+    /// Gets total writer rows in jar.
     pub fn rows(&self) -> usize {
         self.jar.rows()
     }

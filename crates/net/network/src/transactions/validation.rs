@@ -20,8 +20,8 @@ pub const SIGNATURE_DECODED_SIZE_BYTES: usize = mem::size_of::<Signature>();
 /// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)..
 pub trait ValidateTx68 {
     /// Validates a [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)
-    /// entry. Returns [`ValidationOutcome`] which signals to the caller wether to fetch the
-    /// transaction or wether to drop it, and wether the sender of the announcement should be
+    /// entry. Returns [`ValidationOutcome`] which signals to the caller whether to fetch the
+    /// transaction or wether to drop it, and whether the sender of the announcement should be
     /// penalized.
     fn should_fetch(
         &self,

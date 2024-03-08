@@ -217,7 +217,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             target: "sync::stages::execution",
             block_fetch = ?fetch_block_duration,
             execution = ?execution_duration,
-            write_preperation = ?write_preparation_duration,
+            write_preparation = ?write_preparation_duration,
             write = ?db_write_duration,
             "Execution time"
         );
