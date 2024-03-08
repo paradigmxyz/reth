@@ -10,6 +10,8 @@ use thiserror::Error;
 /// The Engine API result type
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 
+/// Invalid payload attributes code.
+pub const INVALID_PAYLOAD_ATTRIBUTES: i32 = -38003;
 /// Payload unsupported fork code.
 pub const UNSUPPORTED_FORK_CODE: i32 = -38005;
 /// Payload unknown error code.
@@ -19,6 +21,9 @@ pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
 /// Error message for the request too large error.
 const REQUEST_TOO_LARGE_MESSAGE: &str = "Too large request";
+
+/// Error message for the request too large error.
+const INVALID_PAYLOAD_ATTRIBUTES_MSG: &str = "Invalid payload attributes";
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
 ///
@@ -106,21 +111,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EngineApiError) -> Self {
         match error {
             EngineApiError::InvalidBodiesRange { .. } |
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::WithdrawalsNotSupportedInV1,
-            ) |
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
-            ) |
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::NoParentBeaconBlockRootPostCancun,
-            ) |
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::NoWithdrawalsPostShanghai,
-            ) |
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::HasWithdrawalsPreShanghai,
-            ) |
+            EngineApiError::AttributesValidationError(AttributesValidationError::Payload(_)) |
             EngineApiError::AttributesValidationError(
                 AttributesValidationError::InvalidParams(_),
             ) => {
@@ -129,6 +120,17 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 jsonrpsee_types::error::ErrorObject::owned(
                     INVALID_PARAMS_CODE,
                     INVALID_PARAMS_MSG,
+                    Some(ErrorData::new(error)),
+                )
+            }
+            EngineApiError::AttributesValidationError(
+                AttributesValidationError::PayloadAttributes(_),
+            ) => {
+                // Note: the data field is not required by the spec, but is also included by other
+                // clients
+                jsonrpsee_types::error::ErrorObject::owned(
+                    INVALID_PAYLOAD_ATTRIBUTES,
+                    INVALID_PAYLOAD_ATTRIBUTES_MSG,
                     Some(ErrorData::new(error)),
                 )
             }

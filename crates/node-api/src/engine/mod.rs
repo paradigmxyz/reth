@@ -17,6 +17,8 @@ pub use error::AttributesValidationError;
 pub mod payload;
 pub use payload::PayloadOrAttributes;
 
+use self::error::PayloadOrAttributesValidationError;
+
 /// The types that are used by the engine API.
 pub trait EngineTypes:
     serde::de::DeserializeOwned + Serialize + fmt::Debug + Unpin + Send + Sync + Clone
@@ -116,6 +118,7 @@ pub fn validate_payload_timestamp(
 pub fn validate_withdrawals_presence(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
+    message_validation_kind: MessageValidationKind,
     timestamp: u64,
     has_withdrawals: bool,
 ) -> Result<(), AttributesValidationError> {
@@ -124,18 +127,22 @@ pub fn validate_withdrawals_presence(
     match version {
         EngineApiMessageVersion::V1 => {
             if has_withdrawals {
-                return Err(AttributesValidationError::WithdrawalsNotSupportedInV1)
+                return Err(message_validation_kind
+                    .to_error(PayloadOrAttributesValidationError::WithdrawalsNotSupportedInV1))
             }
             if is_shanghai {
-                return Err(AttributesValidationError::NoWithdrawalsPostShanghai)
+                return Err(message_validation_kind
+                    .to_error(PayloadOrAttributesValidationError::NoWithdrawalsPostShanghai))
             }
         }
         EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
             if is_shanghai && !has_withdrawals {
-                return Err(AttributesValidationError::NoWithdrawalsPostShanghai)
+                return Err(message_validation_kind
+                    .to_error(PayloadOrAttributesValidationError::NoWithdrawalsPostShanghai))
             }
             if !is_shanghai && has_withdrawals {
-                return Err(AttributesValidationError::HasWithdrawalsPreShanghai)
+                return Err(message_validation_kind
+                    .to_error(PayloadOrAttributesValidationError::HasWithdrawalsPreShanghai))
             }
         }
     };
@@ -167,32 +174,57 @@ pub fn validate_withdrawals_presence(
 ///
 /// For `engine_forkchoiceUpdatedV3`:
 ///
-/// 2. Client software **MUST** return `-38005: Unsupported fork` error if the `payloadAttributes`
-///    is set and the `payloadAttributes.timestamp` does not fall within the time frame of the
-///    Cancun fork.
+/// 1. Client software **MUST** check that provided set of parameters and their fields strictly
+///    matches the expected one and return `-32602: Invalid params` error if this check fails. Any
+///    field having `null` value **MUST** be considered as not provided.
 ///
 /// For `engine_newPayloadV3`:
 ///
 /// 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of the
 ///    payload does not fall within the time frame of the Cancun fork.
+///
+/// Returning the right error code (ie, if the client should return `-38003: Invalid payload
+/// attributes` is handled by the `message_validation_kind` parameter. If the parameter is
+/// `MessageValidationKind::Payload`, then the error code will be `-32602: Invalid params`. If the
+/// parameter is `MessageValidationKind::PayloadAttributes`, then the error code will be `-38003:
+/// Invalid payload attributes`.
 pub fn validate_parent_beacon_block_root_presence(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
+    validation_kind: MessageValidationKind,
     timestamp: u64,
     has_parent_beacon_block_root: bool,
 ) -> Result<(), AttributesValidationError> {
     // 1. Client software **MUST** check that provided set of parameters and their fields strictly
     //    matches the expected one and return `-32602: Invalid params` error if this check fails.
     //    Any field having `null` value **MUST** be considered as not provided.
+    //
+    // For `engine_forkchoiceUpdatedV3`:
+    //
+    // 2. Extend point (7) of the `engine_forkchoiceUpdatedV1` specification by defining the
+    //    following sequence of checks that **MUST** be run over `payloadAttributes`:
+    //     1. `payloadAttributes` matches the `PayloadAttributesV3` structure, return `-38003:
+    //        Invalid payload attributes` on failure.
+    //     2. `payloadAttributes.timestamp` falls within the time frame of the Cancun fork, return
+    //        `-38005: Unsupported fork` on failure.
+    //     3. `payloadAttributes.timestamp` is greater than `timestamp` of a block referenced by
+    //        `forkchoiceState.headBlockHash`, return `-38003: Invalid payload attributes` on
+    //        failure.
+    //     4. If any of the above checks fails, the `forkchoiceState` update **MUST NOT** be rolled
+    //        back.
     match version {
         EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 => {
             if has_parent_beacon_block_root {
-                return Err(AttributesValidationError::ParentBeaconBlockRootNotSupportedBeforeV3)
+                return Err(validation_kind.to_error(
+                    PayloadOrAttributesValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
+                ))
             }
         }
         EngineApiMessageVersion::V3 => {
             if !has_parent_beacon_block_root {
-                return Err(AttributesValidationError::NoParentBeaconBlockRootPostCancun)
+                return Err(validation_kind.to_error(
+                    PayloadOrAttributesValidationError::NoParentBeaconBlockRootPostCancun,
+                ))
             }
         }
     };
@@ -212,6 +244,29 @@ pub fn validate_parent_beacon_block_root_presence(
     Ok(())
 }
 
+/// A type that represents whether or not we are validating a payload or payload attributes.
+///
+/// This is used to ensure that the correct error code is returned when validating the payload or
+/// payload attributes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageValidationKind {
+    /// We are validating fields of a payload attributes.
+    PayloadAttributes,
+    /// We are validating fields of a payload.
+    Payload,
+}
+
+impl MessageValidationKind {
+    /// Returns an `AttributesValidationError` based on the given
+    /// `PayloadOrAttributesValidationError` and the current validation kind.
+    pub fn to_error(self, error: PayloadOrAttributesValidationError) -> AttributesValidationError {
+        match self {
+            Self::Payload => AttributesValidationError::Payload(error),
+            Self::PayloadAttributes => AttributesValidationError::PayloadAttributes(error),
+        }
+    }
+}
+
 /// Validates the presence or exclusion of fork-specific fields based on the ethereum payload
 /// attributes and the message version.
 pub fn validate_version_specific_fields<Type>(
@@ -225,12 +280,14 @@ where
     validate_withdrawals_presence(
         chain_spec,
         version,
+        payload_or_attrs.message_validation_kind(),
         payload_or_attrs.timestamp(),
         payload_or_attrs.withdrawals().is_some(),
     )?;
     validate_parent_beacon_block_root_presence(
         chain_spec,
         version,
+        payload_or_attrs.message_validation_kind(),
         payload_or_attrs.timestamp(),
         payload_or_attrs.parent_beacon_block_root().is_some(),
     )
