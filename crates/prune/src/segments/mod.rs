@@ -82,6 +82,22 @@ pub struct PruneInput {
     pub(crate) limiter: PruneLimiter,
 }
 
+impl Clone for PruneInput {
+    fn clone(&self) -> Self {
+        let Self { previous_checkpoint, to_block, limiter } = self;
+
+        let previous_checkpoint = *previous_checkpoint;
+        let to_block = *to_block;
+        let limiter = PruneLimiterBuilder::with_fraction_of_entries_limit(
+            limiter,
+            NonZeroUsize::new(1).unwrap(),
+        )
+        .build();
+
+        Self { previous_checkpoint, to_block, limiter }
+    }
+}
+
 impl PruneInput {
     /// Get next inclusive tx number range to prune according to the checkpoint and `to_block` block
     /// number.
@@ -138,20 +154,26 @@ impl PruneInput {
     ///
     /// To get the range end: use block `to_block`.
     pub(crate) fn get_next_block_range(&self) -> Option<RangeInclusive<BlockNumber>> {
-        let from_block = self
-            .previous_checkpoint
-            .and_then(|checkpoint| checkpoint.block_number)
-            // Checkpoint exists, prune from the next block after the highest pruned one
-            .map(|block_number| block_number + 1)
-            // No checkpoint exists, prune from genesis
-            .unwrap_or(0);
-
+        let from_block = self.get_start_next_block_range();
         let range = from_block..=self.to_block;
         if range.is_empty() {
             return None
         }
 
         Some(range)
+    }
+
+    /// Returns the start of the next block range.
+    ///
+    /// 1. If checkpoint exists, use next block.
+    /// 2. If checkpoint doesn't exist, use block 0.
+    pub(crate) fn get_start_next_block_range(&self) -> u64 {
+        self.previous_checkpoint
+            .and_then(|checkpoint| checkpoint.block_number)
+            // Checkpoint exists, prune from the next block after the highest pruned one
+            .map(|block_number| block_number + 1)
+            // No checkpoint exists, prune from genesis
+            .unwrap_or(0)
     }
 }
 

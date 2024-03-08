@@ -33,6 +33,7 @@ mod provider;
 
 pub use provider::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder,
+    PruneStepResult,
 };
 use reth_db::mdbx::DatabaseArguments;
 

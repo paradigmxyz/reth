@@ -3,11 +3,14 @@ use crate::{
     PrunerError,
 };
 use itertools::Itertools;
-use reth_db::{database::Database, table::Table, tables};
-use reth_interfaces::RethResult;
-use reth_primitives::{BlockNumber, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
+use reth_db::{
+    database::Database,
+    tables,
+};
+
+use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder};
-use std::{num::NonZeroUsize, ops::RangeInclusive};
+use std::{num::NonZeroUsize};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -43,47 +46,21 @@ impl<DB: Database> Segment<DB> for Headers {
                 return Ok(PruneOutput::done())
             }
         };
+        let last_pruned_block = *block_range.end();
 
-        if let Some(limit) = input.limiter.deleted_entries_limit() {
-            if limit == 0 {
-                // Nothing to do, `input.delete_limit` is less than 3, so we can't prune all
-                // headers-related tables up to the same height
-                return Ok(PruneOutput::not_done(PruneInterruptReason::LimitEntriesDeleted))
-            }
+        let mut limiter = input.limiter;
+
+        let tables_iter = HeaderTablesIter::new(provider, &mut limiter, last_pruned_block);
+
+        for res in tables_iter.into_iter() {
+            res?;
         }
 
-        // todo: divide time fairly between all three
-        let results = [
-            self.prune_table::<DB, tables::Headers>(provider, block_range.clone(), limiter)?,
-            self.prune_table::<DB, tables::HeaderTerminalDifficulties>(
-                provider,
-                block_range.clone(),
-                limiter,
-            )?,
-            self.prune_table::<DB, tables::CanonicalHeaders>(provider, block_range, limiter)?,
-        ];
-
-        if !results.iter().map(|(_, _, last_pruned_block)| last_pruned_block).all_equal() {
-            return Err(PrunerError::InconsistentData(
-                "All headers-related tables should be pruned up to the same height",
-            ))
-        }
-
-        let (done, pruned, last_pruned_block, timed_out) = results.into_iter().fold(
-            (true, 0, 0, true),
-            |(total_done, total_pruned, _, some_timed_out),
-             (progress, pruned, last_pruned_block)| {
-                (
-                    total_done && progress.is_done(),
-                    total_pruned + pruned,
-                    last_pruned_block,
-                    some_timed_out & progress.is_timed_out(),
-                )
-            },
-        );
+        let progress = PruneProgress::new(limiter.is_limit_reached(), limiter.is_timed_out());
+        let pruned = limiter.deleted_entries_count();
 
         Ok(PruneOutput {
-            progress: PruneProgress::new(done, timed_out),
+            progress,
             pruned,
             checkpoint: Some(PruneOutputCheckpoint {
                 block_number: Some(last_pruned_block),
@@ -98,26 +75,107 @@ impl<DB: Database> Segment<DB> for Headers {
     }
 }
 
-impl Headers {
-    /// Prune one headers-related table.
-    ///
-    /// Returns `done`, number of pruned rows and last pruned block number.
-    fn prune_table<DB: Database, T: Table<Key = BlockNumber>>(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        range: RangeInclusive<BlockNumber>,
-        limiter: PruneLimiter,
-    ) -> RethResult<(PruneProgress, usize, BlockNumber)> {
-        let mut last_pruned_block = *range.end();
-        let (pruned, progress) = provider.prune_table_with_range::<T>(
-            range,
-            limiter,
-            |_| false,
-            |row| last_pruned_block = row.0,
-        )?;
-        trace!(target: "pruner", %pruned, ?progress, table = %T::TABLE, "Pruned headers");
+#[allow(missing_debug_implementations)]
+struct HeaderTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    provider: &'a DatabaseProviderRW<DB>,
+    limiter: &'b mut PruneLimiter,
+    last_pruned_block: u64,
+    exhausted: bool,
+}
 
-        Ok((progress, pruned, last_pruned_block))
+impl<'a, 'b, DB> HeaderTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    fn new(
+        provider: &'a DatabaseProviderRW<DB>,
+        limiter: &'b mut PruneLimiter,
+        last_pruned_block: u64,
+    ) -> Self {
+        Self { provider, limiter, last_pruned_block, exhausted: false }
+    }
+}
+
+impl<'a, 'b, DB> Iterator for HeaderTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    type Item = Result<(), PrunerError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let Self { provider, limiter, last_pruned_block, exhausted } = self;
+
+        if *exhausted {
+            return None
+        }
+
+        let next_up_last_pruned_block = *last_pruned_block + 1;
+        let block_range = *last_pruned_block..=next_up_last_pruned_block;
+
+        let mut last_pruned_block_headers = 0;
+        let mut last_pruned_block_headers_td = 0;
+        let mut last_pruned_block_canonical_headers = 0;
+
+        // todo: guarantee skip filter and delete callback are same for all header table types
+
+        match provider.with_walker::<tables::Headers, _, _>(
+            block_range.clone(),
+            |ref mut walker| {
+                provider.step_prune_table(walker, limiter, &mut |_| false, &mut |row| {
+                    last_pruned_block_headers = row.0
+                })
+            },
+        ) {
+            Err(err) => return Some(Err(err.into())),
+            Ok(res) if res.is_exhausted() => *exhausted = true,
+            _ => (),
+        }
+
+        match provider.with_walker::<tables::HeaderTerminalDifficulties, _, _>(
+            block_range.clone(),
+            |ref mut walker| {
+                provider.step_prune_table(walker, limiter, &mut |_| false, &mut |row| {
+                    last_pruned_block_headers_td = row.0
+                })
+            },
+        ) {
+            Err(err) => return Some(Err(err.into())),
+            Ok(res) if res.is_exhausted() => *exhausted = true,
+            _ => (),
+        }
+
+        match provider.with_walker::<tables::CanonicalHeaders, _, _>(
+            block_range,
+            |ref mut walker| {
+                provider.step_prune_table(walker, limiter, &mut |_| false, &mut |row| {
+                    last_pruned_block_canonical_headers = row.0
+                })
+            },
+        ) {
+            Err(err) => return Some(Err(err.into())),
+            Ok(res) if res.is_exhausted() => *exhausted = true,
+            _ => (),
+        }
+
+        if ![
+            next_up_last_pruned_block,
+            last_pruned_block_headers,
+            last_pruned_block_headers_td,
+            last_pruned_block_canonical_headers,
+        ]
+        .iter()
+        .all_equal()
+        {
+            return Some(Err(PrunerError::InconsistentData(
+                "All headers-related tables should be pruned up to the same height",
+            )))
+        }
+
+        *last_pruned_block += 1;
+
+        Some(Ok(()))
     }
 }
 
@@ -175,7 +233,7 @@ mod tests {
                 .unwrap_or_default();
 
             let provider = db.factory.provider_rw().unwrap();
-            let result = segment.prune(&provider, input).unwrap();
+            let result = segment.prune(&provider, input.clone()).unwrap();
             assert_matches!(
                 result,
                 PruneOutput {progress, pruned, checkpoint: Some(_)}

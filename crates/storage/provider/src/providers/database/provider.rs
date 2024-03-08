@@ -14,7 +14,7 @@ use crate::{
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
@@ -812,7 +812,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let done = keys.next().is_none();
 
-        Ok((limiter.deleted_units_count(), PruneProgress::new(done, limiter.is_timed_out())))
+        Ok((limiter.deleted_entries_count(), PruneProgress::new(done, limiter.is_timed_out())))
     }
 
     /// Prune the table for the specified key range.
@@ -827,24 +827,62 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ) -> Result<(usize, PruneProgress), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
+        loop {
+            match self.step_prune_table(
+                &mut walker,
+                &mut limiter,
+                &mut skip_filter,
+                &mut delete_callback,
+            )? {
+                PruneStepResult::Finished | PruneStepResult::ReachedLimit => break,
+                PruneStepResult::MaybeMoreData => continue,
+            }
+        }
 
-        if !limiter.is_limit_reached() {
-            while let Some(row) = walker.next().transpose()? {
+        let done = walker.next().is_none();
+
+        Ok((limiter.deleted_entries_count(), PruneProgress::new(done, limiter.is_timed_out())))
+    }
+
+    /// Gets walker for given table.
+    pub fn with_walker<T: Table, F, R>(
+        &self,
+        range: RangeInclusive<<T as Table>::Key>,
+        f: F,
+    ) -> Result<R, DatabaseError>
+    where
+        F: FnOnce(RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>) -> Result<R, DatabaseError>,
+    {
+        let mut cursor = self.tx.cursor_write::<T>()?;
+        let walker = cursor.walk_range(range)?;
+
+        f(walker)
+    }
+
+    /// Steps once with the given walker and prunes the entry at the destination.
+    pub fn step_prune_table<T: Table>(
+        &self,
+        walker: &mut RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>,
+        limiter: &mut PruneLimiter,
+        skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
+        delete_callback: &mut impl FnMut(TableRow<T>),
+    ) -> Result<PruneStepResult, DatabaseError> {
+        if limiter.is_limit_reached() {
+            return Ok(PruneStepResult::ReachedLimit)
+        }
+        match walker.next() {
+            Some(Err(err)) => Err(err),
+            Some(Ok(row)) => {
                 if !skip_filter(&row) {
                     walker.delete_current()?;
                     limiter.increment_deleted_entries_count();
                     delete_callback(row);
                 }
 
-                if limiter.is_limit_reached() {
-                    break
-                }
+                Ok(PruneStepResult::MaybeMoreData)
             }
+            None => Ok(PruneStepResult::Finished),
         }
-
-        let done = walker.next().transpose()?.is_none();
-
-        Ok((limiter.deleted_units_count(), PruneProgress::new(done, limiter.is_timed_out())))
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -2627,13 +2665,18 @@ impl PruneLimiter {
     }
 
     /// Returns the number of entries that have already been deleted by the prune job.
-    pub fn deleted_units_count(&self) -> usize {
+    pub fn deleted_entries_count(&self) -> usize {
         self.deleted_entries_count
     }
 
     /// Returns `true` if prune limit is reached.
     pub fn is_limit_reached(&mut self) -> bool {
-        let Self { deleted_entries_limit, deleted_entries_count, job_timeout, start, .. } = self;
+        let Self { deleted_entries_limit, deleted_entries_count, job_timeout, start, timed_out } =
+            self;
+
+        if *timed_out {
+            return true
+        }
 
         if let Some(limit) = deleted_entries_limit {
             if limit == deleted_entries_count {
@@ -2658,5 +2701,23 @@ impl PruneLimiter {
     /// Increments the count of deleted entries by one.
     pub fn increment_deleted_entries_count_by(&mut self, entries: usize) {
         self.deleted_entries_count += entries
+    }
+}
+
+/// Result of stepping once with walker and pruning destination.
+#[derive(Debug)]
+pub enum PruneStepResult {
+    /// Walker has no further destination.
+    Finished,
+    /// Limiter has interrupted walk.
+    ReachedLimit,
+    /// Data was pruned at current destination.
+    MaybeMoreData,
+}
+
+impl PruneStepResult {
+    /// Returns `true` if range is exhausted, i.e. no more rows to prune.
+    pub fn is_exhausted(&self) -> bool {
+        matches!(self, Self::Finished) || matches!(self, Self::ReachedLimit)
     }
 }
