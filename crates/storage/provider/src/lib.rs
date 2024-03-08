@@ -21,6 +21,7 @@ pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
+    PruneLimiter, PruneLimiterBuilder
 };
 
 #[cfg(any(test, feature = "test-utils"))]

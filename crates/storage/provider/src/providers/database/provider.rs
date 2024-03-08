@@ -52,6 +52,7 @@ use std::{
     cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
+    num::NonZeroUsize,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
     time::{Duration, Instant},
@@ -788,30 +789,30 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     pub fn prune_table_with_iterator<T: Table>(
         &self,
         keys: impl IntoIterator<Item = T::Key>,
-        limit: usize,
+        mut limiter: PruneLimiter,
         mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> Result<(usize, bool), DatabaseError> {
+    ) -> Result<(usize, PruneProgress), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut deleted = 0;
-
         let mut keys = keys.into_iter();
 
-        if limit != 0 {
+        if !limiter.is_limit_reached() {
             for key in &mut keys {
                 let row = cursor.seek_exact(key.clone())?;
                 if let Some(row) = row {
                     cursor.delete_current()?;
-                    deleted += 1;
+                    limiter.increment_deleted_entries_count();
                     delete_callback(row);
                 }
 
-                if deleted == limit {
+                if limiter.is_limit_reached() {
                     break
                 }
             }
         }
 
-        Ok((deleted, keys.next().is_none()))
+        let done = keys.next().is_none();
+
+        Ok((limiter.deleted_units_count(), PruneProgress::new(done, limiter.is_timed_out())))
     }
 
     /// Prune the table for the specified key range.
@@ -820,29 +821,30 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     pub fn prune_table_with_range<T: Table>(
         &self,
         keys: impl RangeBounds<T::Key> + Clone + Debug,
-        limit: usize,
+        mut limiter: PruneLimiter,
         mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
         mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> Result<(usize, bool), DatabaseError> {
+    ) -> Result<(usize, PruneProgress), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
-        let mut deleted = 0;
 
-        if limit != 0 {
+        if !limiter.is_limit_reached() {
             while let Some(row) = walker.next().transpose()? {
                 if !skip_filter(&row) {
                     walker.delete_current()?;
-                    deleted += 1;
+                    limiter.increment_deleted_entries_count();
                     delete_callback(row);
                 }
 
-                if deleted == limit {
+                if limiter.is_limit_reached() {
                     break
                 }
             }
         }
 
-        Ok((deleted, walker.next().transpose()?.is_none()))
+        let done = walker.next().transpose()?.is_none();
+
+        Ok((limiter.deleted_units_count(), PruneProgress::new(done, limiter.is_timed_out())))
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -2513,4 +2515,142 @@ fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {
         Bound::Unbounded => return None,
     };
     end.checked_sub(start).map(|x| x as _)
+}
+
+/// Limits on how long one prune job can run before it's forced to stop and thereby yield the
+/// [`DatabaseProviderRW`] hook. Note: one prune job can consist of several calls to
+/// [`Segment::prune`].
+#[derive(Debug)]
+pub struct PruneLimiter {
+    /// Maximum entries (rows in the database) to delete from the database per block.
+    deleted_entries_limit: Option<usize>,
+    /// Current number of entries (rows in the database) that have been deleted during the prune
+    /// job.
+    deleted_entries_count: usize,
+    /// The max time one prune job can run.
+    job_timeout: Option<Duration>,
+    /// Time at which the prune job was started.
+    start: Option<Instant>,
+    /// Prune job has timed out.
+    timed_out: bool,
+}
+
+/// Builder for [`PruneLimiter`].
+#[derive(Debug, Default)]
+pub struct PruneLimiterBuilder {
+    /// Maximum entries (rows in the database) to delete from the database per block.
+    deleted_entries_limit: Option<usize>,
+    /// Current number of entries (rows in the database) that have been deleted during the prune
+    /// job.
+    deleted_entries_count: usize,
+        /// Time at which the prune job was started.
+        start: Option<Instant>,
+    /// The max time one prune job can run.
+    job_timeout: Option<Duration>,
+}
+
+impl PruneLimiterBuilder {
+    /// Sets the maximum entries (rows in the database) to delete from the database per block.
+    pub fn deleted_entries_limit(mut self, entries: usize) -> Self {
+        self.deleted_entries_limit = Some(entries);
+
+        self
+    }
+
+    /// Carries the number of entries (rows in the database) that have already been deleted.
+    pub fn deleted_entries_count(mut self, entries: usize) -> Self {
+        self.deleted_entries_count = entries;
+
+        self
+    }
+
+    /// Sets the max time one prune job can run with respect to the given start.
+    pub fn job_timeout(mut self, timeout: Duration, start: Instant) -> Self {
+        self.job_timeout = Some(timeout);
+        self.start = Some(start);
+
+        self
+    }
+
+    /// Returns a new instance of [`PruneLimiter`].
+    pub fn build(self) -> PruneLimiter {
+        let Self { deleted_entries_limit, deleted_entries_count, job_timeout, start } = self;
+
+        PruneLimiter {
+            deleted_entries_limit,
+            deleted_entries_count,
+            job_timeout,
+            start,
+            timed_out: false,
+        }
+    }
+
+    /// Returns a new instance of [`PruneLimiter`], setting fields identical to given instance 
+    /// except for the limit on deleted entries, which is set to a fraction of the corresponding
+    /// limit.
+    pub fn build_with_fraction_of_entries_limit(
+        mut limiter: PruneLimiter,
+        denominator: NonZeroUsize,
+    ) -> PruneLimiter {
+        limiter.deleted_entries_limit = limiter.deleted_entries_limit.map(|limit| limit / denominator);
+
+        limiter
+    }
+}
+
+impl PruneLimiter {
+    /// Returns the maximum entries that can be deleted from the database in one prune job. `None`
+    /// is equivalent to unlimited entries.
+    pub fn deleted_entries_limit(&self) -> Option<usize> {
+        self.deleted_entries_limit
+    }
+
+    /// Returns max time one prune job can run. `None` is equivalent to unlimited time.
+    pub fn timeout(&self) -> Option<&Duration> {
+        self.job_timeout.as_ref()
+    }
+
+        /// Returns the configured start of the prune job.
+        pub fn start(&self) -> Option<&Instant> {
+            self.start.as_ref()
+        }
+
+    /// Returns `true` if prune job has timed out.
+    pub fn is_timed_out(&self) -> bool {
+        self.timed_out
+    }
+
+    /// Returns the number of entries that have already been deleted by the prune job.
+    pub fn deleted_units_count(&self) -> usize {
+        self.deleted_entries_count
+    }
+
+    /// Returns `true` if prune limit is reached.
+    pub fn is_limit_reached(&mut self) -> bool {
+        let Self { deleted_entries_limit, deleted_entries_count, job_timeout, start, .. } = self;
+
+        if let Some(limit) = deleted_entries_limit {
+            if limit == deleted_entries_count {
+                return true
+            }
+        }
+        if let (Some(timeout), Some(start)) = (job_timeout, start) {
+            if *timeout <= start.elapsed() {
+                self.timed_out = true;
+                return true
+            }
+        }
+
+        false
+    }
+
+    /// Increments the count of deleted entries by one.
+    pub fn increment_deleted_entries_count(&mut self) {
+        self.deleted_entries_count += 1
+    }
+
+    /// Increments the count of deleted entries by one.
+    pub fn increment_deleted_entries_count_by(&mut self, entries: usize) {
+        self.deleted_entries_count += entries
+    }
 }

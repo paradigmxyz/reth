@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use crate::{
     segments::{
         history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
@@ -10,7 +12,7 @@ use reth_db::{
     tables,
 };
 use reth_primitives::{PruneMode, PruneSegment};
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{DatabaseProviderRW, PruneLimiterBuilder};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -49,19 +51,31 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
-        let (pruned_changesets, done) = provider
+        let limiter = PruneLimiterBuilder::build_with_fraction_of_entries_limit(
+            input.limiter,
+            NonZeroUsize::new(2).unwrap(),
+        );
+        let (pruned_changesets, progress) = provider
             .prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
-                input.delete_limit / 2,
+                limiter,
                 |_| false,
                 |row| last_changeset_pruned_block = Some(row.0.block_number()),
             )?;
-        trace!(target: "pruner", deleted = %pruned_changesets, %done, "Pruned storage history (changesets)");
+        trace!(target: "pruner", deleted = %pruned_changesets, ?progress, "Pruned storage history (changesets)");
 
         let last_changeset_pruned_block = last_changeset_pruned_block
             // If there's more storage storage changesets to prune, set the checkpoint block number
             // to previous, so we could finish pruning its storage changesets on the next run.
-            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
+            .map(
+                |block_number| {
+                    if progress.is_done() {
+                        block_number
+                    } else {
+                        block_number.saturating_sub(1)
+                    }
+                },
+            )
             .unwrap_or(range_end);
 
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::StoragesHistory, _>(
@@ -70,10 +84,10 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
             |key| StorageShardedKey::last(key.address, key.sharded_key.key),
         )?;
-        trace!(target: "pruner", %processed, deleted = %pruned_indices, %done, "Pruned storage history (history)" );
+        trace!(target: "pruner", %processed, deleted = %pruned_indices, ?progress, "Pruned storage history (history)" );
 
         Ok(PruneOutput {
-            done,
+            progress,
             pruned: pruned_changesets + pruned_indices,
             checkpoint: Some(PruneOutputCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
@@ -87,72 +101,107 @@ impl<DB: Database> Segment<DB> for StorageHistory {
 mod tests {
     use crate::segments::{PruneInput, PruneOutput, Segment, StorageHistory};
     use assert_matches::assert_matches;
-    use reth_db::{tables, BlockNumberList};
+    use reth_db::{models::storage_sharded_key::StorageShardedKey, tables, BlockNumberList};
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_changeset_range, random_eoa_accounts},
     };
-    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
-    use reth_provider::PruneCheckpointReader;
+    use reth_primitives::{
+        Account, Address, BlockNumber, IntegerList, PruneCheckpoint, PruneMode, PruneProgress,
+        PruneSegment, StorageEntry, B256,
+    };
+    use reth_provider::{PruneCheckpointReader, PruneLimiter};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use std::{collections::BTreeMap, ops::AddAssign};
+    use std::{
+        collections::BTreeMap,
+        ops::AddAssign,
+        thread,
+        time::{Duration, Instant},
+    };
 
-    #[test]
-    fn prune() {
-        let db = TestStageDB::default();
-        let mut rng = generators::rng();
+    #[derive(Default)]
+    struct TestRig {
+        db: TestStageDB,
+        original_shards: Vec<(StorageShardedKey, IntegerList)>,
+        changesets: Vec<Vec<(Address, Account, Vec<StorageEntry>)>>,
+    }
 
-        let blocks = random_block_range(&mut rng, 0..=5000, B256::ZERO, 0..1);
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+    impl TestRig {
+        fn new() -> Self {
+            let db = TestStageDB::default();
+            let mut rng = generators::rng();
 
-        let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
+            let blocks = random_block_range(&mut rng, 0..=5000, B256::ZERO, 0..1);
+            db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
-        let (changesets, _) = random_changeset_range(
-            &mut rng,
-            blocks.iter(),
-            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
-            1..2,
-            1..2,
-        );
-        db.insert_changesets(changesets.clone(), None).expect("insert changesets");
-        db.insert_history(changesets.clone(), None).expect("insert history");
+            let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
 
-        let storage_occurrences = db.table::<tables::StoragesHistory>().unwrap().into_iter().fold(
-            BTreeMap::<_, usize>::new(),
-            |mut map, (key, _)| {
-                map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
-                map
-            },
-        );
-        assert!(storage_occurrences.into_iter().any(|(_, occurrences)| occurrences > 1));
+            let (changesets, _) = random_changeset_range(
+                &mut rng,
+                blocks.iter(),
+                accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+                1..2,
+                1..2,
+            );
+            db.insert_changesets(changesets.clone(), None).expect("insert changesets");
+            db.insert_history(changesets.clone(), None).expect("insert history");
 
-        assert_eq!(
-            db.table::<tables::StorageChangeSets>().unwrap().len(),
-            changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
-        );
+            let storage_occurrences = db
+                .table::<tables::StoragesHistory>()
+                .unwrap()
+                .into_iter()
+                .fold(BTreeMap::<_, usize>::new(), |mut map, (key, _)| {
+                    map.entry((key.address, key.sharded_key.key)).or_default().add_assign(1);
+                    map
+                });
+            assert!(storage_occurrences.into_iter().any(|(_, occurrences)| occurrences > 1));
 
-        let original_shards = db.table::<tables::StoragesHistory>().unwrap();
+            assert_eq!(
+                db.table::<tables::StorageChangeSets>().unwrap().len(),
+                changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
+            );
 
-        let test_prune = |to_block: BlockNumber, run: usize, expected_result: (bool, usize)| {
-            let prune_mode = PruneMode::Before(to_block);
-            let input = PruneInput {
-                previous_checkpoint: db
+            let original_shards = db.table::<tables::StoragesHistory>().unwrap();
+
+            Self { db, original_shards, changesets }
+        }
+
+        fn get_input(&self, to_block: BlockNumber, limiter: PruneLimiter) -> PruneInput {
+            PruneInput {
+                previous_checkpoint: self
+                    .db
                     .factory
                     .provider()
                     .unwrap()
                     .get_prune_checkpoint(PruneSegment::StorageHistory)
                     .unwrap(),
                 to_block,
-                delete_limit: 1000,
-            };
-            let segment = StorageHistory::new(prune_mode);
+                limiter,
+            }
+        }
+    }
 
-            let provider = db.factory.provider_rw().unwrap();
+    #[test]
+    fn prune() {
+        let test_rig = TestRig::new();
+
+        fn test_prune(
+            test_rig: &TestRig,
+            to_block: BlockNumber,
+            run: usize,
+            expected_result: (PruneProgress, usize),
+            limiter: PruneLimiter,
+        ) {
+            let prune_mode = PruneMode::Before(to_block);
+            let segment = StorageHistory::new(prune_mode);
+            let input = test_rig.get_input(to_block, limiter);
+
+            let provider = test_rig.db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
             assert_matches!(
                 result,
-                PruneOutput {done, pruned, checkpoint: Some(_)}
-                    if (done, pruned) == expected_result
+                PruneOutput {progress, pruned, checkpoint: Some(_)}
+                    if (progress, pruned) == expected_result
             );
             segment
                 .save_checkpoint(
@@ -162,7 +211,8 @@ mod tests {
                 .unwrap();
             provider.commit().expect("commit");
 
-            let changesets = changesets
+            let changesets = test_rig
+                .changesets
                 .iter()
                 .enumerate()
                 .flat_map(|(block_number, changeset)| {
@@ -177,7 +227,12 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip_while(|(i, (block_number, _, _))| {
-                    *i < input.delete_limit / 2 * run && *block_number <= to_block as usize
+                    if let Some(limit) = input.limiter.deleted_entries_limit() {
+                        if *i >= limit / 2 * run {
+                            return false
+                        }
+                    }
+                    *block_number <= to_block as usize
                 })
                 .next()
                 .map(|(i, _)| i)
@@ -190,13 +245,13 @@ mod tests {
                 .skip(pruned.saturating_sub(1));
 
             let last_pruned_block_number = pruned_changesets
-                .next()
-                .map(|(block_number, _, _)| if result.done {
-                    *block_number
-                } else {
-                    block_number.saturating_sub(1)
-                } as BlockNumber)
-                .unwrap_or(to_block);
+            .next()
+            .map(|(block_number, _, _)| if result.progress.is_done() {
+                *block_number
+            } else {
+                block_number.saturating_sub(1)
+            } as BlockNumber)
+            .unwrap_or(to_block);
 
             let pruned_changesets = pruned_changesets.fold(
                 BTreeMap::<_, Vec<_>>::new(),
@@ -207,13 +262,14 @@ mod tests {
             );
 
             assert_eq!(
-                db.table::<tables::StorageChangeSets>().unwrap().len(),
+                test_rig.db.table::<tables::StorageChangeSets>().unwrap().len(),
                 pruned_changesets.values().flatten().count()
             );
 
-            let actual_shards = db.table::<tables::StoragesHistory>().unwrap();
+            let actual_shards = test_rig.db.table::<tables::StoragesHistory>().unwrap();
 
-            let expected_shards = original_shards
+            let expected_shards = test_rig
+                .original_shards
                 .iter()
                 .filter(|(key, _)| key.sharded_key.highest_block_number > last_pruned_block_number)
                 .map(|(key, blocks)| {
@@ -228,7 +284,9 @@ mod tests {
             assert_eq!(actual_shards, expected_shards);
 
             assert_eq!(
-                db.factory
+                test_rig
+                    .db
+                    .factory
                     .provider()
                     .unwrap()
                     .get_prune_checkpoint(PruneSegment::StorageHistory)
@@ -239,10 +297,33 @@ mod tests {
                     prune_mode
                 })
             );
-        };
+        }
 
-        test_prune(998, 1, (false, 500));
-        test_prune(998, 2, (true, 499));
-        test_prune(1200, 3, (true, 202));
+        let limiter = PruneLimiter::default().deleted_entries_limit(1000);
+
+        test_prune(&test_rig, 998, 1, (PruneProgress::entries_limit_reached(), 500), limiter);
+        test_prune(&test_rig, 998, 2, (PruneProgress::finished(), 499), limiter);
+        test_prune(&test_rig, 1200, 3, (PruneProgress::finished(), 202), limiter);
+    }
+
+    #[test]
+    fn timeout_prune() {
+        const PRUNE_JOB_TIMEOUT: Duration = Duration::from_millis(100);
+        const TO_BLOCK: u64 = 1200;
+        const PRUNE_MODE: PruneMode = PruneMode::Before(TO_BLOCK);
+
+        let start = Instant::now();
+
+        let limiter = PruneLimiterBuilder::default().job_timeout(PRUNE_JOB_TIMEOUT, start).build();
+        let segment = StorageHistory::new(PRUNE_MODE);
+        let test_rig = TestRig::new();
+        let input = test_rig.get_input(TO_BLOCK, limiter);
+
+        thread::sleep(PRUNE_JOB_TIMEOUT);
+
+        let provider = test_rig.db.factory.provider_rw().unwrap();
+        let result = segment.prune(&provider, input).unwrap();
+
+        assert!(result.progress.is_timed_out())
     }
 }

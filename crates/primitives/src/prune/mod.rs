@@ -91,21 +91,76 @@ impl ReceiptsLogPruneConfig {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PruneProgress {
     /// There is more data to prune.
-    HasMoreData,
+    HasMoreData(PruneInterruptReason),
     /// Pruning has been finished.
     Finished,
 }
 
+/// Reason for interrupting a prune job.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum PruneInterruptReason {
+    /// Prune job timed out.
+    Timeout,
+    /// Limit on the number of deleted entries (rows in the database) per prune job was reached.
+    LimitEntriesDeleted,
+}
+
+impl PruneInterruptReason {
+    /// Returns `true` if reason is timeout.
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, Self::Timeout)
+    }
+
+    /// Returns `true` if reason is reaching limit on deleted entries.
+    pub fn is_entries_limit_reached(&self) -> bool {
+        matches!(self, Self::LimitEntriesDeleted)
+    }
+}
+
 impl PruneProgress {
-    /// Creates new [PruneProgress] from `done` boolean value.
+    /// Creates new [PruneProgress] that summarises prune job.
     ///
-    /// If `done == true`, returns [PruneProgress::Finished], otherwise [PruneProgress::HasMoreData]
-    /// is returned.
-    pub fn from_done(done: bool) -> Self {
+    /// If `done == true`, returns [`PruneProgress::Finished`], otherwise
+    /// [PruneProgress::HasMoreData] is returned.
+    pub fn new(done: bool, timeout: bool) -> Self {
         if done {
             Self::Finished
+        } else if timeout {
+            Self::new_timed_out()
         } else {
-            Self::HasMoreData
+            Self::new_entries_limit_reached()
         }
+    }
+
+    /// Returns a new instance of variant [`Finished`](Self::Finished).
+    pub const fn new_finished() -> Self {
+        Self::Finished
+    }
+
+    /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
+    /// [`PruneInterruptReason::Timeout`].
+    pub const fn new_timed_out() -> Self {
+        Self::HasMoreData(PruneInterruptReason::Timeout)
+    }
+
+    /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
+    /// [`PruneInterruptReason::LimitEntriesDeleted`].
+    pub const fn new_entries_limit_reached() -> Self {
+        Self::HasMoreData(PruneInterruptReason::LimitEntriesDeleted)
+    }
+
+    /// Returns `true` if prune job is done.
+    pub fn is_done(&self) -> bool {
+        matches!(self, Self::Finished)
+    }
+
+    /// Returns `true` if prune job was interrupted by timeout.
+    pub fn is_timed_out(&self) -> bool {
+        matches!(self, Self::HasMoreData(reason) if reason.is_timeout())
+    }
+
+    /// Returns `true` if prune job was interrupted by reaching limit on deleted entries.
+    pub fn is_entries_limit_reached(&self) -> bool {
+        matches!(self, Self::HasMoreData(reason) if reason.is_entries_limit_reached())
     }
 }
