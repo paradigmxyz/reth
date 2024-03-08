@@ -44,7 +44,7 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         .into_inner();
         let tx_range = start..=
             (Some(end)
-                .min(input.limiter.deleted_units_limit().map(|limit| start + limit as u64 - 1)))
+                .min(input.limiter.deleted_entries_limit().map(|limit| start + limit as u64 - 1)))
             .unwrap();
         let tx_range_end = *tx_range.end();
 
@@ -173,7 +173,8 @@ mod tests {
                 .map(|block| block.body.len())
                 .sum::<usize>()
                 .min(
-                    next_tx_number_to_prune as usize + input.limiter.deleted_units_limit().unwrap(),
+                    next_tx_number_to_prune as usize +
+                        input.limiter.deleted_entries_limit().unwrap(),
                 )
                 .sub(1);
 
@@ -227,7 +228,7 @@ mod tests {
             );
         };
 
-        test_prune(6, (PruneProgress::segment_limit_reached(), 10));
+        test_prune(6, (PruneProgress::entries_limit_reached(), 10));
         test_prune(6, (PruneProgress::finished(), 2));
         test_prune(10, (PruneProgress::finished(), 8));
     }

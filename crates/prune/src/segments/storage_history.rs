@@ -51,7 +51,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
-        let limiter = PruneLimiter::new_with_fraction_of_units_limit(
+        let limiter = PruneLimiter::new_with_fraction_of_entries_limit(
             input.limiter,
             NonZeroUsize::new(2).unwrap(),
         );
@@ -227,7 +227,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip_while(|(i, (block_number, _, _))| {
-                    if let Some(limit) = input.limiter.deleted_units_limit() {
+                    if let Some(limit) = input.limiter.deleted_entries_limit() {
                         if *i >= limit / 2 * run {
                             return false
                         }
@@ -301,7 +301,7 @@ mod tests {
 
         let limiter = PruneLimiter::new_without_timeout(1000);
 
-        test_prune(&test_rig, 998, 1, (PruneProgress::segment_limit_reached(), 500), limiter);
+        test_prune(&test_rig, 998, 1, (PruneProgress::entries_limit_reached(), 500), limiter);
         test_prune(&test_rig, 998, 2, (PruneProgress::finished(), 499), limiter);
         test_prune(&test_rig, 1200, 3, (PruneProgress::finished(), 202), limiter);
     }

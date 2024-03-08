@@ -47,7 +47,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
-        let limiter = PruneLimiter::new_with_fraction_of_units_limit(
+        let limiter = PruneLimiter::new_with_fraction_of_entries_limit(
             input.limiter,
             NonZeroUsize::new(2).unwrap(),
         );
@@ -188,7 +188,7 @@ mod tests {
                     .iter()
                     .enumerate()
                     .skip_while(|(i, (block_number, _))| {
-                        *i < input.limiter.deleted_units_limit().unwrap() / 2 * run &&
+                        *i < input.limiter.deleted_entries_limit().unwrap() / 2 * run &&
                             *block_number <= to_block as usize
                     })
                     .next()
@@ -253,7 +253,7 @@ mod tests {
                 );
             };
 
-        test_prune(998, 1, (PruneProgress::segment_limit_reached(), 1000));
+        test_prune(998, 1, (PruneProgress::entries_limit_reached(), 1000));
         test_prune(998, 2, (PruneProgress::finished(), 998));
         test_prune(1400, 3, (PruneProgress::finished(), 804));
     }

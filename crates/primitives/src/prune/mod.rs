@@ -101,8 +101,8 @@ pub enum PruneProgress {
 pub enum PruneInterruptReason {
     /// Prune job timed out.
     Timeout,
-    /// Limit on the number of deleted segments per prune job was reached.
-    LimitSegmentsDeleted,
+    /// Limit on the number of deleted entries (rows in the database) per prune job was reached.
+    LimitEntriesDeleted,
 }
 
 impl PruneInterruptReason {
@@ -110,15 +110,15 @@ impl PruneInterruptReason {
     pub fn is_timeout(&self) -> bool {
         match self {
             Self::Timeout => true,
-            Self::LimitSegmentsDeleted => false,
+            Self::LimitEntriesDeleted => false,
         }
     }
 
-    /// Returns `true` if reason is reaching limit on deleted segments.
-    pub fn is_segment_limit_reached(&self) -> bool {
+    /// Returns `true` if reason is reaching limit on deleted entries.
+    pub fn is_entries_limit_reached(&self) -> bool {
         match self {
             Self::Timeout => false,
-            Self::LimitSegmentsDeleted => true,
+            Self::LimitEntriesDeleted => true,
         }
     }
 }
@@ -134,7 +134,7 @@ impl PruneProgress {
         } else if timeout {
             Self::timed_out()
         } else {
-            Self::segment_limit_reached()
+            Self::entries_limit_reached()
         }
     }
 
@@ -150,9 +150,9 @@ impl PruneProgress {
     }
 
     /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
-    /// [`PruneInterruptReason::LimitSegmentsDeleted`].
-    pub const fn segment_limit_reached() -> Self {
-        Self::HasMoreData(PruneInterruptReason::LimitSegmentsDeleted)
+    /// [`PruneInterruptReason::LimitEntriesDeleted`].
+    pub const fn entries_limit_reached() -> Self {
+        Self::HasMoreData(PruneInterruptReason::LimitEntriesDeleted)
     }
 
     /// Returns `true` if prune job is done.
@@ -171,11 +171,11 @@ impl PruneProgress {
         }
     }
 
-    /// Returns `true` if prune job was interrupted by reaching limit on deleted segments.
-    pub fn is_segment_limit_reached(&self) -> bool {
+    /// Returns `true` if prune job was interrupted by reaching limit on deleted entries.
+    pub fn is_entries_limit_reached(&self) -> bool {
         match self {
             Self::Finished => false,
-            Self::HasMoreData(reason) => reason.is_segment_limit_reached(),
+            Self::HasMoreData(reason) => reason.is_entries_limit_reached(),
         }
     }
 }

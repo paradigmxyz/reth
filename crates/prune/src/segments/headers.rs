@@ -44,15 +44,15 @@ impl<DB: Database> Segment<DB> for Headers {
             }
         };
 
-        let limiter = PruneLimiter::new_with_fraction_of_units_limit(
+        let limiter = PruneLimiter::new_with_fraction_of_entries_limit(
             input.limiter,
             NonZeroUsize::new(3).unwrap(),
         );
-        if let Some(limit) = limiter.deleted_units_limit() {
+        if let Some(limit) = limiter.deleted_entries_limit() {
             if limit == 0 {
                 // Nothing to do, `input.delete_limit` is less than 3, so we can't prune all
                 // headers-related tables up to the same height
-                return Ok(PruneOutput::not_done(PruneInterruptReason::LimitSegmentsDeleted))
+                return Ok(PruneOutput::not_done(PruneInterruptReason::LimitEntriesDeleted))
             }
         }
 
@@ -190,7 +190,7 @@ mod tests {
 
             let last_pruned_block_number = to_block.min(
                 next_block_number_to_prune +
-                    input.limiter.deleted_units_limit().unwrap() as BlockNumber / 3 -
+                    input.limiter.deleted_entries_limit().unwrap() as BlockNumber / 3 -
                     1,
             );
 
@@ -216,7 +216,7 @@ mod tests {
             );
         };
 
-        test_prune(3, (PruneProgress::segment_limit_reached(), 9));
+        test_prune(3, (PruneProgress::entries_limit_reached(), 9));
         test_prune(3, (PruneProgress::finished(), 3));
     }
 
@@ -234,6 +234,6 @@ mod tests {
 
         let provider = db.factory.provider_rw().unwrap();
         let result = segment.prune(&provider, input).unwrap();
-        assert_eq!(result, PruneOutput::not_done(PruneInterruptReason::LimitSegmentsDeleted));
+        assert_eq!(result, PruneOutput::not_done(PruneInterruptReason::LimitEntriesDeleted));
     }
 }

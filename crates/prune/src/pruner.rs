@@ -132,13 +132,13 @@ impl<DB: Database> Pruner<DB> {
                 ?stats,
                 ,
             );
-        } else if progress.is_segment_limit_reached() {
+        } else if progress.is_entries_limit_reached() {
             debug!(
                 target: "pruner",
                 %tip_block_number,
                 ?elapsed,
                 ?deleted_segments,
-                delete_limit=?limiter.deleted_units_limit(),
+                delete_limit=?limiter.deleted_entries_limit(),
                 ?progress,
                 ?stats,
                 "Pruner interrupted by limit on deleted segments"
