@@ -376,6 +376,7 @@ impl StorageInner {
         bundle_state: &BundleStateWithReceipts,
         client: &S,
         gas_used: u64,
+        blob_gas_used: Option<u64>,
         #[cfg(feature = "optimism")] chain_spec: &ChainSpec,
     ) -> Result<Header, BlockExecutionError> {
         let receipts = bundle_state.receipts_by_block(header.number);
@@ -403,6 +404,7 @@ impl StorageInner {
         };
 
         header.gas_used = gas_used;
+        header.blob_gas_used = blob_gas_used;
 
         // calculate the state root
         let state_root = client
@@ -447,6 +449,17 @@ impl StorageInner {
         let Block { header, body, .. } = block.block;
         let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
 
+        let mut blob_gas_used = None;
+        if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
+            let mut sum_blob_gas_used  = 0;
+            for tx in &body.transactions {
+                if let Some(blob_tx) = tx.transaction.as_eip4844() {
+                    sum_blob_gas_used += blob_tx.blob_gas();
+                }
+            }
+            blob_gas_used = Some(sum_blob_gas_used);
+        }
+
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 
         // fill in the rest of the fields
@@ -455,6 +468,7 @@ impl StorageInner {
             &bundle_state,
             client,
             gas_used,
+            blob_gas_used,
             #[cfg(feature = "optimism")]
             chain_spec.as_ref(),
         )?;
