@@ -2079,7 +2079,7 @@ enum MDBX_option_t {
    * for all processes interacting with the database.
    *
    * \details This defines the number of slots in the lock table that is used to
-   * track readers in the the environment. The default is about 100 for 4K
+   * track readers in the environment. The default is about 100 for 4K
    * system page size. Starting a read-only transaction normally ties a lock
    * table slot to the current thread until the environment closes or the thread
    * exits. If \ref MDBX_NOTLS is in use, \ref mdbx_txn_begin() instead ties the
@@ -3343,7 +3343,7 @@ mdbx_limits_txnsize_max(intptr_t pagesize);
  * \ingroup c_settings
  *
  * \details This defines the number of slots in the lock table that is used to
- * track readers in the the environment. The default is about 100 for 4K system
+ * track readers in the environment. The default is about 100 for 4K system
  * page size. Starting a read-only transaction normally ties a lock table slot
  * to the current thread until the environment closes or the thread exits. If
  * \ref MDBX_NOTLS is in use, \ref mdbx_txn_begin() instead ties the slot to the

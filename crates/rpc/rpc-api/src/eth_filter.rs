@@ -25,7 +25,7 @@ pub trait EthFilterApi {
 
     /// Returns all logs matching given filter (in a range 'from' - 'to').
     #[method(name = "getFilterLogs")]
-    async fn filter_logs(&self, id: FilterId) -> RpcResult<FilterChanges>;
+    async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>>;
 
     /// Uninstalls filter.
     #[method(name = "uninstallFilter")]
