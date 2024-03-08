@@ -59,7 +59,7 @@ mod chain_info;
 use chain_info::ChainInfoTracker;
 
 mod consistent_view;
-pub use consistent_view::ConsistentDbView;
+pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
 /// The main type for interacting with the blockchain.
 ///
