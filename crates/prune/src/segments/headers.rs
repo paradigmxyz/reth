@@ -44,11 +44,7 @@ impl<DB: Database> Segment<DB> for Headers {
             }
         };
 
-        let limiter = PruneLimiterBuilder::build_with_fraction_of_entries_limit(
-            input.limiter,
-            NonZeroUsize::new(3).unwrap(),
-        );
-        if let Some(limit) = limiter.deleted_entries_limit() {
+        if let Some(limit) = input.limiter.deleted_entries_limit() {
             if limit == 0 {
                 // Nothing to do, `input.delete_limit` is less than 3, so we can't prune all
                 // headers-related tables up to the same height
@@ -95,6 +91,11 @@ impl<DB: Database> Segment<DB> for Headers {
             }),
         })
     }
+
+    fn new_limiter_from_parent_scope_limiter(&self, limiter: &PruneLimiter) -> PruneLimiter {
+        PruneLimiterBuilder::with_fraction_of_entries_limit(limiter, NonZeroUsize::new(3).unwrap())
+            .build()
+    }
 }
 
 impl Headers {
@@ -130,7 +131,7 @@ mod tests {
         BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
         B256, U256,
     };
-    use reth_provider::{PruneCheckpointReader, PruneLimiter};
+    use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
     use reth_stages::test_utils::TestStageDB;
 
     #[test]
@@ -159,7 +160,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Headers)
                     .unwrap(),
                 to_block,
-                limiter: PruneLimiter::default().deleted_entries_limit(10),
+                limiter: PruneLimiterBuilder::default().deleted_entries_limit(10).build(),
             };
             let segment = Headers::new(prune_mode);
 
@@ -228,7 +229,7 @@ mod tests {
             previous_checkpoint: None,
             to_block: 1,
             // Less than total number of tables for `Headers` segment
-            limiter: PruneLimiter::default().deleted_entries_limit(2),
+            limiter: PruneLimiterBuilder::default().deleted_entries_limit(2).build(),
         };
         let segment = Headers::new(PruneMode::Full);
 

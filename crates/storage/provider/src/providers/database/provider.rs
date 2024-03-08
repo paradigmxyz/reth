@@ -37,10 +37,10 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, GotExpected, Head, Header, PruneCheckpoint, PruneModes, PruneSegment,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    ChainInfo, ChainSpec, GotExpected, Head, Header, PruneCheckpoint, PruneModes, PruneProgress,
+    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
+    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -786,7 +786,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// Prune the table for the specified pre-sorted key iterator.
     ///
     /// Returns number of rows pruned.
-    pub fn prune_table_with_iterator<T: Table>(
+    pub fn prune_table_with_iterator<'a, T: Table>(
         &self,
         keys: impl IntoIterator<Item = T::Key>,
         mut limiter: PruneLimiter,
@@ -818,7 +818,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// Prune the table for the specified key range.
     ///
     /// Returns number of rows pruned.
-    pub fn prune_table_with_range<T: Table>(
+    pub fn prune_table_with_range<'a, T: Table>(
         &self,
         keys: impl RangeBounds<T::Key> + Clone + Debug,
         mut limiter: PruneLimiter,
@@ -2543,8 +2543,8 @@ pub struct PruneLimiterBuilder {
     /// Current number of entries (rows in the database) that have been deleted during the prune
     /// job.
     deleted_entries_count: usize,
-        /// Time at which the prune job was started.
-        start: Option<Instant>,
+    /// Time at which the prune job was started.
+    start: Option<Instant>,
     /// The max time one prune job can run.
     job_timeout: Option<Duration>,
 }
@@ -2572,6 +2572,24 @@ impl PruneLimiterBuilder {
         self
     }
 
+    /// Sets fields identical to given instance except for the limit on deleted entries, which is
+    /// set to a fraction of the corresponding limit.
+    pub fn with_fraction_of_entries_limit(
+        limiter: &PruneLimiter,
+        denominator: NonZeroUsize,
+    ) -> Self {
+        let PruneLimiter {
+            deleted_entries_limit, deleted_entries_count, job_timeout, start, ..
+        } = *limiter;
+
+        Self {
+            deleted_entries_limit: deleted_entries_limit.map(|limit| limit / denominator),
+            deleted_entries_count,
+            job_timeout,
+            start,
+        }
+    }
+
     /// Returns a new instance of [`PruneLimiter`].
     pub fn build(self) -> PruneLimiter {
         let Self { deleted_entries_limit, deleted_entries_count, job_timeout, start } = self;
@@ -2583,18 +2601,6 @@ impl PruneLimiterBuilder {
             start,
             timed_out: false,
         }
-    }
-
-    /// Returns a new instance of [`PruneLimiter`], setting fields identical to given instance 
-    /// except for the limit on deleted entries, which is set to a fraction of the corresponding
-    /// limit.
-    pub fn build_with_fraction_of_entries_limit(
-        mut limiter: PruneLimiter,
-        denominator: NonZeroUsize,
-    ) -> PruneLimiter {
-        limiter.deleted_entries_limit = limiter.deleted_entries_limit.map(|limit| limit / denominator);
-
-        limiter
     }
 }
 
@@ -2610,10 +2616,10 @@ impl PruneLimiter {
         self.job_timeout.as_ref()
     }
 
-        /// Returns the configured start of the prune job.
-        pub fn start(&self) -> Option<&Instant> {
-            self.start.as_ref()
-        }
+    /// Returns the configured start of the prune job.
+    pub fn start(&self) -> Option<&Instant> {
+        self.start.as_ref()
+    }
 
     /// Returns `true` if prune job has timed out.
     pub fn is_timed_out(&self) -> bool {

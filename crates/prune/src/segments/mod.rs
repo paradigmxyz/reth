@@ -15,7 +15,7 @@ pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;
 pub use sender_recovery::SenderRecovery;
 pub use set::SegmentSet;
-use std::fmt::Debug;
+use std::{fmt::Debug, num::NonZeroUsize};
 pub use storage_history::StorageHistory;
 pub use transaction_lookup::TransactionLookup;
 pub use transactions::Transactions;
@@ -29,6 +29,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::PruneLimiter, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
+    PruneLimiterBuilder,
 };
 use std::ops::RangeInclusive;
 use tracing::error;
@@ -62,15 +63,22 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
     ) -> ProviderResult<()> {
         provider.save_prune_checkpoint(self.segment(), checkpoint)
     }
+
+    /// Gets the limiter for this specific segment, built from the limiter used in the parent
+    /// scope.
+    fn new_limiter_from_parent_scope_limiter(&self, limiter: &PruneLimiter) -> PruneLimiter {
+        PruneLimiterBuilder::with_fraction_of_entries_limit(limiter, NonZeroUsize::new(1).unwrap())
+            .build()
+    }
 }
 
 /// Segment pruning input, see [Segment::prune].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PruneInput {
     pub(crate) previous_checkpoint: Option<PruneCheckpoint>,
     /// Target block up to which the pruning needs to be done, inclusive.
     pub(crate) to_block: BlockNumber,
-    /// Limits the prune job.
+    /// Limits pruning of segment in prune job.
     pub(crate) limiter: PruneLimiter,
 }
 
@@ -163,7 +171,7 @@ impl PruneOutput {
     /// Returns a [PruneOutput] with `done = true`, `pruned = 0` and `checkpoint = None`.
     /// Use when no pruning is needed.
     pub(crate) const fn done() -> Self {
-        Self { progress: PruneProgress::finished(), pruned: 0, checkpoint: None }
+        Self { progress: PruneProgress::new_finished(), pruned: 0, checkpoint: None }
     }
 
     /// Returns a [PruneOutput] with `done = false`, `pruned = 0` and `checkpoint = None`.

@@ -12,7 +12,7 @@ use reth_db::{
     tables,
 };
 use reth_primitives::{PruneMode, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneLimiterBuilder};
+use reth_provider::{DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -51,14 +51,10 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
-        let limiter = PruneLimiterBuilder::build_with_fraction_of_entries_limit(
-            input.limiter,
-            NonZeroUsize::new(2).unwrap(),
-        );
         let (pruned_changesets, progress) = provider
             .prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
-                limiter,
+                input.limiter,
                 |_| false,
                 |row| last_changeset_pruned_block = Some(row.0.block_number()),
             )?;
@@ -95,6 +91,11 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             }),
         })
     }
+
+    fn new_limiter_from_parent_scope_limiter(&self, limiter: &PruneLimiter) -> PruneLimiter {
+        PruneLimiterBuilder::with_fraction_of_entries_limit(limiter, NonZeroUsize::new(2).unwrap())
+            .build()
+    }
 }
 
 #[cfg(test)]
@@ -110,7 +111,7 @@ mod tests {
         Account, Address, BlockNumber, IntegerList, PruneCheckpoint, PruneMode, PruneProgress,
         PruneSegment, StorageEntry, B256,
     };
-    use reth_provider::{PruneCheckpointReader, PruneLimiter};
+    use reth_provider::{PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::{
         collections::BTreeMap,
@@ -190,10 +191,10 @@ mod tests {
             to_block: BlockNumber,
             run: usize,
             expected_result: (PruneProgress, usize),
-            limiter: PruneLimiter,
         ) {
             let prune_mode = PruneMode::Before(to_block);
             let segment = StorageHistory::new(prune_mode);
+            let limiter = PruneLimiterBuilder::default().deleted_entries_limit(1000).build();
             let input = test_rig.get_input(to_block, limiter);
 
             let provider = test_rig.db.factory.provider_rw().unwrap();
@@ -299,11 +300,9 @@ mod tests {
             );
         }
 
-        let limiter = PruneLimiter::default().deleted_entries_limit(1000);
-
-        test_prune(&test_rig, 998, 1, (PruneProgress::entries_limit_reached(), 500), limiter);
-        test_prune(&test_rig, 998, 2, (PruneProgress::finished(), 499), limiter);
-        test_prune(&test_rig, 1200, 3, (PruneProgress::finished(), 202), limiter);
+        test_prune(&test_rig, 998, 1, (PruneProgress::new_entries_limit_reached(), 500));
+        test_prune(&test_rig, 998, 2, (PruneProgress::new_finished(), 499));
+        test_prune(&test_rig, 1200, 3, (PruneProgress::new_finished(), 202));
     }
 
     #[test]
@@ -314,7 +313,8 @@ mod tests {
 
         let start = Instant::now();
 
-        let limiter = PruneLimiterBuilder::default().job_timeout(PRUNE_JOB_TIMEOUT, start).build();
+        let mut limiter =
+            PruneLimiterBuilder::default().job_timeout(PRUNE_JOB_TIMEOUT, start).build();
         let segment = StorageHistory::new(PRUNE_MODE);
         let test_rig = TestRig::new();
         let input = test_rig.get_input(TO_BLOCK, limiter);

@@ -81,7 +81,7 @@ mod tests {
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, TxNumber, B256,
     };
-    use reth_provider::{PruneCheckpointReader, PruneLimiter};
+    use reth_provider::{PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
 
@@ -107,7 +107,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Transactions)
                     .unwrap(),
                 to_block,
-                limiter: PruneLimiter::default().deleted_entries_limit(10),
+                limiter: PruneLimiterBuilder::default().deleted_entries_limit(10).build(),
             };
             let segment = Transactions::new(prune_mode);
 
@@ -180,7 +180,7 @@ mod tests {
             );
         };
 
-        test_prune(6, (PruneProgress::entries_limit_reached(), 10));
-        test_prune(6, (PruneProgress::finished(), 2));
+        test_prune(6, (PruneProgress::new_entries_limit_reached(), 10));
+        test_prune(6, (PruneProgress::new_finished(), 2));
     }
 }

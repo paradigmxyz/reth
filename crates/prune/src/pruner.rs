@@ -9,7 +9,9 @@ use reth_db::database::Database;
 use reth_primitives::{
     BlockNumber, PruneMode, PruneProgress, PrunePurpose, PruneSegment, StaticFileSegment,
 };
-use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder};
+use reth_provider::{
+    DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder,
+};
 use reth_tokio_util::EventListeners;
 use std::{
     collections::BTreeMap,
@@ -107,10 +109,12 @@ impl<DB: Database> Pruner<DB> {
                 tip_block_number.saturating_sub(previous_tip_block_number) as usize
             }))
             .min(self.prune_max_blocks_per_run);
-        let limiter = PruneLimiterBuilder::default()
-            .deleted_entries_limit(self.delete_limit * blocks_since_last_run)
-            .job_timeout(self.timeout)
-            .build(start);
+        let mut limiter_builder = PruneLimiterBuilder::default();
+        limiter_builder.deleted_entries_limit(self.delete_limit * blocks_since_last_run);
+        if let Some(timeout) = self.timeout {
+            limiter_builder.job_timeout(timeout, start);
+        }
+        let limiter = limiter_builder.build();
 
         let provider = self.provider_factory.provider_rw()?;
         let (stats, deleted_entries, progress) =
@@ -188,8 +192,11 @@ impl<DB: Database> Pruner<DB> {
 
                     let segment_start = Instant::now();
                     let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
-                    let output = segment
-                        .prune(provider, PruneInput { previous_checkpoint, to_block, limiter })?;
+                    let segment_limiter = segment.new_limiter_from_parent_scope_limiter(&limiter);
+                    let output = segment.prune(
+                        provider,
+                        PruneInput { previous_checkpoint, to_block, limiter: segment_limiter },
+                    )?;
                     if let Some(checkpoint) = output.checkpoint {
                         segment.save_checkpoint(
                             provider,

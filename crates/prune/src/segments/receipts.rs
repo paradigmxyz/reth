@@ -100,7 +100,7 @@ mod tests {
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, TxNumber, B256,
     };
-    use reth_provider::{PruneCheckpointReader, PruneLimiter};
+    use reth_provider::{PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
 
@@ -140,7 +140,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Receipts)
                     .unwrap(),
                 to_block,
-                limiter: PruneLimiter::default().deleted_entries_limit(10),
+                limiter: PruneLimiterBuilder::default().deleted_entries_limit(10).build(),
             };
             let segment = Receipts::new(prune_mode);
 

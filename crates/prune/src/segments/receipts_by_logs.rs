@@ -224,7 +224,9 @@ mod tests {
         generators::{random_block_range, random_eoa_account, random_log, random_receipt},
     };
     use reth_primitives::{PruneMode, PruneProgress, PruneSegment, ReceiptsLogPruneConfig, B256};
-    use reth_provider::{PruneCheckpointReader, PruneLimiter, TransactionsProvider};
+    use reth_provider::{
+        PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder, TransactionsProvider,
+    };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::collections::BTreeMap;
 
@@ -285,7 +287,7 @@ mod tests {
                         .get_prune_checkpoint(PruneSegment::ContractLogs)
                         .unwrap(),
                     to_block: tip,
-                    limiter: PruneLimiter::default().deleted_entries_limit(10),
+                    limiter: PruneLimiterBuilder::default().deleted_entries_limit(10).build(),
                 },
             );
             provider.commit().expect("commit");

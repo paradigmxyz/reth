@@ -8,7 +8,7 @@ use crate::{
 };
 use reth_db::{database::Database, models::ShardedKey, tables};
 use reth_primitives::{PruneMode, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneLimiterBuilder};
+use reth_provider::{DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -45,16 +45,12 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             }
         };
         let range_end = *range.end();
-
         let mut last_changeset_pruned_block = None;
-        let limiter = PruneLimiterBuilder::with_fraction_of_entries_limit(
-            &input.limiter,
-            NonZeroUsize::new(2).unwrap(),
-        ).build(input.limiter.start());
+
         let (pruned_changesets, progress) = provider
             .prune_table_with_range::<tables::AccountChangeSets>(
                 range,
-                limiter,
+                input.limiter,
                 |_| false,
                 |row| last_changeset_pruned_block = Some(row.0),
             )?;
@@ -91,6 +87,11 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             }),
         })
     }
+
+    fn new_limiter_from_parent_scope_limiter(&self, limiter: &PruneLimiter) -> PruneLimiter {
+        PruneLimiterBuilder::with_fraction_of_entries_limit(limiter, NonZeroUsize::new(2).unwrap())
+            .build()
+    }
 }
 
 #[cfg(test)]
@@ -105,7 +106,7 @@ mod tests {
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, B256,
     };
-    use reth_provider::{PruneCheckpointReader, PruneLimiter};
+    use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::{collections::BTreeMap, ops::AddAssign};
 
@@ -156,7 +157,7 @@ mod tests {
                         .get_prune_checkpoint(PruneSegment::AccountHistory)
                         .unwrap(),
                     to_block,
-                    limiter: PruneLimiter::default().deleted_entries_limit(2000),
+                    limiter: PruneLimiterBuilder::default().deleted_entries_limit(2000).build(),
                 };
                 let segment = AccountHistory::new(prune_mode);
 
