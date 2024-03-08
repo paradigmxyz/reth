@@ -802,7 +802,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 let row = cursor.seek_exact(key.clone())?;
                 if let Some(row) = row {
                     cursor.delete_current()?;
-                    limiter.increment_deleted_units_count();
+                    limiter.increment_deleted_entries_count();
                     delete_callback(row);
                 }
 
@@ -834,7 +834,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             while let Some(row) = walker.next().transpose()? {
                 if !skip_filter(&row) {
                     walker.delete_current()?;
-                    limiter.increment_deleted_units_count();
+                    limiter.increment_deleted_entries_count();
                     delete_callback(row);
                 }
 
@@ -2605,12 +2605,12 @@ impl PruneLimiter {
     }
 
     /// Increments the count of deleted entries by one.
-    pub fn increment_deleted_units_count(&mut self) {
+    pub fn increment_deleted_entries_count(&mut self) {
         self.deleted_entries_count += 1
     }
 
     /// Increments the count of deleted entries by one.
-    pub fn increment_deleted_units_count_by(&mut self, entries: usize) {
+    pub fn increment_deleted_entries_count_by(&mut self, entries: usize) {
         self.deleted_entries_count += entries
     }
 }
