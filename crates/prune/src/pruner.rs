@@ -243,7 +243,6 @@ impl<DB: Database> Pruner<DB> {
                 }
 
                 if limiter.at_limit() {
-                    done = false;
                     break
                 }
             }
