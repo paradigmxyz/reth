@@ -296,8 +296,7 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config)
-                                .set_record_logs(call_config.with_log.unwrap_or_default()),
+                            TracingInspectorConfig::from_geth_call_config(&call_config),
                         );
 
                         let frame = self
@@ -318,10 +317,7 @@ where
                             .into_pre_state_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config)
-                                // if in default mode, we need to return all touched storages, for
-                                // which we need to record steps and statediff
-                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
+                            TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
                         );
 
                         let frame =
@@ -540,8 +536,7 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config)
-                                .set_record_logs(call_config.with_log.unwrap_or_default()),
+                            TracingInspectorConfig::from_geth_call_config(&call_config),
                         );
 
                         let (res, _) = inspect(db, env, &mut inspector)?;
@@ -558,10 +553,7 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config)
-                                // if in default mode, we need to return all touched storages, for
-                                // which we need to record steps and statediff
-                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
+                            TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
                         );
                         let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
