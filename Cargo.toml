@@ -57,6 +57,7 @@ members = [
     "crates/tracing/",
     "crates/transaction-pool/",
     "crates/trie/",
+    "crates/trie-parallel/",
     "examples/",
     "examples/additional-rpc-namespace-in-cli/",
     "examples/beacon-api-sse/",
@@ -182,6 +183,7 @@ reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
+reth-trie-parallel = { path = "crates/trie-parallel" }
 
 # revm
 revm = { version = "6.1.0", features = ["std", "secp256k1"], default-features = false }
