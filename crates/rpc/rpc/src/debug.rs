@@ -36,7 +36,7 @@ use revm::{
 };
 use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
-    FourByteInspector, TracingInspector, TracingInspectorConfig,
+    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
 };
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -339,6 +339,24 @@ where
                         return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
+                    GethDebugBuiltInTracerType::MuxTracer => {
+                        let mux_config = tracer_config
+                            .into_mux_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+
+                        let mut inspector = MuxInspector::try_from_config(mux_config)?;
+
+                        let frame = self
+                            .inner
+                            .eth_api
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+                                let frame = inspector.try_into_mux_frame(&res, &db)?;
+                                Ok(frame.into())
+                            })
+                            .await?;
+                        return Ok(frame)
+                    }
                 },
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
@@ -545,18 +563,29 @@ where
                                 // which we need to record steps and statediff
                                 .set_steps_and_state_diffs(prestate_config.is_default_mode()),
                         );
-                        let (res, _) = inspect(&mut *db, env, &mut inspector)?;
+                        let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
                         let frame = inspector.into_geth_builder().geth_prestate_traces(
                             &res,
                             prestate_config,
-                            &*db,
+                            db,
                         )?;
 
                         return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::NoopTracer => {
                         Ok((NoopFrame::default().into(), Default::default()))
+                    }
+                    GethDebugBuiltInTracerType::MuxTracer => {
+                        let mux_config = tracer_config
+                            .into_mux_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+
+                        let mut inspector = MuxInspector::try_from_config(mux_config)?;
+
+                        let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+                        let frame = inspector.try_into_mux_frame(&res, db)?;
+                        return Ok((frame.into(), res.state))
                     }
                 },
                 GethDebugTracerType::JsTracer(code) => {
