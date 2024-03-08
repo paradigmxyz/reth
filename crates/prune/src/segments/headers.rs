@@ -6,7 +6,7 @@ use itertools::Itertools;
 use reth_db::{database::Database, table::Table, tables};
 use reth_interfaces::RethResult;
 use reth_primitives::{BlockNumber, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneLimiter};
+use reth_provider::{DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder};
 use std::{num::NonZeroUsize, ops::RangeInclusive};
 use tracing::{instrument, trace};
 
@@ -44,7 +44,7 @@ impl<DB: Database> Segment<DB> for Headers {
             }
         };
 
-        let limiter = PruneLimiter::new_with_fraction_of_entries_limit(
+        let limiter = PruneLimiterBuilder::build_with_fraction_of_entries_limit(
             input.limiter,
             NonZeroUsize::new(3).unwrap(),
         );
@@ -159,7 +159,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Headers)
                     .unwrap(),
                 to_block,
-                limiter: PruneLimiter::new_without_timeout(10),
+                limiter: PruneLimiter::default().deleted_entries_limit(10),
             };
             let segment = Headers::new(prune_mode);
 
@@ -228,7 +228,7 @@ mod tests {
             previous_checkpoint: None,
             to_block: 1,
             // Less than total number of tables for `Headers` segment
-            limiter: PruneLimiter::new_without_timeout(2),
+            limiter: PruneLimiter::default().deleted_entries_limit(2),
         };
         let segment = Headers::new(PruneMode::Full);
 

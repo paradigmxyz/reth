@@ -107,7 +107,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Transactions)
                     .unwrap(),
                 to_block,
-                limiter: PruneLimiter::new_without_timeout(10),
+                limiter: PruneLimiter::default().deleted_entries_limit(10),
             };
             let segment = Transactions::new(prune_mode);
 

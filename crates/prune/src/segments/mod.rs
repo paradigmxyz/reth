@@ -65,7 +65,7 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
 }
 
 /// Segment pruning input, see [Segment::prune].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct PruneInput {
     pub(crate) previous_checkpoint: Option<PruneCheckpoint>,
     /// Target block up to which the pruning needs to be done, inclusive.

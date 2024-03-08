@@ -285,7 +285,7 @@ mod tests {
                         .get_prune_checkpoint(PruneSegment::ContractLogs)
                         .unwrap(),
                     to_block: tip,
-                    limiter: PruneLimiter::new_without_timeout(10),
+                    limiter: PruneLimiter::default().deleted_entries_limit(10),
                 },
             );
             provider.commit().expect("commit");

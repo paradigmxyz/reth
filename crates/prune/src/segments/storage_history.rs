@@ -12,7 +12,7 @@ use reth_db::{
     tables,
 };
 use reth_primitives::{PruneMode, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneLimiter};
+use reth_provider::{DatabaseProviderRW, PruneLimiterBuilder};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -51,7 +51,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
-        let limiter = PruneLimiter::new_with_fraction_of_entries_limit(
+        let limiter = PruneLimiterBuilder::build_with_fraction_of_entries_limit(
             input.limiter,
             NonZeroUsize::new(2).unwrap(),
         );
@@ -299,7 +299,7 @@ mod tests {
             );
         }
 
-        let limiter = PruneLimiter::new_without_timeout(1000);
+        let limiter = PruneLimiter::default().deleted_entries_limit(1000);
 
         test_prune(&test_rig, 998, 1, (PruneProgress::entries_limit_reached(), 500), limiter);
         test_prune(&test_rig, 998, 2, (PruneProgress::finished(), 499), limiter);
@@ -314,7 +314,7 @@ mod tests {
 
         let start = Instant::now();
 
-        let limiter = PruneLimiter::new(None, Some(PRUNE_JOB_TIMEOUT), start);
+        let limiter = PruneLimiterBuilder::default().job_timeout(PRUNE_JOB_TIMEOUT, start).build();
         let segment = StorageHistory::new(PRUNE_MODE);
         let test_rig = TestRig::new();
         let input = test_rig.get_input(TO_BLOCK, limiter);

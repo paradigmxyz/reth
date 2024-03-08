@@ -9,7 +9,7 @@ use reth_db::database::Database;
 use reth_primitives::{
     BlockNumber, PruneMode, PruneProgress, PrunePurpose, PruneSegment, StaticFileSegment,
 };
-use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneLimiter};
+use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder};
 use reth_tokio_util::EventListeners;
 use std::{
     collections::BTreeMap,
@@ -107,8 +107,10 @@ impl<DB: Database> Pruner<DB> {
                 tip_block_number.saturating_sub(previous_tip_block_number) as usize
             }))
             .min(self.prune_max_blocks_per_run);
-        let delete_limit = self.delete_limit * blocks_since_last_run;
-        let limiter = PruneLimiter::new(Some(delete_limit), self.timeout, start);
+        let limiter = PruneLimiterBuilder::default()
+            .deleted_entries_limit(self.delete_limit * blocks_since_last_run)
+            .job_timeout(self.timeout)
+            .build(start);
 
         let provider = self.provider_factory.provider_rw()?;
         let (stats, deleted_entries, progress) =

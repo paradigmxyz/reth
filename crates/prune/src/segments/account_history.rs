@@ -8,7 +8,7 @@ use crate::{
 };
 use reth_db::{database::Database, models::ShardedKey, tables};
 use reth_primitives::{PruneMode, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneLimiter};
+use reth_provider::{DatabaseProviderRW, PruneLimiterBuilder};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -47,10 +47,10 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
-        let limiter = PruneLimiter::new_with_fraction_of_entries_limit(
-            input.limiter,
+        let limiter = PruneLimiterBuilder::with_fraction_of_entries_limit(
+            &input.limiter,
             NonZeroUsize::new(2).unwrap(),
-        );
+        ).build(input.limiter.start());
         let (pruned_changesets, progress) = provider
             .prune_table_with_range::<tables::AccountChangeSets>(
                 range,
@@ -156,7 +156,7 @@ mod tests {
                         .get_prune_checkpoint(PruneSegment::AccountHistory)
                         .unwrap(),
                     to_block,
-                    limiter: PruneLimiter::new_without_timeout(2000),
+                    limiter: PruneLimiter::default().deleted_entries_limit(2000),
                 };
                 let segment = AccountHistory::new(prune_mode);
 

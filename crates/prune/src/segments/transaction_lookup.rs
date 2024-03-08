@@ -153,7 +153,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::TransactionLookup)
                     .unwrap(),
                 to_block,
-                limiter: PruneLimiter::new_without_timeout(10),
+                limiter: PruneLimiter::default().deleted_entries_limit(10),
             };
             let segment = TransactionLookup::new(prune_mode);
 
