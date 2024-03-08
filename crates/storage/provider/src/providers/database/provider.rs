@@ -2580,7 +2580,7 @@ impl PruneLimiter {
     }
 
     /// Returns true if prune limit is reached.
-    pub fn at_limit(&mut self) -> bool {
+    pub fn is_limit_reached(&mut self) -> bool {
         let Self { deleted_units_limit, deleted_units_count, job_timeout, start, .. } = self;
 
         if let Some(limit) = deleted_units_limit {
