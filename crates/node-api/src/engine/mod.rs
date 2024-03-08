@@ -162,7 +162,7 @@ pub fn validate_withdrawals_presence(
 /// will return [AttributesValidationError::UnsupportedFork].
 ///
 /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
-/// this will return [AttributesValidationError::NoParentBeaconBlockRootPostCancun].
+/// this will return [PayloadOrAttributesValidationError::NoParentBeaconBlockRootPostCancun].
 ///
 /// This implements the following Engine API spec rules:
 ///
