@@ -139,7 +139,7 @@ pub struct RpcServerArgs {
     #[arg(long, visible_alias = "--rpc.returndata.limit", default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into())]
     pub rpc_max_response_size: MaxU32,
 
-    /// Set the the maximum concurrent subscriptions per connection.
+    /// Set the maximum concurrent subscriptions per connection.
     #[arg(long, default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN.into())]
     pub rpc_max_subscriptions_per_connection: MaxU32,
 
