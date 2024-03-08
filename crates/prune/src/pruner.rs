@@ -138,7 +138,7 @@ impl<DB: Database> Pruner<DB> {
             delete_limit=?limiter.deleted_entries_limit(),
             ?progress,
             ?stats,
-            message,
+            "{message}",
         );
 
         self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
