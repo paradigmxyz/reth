@@ -31,7 +31,7 @@ fn main() -> eyre::Result<()> {
     // the `provider_rw` function and look for the `Writer` variants of the traits.
     let provider = factory.provider()?;
 
-    // Run basic queryies against the DB
+    // Run basic queries against the DB
     let block_num = 100;
     header_provider_example(&provider, block_num)?;
     block_provider_example(&provider, block_num)?;

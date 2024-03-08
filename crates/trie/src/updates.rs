@@ -6,12 +6,14 @@ use reth_db::{
 };
 use reth_primitives::{
     trie::{
-        BranchNodeCompact, Nibbles, StorageTrieEntry, StoredBranchNode, StoredNibbles,
+        BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry, StoredBranchNode, StoredNibbles,
         StoredNibblesSubKey,
     },
     B256,
 };
-use std::collections::{hash_map::IntoIter, HashMap};
+use std::collections::{hash_map::IntoIter, HashMap, HashSet};
+
+use crate::walker::TrieWalker;
 
 /// The key of a trie node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -88,20 +90,43 @@ impl TrieUpdates {
         );
     }
 
-    /// Extend the updates with storage trie updates.
-    pub fn extend_with_storage_updates(
+    /// Finalize state trie updates.
+    pub fn finalize_state_updates<C>(
         &mut self,
-        hashed_address: B256,
-        updates: HashMap<Nibbles, BranchNodeCompact>,
+        walker: TrieWalker<C>,
+        hash_builder: HashBuilder,
+        destroyed_accounts: HashSet<B256>,
     ) {
-        self.extend(updates.into_iter().map(|(nibbles, node)| {
-            (TrieKey::StorageNode(hashed_address, nibbles.into()), TrieOp::Update(node))
-        }));
+        // Add updates from trie walker.
+        let (_, walker_updates) = walker.split();
+        self.extend(walker_updates);
+
+        // Add account node updates from hash builder.
+        let (_, hash_builder_updates) = hash_builder.split();
+        self.extend_with_account_updates(hash_builder_updates);
+
+        // Add deleted storage tries for destroyed accounts.
+        self.extend(
+            destroyed_accounts.into_iter().map(|key| (TrieKey::StorageTrie(key), TrieOp::Delete)),
+        );
     }
 
-    /// Extend the updates with deletes.
-    pub fn extend_with_deletes(&mut self, keys: impl IntoIterator<Item = TrieKey>) {
-        self.extend(keys.into_iter().map(|key| (key, TrieOp::Delete)));
+    /// Finalize storage trie updates for a given address.
+    pub fn finalize_storage_updates<C>(
+        &mut self,
+        hashed_address: B256,
+        walker: TrieWalker<C>,
+        hash_builder: HashBuilder,
+    ) {
+        // Add updates from trie walker.
+        let (_, walker_updates) = walker.split();
+        self.extend(walker_updates);
+
+        // Add storage node updates from hash builder.
+        let (_, hash_builder_updates) = hash_builder.split();
+        self.extend(hash_builder_updates.into_iter().map(|(nibbles, node)| {
+            (TrieKey::StorageNode(hashed_address, nibbles.into()), TrieOp::Update(node))
+        }));
     }
 
     /// Flush updates all aggregated updates to the database.

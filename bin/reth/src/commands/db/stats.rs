@@ -84,11 +84,11 @@ impl Command {
             }
 
             let max_widths = table.column_max_content_widths();
-            let mut seperator = Row::new();
+            let mut separator = Row::new();
             for width in max_widths {
-                seperator.add_cell(Cell::new("-".repeat(width as usize)));
+                separator.add_cell(Cell::new("-".repeat(width as usize)));
             }
-            table.add_row(seperator);
+            table.add_row(separator);
 
             let mut row = Row::new();
             row.add_cell(Cell::new("Tables"))
@@ -259,11 +259,11 @@ impl Command {
         }
 
         let max_widths = table.column_max_content_widths();
-        let mut seperator = Row::new();
+        let mut separator = Row::new();
         for width in max_widths {
-            seperator.add_cell(Cell::new("-".repeat(width as usize)));
+            separator.add_cell(Cell::new("-".repeat(width as usize)));
         }
-        table.add_row(seperator);
+        table.add_row(separator);
 
         let mut row = Row::new();
         row.add_cell(Cell::new("Total"))

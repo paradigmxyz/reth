@@ -185,13 +185,14 @@ where
         &mut self,
         reason: DisconnectReason,
     ) -> Result<(), P2PStreamError> {
-        let mut buf = BytesMut::new();
-        P2PMessage::Disconnect(reason).encode(&mut buf);
         trace!(
             %reason,
             "Sending disconnect message during the handshake",
         );
-        self.inner.send(buf.freeze()).await.map_err(P2PStreamError::Io)
+        self.inner
+            .send(Bytes::from(alloy_rlp::encode(P2PMessage::Disconnect(reason))))
+            .await
+            .map_err(P2PStreamError::Io)
     }
 }
 
