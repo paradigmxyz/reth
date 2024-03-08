@@ -1,6 +1,7 @@
 use reth_node_api::{
     engine::validate_parent_beacon_block_root_presence, AttributesValidationError,
-    EngineApiMessageVersion, EngineTypes, PayloadOrAttributes,
+    EngineApiMessageVersion, EngineTypes, MessageValidationKind, PayloadOrAttributes,
+    PayloadOrAttributesValidationError,
 };
 use reth_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
 use reth_primitives::{ChainSpec, Hardfork};
@@ -32,12 +33,14 @@ impl EngineTypes for OptimismEngineTypes {
         validate_withdrawals_presence(
             chain_spec,
             version,
+            payload_or_attrs.message_validation_kind(),
             payload_or_attrs.timestamp(),
             payload_or_attrs.withdrawals().is_some(),
         )?;
         validate_parent_beacon_block_root_presence(
             chain_spec,
             version,
+            payload_or_attrs.message_validation_kind(),
             payload_or_attrs.timestamp(),
             payload_or_attrs.parent_beacon_block_root().is_some(),
         )
@@ -54,6 +57,7 @@ impl EngineTypes for OptimismEngineTypes {
 pub fn validate_withdrawals_presence(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
+    message_validation_kind: MessageValidationKind,
     timestamp: u64,
     has_withdrawals: bool,
 ) -> Result<(), AttributesValidationError> {
@@ -62,18 +66,22 @@ pub fn validate_withdrawals_presence(
     match version {
         EngineApiMessageVersion::V1 => {
             if has_withdrawals {
-                return Err(AttributesValidationError::WithdrawalsNotSupportedInV1)
+                return Err(message_validation_kind
+                    .to_error(PayloadOrAttributesValidationError::WithdrawalsNotSupportedInV1))
             }
             if is_shanghai {
-                return Err(AttributesValidationError::NoWithdrawalsPostShanghai)
+                return Err(message_validation_kind
+                    .to_error(PayloadOrAttributesValidationError::NoWithdrawalsPostShanghai))
             }
         }
         EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
             if is_shanghai && !has_withdrawals {
-                return Err(AttributesValidationError::NoWithdrawalsPostShanghai)
+                return Err(message_validation_kind
+                    .to_error(PayloadOrAttributesValidationError::NoWithdrawalsPostShanghai))
             }
             if !is_shanghai && has_withdrawals {
-                return Err(AttributesValidationError::HasWithdrawalsPreShanghai)
+                return Err(message_validation_kind
+                    .to_error(PayloadOrAttributesValidationError::HasWithdrawalsPreShanghai))
             }
         }
     };

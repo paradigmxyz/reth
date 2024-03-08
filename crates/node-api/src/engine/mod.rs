@@ -11,13 +11,11 @@ pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 
 /// Contains error types used in the traits defined in this crate.
 pub mod error;
-pub use error::AttributesValidationError;
+pub use error::{AttributesValidationError, PayloadOrAttributesValidationError};
 
 /// Contains types used in implementations of the [PayloadAttributes] trait.
 pub mod payload;
 pub use payload::PayloadOrAttributes;
-
-use self::error::PayloadOrAttributesValidationError;
 
 /// The types that are used by the engine API.
 pub trait EngineTypes:
