@@ -313,7 +313,7 @@ where
             tx_type: tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
-            logs: result.logs().into_iter().cloned().map(Into::into).collect(),
+            logs: result.logs().iter().cloned().map(Into::into).collect(),
             ..Default::default()
         }));
 
