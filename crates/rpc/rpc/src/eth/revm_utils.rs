@@ -148,15 +148,7 @@ where
     <DB as Database>::Error: Into<EthApiError>,
     I: GetInspector<DB>,
 {
-    let mut evm = revm::Evm::builder()
-        .with_db(db)
-        .with_external_context(inspector)
-        .with_env_with_handler_cfg(env)
-        .append_handler_register(inspector_handle_register)
-        .build();
-    let res = evm.transact()?;
-    let (_, env) = evm.into_db_and_env_with_handler_cfg();
-    Ok((res, env))
+    inspect_and_return_db(db, env, inspector).map(|(res, env, _db)| (res, env))
 }
 
 /// Same as [inspect] but also returns the database again.

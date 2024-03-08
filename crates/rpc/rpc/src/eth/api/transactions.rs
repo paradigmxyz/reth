@@ -38,6 +38,7 @@ use reth_rpc_types::{
     TransactionReceipt, TransactionRequest, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
+use reth_tasks::pool::BlockingTaskHandle;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
@@ -90,6 +91,12 @@ pub trait EthTransactions: Send + Sync {
 
     /// Returns the state at the given [BlockId]
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox>;
+
+    /// Spawns a generic blocking task.
+    fn spawn_blocking<F, R>(&self, func: F) -> BlockingTaskHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static;
 
     /// Executes the closure with the state that corresponds to the given [BlockId].
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
@@ -466,6 +473,14 @@ where
 
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox> {
         self.state_at_block_id(at)
+    }
+
+    fn spawn_blocking<F, R>(&self, func: F) -> BlockingTaskHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.inner.blocking_task_pool.spawn(func)
     }
 
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>

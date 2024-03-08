@@ -300,14 +300,16 @@ where
                                 .set_record_logs(call_config.with_log.unwrap_or_default()),
                         );
 
+                        let inner = self.inner.clone();
                         let frame = self
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, env| {
                                 let (res, _) = inspect(db, env, &mut inspector)?;
-                                let frame = inspector
-                                    .into_geth_builder()
+                                let geth_builder = inspector.into_geth_builder();
+                                let frame = geth_builder
                                     .geth_call_traces(call_config, res.result.gas_used());
+                                inner.drop_in_task(geth_builder);
                                 Ok(frame.into())
                             })
                             .await?;
@@ -324,18 +326,22 @@ where
                                 .set_steps_and_state_diffs(prestate_config.is_default_mode()),
                         );
 
-                        let frame =
-                            self.inner
-                                .eth_api
-                                .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                    let (res, _, db) =
-                                        inspect_and_return_db(db, env, &mut inspector)?;
-                                    let frame = inspector
-                                        .into_geth_builder()
-                                        .geth_prestate_traces(&res, prestate_config, &db)?;
-                                    Ok(frame)
-                                })
-                                .await?;
+                        let inner = self.inner.clone();
+                        let frame = self
+                            .inner
+                            .eth_api
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+                                let geth_builder = inspector.into_geth_builder();
+                                let frame = geth_builder.geth_prestate_traces(
+                                    &res,
+                                    prestate_config,
+                                    &db,
+                                )?;
+                                inner.drop_in_task(geth_builder);
+                                Ok(frame)
+                            })
+                            .await?;
                         return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
@@ -394,7 +400,9 @@ where
             .await?;
         let gas_used = res.result.gas_used();
         let return_value = res.result.into_output().unwrap_or_default();
-        let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
+        let geth_builder = inspector.into_geth_builder();
+        let frame = geth_builder.geth_traces(gas_used, return_value, config);
+        self.drop_in_task(geth_builder);
 
         Ok(frame.into())
     }
@@ -546,9 +554,10 @@ where
 
                         let (res, _) = inspect(db, env, &mut inspector)?;
 
-                        let frame = inspector
-                            .into_geth_builder()
-                            .geth_call_traces(call_config, res.result.gas_used());
+                        let geth_builder = inspector.into_geth_builder();
+                        let frame =
+                            geth_builder.geth_call_traces(call_config, res.result.gas_used());
+                        self.drop_in_task(geth_builder);
 
                         return Ok((frame.into(), res.state))
                     }
@@ -565,11 +574,9 @@ where
                         );
                         let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
-                        let frame = inspector.into_geth_builder().geth_prestate_traces(
-                            &res,
-                            prestate_config,
-                            db,
-                        )?;
+                        let geth_builder = inspector.into_geth_builder();
+                        let frame = geth_builder.geth_prestate_traces(&res, prestate_config, db)?;
+                        self.drop_in_task(geth_builder);
 
                         return Ok((frame.into(), res.state))
                     }
@@ -612,9 +619,17 @@ where
         let (res, _) = inspect(db, env, &mut inspector)?;
         let gas_used = res.result.gas_used();
         let return_value = res.result.into_output().unwrap_or_default();
-        let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
+        let geth_builder = inspector.into_geth_builder();
+        let frame = geth_builder.geth_traces(gas_used, return_value, config);
+        self.drop_in_task(geth_builder);
 
         Ok((frame.into(), res.state))
+    }
+
+    /// Drop the given value in a separate blocking task.
+    /// This is used to drop the trace arenas as their size can be quite large.
+    fn drop_in_task<T: Send + 'static>(&self, t: T) {
+        self.inner.drop_in_task(t);
     }
 }
 
@@ -1008,4 +1023,11 @@ struct DebugApiInner<Provider, Eth> {
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls
     blocking_task_guard: BlockingTaskGuard,
+}
+
+impl<Provider, Eth: EthTransactions> DebugApiInner<Provider, Eth> {
+    /// See [`DebugApi::drop_in_task`].
+    fn drop_in_task<T: Send + 'static>(&self, t: T) {
+        let _ = self.eth_api.spawn_blocking(move || drop(t));
+    }
 }
