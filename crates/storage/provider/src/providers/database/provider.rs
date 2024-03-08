@@ -2585,8 +2585,8 @@ impl PruneLimiter {
         self.deleted_entries_count
     }
 
-    /// Returns `true`` if prune limit is reached.
-    pub fn at_limit(&mut self) -> bool {
+    /// Returns true if prune limit is reached.
+    pub fn is_limit_reached(&mut self) -> bool {
         let Self { deleted_entries_limit, deleted_entries_count, job_timeout, start, .. } = self;
 
         if let Some(limit) = deleted_entries_limit {
