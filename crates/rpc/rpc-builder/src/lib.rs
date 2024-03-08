@@ -324,7 +324,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
 
     /// Configure a [NoopTransactionPool] instance.
     ///
-    /// Caution: This will configure a pool API that does abosultely nothing.
+    /// Caution: This will configure a pool API that does absolutely nothing.
     /// This is only intended for allow easier setup of namespaces that depend on the [EthApi] which
     /// requires a [TransactionPool] implementation.
     pub fn with_noop_pool(
@@ -355,7 +355,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
 
     /// Configure a [NoopNetwork] instance.
     ///
-    /// Caution: This will configure a network API that does abosultely nothing.
+    /// Caution: This will configure a network API that does absolutely nothing.
     /// This is only intended for allow easier setup of namespaces that depend on the [EthApi] which
     /// requires a [NetworkInfo] implementation.
     pub fn with_noop_network(
@@ -1729,7 +1729,7 @@ impl RpcServerConfig {
     ///
     /// This consumes the builder and returns a server.
     ///
-    /// Note: The server ist not started and does nothing unless polled, See also [RpcServer::start]
+    /// Note: The server is not started and does nothing unless polled, See also [RpcServer::start]
     pub async fn build(mut self, modules: &TransportRpcModules) -> Result<RpcServer, RpcError> {
         let mut server = RpcServer::empty();
         server.ws_http = self.build_ws_http(modules).await?;

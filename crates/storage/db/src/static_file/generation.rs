@@ -10,7 +10,7 @@ use reth_nippy_jar::{ColumnResult, NippyJar, NippyJarHeader, PHFKey};
 use reth_tracing::tracing::*;
 use std::{error::Error as StdError, ops::RangeInclusive};
 
-/// Macro that generates static file creation functions that take an arbitratry number of [`Table`]
+/// Macro that generates static file creation functions that take an arbitrary number of [`Table`]
 /// and creates a [`NippyJar`] file out of their [`Table::Value`]. Each list of [`Table::Value`]
 /// from a table is a column of values.
 ///

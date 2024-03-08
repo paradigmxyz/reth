@@ -29,7 +29,7 @@ pub struct FeeHistoryCache {
 }
 
 impl FeeHistoryCache {
-    /// Creates new FeeHistoryCache instance, initialize it with the mose recent data, set bounds
+    /// Creates new FeeHistoryCache instance, initialize it with the more recent data, set bounds
     pub fn new(eth_cache: EthStateCache, config: FeeHistoryCacheConfig) -> Self {
         let inner = FeeHistoryCacheInner {
             lower_bound: Default::default(),

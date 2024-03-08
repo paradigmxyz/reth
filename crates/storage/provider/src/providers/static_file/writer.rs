@@ -156,7 +156,7 @@ impl StaticFileProviderRW {
         // We find the maximum block of the segment by checking this writer's last block.
         //
         // However if there's no block range (because there's no data), we try to calculate it by
-        // substracting 1 from the expected block start, resulting on the last block of the
+        // subtracting 1 from the expected block start, resulting on the last block of the
         // previous file.
         //
         // If that expected block start is 0, then it means that there's no actual block data, and

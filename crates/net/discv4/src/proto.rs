@@ -772,10 +772,10 @@ mod tests {
             EnrWrapper::new(builder.build(&key).unwrap())
         };
 
-        let enr_respone = EnrResponse { request_hash: rng.gen(), enr };
+        let enr_response = EnrResponse { request_hash: rng.gen(), enr };
 
         let mut buf = Vec::new();
-        enr_respone.encode(&mut buf);
+        enr_response.encode(&mut buf);
 
         let decoded = EnrResponse::decode(&mut &buf[..]).unwrap();
 
