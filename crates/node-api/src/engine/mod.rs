@@ -178,6 +178,17 @@ pub fn validate_withdrawals_presence(
 ///    matches the expected one and return `-32602: Invalid params` error if this check fails. Any
 ///    field having `null` value **MUST** be considered as not provided.
 ///
+/// 2. Extend point (7) of the `engine_forkchoiceUpdatedV1` specification by defining the following
+///    sequence of checks that **MUST** be run over `payloadAttributes`:
+///     1. `payloadAttributes` matches the `PayloadAttributesV3` structure, return `-38003: Invalid
+///        payload attributes` on failure.
+///     2. `payloadAttributes.timestamp` falls within the time frame of the Cancun fork, return
+///        `-38005: Unsupported fork` on failure.
+///     3. `payloadAttributes.timestamp` is greater than `timestamp` of a block referenced by
+///        `forkchoiceState.headBlockHash`, return `-38003: Invalid payload attributes` on failure.
+///     4. If any of the above checks fails, the `forkchoiceState` update **MUST NOT** be rolled
+///        back.
+///
 /// For `engine_newPayloadV3`:
 ///
 /// 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of the

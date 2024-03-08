@@ -25,21 +25,23 @@ pub enum AttributesValidationError {
 /// Thrown when validating a payload or attributes fails.
 #[derive(Error, Debug)]
 pub enum PayloadOrAttributesValidationError {
-    /// Thrown if `PayloadAttributes` provided in engine_forkchoiceUpdated before V3 contains a
-    /// parent beacon block root
+    /// Thrown if the pre-V3 `PayloadAttributes` or `ExecutionPayload` contains a parent beacon
+    /// block root
     #[error("parent beacon block root not supported before V3")]
     ParentBeaconBlockRootNotSupportedBeforeV3,
-    /// Thrown if engine_forkchoiceUpdatedV1 contains withdrawals
+    /// Thrown if engine_forkchoiceUpdatedV1 or engine_newPayloadV1 contains withdrawals
     #[error("withdrawals not supported in V1")]
     WithdrawalsNotSupportedInV1,
-    /// Thrown if engine_forkchoiceUpdated contains no withdrawals after Shanghai
+    /// Thrown if engine_forkchoiceUpdated or engine_newPayload contains no withdrawals after
+    /// Shanghai
     #[error("no withdrawals post-Shanghai")]
     NoWithdrawalsPostShanghai,
-    /// Thrown if engine_forkchoiceUpdated contains withdrawals before Shanghai
+    /// Thrown if engine_forkchoiceUpdated or engine_newPayload contains withdrawals before
+    /// Shanghai
     #[error("withdrawals pre-Shanghai")]
     HasWithdrawalsPreShanghai,
-    /// Thrown if the `PayloadAttributes` provided in engine_forkchoiceUpdated contains no parent
-    /// beacon block root after Cancun
+    /// Thrown if the `PayloadAttributes` or `ExecutionPayload` contains no parent beacon block
+    /// root after Cancun
     #[error("no parent beacon block root post-cancun")]
     NoParentBeaconBlockRootPostCancun,
 }
