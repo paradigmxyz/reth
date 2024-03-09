@@ -122,7 +122,7 @@ impl TryFrom<Enr<SecretKey>> for EnrCombinedKeyWrapper {
 #[derive(Debug, From)]
 pub enum DiscoveryUpdateV5 {
     /// A [`discv5::Discv5`] update.
-    V5(discv5::Discv5Event),
+    V5(discv5::Event),
     /// A [`Discv4`] update.
     V4(DiscoveryUpdate),
 }
@@ -146,17 +146,17 @@ where
 /// A stream that polls update streams from [`discv5::Discv5`] and [`Discv4`] in round-robin
 /// fashion.
 pub type MergedUpdateStream = Select<
-    UpdateStream<ReceiverStream<discv5::Discv5Event>>,
+    UpdateStream<ReceiverStream<discv5::Event>>,
     UpdateStream<ReceiverStream<DiscoveryUpdate>>,
 >;
 
-/// Returns a merged stream of [`discv5::Discv5Event`]s and [`DiscoveryUpdate`]s, that supports
+/// Returns a merged stream of [`discv5::Event`]s and [`DiscoveryUpdate`]s, that supports
 /// downgrading to discv4.
 pub fn merge_discovery_streams(
-    discv5_event_stream: mpsc::Receiver<discv5::Discv5Event>,
+    discv5_event_stream: mpsc::Receiver<discv5::Event>,
     discv4_update_stream: ReceiverStream<DiscoveryUpdate>,
 ) -> Select<
-    UpdateStream<ReceiverStream<discv5::Discv5Event>>,
+    UpdateStream<ReceiverStream<discv5::Event>>,
     UpdateStream<ReceiverStream<DiscoveryUpdate>>,
 > {
     let discv5_event_stream = UpdateStream(ReceiverStream::new(discv5_event_stream));

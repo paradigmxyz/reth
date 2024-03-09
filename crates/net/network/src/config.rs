@@ -46,7 +46,7 @@ pub struct NetworkConfig<C> {
     pub discovery_v4_config: Option<Discv4Config>,
     #[cfg(feature = "discv5")]
     /// How to set up discovery version 5.
-    pub discovery_v5_config: Option<discv5::Discv5Config>,
+    pub discovery_v5_config: Option<discv5::Config>,
     /// Address to use for discovery
     pub discovery_addr: SocketAddr,
     /// Address to listen for incoming connections
@@ -118,7 +118,7 @@ impl<C> NetworkConfig<C> {
     #[cfg(feature = "discv5")]
     pub fn set_discovery_v5(
         mut self,
-        discovery_v5_config: discv5::Discv5Config,
+        discovery_v5_config: discv5::Config,
         discovery_v4_config: Discv4Config,
     ) -> Self {
         self.discovery_v4_config = Some(discovery_v4_config);

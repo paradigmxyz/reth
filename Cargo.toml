@@ -205,7 +205,6 @@ alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "64d
 alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "64d0352" }
 alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "64d0352" }
 alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "64d0352" }
-discv5.workspace = true
 
 # TODO: Remove
 ethers-core = { version = "2.0.14", default-features = false }

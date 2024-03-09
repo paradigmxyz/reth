@@ -246,13 +246,13 @@ impl fmt::Debug for Discovery {
 }
 
 impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
-    fn on_discv5_update(&mut self, update: discv5::Discv5Event) -> Result<(), NetworkError> {
-        use discv5::Discv5Event::*;
+    fn on_discv5_update(&mut self, update: discv5::Event) -> Result<(), NetworkError> {
+        use discv5::Event::*;
         match update {
             Discovered(enr) => {
                 // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::DiscoveredAtCapacity(_)
 
-                // node has been discovered as part of a query. discv5::Discv5Config sets
+                // node has been discovered as part of a query. discv5::Config sets
                 // `report_discovered_peers` to true by default.
 
                 self.try_insert_enr_into_discovered_nodes(enr)?;
@@ -390,7 +390,7 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
     pub async fn new_discv5(
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
-        disc_config: (Option<Discv4Config>, Option<discv5::Discv5Config>),
+        disc_config: (Option<Discv4Config>, Option<discv5::Config>),
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         let (disc, disc_updates, local_enr_discv4) = match disc_config {
@@ -426,7 +426,7 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                     discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk_copy)
                         .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
                 let enr = {
-                    let mut builder = discv5::enr::EnrBuilder::new("v4");
+                    let mut builder = discv5::enr::Enr::builder();
                     builder.ip(discv5_addresses[0].ip());
                     builder.udp4(discv5_addresses[0].port());
                     if let Some(ipv6) = discv5_addresses.get(1) {

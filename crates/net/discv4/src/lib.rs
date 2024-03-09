@@ -38,15 +38,12 @@ use discv5::{
     },
     ConnectionDirection, ConnectionState,
 };
-use enr::{Enr, EnrBuilder};
+use enr::Enr;
 use error::MirrorUpdateError;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
-use reth_primitives::{
-    bytes::{Bytes, BytesMut},
-    hex, ForkId, PeerId, B256,
-};
+use reth_primitives::{bytes::Bytes, hex, ForkId, PeerId, B256};
 use smallvec::{smallvec, SmallVec};
 use std::{
     cell::RefCell,
@@ -1696,6 +1693,11 @@ where
                         // terminate the service
                         self.queued_events.push_back(Discv4Event::Terminated);
                     }
+
+                    #[cfg(debug_assertions)]
+                    Discv4Command::DumpKBuckets(callback) => {
+                        _ = callback.send(self.kbuckets.clone())
+                    }
                 }
             }
 
@@ -1936,15 +1938,24 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
 enum Discv4Command {
     Add(NodeRecord),
     SetTcpPort(u16),
-    SetEIP868RLPPair { key: Vec<u8>, rlp: Bytes },
+    SetEIP868RLPPair {
+        key: Vec<u8>,
+        rlp: Bytes,
+    },
     Ban(PeerId, IpAddr),
     BanPeer(PeerId),
     BanIp(IpAddr),
     Remove(PeerId),
-    Lookup { node_id: Option<PeerId>, tx: Option<NodeRecordSender> },
+    Lookup {
+        node_id: Option<PeerId>,
+        tx: Option<NodeRecordSender>,
+    },
     SetLookupInterval(Duration),
     Updates(OneshotSender<ReceiverStream<DiscoveryUpdate>>),
     Terminated,
+    #[doc(hidden)]
+    #[cfg(debug_assertions)]
+    DumpKBuckets(oneshot::Sender<KBucketsTable<NodeKey, NodeEntry>>),
 }
 
 /// Event type receiver produces
