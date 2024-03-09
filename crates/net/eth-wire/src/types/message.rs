@@ -327,14 +327,16 @@ impl<T: Encodable> EncodableExt for Vec<T> {
 
     fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize) {
         let mut buffer = Vec::with_capacity(approx);
-        let mut header = Header { list: true, payload_length: 0 };
         let mut actual_payload_length = 0;
         let mut current_len = 0;
+        let mut header = Header { list: true, payload_length: 0 };
         for item in self {
             item.encode(&mut buffer);
             actual_payload_length += item.length();
-            // retroactively check if current buffer , and the list header would be > limit
-            if check_limit(&buffer, actual_payload_length) > limit {
+            if (buffer.len() +
+                Header { list: true, payload_length: actual_payload_length }.length()) >
+                limit
+            {
                 let mut head: Vec<u8> = Vec::new();
                 header.payload_length = actual_payload_length - item.length();
                 header.encode(&mut head);
@@ -365,13 +367,6 @@ impl<T: Encodable> EncodableExt for Vec<T> {
         buf.shrink_to_fit();
         buf
     }
-}
-
-fn check_limit(buf: &[u8], payload_length: usize) -> usize {
-    let mut head: Vec<u8> = Vec::new();
-    let header = Header { list: true, payload_length };
-    header.encode(&mut head);
-    head.len() + buf.len()
 }
 
 impl Encodable for EthMessage {
