@@ -7018,9 +7018,8 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "6.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d35316fc02d99e42831356c71e882f5d385c77b78f64a44ae82f2f9a4b8b72f"
+version = "6.2.0"
+source = "git+https://github.com/bluealloy/revm?rev=34e636b#34e636b2818a20b66448fec41ff2d9ee207a8ee7"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -7033,7 +7032,7 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/evm-inspectors?rev=75a187b#75a187ba967a29b30af2e5e848073c755068da06"
+source = "git+https://github.com/paradigmxyz/evm-inspectors?rev=1ae72ff#1ae72ffd4b677a8151db71a9fd8ce04530173022"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-trace-types",
@@ -7051,8 +7050,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fa10c2dc1e8f4934bdc763a2c09371bcec29e50c22e55e3eb325ee0cba09064"
+source = "git+https://github.com/bluealloy/revm?rev=34e636b#34e636b2818a20b66448fec41ff2d9ee207a8ee7"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -7061,8 +7059,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "4.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db828d49d329560a70809d9d1fa0c74695edb49f50c5332db3eb24483076deac"
+source = "git+https://github.com/bluealloy/revm?rev=34e636b#34e636b2818a20b66448fec41ff2d9ee207a8ee7"
 dependencies = [
  "aurora-engine-modexp",
  "c-kzg",
@@ -7078,8 +7075,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fecd125aad58e135e2ca5771ed6e4e7b1f05fa3a64e0dfb9cc643b7a800a8435"
+source = "git+https://github.com/bluealloy/revm?rev=34e636b#34e636b2818a20b66448fec41ff2d9ee207a8ee7"
 dependencies = [
  "alloy-primitives",
  "auto_impl",
