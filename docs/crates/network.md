@@ -440,7 +440,7 @@ fn poll_action(&mut self) -> PollAction {
         return PollAction::NoPeersAvailable
     };
 
-    let request = self.queued_requests.pop_front().expect("not empty; qed");
+    let request = self.queued_requests.pop_front().expect("not empty");
     let request = self.prepare_block_request(peer_id, request);
 
     PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
@@ -528,73 +528,72 @@ pub struct GetBlockHeaders {
 
 In handling this request, the ETH requests task attempts, starting with `start_block`, to fetch the associated header from the database, increment/decrement the block number to fetch by `skip` depending on the `direction` while checking for overflow/underflow, and checks that bounds specifying the maximum numbers of headers or bytes to send have not been breached.
 
-[File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/eth_requests.rs)
+[File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/eth_requests.rs)
 ```rust,ignore
-  fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
-        let GetBlockHeaders { start_block, limit, skip, direction } = request;
+fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
+    let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
-        let mut headers = Vec::new();
+    let mut headers = Vec::new();
 
-        let mut block: BlockHashOrNumber = match start_block {
-            BlockHashOrNumber::Hash(start) => start.into(),
-            BlockHashOrNumber::Number(num) => {
-                let Some(hash) = self.client.block_hash(num).unwrap_or_default() else {
-                    return headers
-                };
+    let mut block: BlockHashOrNumber = match start_block {
+        BlockHashOrNumber::Hash(start) => start.into(),
+        BlockHashOrNumber::Number(num) => {
+            if let Some(hash) = self.client.block_hash(num.into()).unwrap_or_default() {
                 hash.into()
+            } else {
+                return headers
             }
-        };
+        }
+    };
 
-        let skip = skip as u64;
+    let skip = skip as u64;
+    let mut total_bytes = APPROX_HEADER_SIZE;
 
-        for _ in 0..limit {
-            if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
-                match direction {
-                    HeadersDirection::Rising => {
-                        if let Some(next) = (header.number + 1).checked_add(skip) {
+    for _ in 0..limit {
+        if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
+            match direction {
+                HeadersDirection::Rising => {
+                    if let Some(next) = (header.number + 1).checked_add(skip) {
+                        block = next.into()
+                    } else {
+                        break
+                    }
+                }
+                HeadersDirection::Falling => {
+                    if skip > 0 {
+                        // prevent under flows for block.number == 0 and `block.number - skip <
+                        // 0`
+                        if let Some(next) =
+                            header.number.checked_sub(1).and_then(|num| num.checked_sub(skip))
+                        {
                             block = next.into()
                         } else {
                             break
                         }
-                    }
-                    HeadersDirection::Falling => {
-                        if skip > 0 {
-                            // prevent under flows for block.number == 0 and `block.number - skip <
-                            // 0`
-                            if let Some(next) =
-                                header.number.checked_sub(1).and_then(|num| num.checked_sub(skip))
-                            {
-                                block = next.into()
-                            } else {
-                                break
-                            }
-                        } else {
-                            block = header.parent_hash.into()
-                        }
+                    } else {
+                        block = header.parent_hash.into()
                     }
                 }
+            }
 
-                headers.push(header);
+            headers.push(header);
 
-                if headers.len() >= MAX_HEADERS_SERVE {
-                    break
-                }
-                match headers.encode_max(APPROX_HEADER_SIZE, SOFT_RESPONSE_LIMIT) {
-                    Ok(_) => {
-                        // If encode_max succeeds, continue accumulating headers
-                    }
-                    Err(_) => {
-                        // If encode_max fails,stop the loop
-                        break;
-                    }
-                }
-            } else {
+            if headers.len() >= MAX_HEADERS_SERVE {
                 break
             }
-        }
 
-        headers
+            total_bytes += APPROX_HEADER_SIZE;
+
+            if total_bytes > SOFT_RESPONSE_LIMIT {
+                break
+            }
+        } else {
+            break
+        }
     }
+
+    headers
+}
 ```
 
 The `GetBlockBodies` payload is simpler, it just contains a vector of requested block hashes:
@@ -609,42 +608,40 @@ pub struct GetBlockBodies(
 
 In handling this request, similarly, the ETH requests task attempts, for each hash in the requested order, to fetch the block body (transactions & ommers), while checking that bounds specifying the maximum numbers of bodies or bytes to send have not been breached.
 
-[File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/eth_requests.rs)
+[File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/eth_requests.rs)
 ```rust,ignore
- fn on_bodies_request(
-        &mut self,
-        _peer_id: PeerId,
-        request: GetBlockBodies,
-        response: oneshot::Sender<RequestResult<BlockBodies>>,
-    ) {
-        self.metrics.received_bodies_requests.increment(1);
-        let mut bodies = Vec::new();
+fn on_bodies_request(
+    &mut self,
+    _peer_id: PeerId,
+    request: GetBlockBodies,
+    response: oneshot::Sender<RequestResult<BlockBodies>>,
+) {
+    let mut bodies = Vec::new();
 
-        for hash in request.0 {
-            if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
-                let body = BlockBody {
-                    transactions: block.body,
-                    ommers: block.ommers,
-                    withdrawals: block.withdrawals,
-                };
+    let mut total_bytes = APPROX_BODY_SIZE;
 
-                bodies.push(body);
-                if bodies.len() >= MAX_BODIES_SERVE {
-                    break
-                }
-                match bodies.encode_max(APPROX_BODY_SIZE, SOFT_RESPONSE_LIMIT) {
-                    Ok(_) => {
-                        // If encode_max succeeds, continue accumulating bodies
-                    }
-                    Err(_) => {
-                        // If encode_max fails,stop the loop
-                        break;
-                    }
-                }
+    for hash in request.0 {
+        if let Some(block) = self.client.block(hash.into()).unwrap_or_default() {
+            let body = BlockBody { transactions: block.body, ommers: block.ommers };
+
+            bodies.push(body);
+
+            total_bytes += APPROX_BODY_SIZE;
+
+            if total_bytes > SOFT_RESPONSE_LIMIT {
+                break
             }
+
+            if bodies.len() >= MAX_BODIES_SERVE {
+                break
+            }
+        } else {
+            break
         }
-        let _ = response.send(Ok(BlockBodies(bodies)));
     }
+
+    let _ = response.send(Ok(BlockBodies(bodies)));
+}
 ```
 
 ---
@@ -837,7 +834,7 @@ struct Peer {
 
 Note that the `Peer` struct contains a field `transactions`, which is an [LRU cache](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) of the transactions this peer is aware of. 
 
-The `request_tx` field on the `Peer` is used at the sender end of a channel to send requests to the session with the peer.
+The `request_tx` field on the `Peer` is used as the sender end of a channel to send requests to the session with the peer.
 
 After the `Peer` is added to `TransactionsManager.peers`, the hashes of all of the transactions in the node's transaction pool are sent to the peer in a [`NewPooledTransactionHashes` message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08).
 
@@ -914,7 +911,7 @@ fn propagate_transactions(
 ) -> PropagatedTransactions {
     let mut propagated = PropagatedTransactions::default();
 
-    // send full transactions to a fraction fo the connected peers (square root of the total
+    // send full transactions to a fraction of the connected peers (square root of the total
     // number of connected peers)
     let max_num_full = (self.peers.len() as f64).sqrt() as usize + 1;
 
