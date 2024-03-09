@@ -7,22 +7,10 @@
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
-    },
-    {
-      "name": "DS_EXPRESSION",
-      "label": "Expression",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "__expr__"
     }
   ],
   "__elements": {},
   "__requires": [
-    {
-      "type": "datasource",
-      "id": "__expr__",
-      "version": "1.0.0"
-    },
     {
       "type": "panel",
       "id": "bargauge",
@@ -141,8 +129,7 @@
                 "value": null
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -172,7 +159,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -211,8 +198,7 @@
                 "value": null
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -242,7 +228,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -281,8 +267,7 @@
                 "value": null
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -312,7 +297,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -351,8 +336,7 @@
                 "value": null
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -382,7 +366,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -421,8 +405,7 @@
                 "value": null
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -452,7 +435,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -491,8 +474,7 @@
                 "value": null
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -522,7 +504,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -575,8 +557,7 @@
                 "value": 30
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -602,7 +583,7 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -643,8 +624,7 @@
                 "value": null
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -673,7 +653,7 @@
         "sizing": "auto",
         "valueMode": "color"
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -732,7 +712,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -775,8 +754,7 @@
               }
             ]
           },
-          "unit": "percentunit",
-          "unitScale": true
+          "unit": "percentunit"
         },
         "overrides": []
       },
@@ -826,7 +804,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -870,8 +847,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -938,7 +914,6 @@
             "seriesBy": "last"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -979,8 +954,7 @@
               }
             ]
           },
-          "unit": "s",
-          "unitScale": true
+          "unit": "s"
         },
         "overrides": []
       },
@@ -1040,8 +1014,7 @@
             "scaleDistribution": {
               "type": "linear"
             }
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -1084,6 +1057,7 @@
         },
         "tooltip": {
           "mode": "single",
+          "show": true,
           "showColorScale": false,
           "yHistogram": false
         },
@@ -1094,7 +1068,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -1127,7 +1101,6 @@
             "seriesBy": "last"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1168,8 +1141,7 @@
               }
             ]
           },
-          "unit": "s",
-          "unitScale": true
+          "unit": "s"
         },
         "overrides": []
       },
@@ -1224,7 +1196,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1265,8 +1236,7 @@
               }
             ]
           },
-          "unit": "s",
-          "unitScale": true
+          "unit": "s"
         },
         "overrides": []
       },
@@ -1321,7 +1291,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1366,8 +1335,7 @@
               }
             ]
           },
-          "unit": "none",
-          "unitScale": true
+          "unit": "none"
         },
         "overrides": []
       },
@@ -1422,7 +1390,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1467,8 +1434,7 @@
               }
             ]
           },
-          "unit": "s",
-          "unitScale": true
+          "unit": "s"
         },
         "overrides": []
       },
@@ -1530,8 +1496,7 @@
             }
           },
           "mappings": [],
-          "unit": "bytes",
-          "unitScale": true
+          "unit": "bytes"
         },
         "overrides": []
       },
@@ -1597,7 +1562,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1642,8 +1606,7 @@
               }
             ]
           },
-          "unit": "bytes",
-          "unitScale": true
+          "unit": "bytes"
         },
         "overrides": []
       },
@@ -1701,8 +1664,7 @@
             }
           },
           "mappings": [],
-          "unit": "short",
-          "unitScale": true
+          "unit": "short"
         },
         "overrides": []
       },
@@ -1781,8 +1743,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": [
           {
@@ -1894,7 +1855,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -1926,7 +1887,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1971,8 +1931,7 @@
               }
             ]
           },
-          "unit": "none",
-          "unitScale": true
+          "unit": "none"
         },
         "overrides": []
       },
@@ -2023,7 +1982,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -2068,8 +2026,7 @@
               }
             ]
           },
-          "unit": "s",
-          "unitScale": true
+          "unit": "s"
         },
         "overrides": []
       },
@@ -2168,8 +2125,7 @@
             }
           },
           "mappings": [],
-          "unit": "bytes",
-          "unitScale": true
+          "unit": "bytes"
         },
         "overrides": []
       },
@@ -2253,8 +2209,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": [
           {
@@ -2354,7 +2309,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -2404,8 +2359,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": [
           {
@@ -2505,7 +2459,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "10.3.3",
+      "pluginVersion": "10.1.1",
       "targets": [
         {
           "datasource": {
@@ -2537,7 +2491,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -2582,8 +2535,7 @@
               }
             ]
           },
-          "unit": "bytes",
-          "unitScale": true
+          "unit": "bytes"
         },
         "overrides": []
       },
@@ -2634,7 +2586,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -2679,8 +2630,7 @@
               }
             ]
           },
-          "unit": "s",
-          "unitScale": true
+          "unit": "s"
         },
         "overrides": []
       },
@@ -2746,7 +2696,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -2787,8 +2736,7 @@
               }
             ]
           },
-          "unit": "Mgas/s",
-          "unitScale": true
+          "unit": "Mgas/s"
         },
         "overrides": []
       },
@@ -2890,7 +2838,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -2934,8 +2881,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -2986,7 +2932,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3030,8 +2975,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -3107,7 +3051,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3152,8 +3095,7 @@
               }
             ]
           },
-          "unit": "cps",
-          "unitScale": true
+          "unit": "cps"
         },
         "overrides": []
       },
@@ -3236,8 +3178,7 @@
               "viz": false
             }
           },
-          "mappings": [],
-          "unitScale": true
+          "mappings": []
         },
         "overrides": []
       },
@@ -3415,7 +3356,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3459,8 +3399,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -3525,7 +3464,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3569,8 +3507,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": [
           {
@@ -3683,7 +3620,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3728,8 +3664,7 @@
               }
             ]
           },
-          "unit": "cps",
-          "unitScale": true
+          "unit": "cps"
         },
         "overrides": []
       },
@@ -3804,7 +3739,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3848,8 +3782,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -3927,7 +3860,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3972,8 +3904,7 @@
               }
             ]
           },
-          "unit": "locale",
-          "unitScale": true
+          "unit": "locale"
         },
         "overrides": [
           {
@@ -4129,7 +4060,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4171,8 +4101,7 @@
               }
             ]
           },
-          "unit": "cps",
-          "unitScale": true
+          "unit": "cps"
         },
         "overrides": []
       },
@@ -4247,7 +4176,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4291,8 +4219,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -4355,7 +4282,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4400,8 +4326,7 @@
               }
             ]
           },
-          "unit": "bytes",
-          "unitScale": true
+          "unit": "bytes"
         },
         "overrides": [
           {
@@ -4482,7 +4407,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4527,8 +4451,7 @@
               }
             ]
           },
-          "unit": "bytes",
-          "unitScale": true
+          "unit": "bytes"
         },
         "overrides": [
           {
@@ -4618,1743 +4541,6 @@
         "x": 0,
         "y": 154
       },
-      "id": 89,
-      "panels": [],
-      "repeat": "instance",
-      "repeatDirection": "h",
-      "title": "Transaction Pool",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Transaction pool maintenance metrics",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 155
-      },
-      "id": 122,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_dirty_accounts{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Dirty Accounts",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_drift_count{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Drift Count",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_reinserted_transactions{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Reinserted Transactions",
-          "range": true,
-          "refId": "C",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_deleted_tracked_finalized_blobs{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Deleted Tracked Finalized Blobs",
-          "range": true,
-          "refId": "D",
-          "useBackend": false
-        }
-      ],
-      "title": "TxPool Maintenance",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Tracks the number of transactions in the various transaction pool sub-pools",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 155
-      },
-      "id": 92,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_basefee_pool_transactions{instance=~\"$instance\"}",
-          "legendFormat": "Base fee pool transactions",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_pending_pool_transactions{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Pending pool transactions",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_queued_pool_transactions{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Queued pool transactions",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_blob_pool_transactions{instance=~\"$instance\"}",
-          "legendFormat": "Blob pool transactions",
-          "range": true,
-          "refId": "D"
-        }
-      ],
-      "title": "Subpool transaction count",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Tracks a heuristic of the memory footprint of the various transaction pool sub-pools",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "bytes",
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 163
-      },
-      "id": 91,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_basefee_pool_size_bytes{instance=~\"$instance\"}",
-          "legendFormat": "Base fee pool size",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_pending_pool_size_bytes{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Pending pool size",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_queued_pool_size_bytes{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Queued pool size",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_blob_pool_size_bytes{instance=~\"$instance\"}",
-          "legendFormat": "Blob pool size",
-          "range": true,
-          "refId": "D"
-        }
-      ],
-      "title": "Subpool sizes in bytes",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Number of transactions about to be imported into the pool.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 163
-      },
-      "id": 94,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_pending_pool_imports{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Transactions pending import",
-          "range": true,
-          "refId": "C"
-        }
-      ],
-      "title": "Pending pool imports",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Currently active outgoing GetPooledTransactions requests.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 171
-      },
-      "id": 104,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_inflight_transaction_requests{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Inflight Transaction Requests",
-          "range": true,
-          "refId": "C"
-        }
-      ],
-      "title": "Inflight Transaction Requests",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Tracks the number of transactions per second that are inserted and removed from the transaction pool, as well as the number of invalid transactions per second.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": true,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ops",
-          "unitScale": true
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "B"
-            },
-            "properties": [
-              {
-                "id": "custom.transform",
-                "value": "negative-Y"
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 171
-      },
-      "id": 93,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "rate(reth_transaction_pool_inserted_transactions{instance=~\"$instance\"}[$__rate_interval])",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "legendFormat": "Inserted transactions",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "rate(reth_transaction_pool_removed_transactions{instance=~\"$instance\"}[$__rate_interval])",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "Removed transactions",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "rate(reth_transaction_pool_invalid_transactions{instance=~\"$instance\"}[$__rate_interval])",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "Invalid transactions",
-          "range": true,
-          "refId": "C",
-          "useBackend": false
-        }
-      ],
-      "title": "Inserted transactions",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 179
-      },
-      "id": 199,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_hashes_pending_fetch{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Hashes in Pending Fetch Cache",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Hashes in Inflight Requests",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "__expr__",
-            "uid": "${DS_EXPRESSION}"
-          },
-          "expression": "$A + $B",
-          "hide": false,
-          "refId": "Total Hashes in Transaction Fetcher",
-          "type": "math"
-        }
-      ],
-      "title": "Transaction Fetcher Hashes",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Tracks the entries, byte size, failed inserts and file deletes of the blob store",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 179
-      },
-      "id": 115,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_blobstore_entries{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Entries",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_blobstore_byte_size{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Bytesize",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_blobstore_failed_inserts{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Failed Inserts",
-          "range": true,
-          "refId": "C",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_transaction_pool_blobstore_failed_deletes{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Failed Deletes",
-          "range": true,
-          "refId": "D",
-          "useBackend": false
-        }
-      ],
-      "title": "Blob store",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Tracks the number of transaction messages in the channel from the network to the transaction pool",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": true,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "reqps",
-          "unitScale": true
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "B"
-            },
-            "properties": [
-              {
-                "id": "custom.transform",
-                "value": "negative-Y"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "C"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "events"
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 187
-      },
-      "id": 95,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "rate(reth_network_pool_transactions_messages_sent{instance=~\"$instance\"}[$__rate_interval])",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "Tx",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "rate(reth_network_pool_transactions_messages_received{instance=~\"$instance\"}[$__rate_interval])",
-          "hide": false,
-          "legendFormat": "Rx",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "reth_network_pool_transactions_messages_sent{instance=~\"$instance\"} - reth_network_pool_transactions_messages_received{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Messages in channel",
-          "range": true,
-          "refId": "C"
-        }
-      ],
-      "title": "Network transaction channel",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Duration spent inside one call to poll the `TransactionsManager` future",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s",
-          "unitScale": true
-        },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "Transactions Manager Future"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 187
-      },
-      "id": 201,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_duration_poll_tx_manager{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Transactions Manager Future",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        }
-      ],
-      "title": "Transactions Manager Future Poll Duration",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-        "description": "Durations of nested function calls, in one call to poll `TransactionsManager` future:\n\nNetwork Events - stream peer session updates from `NetworkManager`;\nTransaction Events - stream txns gossip from `NetworkManager`;\nPending Transactions - stream hashes of txns successfully inserted into pending set in `TransactionPool`;\nPending Pool Imports - flush txns to pool from `TransactionsManager`;\nFetch Events - stream fetch txn events (success case wraps a tx) from `TransactionFetcher`;\n(Transactions Commands - stream commands from testnet to fetch/serve/propagate txns)\n",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s",
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 195
-      },
-      "id": 200,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_acc_duration_poll_network_events{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Network Events",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_acc_duration_poll_transaction_events{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Transaction Events",
-          "range": true,
-          "refId": "C",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "exemplar": false,
-          "expr": "reth_network_acc_duration_poll_imported_transactions{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Pending Transactions",
-          "range": true,
-          "refId": "D",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_acc_duration_poll_pending_pool_imports{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Pending Pool Imports",
-          "range": true,
-          "refId": "E",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_acc_duration_poll_fetch_events{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Fetch Events",
-          "range": true,
-          "refId": "F",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_acc_duration_poll_commands{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Commands",
-          "range": true,
-          "refId": "G",
-          "useBackend": false
-        }
-      ],
-      "title": "Transactions Manager Poll Duration Nested Function Calls",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Duration spent inside one call to poll the `NetworkManager` future",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s",
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 195
-      },
-      "id": 209,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_duration_poll_network_manager{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Network Manager Future",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        }
-      ],
-      "title": "Network Manager Future Poll Duration",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Durations of nested function calls, in one call to poll `NetworkManager` future:\n\nNetwork Handle Message - stream network handle messages from `TransactionsManager`;\nSwarm Events - stream transaction gossip from `Swarm`",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s",
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 203
-      },
-      "id": 208,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_duration_poll_network_handle{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Network Handle Messages",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_network_duration_poll_swarm{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Swarm Events",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        }
-      ],
-      "title": "Network Manager Poll Duration Nested Function Calls",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 211
-      },
       "id": 79,
       "panels": [],
       "repeat": "instance",
@@ -6374,7 +4560,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -6418,8 +4603,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -6427,7 +4611,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 212
+        "y": 155
       },
       "id": 74,
       "options": {
@@ -6471,7 +4655,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -6515,8 +4698,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -6524,7 +4706,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 212
+        "y": 155
       },
       "id": 80,
       "options": {
@@ -6568,7 +4750,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -6612,8 +4793,7 @@
                 "value": 80
               }
             ]
-          },
-          "unitScale": true
+          }
         },
         "overrides": []
       },
@@ -6621,7 +4801,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 220
+        "y": 163
       },
       "id": 81,
       "options": {
@@ -6664,7 +4844,6 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -6709,8 +4888,7 @@
               }
             ]
           },
-          "unit": "s",
-          "unitScale": true
+          "unit": "s"
         },
         "overrides": []
       },
@@ -6718,7 +4896,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 220
+        "y": 163
       },
       "id": 114,
       "options": {
@@ -6798,8 +4976,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6816,7 +4993,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 228
+        "y": 171
       },
       "id": 158,
       "options": {
@@ -6922,8 +5099,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6940,7 +5116,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 228
+        "y": 171
       },
       "id": 190,
       "options": {
@@ -6978,7 +5154,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 236
+        "y": 179
       },
       "id": 87,
       "panels": [],
@@ -7035,8 +5211,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7052,7 +5227,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 237
+        "y": 180
       },
       "id": 83,
       "options": {
@@ -7131,8 +5306,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7148,7 +5322,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 237
+        "y": 180
       },
       "id": 84,
       "options": {
@@ -7239,8 +5413,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7256,7 +5429,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 245
+        "y": 188
       },
       "id": 85,
       "options": {
@@ -7335,8 +5508,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7353,7 +5525,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 245
+        "y": 188
       },
       "id": 210,
       "options": {
@@ -7660,8 +5832,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7678,7 +5849,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 253
+        "y": 196
       },
       "id": 211,
       "options": {
@@ -7985,8 +6156,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8003,7 +6173,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 253
+        "y": 196
       },
       "id": 212,
       "options": {
@@ -8189,7 +6359,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 261
+        "y": 204
       },
       "id": 68,
       "panels": [],
@@ -8246,8 +6416,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8263,7 +6432,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 262
+        "y": 205
       },
       "id": 60,
       "options": {
@@ -8342,8 +6511,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8359,7 +6527,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 262
+        "y": 205
       },
       "id": 62,
       "options": {
@@ -8438,8 +6606,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8455,7 +6622,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 270
+        "y": 213
       },
       "id": 64,
       "options": {
@@ -8492,7 +6659,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 278
+        "y": 221
       },
       "id": 97,
       "panels": [],
@@ -8546,8 +6713,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8577,7 +6743,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 279
+        "y": 222
       },
       "id": 98,
       "options": {
@@ -8722,8 +6888,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8740,7 +6905,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 279
+        "y": 222
       },
       "id": 101,
       "options": {
@@ -8820,8 +6985,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8838,7 +7002,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 287
+        "y": 230
       },
       "id": 99,
       "options": {
@@ -8918,8 +7082,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8936,7 +7099,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 287
+        "y": 230
       },
       "id": 100,
       "options": {
@@ -8974,7 +7137,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 295
+        "y": 238
       },
       "id": 105,
       "panels": [],
@@ -9029,8 +7192,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9047,7 +7209,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 296
+        "y": 239
       },
       "id": 106,
       "options": {
@@ -9127,8 +7289,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9145,7 +7306,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 296
+        "y": 239
       },
       "id": 107,
       "options": {
@@ -9183,7 +7344,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 304
+        "y": 247
       },
       "id": 108,
       "panels": [],
@@ -9238,8 +7399,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9281,7 +7441,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 305
+        "y": 248
       },
       "id": 109,
       "options": {
@@ -9344,7 +7504,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 305
+        "y": 248
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -9456,8 +7616,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9474,7 +7633,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 313
+        "y": 256
       },
       "id": 120,
       "options": {
@@ -9533,7 +7692,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 313
+        "y": 256
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -9645,8 +7804,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9687,7 +7845,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 321
+        "y": 264
       },
       "id": 198,
       "options": {
@@ -9811,7 +7969,8 @@
   ],
   "refresh": "30s",
   "revision": 1,
-  "schemaVersion": 39,
+  "schemaVersion": 38,
+  "style": "dark",
   "tags": [],
   "templating": {
     "list": [
@@ -9893,6 +8052,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 4,
+  "version": 1,
   "weekStart": ""
 }
