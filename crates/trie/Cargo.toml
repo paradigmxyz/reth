@@ -27,10 +27,14 @@ tracing.workspace = true
 
 # misc
 thiserror.workspace = true
-derive_more = "0.99"
+derive_more.workspace = true
 auto_impl = "1"
 
-# test-utils
+# `metrics` feature
+reth-metrics = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
+
+# `test-utils` feature
 triehash = { version = "0.8", optional = true }
 
 [dev-dependencies]
@@ -52,6 +56,7 @@ similar-asserts.workspace = true
 criterion.workspace = true
 
 [features]
+metrics = ["reth-metrics", "dep:metrics"]
 test-utils = ["triehash"]
 
 [[bench]]

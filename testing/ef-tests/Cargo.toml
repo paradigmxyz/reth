@@ -13,11 +13,12 @@ workspace = true
 
 [features]
 ef-tests = []
+asm-keccak = ["reth-primitives/asm-keccak"]
 
 [dependencies]
 reth-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
-reth-provider.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-stages.workspace = true
 reth-interfaces.workspace = true
 reth-revm.workspace = true
@@ -29,3 +30,4 @@ walkdir = "2.3.3"
 serde = "1.0.163"
 serde_json.workspace = true
 thiserror.workspace = true
+rayon.workspace = true

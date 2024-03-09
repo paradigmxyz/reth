@@ -67,7 +67,6 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 3500,
-        snapshot_block_interval: 500_000,
     }
     .into()
 });
@@ -111,7 +110,6 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
     }
     .into()
 });
@@ -159,7 +157,6 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
     }
     .into()
 });
@@ -202,7 +199,6 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
     }
     .into()
 });
@@ -296,7 +292,6 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             .into(),
         ),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
         ..Default::default()
     }
     .into()
@@ -351,7 +346,6 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             .into(),
         ),
         prune_delete_limit: 1700,
-        snapshot_block_interval: 1_000_000,
         ..Default::default()
     }
     .into()
@@ -359,7 +353,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// A wrapper around [BaseFeeParams] that allows for specifying constant or dynamic EIP-1559
 /// parameters based on the active [Hardfork].
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum BaseFeeParamsKind {
     /// Constant [BaseFeeParams]; used for chains that don't have dynamic EIP-1559 parameters
@@ -383,7 +377,7 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 
 /// A type alias to a vector of tuples of [Hardfork] and [BaseFeeParams], sorted by [Hardfork]
 /// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
 
 impl From<Vec<(Hardfork, BaseFeeParams)>> for ForkBaseFeeParams {
@@ -462,7 +456,7 @@ impl BaseFeeParams {
 /// - Meta-information about the chain (the chain ID)
 /// - The genesis block of the chain ([`Genesis`])
 /// - What hardforks are activated, and under which conditions
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ChainSpec {
     /// The chain ID
     pub chain: Chain,
@@ -502,9 +496,6 @@ pub struct ChainSpec {
     /// data coming in.
     #[serde(default)]
     pub prune_delete_limit: usize,
-
-    /// The block interval for creating snapshots. Each snapshot will have that much blocks in it.
-    pub snapshot_block_interval: u64,
 }
 
 impl Default for ChainSpec {
@@ -519,7 +510,6 @@ impl Default for ChainSpec {
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET.prune_delete_limit,
-            snapshot_block_interval: Default::default(),
         }
     }
 }
@@ -559,7 +549,7 @@ impl ChainSpec {
         // * blob gas used to provided genesis or 0x0
         // * excess blob gas to provided genesis or 0x0
         let (parent_beacon_block_root, blob_gas_used, excess_blob_gas) =
-            if self.fork(Hardfork::Cancun).active_at_timestamp(self.genesis.timestamp) {
+            if self.is_cancun_active_at_timestamp(self.genesis.timestamp) {
                 let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
                 let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
                 (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
@@ -752,7 +742,7 @@ impl ChainSpec {
         ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
 
-    /// Compute the [`ForkId`] for the given [`Head`] folowing eip-6122 spec
+    /// Compute the [`ForkId`] for the given [`Head`] following eip-6122 spec
     pub fn fork_id(&self, head: &Head) -> ForkId {
         let mut forkhash = ForkHash::from(self.genesis_hash());
         let mut current_applied = 0;
@@ -827,8 +817,8 @@ impl ChainSpec {
         let mut hardforks_iter = self.forks_iter().peekable();
         while let Some((_, curr_cond)) = hardforks_iter.next() {
             if let Some((_, next_cond)) = hardforks_iter.peek() {
-                // peek and find the first occurence of ForkCondition::TTD (merge) , or in
-                // custom ChainSpecs, the first occurence of
+                // peek and find the first occurrence of ForkCondition::TTD (merge) , or in
+                // custom ChainSpecs, the first occurrence of
                 // ForkCondition::Timestamp. If curr_cond is ForkCondition::Block at
                 // this point, which it should be in most "normal" ChainSpecs,
                 // return its block_num
@@ -956,7 +946,7 @@ pub struct ForkTimestamps {
 }
 
 impl ForkTimestamps {
-    /// Creates a new [`ForkTimestamps`] from the given hardforks by extracing the timestamps
+    /// Creates a new [`ForkTimestamps`] from the given hardforks by extracting the timestamps
     fn from_hardforks(forks: &BTreeMap<Hardfork, ForkCondition>) -> Self {
         let mut timestamps = ForkTimestamps::default();
         if let Some(shanghai) = forks.get(&Hardfork::Shanghai).and_then(|f| f.as_timestamp()) {
@@ -1781,7 +1771,7 @@ Post-merge hard forks (timestamp based):
 
         // spec w/ only ForkCondition::Block - test the match arm for ForkCondition::Block to ensure
         // no regressions, for these ForkConditions(Block/TTD) - a separate chain spec definition is
-        // technically unecessary - but we include it here for thoroughness
+        // technically unnecessary - but we include it here for thoroughness
         let fork_cond_block_only_case = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis)

@@ -1,4 +1,4 @@
-use crate::{Address, Bytes, TransactionKind, TxType, TxValue, B256};
+use crate::{Address, Bytes, TransactionKind, TxType, B256, U256};
 use alloy_rlp::{
     length_of_length, Decodable, Encodable, Error as DecodeError, Header, EMPTY_STRING_CODE,
 };
@@ -20,7 +20,7 @@ pub struct TxDeposit {
     /// The ETH value to mint on L2.
     pub mint: Option<u128>,
     ///  The ETH value to send to the recipient account.
-    pub value: TxValue,
+    pub value: U256,
     /// The gas limit for the L2 transaction.
     pub gas_limit: u64,
     /// Field indicating if this transaction is exempt from the L2 gas limit.
@@ -38,7 +38,7 @@ impl TxDeposit {
         mem::size_of::<Address>() + // from
         self.to.size() + // to
         mem::size_of::<Option<u128>>() + // mint
-        mem::size_of::<TxValue>() + // value
+        mem::size_of::<U256>() + // value
         mem::size_of::<u64>() + // gas_limit
         mem::size_of::<bool>() + // is_system_transaction
         self.input.len() // input
@@ -138,7 +138,7 @@ impl TxDeposit {
 
     /// Get the transaction type
     pub(crate) fn tx_type(&self) -> TxType {
-        TxType::DEPOSIT
+        TxType::Deposit
     }
 }
 
@@ -171,7 +171,7 @@ mod tests {
             from: Address::default(),
             to: TransactionKind::default(),
             mint: Some(100),
-            value: TxValue::default(),
+            value: U256::default(),
             gas_limit: 50000,
             is_system_transaction: true,
             input: Bytes::default(),
@@ -191,7 +191,7 @@ mod tests {
             from: Address::default(),
             to: TransactionKind::default(),
             mint: Some(100),
-            value: TxValue::default(),
+            value: U256::default(),
             gas_limit: 50000,
             is_system_transaction: true,
             input: Bytes::default(),
@@ -213,7 +213,7 @@ mod tests {
             from: Address::default(),
             to: TransactionKind::default(),
             mint: Some(100),
-            value: TxValue::default(),
+            value: U256::default(),
             gas_limit: 50000,
             is_system_transaction: true,
             input: Bytes::default(),

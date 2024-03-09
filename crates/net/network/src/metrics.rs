@@ -45,6 +45,30 @@ pub struct NetworkMetrics {
 
     /// Number of Eth Requests dropped due to channel being at full capacity
     pub(crate) total_dropped_eth_requests_at_full_capacity: Counter,
+
+    /* ================ POLL DURATION ================ */
+
+    /* -- Total poll duration of `NetworksManager` future -- */
+    /// Duration in seconds of call to
+    /// [`NetworkManager`](crate::NetworkManager)'s poll function.
+    ///
+    /// True duration of this call, should be sum of the accumulated durations of calling nested
+    // items.
+    pub(crate) duration_poll_network_manager: Gauge,
+
+    /* -- Poll duration of items nested in `NetworkManager` future -- */
+    /// Time spent streaming messages sent over the [`NetworkHandle`](crate::NetworkHandle), which
+    /// can be cloned and shared via [`NetworkManager::handle`](crate::NetworkManager::handle), in
+    /// one call to poll the [`NetworkManager`](crate::NetworkManager) future. At least
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager) holds this handle.
+    ///
+    /// Duration in seconds.
+    pub(crate) duration_poll_network_handle: Gauge,
+    /// Time spent polling [`Swarm`](crate::swarm::Swarm), in one call to poll the
+    /// [`NetworkManager`](crate::NetworkManager) future.
+    ///
+    /// Duration in seconds.
+    pub(crate) duration_poll_swarm: Gauge,
 }
 
 /// Metrics for SessionManager
@@ -95,22 +119,6 @@ pub struct TransactionsManagerMetrics {
     /// capacity. Note, this is not a limit to the number of inflight requests, but a health
     /// measure.
     pub(crate) capacity_pending_pool_imports: Counter,
-    /// Currently active outgoing [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
-    /// requests.
-    /* ================ TX FETCHER ================ */
-    pub(crate) inflight_transaction_requests: Gauge,
-    /// Number of inflight requests at which the
-    /// [`TransactionFetcher`](crate::transactions::TransactionFetcher) is considered to be at
-    /// capacity. Note, this is not a limit to the number of inflight requests, but a health
-    /// measure.
-    pub(crate) capacity_inflight_requests: Counter,
-    /// Hashes in currently active outgoing
-    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) requests.
-    pub(crate) hashes_inflight_transaction_requests: Gauge,
-    /// How often we failed to send a request to the peer because the channel was full.
-    pub(crate) egress_peer_channel_full: Counter,
-    /// Total number of hashes pending fetch.
-    pub(crate) hashes_pending_fetch: Gauge,
 
     /* ================ POLL DURATION ================ */
 
@@ -119,7 +127,7 @@ pub struct TransactionsManagerMetrics {
     /// [`TransactionsManager`](crate::transactions::TransactionsManager)'s poll function.
     ///
     /// Updating metrics could take time, so the true duration of this call could
-    /// be longer than the sum of the accumulated durations of polling nested streams.
+    /// be longer than the sum of the accumulated durations of polling nested items.
     pub(crate) duration_poll_tx_manager: Gauge,
 
     /* -- Poll duration of items nested in `TransactionsManager` future -- */
@@ -165,6 +173,55 @@ pub struct TransactionsManagerMetrics {
     ///
     /// Duration in seconds.
     pub(crate) acc_duration_poll_commands: Gauge,
+}
+
+/// Metrics for the [`TransactionsManager`](crate::transactions::TransactionsManager).
+#[derive(Metrics)]
+#[metrics(scope = "network")]
+pub struct TransactionFetcherMetrics {
+    /// Currently active outgoing [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
+    /// requests.
+    pub(crate) inflight_transaction_requests: Gauge,
+    /// Number of inflight requests at which the
+    /// [`TransactionFetcher`](crate::transactions::TransactionFetcher) is considered to be at
+    /// capacity. Note, this is not a limit to the number of inflight requests, but a health
+    /// measure.
+    pub(crate) capacity_inflight_requests: Counter,
+    /// Hashes in currently active outgoing
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) requests.
+    pub(crate) hashes_inflight_transaction_requests: Gauge,
+    /// How often we failed to send a request to the peer because the channel was full.
+    pub(crate) egress_peer_channel_full: Counter,
+    /// Total number of hashes pending fetch.
+    pub(crate) hashes_pending_fetch: Gauge,
+
+    /* ================ SEARCH DURATION ================ */
+    /// Time spent searching for an idle peer in call to
+    /// [`TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash`](crate::transactions::TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash).
+    ///
+    /// Duration in seconds.
+    pub(crate) duration_find_idle_fallback_peer_for_any_pending_hash: Gauge,
+
+    /// Time spent searching for hashes pending fetch, announced by a given peer in
+    /// [`TransactionFetcher::fill_request_from_hashes_pending_fetch`](crate::transactions::TransactionFetcher::fill_request_from_hashes_pending_fetch).
+    ///
+    /// Duration in seconds.
+    pub(crate) duration_fill_request_from_hashes_pending_fetch: Gauge,
+}
+
+/// Measures the duration of executing the given code block. The duration is added to the given
+/// accumulator value passed as a mutable reference.
+#[macro_export]
+macro_rules! duration_metered_exec {
+    ($code:expr, $acc:ident) => {{
+        let start = Instant::now();
+
+        let res = $code;
+
+        *$acc += start.elapsed();
+
+        res
+    }};
 }
 
 /// Metrics for Disconnection types
@@ -278,17 +335,17 @@ impl TxTypesCounter {
             TxType::Legacy => {
                 self.legacy += 1;
             }
-            TxType::EIP2930 => {
+            TxType::Eip2930 => {
                 self.eip2930 += 1;
             }
-            TxType::EIP1559 => {
+            TxType::Eip1559 => {
                 self.eip1559 += 1;
             }
-            TxType::EIP4844 => {
+            TxType::Eip4844 => {
                 self.eip4844 += 1;
             }
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => {}
+            TxType::Deposit => {}
         }
     }
 }

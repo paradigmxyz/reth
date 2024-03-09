@@ -4,11 +4,12 @@ Deletes all table entries
 
 ```bash
 $ reth db clear --help
-Usage: reth db clear [OPTIONS] <TABLE>
+Usage: reth db clear [OPTIONS] <COMMAND>
 
-Arguments:
-  <TABLE>
-          Table name
+Commands:
+  mdbx         Deletes all database table entries
+  static-file  Deletes all static file segment entries
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
       --datadir <DATA_DIR>

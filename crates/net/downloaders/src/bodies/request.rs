@@ -155,7 +155,7 @@ where
     }
 
     /// Attempt to buffer body responses. Returns an error if body response fails validation.
-    /// Every body preceeding the failed one will be buffered.
+    /// Every body preceding the failed one will be buffered.
     ///
     /// This method removes headers from the internal collection.
     /// If the response fails validation, then the header will be put back.
@@ -254,7 +254,7 @@ mod tests {
     };
     use reth_interfaces::test_utils::{generators, generators::random_header_range, TestConsensus};
 
-    /// Check if future returns empty bodies without dispathing any requests.
+    /// Check if future returns empty bodies without dispatching any requests.
     #[tokio::test]
     async fn request_returns_empty_bodies() {
         let mut rng = generators::rng();

@@ -96,7 +96,7 @@ where
                 key,
                 TxpoolInspectSummary {
                     to: tx.to(),
-                    value: tx.value().into(),
+                    value: tx.value(),
                     gas: U256::from(tx.gas_limit()),
                     gas_price: U256::from(tx.transaction.max_fee_per_gas()),
                 },

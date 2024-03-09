@@ -5,19 +5,19 @@ publish = false
 edition.workspace = true
 license.workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 reth.workspace = true
-reth-rpc-api.workspace = true
 reth-rpc-types.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-ethereum-payload-builder.workspace = true
+reth-node-ethereum.workspace = true
+reth-tracing.workspace = true
 
 alloy-chains.workspace = true
-jsonrpsee.workspace = true
 eyre.workspace = true
 tokio.workspace = true
 thiserror.workspace = true

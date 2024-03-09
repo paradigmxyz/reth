@@ -1,0 +1,18 @@
+[package]
+name = "custom-evm"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-node-api.workspace = true
+reth-node-core.workspace = true
+reth-primitives.workspace = true
+reth-node-ethereum.workspace = true
+reth-tracing.workspace = true
+
+alloy-chains.workspace = true
+eyre.workspace = true
+tokio.workspace = true

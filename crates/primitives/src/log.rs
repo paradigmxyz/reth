@@ -22,8 +22,12 @@ pub struct Log {
 }
 
 impl From<AlloyLog> for Log {
-    fn from(log: AlloyLog) -> Self {
-        Self { address: log.address, topics: log.topics().to_vec(), data: log.data.data }
+    fn from(mut log: AlloyLog) -> Self {
+        Self {
+            address: log.address,
+            topics: std::mem::take(log.data.topics_mut_unchecked()),
+            data: log.data.data,
+        }
     }
 }
 

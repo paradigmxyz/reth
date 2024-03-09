@@ -115,10 +115,19 @@ impl<T> ValidTransaction<T> {
 }
 
 impl<T: PoolTransaction> ValidTransaction<T> {
+    /// Returns the transaction.
     #[inline]
-    pub(crate) const fn transaction(&self) -> &T {
+    pub const fn transaction(&self) -> &T {
         match self {
             Self::Valid(transaction) | Self::ValidWithSidecar { transaction, .. } => transaction,
+        }
+    }
+
+    /// Consumes the wrapper and returns the transaction.
+    pub fn into_transaction(self) -> T {
+        match self {
+            Self::Valid(transaction) => transaction,
+            Self::ValidWithSidecar { transaction, .. } => transaction,
         }
     }
 
@@ -130,13 +139,13 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 
     /// Returns the hash of the transaction.
     #[inline]
-    pub(crate) fn hash(&self) -> &B256 {
+    pub fn hash(&self) -> &B256 {
         self.transaction().hash()
     }
 
     /// Returns the nonce of the transaction.
     #[inline]
-    pub(crate) fn nonce(&self) -> u64 {
+    pub fn nonce(&self) -> u64 {
         self.transaction().nonce()
     }
 }
