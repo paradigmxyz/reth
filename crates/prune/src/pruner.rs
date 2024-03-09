@@ -14,8 +14,7 @@ use reth_provider::{
 };
 use reth_tokio_util::EventListeners;
 use std::{
-    collections::BTreeMap,
-    time::{Duration, Instant},
+    collections::BTreeMap, num::NonZeroUsize, time::{Duration, Instant}
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::debug;
@@ -109,16 +108,18 @@ impl<DB: Database> Pruner<DB> {
                 tip_block_number.saturating_sub(previous_tip_block_number) as usize
             }))
             .min(self.prune_max_blocks_per_run);
-        let mut limiter_builder = PruneLimiterBuilder::default();
-        limiter_builder.deleted_entries_limit(self.delete_limit * blocks_since_last_run);
-        if let Some(timeout) = self.timeout {
-            limiter_builder.job_timeout(timeout, start);
-        }
-        let limiter = limiter_builder.build();
+        let limiter = {
+            let mut limiter_builder = PruneLimiterBuilder::default().deleted_entries_limit(self.delete_limit * blocks_since_last_run);
+            if let Some(timeout) = self.timeout {
+                limiter_builder = limiter_builder.job_timeout(timeout, start);
+            }
+            limiter_builder.build()
+        };
 
         let provider = self.provider_factory.provider_rw()?;
+        let segments_limiter = PruneLimiterBuilder::with_fraction_of_entries_limit(&limiter, NonZeroUsize::new(1).unwrap()).build();
         let (stats, deleted_entries, progress) =
-            self.prune_segments(&provider, tip_block_number, limiter)?;
+            self.prune_segments(&provider, tip_block_number, segments_limiter)?;
         provider.commit()?;
 
         self.previous_tip_block_number = Some(tip_block_number);
@@ -242,7 +243,11 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
-        Ok((stats, limiter.deleted_units_count(), PruneProgress::new(done, limiter.is_timed_out())))
+        Ok((
+            stats,
+            limiter.deleted_entries_count(),
+            PruneProgress::new(done, limiter.is_timed_out()),
+        ))
     }
 
     /// Returns pre-configured segments that needs to be pruned according to the highest

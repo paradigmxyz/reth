@@ -162,7 +162,7 @@ mod tests {
                 let segment = AccountHistory::new(prune_mode);
 
                 let provider = db.factory.provider_rw().unwrap();
-                let result = segment.prune(&provider, input).unwrap();
+                let result = segment.prune(&provider, input.clone()).unwrap();
                 assert_matches!(
                     result,
                     PruneOutput {progress, pruned, checkpoint: Some(_)}

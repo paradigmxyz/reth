@@ -100,7 +100,7 @@ mod tests {
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, TxNumber, B256,
     };
-    use reth_provider::{PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder};
+    use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
 

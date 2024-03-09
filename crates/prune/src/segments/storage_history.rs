@@ -198,7 +198,7 @@ mod tests {
             let input = test_rig.get_input(to_block, limiter);
 
             let provider = test_rig.db.factory.provider_rw().unwrap();
-            let result = segment.prune(&provider, input).unwrap();
+            let result = segment.prune(&provider, input.clone()).unwrap();
             assert_matches!(
                 result,
                 PruneOutput {progress, pruned, checkpoint: Some(_)}
@@ -313,7 +313,7 @@ mod tests {
 
         let start = Instant::now();
 
-        let mut limiter =
+        let limiter =
             PruneLimiterBuilder::default().job_timeout(PRUNE_JOB_TIMEOUT, start).build();
         let segment = StorageHistory::new(PRUNE_MODE);
         let test_rig = TestRig::new();

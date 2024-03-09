@@ -81,7 +81,7 @@ mod tests {
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, TxNumber, B256,
     };
-    use reth_provider::{PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder};
+    use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
 
@@ -122,7 +122,7 @@ mod tests {
                 .unwrap_or_default();
 
             let provider = db.factory.provider_rw().unwrap();
-            let result = segment.prune(&provider, input).unwrap();
+            let result = segment.prune(&provider, input.clone()).unwrap();
             assert_matches!(
                 result,
                 PruneOutput {progress, pruned, checkpoint: Some(_)}

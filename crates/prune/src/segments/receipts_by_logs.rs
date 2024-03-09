@@ -34,7 +34,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
     fn prune(
         &self,
         provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
+        mut input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         // Contract log filtering removes every receipt possible except the ones in the list. So,
         // for the other receipts it's as if they had a `PruneMode::Distance()` of
@@ -113,7 +113,6 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             "Calculated block ranges and filtered addresses",
         );
 
-        let mut limiter = input.limiter;
         let mut done = true;
         let mut last_pruned_transaction = None;
         for (start_block, end_block, num_addresses) in block_ranges {
@@ -135,6 +134,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
 
             // Delete receipts, except the ones in the inclusion list
             let mut last_skipped_transaction = 0;
+            let limiter = <Self as Segment<DB>>::new_limiter_from_parent_scope_limiter(self, &input.limiter);
             let (deleted, progress) = provider.prune_table_with_range::<tables::Receipts>(
                 tx_range,
                 limiter,
@@ -156,7 +156,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
 
             trace!(target: "pruner", %deleted, ?progress, ?block_range, "Pruned receipts");
 
-            limiter.increment_deleted_entries_count_by(deleted);
+            input.limiter.increment_deleted_entries_count_by(deleted);
 
             // For accurate checkpoints we need to know that we have checked every transaction.
             // Example: we reached the end of the range, and the last receipt is supposed to skip
@@ -174,7 +174,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                     .saturating_sub(if done { 0 } else { 1 }),
             );
 
-            if limiter.is_limit_reached() {
+            if input.limiter.is_limit_reached() {
                 done &= end_block == to_block;
                 break
             }
@@ -205,9 +205,9 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             },
         )?;
 
-        let pruned = limiter.deleted_units_count();
+        let pruned = input.limiter.deleted_entries_count();
         Ok(PruneOutput {
-            progress: PruneProgress::new(done, limiter.is_timed_out()),
+            progress: PruneProgress::new(done, input.limiter.is_timed_out()),
             pruned,
             checkpoint: None,
         })
@@ -225,7 +225,7 @@ mod tests {
     };
     use reth_primitives::{PruneMode, PruneProgress, PruneSegment, ReceiptsLogPruneConfig, B256};
     use reth_provider::{
-        PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder, TransactionsProvider,
+        PruneCheckpointReader, PruneLimiterBuilder, TransactionsProvider,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::collections::BTreeMap;
