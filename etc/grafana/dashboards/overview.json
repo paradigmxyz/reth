@@ -96,6 +96,40 @@
   "liveNow": false,
   "panels": [
     {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 216,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "description": "Release feed from the reth GitHub repository",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 1
+          },
+          "id": 215,
+          "options": {
+            "feedUrl": "https://corsproxy.io/?https://github.com/paradigmxyz/reth/releases.atom",
+            "showImage": true
+          },
+          "title": "Latest reth Releases",
+          "type": "news"
+        }
+      ],
+      "title": "Releases",
+      "type": "row"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
