@@ -978,7 +978,7 @@ mod tests {
 
         // there is no system contract call so there should be NO STORAGE CHANGES
         // this means we'll check the transition state
-        let state = executor.evm.context.evm.db;
+        let state = executor.evm.context.evm.inner.db;
         let transition_state = state
             .transition_state
             .clone()
