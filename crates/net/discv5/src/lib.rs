@@ -24,29 +24,18 @@ use reth_primitives::{
 use secp256k1::SecretKey;
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::error;
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
 pub struct Discv5WithDiscv4Downgrade {
     discv5: Arc<RwLock<discv5::Discv5>>, // todo: remove not needed lock
     discv4: Discv4,
-    discv5_kbuckets_change_tx: watch::Sender<()>,
 }
 
 impl Discv5WithDiscv4Downgrade {
     /// Returns a new [`Discv5WithDiscv4Downgrade`] handle.
-    pub fn new(
-        discv5: Arc<RwLock<discv5::Discv5>>,
-        discv4: Discv4,
-        discv5_kbuckets_change_tx: watch::Sender<()>,
-    ) -> Self {
-        Self { discv5, discv4, discv5_kbuckets_change_tx }
-    }
-
-    /// Notifies [`Discv4`] that [discv5::Discv5]'s kbucktes have been updated. This brings
-    /// [`Discv4`] to update its mirror of the [discv5::Discv5] kbucktes upon next
-    /// [`reth_discv4::proto::Neighbours`] message.
-    pub fn notify_discv4_of_kbuckets_update(&self) -> Result<(), watch::error::SendError<()>> {
-        self.discv5_kbuckets_change_tx.send(())
+    pub fn new(discv5: Arc<RwLock<discv5::Discv5>>, discv4: Discv4) -> Self {
+        Self { discv5, discv4 }
     }
 
     /// Exposes methods on [`Discv4`] that take a reference to self.
@@ -122,7 +111,6 @@ impl fmt::Debug for Discv5WithDiscv4Downgrade {
 
         debug_struct.field("discv5", &"{ .. }");
         debug_struct.field("discv4", &self.discv4);
-        debug_struct.field("discv5_kbuckets_change_tx", &self.discv5_kbuckets_change_tx);
 
         debug_struct.finish()
     }
@@ -180,24 +168,53 @@ where
 
 /// A stream that polls update streams from [`discv5::Discv5`] and [`Discv4`] in round-robin
 /// fashion.
-pub type MergedUpdateStream = Select<
-    UpdateStream<ReceiverStream<discv5::Event>>,
-    UpdateStream<ReceiverStream<DiscoveryUpdate>>,
->;
+#[derive(Debug)]
+pub struct MergedUpdateStream {
+    inner: Select<
+        UpdateStream<ReceiverStream<discv5::Event>>,
+        UpdateStream<ReceiverStream<DiscoveryUpdate>>,
+    >,
+    discv5_kbuckets_change_tx: watch::Sender<()>,
+}
 
-/// Returns a merged stream of [`discv5::Event`]s and [`DiscoveryUpdate`]s, that supports
-/// downgrading to discv4.
-pub fn merge_discovery_streams(
-    discv5_event_stream: mpsc::Receiver<discv5::Event>,
-    discv4_update_stream: ReceiverStream<DiscoveryUpdate>,
-) -> Select<
-    UpdateStream<ReceiverStream<discv5::Event>>,
-    UpdateStream<ReceiverStream<DiscoveryUpdate>>,
-> {
-    let discv5_event_stream = UpdateStream(ReceiverStream::new(discv5_event_stream));
-    let discv4_update_stream = UpdateStream(discv4_update_stream);
+impl MergedUpdateStream {
+    /// Returns a merged stream of [`discv5::Event`]s and [`DiscoveryUpdate`]s, that supports
+    /// downgrading to discv4.
+    pub fn merge_discovery_streams(
+        discv5_event_stream: mpsc::Receiver<discv5::Event>,
+        discv4_update_stream: ReceiverStream<DiscoveryUpdate>,
+        discv5_kbuckets_change_tx: watch::Sender<()>,
+    ) -> Self {
+        let discv5_event_stream = UpdateStream(ReceiverStream::new(discv5_event_stream));
+        let discv4_update_stream = UpdateStream(discv4_update_stream);
 
-    select(discv5_event_stream, discv4_update_stream)
+        Self { inner: select(discv5_event_stream, discv4_update_stream), discv5_kbuckets_change_tx }
+    }
+
+    /// Notifies [`Discv4`] that [discv5::Discv5]'s kbucktes have been updated. This brings
+    /// [`Discv4`] to update its mirror of the [discv5::Discv5] kbucktes upon next
+    /// [`reth_discv4::proto::Neighbours`] message.
+    fn notify_discv4_of_kbuckets_update(&self) -> Result<(), watch::error::SendError<()>> {
+        self.discv5_kbuckets_change_tx.send(())
+    }
+}
+
+impl Stream for MergedUpdateStream {
+    type Item = DiscoveryUpdateV5; // todo: return result
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let update = ready!(self.inner.poll_next_unpin(cx));
+        if let Some(DiscoveryUpdateV5::V5(discv5::Event::NodeInserted { .. })) = update {
+            // notify discv4 that a node has been inserted,
+            if let Err(err) = self.notify_discv4_of_kbuckets_update() {
+                error!(target: "net::discv5",
+                    "failed to notify discv4 of discv5 kbuckets update, {err}",
+                );
+            }
+        }
+
+        Poll::Ready(update)
+    }
 }
 
 /// Converts a [`discv5::enr::NodeId`] to a [`PeerId`]. [`discv5::enr::NodeId`] is essentially a

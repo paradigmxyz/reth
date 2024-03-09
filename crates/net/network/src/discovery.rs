@@ -133,18 +133,12 @@ where
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
         match update {
             DiscoveryUpdate::Added(record) => {
-                #[cfg(test)]
-                self.notify_listeners(&Discv5Event::AddedV4(record.id));
-
                 self.on_node_record_update(record, None);
             }
             DiscoveryUpdate::EnrForkId(node, fork_id) => {
                 self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
             }
             DiscoveryUpdate::Removed(node) => {
-                #[cfg(test)]
-                self.notify_listeners(&Discv5Event::RemovedV4(node.id));
-
                 self.discovered_nodes.remove(&node);
             }
             DiscoveryUpdate::Batch(updates) => {
@@ -266,11 +260,8 @@ impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
             EnrAdded { .. } => {
                 // not used in discv5 codebase
             }
-            NodeInserted { node_id, replaced } => {
+            NodeInserted { replaced, .. } => {
                 // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::Removed(_)
-
-                #[cfg(test)]
-                self.notify_listeners(&Discv5Event::AddedV5(node_id));
 
                 if let Some(node_id) = replaced {
                     let id = reth_discv5::compressed_to_uncompressed_id(node_id).map_err(|_| {
@@ -281,21 +272,12 @@ impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
 
                     self.discovered_nodes.remove(&id);
                 };
-
-                // notify discv4 that a node has been inserted,
-                if let Some(disc) = &self.disc {
-                    disc.notify_discv4_of_kbuckets_update()
-                        .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?
-                }
             }
             SessionEstablished(enr, _remote_socket) => {
                 // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::DiscoveredAtCapacity(_)
 
                 // node has been discovered unrelated to a query, e.g. an incoming connection to
                 // discv5
-
-                #[cfg(test)]
-                self.notify_listeners(&Discv5Event::ConnectedV5(enr.node_id()));
 
                 self.try_insert_enr_into_discovered_nodes(enr)?;
             }
@@ -531,11 +513,11 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                 //
                 // combined handle
                 let disc =
-                    Discv5WithDiscv4Downgrade::new(discv5, discv4, discv5_kbuckets_change_tx);
+                    Discv5WithDiscv4Downgrade::new(discv5, discv4);
 
                 // combined update stream
                 let disc_updates =
-                    reth_discv5::merge_discovery_streams(discv5_updates, discv4_updates);
+                    MergedUpdateStream::merge_discovery_streams(discv5_updates, discv4_updates, discv5_kbuckets_change_tx);
 
                 // discv5 and discv4 are running like usual, only that discv4 will filter out
                 // nodes already connected over discv5 identified by their public key
@@ -603,18 +585,6 @@ pub enum DiscoveryEvent {
     NewNode(DiscoveredEvent),
     /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
     EnrForkId(PeerId, ForkId),
-    #[doc(hidden)]
-    #[cfg(test)]
-    AddedV4(PeerId),
-    #[doc(hidden)]
-    #[cfg(test)]
-    RemovedV4(PeerId),
-    #[doc(hidden)]
-    #[cfg(test)]
-    AddedV5(enr::NodeId),
-    #[doc(hidden)]
-    #[cfg(test)]
-    ConnectedV5(enr::NodeId),
 }
 
 #[cfg(test)]
@@ -675,14 +645,11 @@ mod discv4_tests {
 mod discv5_test {
     use super::*;
 
-    use std::time::Duration;
-
     use reth_discv4::Discv4ConfigBuilder;
     use reth_discv5::EnrCombinedKeyWrapper;
 
     use discv5;
     use rand::thread_rng;
-    use tracing;
 
     async fn start_discv5_with_discv4_downgrade_node(
         udp_port_discv4: u16,
@@ -722,7 +689,7 @@ mod discv5_test {
         let node_2_enr = node_2.disc.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
         let node_2_enr_without_sig = node_2.local_enr;
 
-        // add node_2 manually to node_1:discv4's kbuckets
+        // add node_2 manually to node_1:discv4 kbuckets
         node_1.disc.as_ref().unwrap().with_discv4(|discv4| {
             _ = discv4.add_node_to_routing_table(NodeFromExternalSource::NodeRecord(
                 node_2_enr_without_sig,
@@ -730,8 +697,8 @@ mod discv5_test {
         });
 
         // verify node_2 is in KBuckets of node_1:discv4 and vv
-        let event_1_v4 = node_1.next().await.unwrap();
-        let event_2_v4 = node_2.next().await.unwrap();
+        let event_1_v4 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
+        let event_2_v4 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
         assert!(match event_1_v4 {
             DiscoveryUpdateV5::V4(DiscoveryUpdate::Added(node))
                 if node == node_2_enr_without_sig =>
@@ -795,7 +762,6 @@ mod discv5_test {
             _ => false,
         });
 
-        // verify node_1 is evicted from node_2:discv4's kbuckets and vv.
         let event_1_v4 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
         let event_2_v4 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
 
@@ -811,7 +777,5 @@ mod discv5_test {
                 true,
             _ => false,
         });
-
-        // todo: add only discv4 node to verify stays in discv4 kbuckets
     }
 }

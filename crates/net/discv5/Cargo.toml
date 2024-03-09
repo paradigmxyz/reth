@@ -32,3 +32,4 @@ parking_lot.workspace = true
 
 # misc
 derive_more.workspace = true
+tracing.workspace = true
