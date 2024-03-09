@@ -130,7 +130,7 @@ impl fmt::Debug for Discv5WithDiscv4Downgrade {
 
 /// Wrapper around enr type used in [`discv5::Discv5`].
 #[derive(Debug, Clone)]
-pub struct EnrCombinedKeyWrapper(Enr<discv5::enr::CombinedKey>);
+pub struct EnrCombinedKeyWrapper(pub Enr<discv5::enr::CombinedKey>);
 
 impl TryFrom<Enr<SecretKey>> for EnrCombinedKeyWrapper {
     type Error = rlp::DecoderError;
@@ -139,6 +139,17 @@ impl TryFrom<Enr<SecretKey>> for EnrCombinedKeyWrapper {
         let enr = rlp::decode::<discv5::Enr>(&encoded_enr)?;
 
         Ok(EnrCombinedKeyWrapper(enr))
+    }
+}
+
+impl TryInto<Enr<SecretKey>> for EnrCombinedKeyWrapper {
+    type Error = rlp::DecoderError;
+    fn try_into(self) -> Result<Enr<SecretKey>, Self::Error> {
+        let Self(enr) = self;
+        let encoded_enr = rlp::encode(&enr);
+        let enr = rlp::decode::<Enr<SecretKey>>(&encoded_enr)?;
+
+        Ok(enr)
     }
 }
 

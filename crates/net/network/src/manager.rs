@@ -220,7 +220,7 @@ where
                 .await?;
 
         #[cfg(feature = "discv5")]
-        let discovery = Discovery::new_discv5(
+        let discovery = Discovery::start_discv5_with_discv4_downgrade(
             discovery_addr,
             secret_key,
             (discovery_v4_config, discovery_v5_config),

@@ -133,12 +133,18 @@ where
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
         match update {
             DiscoveryUpdate::Added(record) => {
+                #[cfg(test)]
+                self.notify_listeners(&Discv5Event::AddedV4(record.id));
+
                 self.on_node_record_update(record, None);
             }
             DiscoveryUpdate::EnrForkId(node, fork_id) => {
                 self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
             }
             DiscoveryUpdate::Removed(node) => {
+                #[cfg(test)]
+                self.notify_listeners(&Discv5Event::RemovedV4(node.id));
+
                 self.discovered_nodes.remove(&node);
             }
             DiscoveryUpdate::Batch(updates) => {
@@ -260,8 +266,11 @@ impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
             EnrAdded { .. } => {
                 // not used in discv5 codebase
             }
-            NodeInserted { replaced, .. } => {
+            NodeInserted { node_id, replaced } => {
                 // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::Removed(_)
+
+                #[cfg(test)]
+                self.notify_listeners(&Discv5Event::AddedV5(node_id));
 
                 if let Some(node_id) = replaced {
                     let id = reth_discv5::compressed_to_uncompressed_id(node_id).map_err(|_| {
@@ -285,8 +294,8 @@ impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
                 // node has been discovered unrelated to a query, e.g. an incoming connection to
                 // discv5
 
-                // todo: notify discv4 also for nodes that don't make it into kbuckets? e.g. nodes
-                // behind symmetric nat
+                #[cfg(test)]
+                self.notify_listeners(&Discv5Event::ConnectedV5(enr.node_id()));
 
                 self.try_insert_enr_into_discovered_nodes(enr)?;
             }
@@ -365,7 +374,10 @@ where
     }
 }
 
-impl<S, N> fmt::Debug for Discovery<Discv5WithDiscv4Downgrade, S, N> {
+impl<S, N> fmt::Debug for Discovery<Discv5WithDiscv4Downgrade, S, N>
+where
+    N: fmt::Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("Discovery<Discv5>");
 
@@ -387,7 +399,7 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
     /// establish a merged listener channel to receive all discovered nodes.
     ///
     /// Note: if dns discovery is configured, any nodes found by this service will be
-    pub async fn new_discv5(
+    pub async fn start_discv5_with_discv4_downgrade(
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
         disc_config: (Option<Discv4Config>, Option<discv5::Config>),
@@ -411,7 +423,11 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                 };
 
                 if discv5_addresses.iter().any(|addr| addr.port() == discv4_addr.port()) {
-                    return Err(NetworkError::custom_discovery(&format!("discv5 port and discv4 port can't be the same, discv5_addresses: {discv5_addresses:?}, discv4_addr: {discv4_addr}")))
+                    return Err(NetworkError::custom_discovery(&format!(
+                        "discv5 port and discv4 port can't be the same,
+                        discv5_addresses: {discv5_addresses:?},
+                        discv4_addr: {discv4_addr}"
+                    )))
                 }
 
                 //
@@ -446,7 +462,7 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                 // 3. start discv5
                 //
                 let mut discv5 = discv5::Discv5::new(enr, sk_discv5_wrapper, discv5_config)
-                    .map_err(NetworkError::custom_discovery)?;
+                    .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
                 discv5.start().await.map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
 
                 info!("Discv5 listening on {discv5_addresses:?}");
@@ -466,6 +482,9 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                 let discv5 = Arc::new(RwLock::new(discv5));
                 let discv5_ref = discv5.clone();
                 let kbuckets_callback = move || -> Result<HashSet<PeerId>, secp256k1::Error> {
+                    // waits for write lock on kbuckets
+                    // todo: use master branch in discv5 which has api for taking read lock only
+                    // to get keys
                     let keys = discv5_ref.read().table_entries_id();
 
                     let mut discv5_kbucket_keys = HashSet::new();
@@ -584,6 +603,18 @@ pub enum DiscoveryEvent {
     NewNode(DiscoveredEvent),
     /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
     EnrForkId(PeerId, ForkId),
+    #[doc(hidden)]
+    #[cfg(test)]
+    AddedV4(PeerId),
+    #[doc(hidden)]
+    #[cfg(test)]
+    RemovedV4(PeerId),
+    #[doc(hidden)]
+    #[cfg(test)]
+    AddedV5(enr::NodeId),
+    #[doc(hidden)]
+    #[cfg(test)]
+    ConnectedV5(enr::NodeId),
 }
 
 #[cfg(test)]
@@ -617,13 +648,17 @@ impl<D, S, N> Discovery<D, S, N> {
 
 #[cfg(test)]
 #[cfg(not(feature = "discv5"))]
-mod tests {
+mod discv4_tests {
     use super::*;
     use rand::thread_rng;
+
+    use reth_primitives::{Hardfork, MAINNET};
+
     use secp256k1::SECP256K1;
     use std::net::{Ipv4Addr, SocketAddrV4};
 
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(not(feature = "discv5"))]
     async fn test_discovery_setup() {
         let mut rng = thread_rng();
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
@@ -632,5 +667,151 @@ mod tests {
             Discovery::new(discovery_addr, secret_key, Default::default(), Default::default())
                 .await
                 .unwrap();
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "discv5")]
+mod discv5_test {
+    use super::*;
+
+    use std::time::Duration;
+
+    use reth_discv4::Discv4ConfigBuilder;
+    use reth_discv5::EnrCombinedKeyWrapper;
+
+    use discv5;
+    use rand::thread_rng;
+    use tracing;
+
+    async fn start_discv5_with_discv4_downgrade_node(
+        udp_port_discv4: u16,
+        udp_port_discv5: u16,
+    ) -> Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, enr::Enr<secp256k1::SecretKey>>
+    {
+        let secret_key = SecretKey::new(&mut thread_rng());
+
+        let discv4_addr = format!("127.0.0.1:{udp_port_discv4}").parse().unwrap();
+        let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
+
+        // disable `NatResolver`
+        let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
+
+        let discv5_listen_config = discv5::ListenConfig::try_from(discv5_addr).unwrap();
+        let discv5_config = discv5::ConfigBuilder::new(discv5_listen_config).build();
+
+        Discovery::start_discv5_with_discv4_downgrade(
+            discv4_addr,
+            secret_key,
+            (Some(discv4_config), Some(discv5_config)),
+            None,
+        )
+        .await
+        .expect("should build discv5 with discv4 downgrade")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn discv5_with_discv4_downgrade() {
+        reth_tracing::init_test_tracing();
+
+        let mut node_1 = start_discv5_with_discv4_downgrade_node(30314, 30315).await;
+        let node_1_enr = node_1.disc.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
+        let node_1_enr_without_sig = node_1.local_enr;
+
+        let mut node_2 = start_discv5_with_discv4_downgrade_node(30324, 30325).await;
+        let node_2_enr = node_2.disc.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
+        let node_2_enr_without_sig = node_2.local_enr;
+
+        // add node_2 manually to node_1:discv4's kbuckets
+        node_1.disc.as_ref().unwrap().with_discv4(|discv4| {
+            _ = discv4.add_node_to_routing_table(NodeFromExternalSource::NodeRecord(
+                node_2_enr_without_sig,
+            ));
+        });
+
+        // verify node_2 is in KBuckets of node_1:discv4 and vv
+        let event_1_v4 = node_1.next().await.unwrap();
+        let event_2_v4 = node_2.next().await.unwrap();
+        assert!(match event_1_v4 {
+            DiscoveryUpdateV5::V4(DiscoveryUpdate::Added(node))
+                if node == node_2_enr_without_sig =>
+                true,
+            _ => false,
+        });
+        assert!(match event_2_v4 {
+            DiscoveryUpdateV5::V4(DiscoveryUpdate::Added(node))
+                if node == node_1_enr_without_sig =>
+                true,
+            _ => false,
+        });
+
+        // add node_2 to discovery (should add node to discv5 kbuckets)
+        let node_2_enr_reth_compatible_ty: Enr<SecretKey> =
+            EnrCombinedKeyWrapper(node_2_enr.clone()).try_into().unwrap();
+        node_1
+            .disc
+            .as_ref()
+            .unwrap()
+            .add_node_to_routing_table(NodeFromExternalSource::Enr(node_2_enr_reth_compatible_ty))
+            .unwrap();
+        // verify node_2 is in KBuckets of node_1:discv5
+        assert!(node_1
+            .disc
+            .as_ref()
+            .unwrap()
+            .with_discv5(|discv5| discv5.table_entries_id().contains(&node_2_enr.node_id())));
+
+        // make connection from node_1 to node_2
+        node_1
+            .disc
+            .as_ref()
+            .unwrap()
+            .with_discv5(|discv5| discv5.send_ping(node_2_enr.clone()))
+            .await
+            .unwrap();
+
+        // verify node_1:discv5 is connected to node_2:discv5 and vv
+        let event_1_v5 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
+        let event_2_v5 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
+        assert!(match event_1_v5 {
+            DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(node, socket))
+                if node == node_2_enr && socket == node_2_enr.udp4_socket().unwrap().into() =>
+                true,
+            _ => false,
+        });
+        assert!(match event_2_v5 {
+            DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(node, socket))
+                if node == node_1_enr && socket == node_1_enr.udp4_socket().unwrap().into() =>
+                true,
+            _ => false,
+        });
+
+        // verify node_1 is in KBuckets of node_2:discv5
+        let event_2_v5 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
+        assert!(match event_2_v5 {
+            DiscoveryUpdateV5::V5(discv5::Event::NodeInserted { node_id, replaced })
+                if node_id == node_1_enr.node_id() && replaced.is_none() =>
+                true,
+            _ => false,
+        });
+
+        // verify node_1 is evicted from node_2:discv4's kbuckets and vv.
+        let event_1_v4 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
+        let event_2_v4 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
+
+        assert!(match event_1_v4 {
+            DiscoveryUpdateV5::V4(DiscoveryUpdate::Removed(node_id))
+                if node_id == node_2_enr_without_sig.id =>
+                true,
+            _ => false,
+        });
+        assert!(match event_2_v4 {
+            DiscoveryUpdateV5::V4(DiscoveryUpdate::Removed(node_id))
+                if node_id == node_1_enr_without_sig.id =>
+                true,
+            _ => false,
+        });
+
+        // todo: add only discv4 node to verify stays in discv4 kbuckets
     }
 }

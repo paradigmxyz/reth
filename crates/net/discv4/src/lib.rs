@@ -1622,11 +1622,10 @@ where
             // trigger self lookup
             let local_node_id = self.local_node_record.id;
             if self.config.enable_lookup {
+                // disconnect to nodes that are in discv5 kbuckets if node is running as
+                // downgrade from discv5.
+                self.filter_kbuckets_against_primary_kbuckets();
                 while self.lookup_interval.poll_tick(cx).is_ready() {
-                    // disconnect to nodes that are in discv5 kbuckets if node is running as
-                    // downgrade from discv5.
-                    self.filter_kbuckets_against_primary_kbuckets();
-
                     let target = self.lookup_rotator.next(&local_node_id);
                     self.lookup_with(target, None);
                 }
@@ -1815,9 +1814,15 @@ where
         let Some(ref filter) = self.neighbours_filter else { return };
         let connected_over_discv5 = filter.find_intersection(&self.kbuckets);
 
+        if !connected_over_discv5.is_empty() {
+            trace!(target: "discv4",
+                evicted_nodes=format!("[{:#}]", connected_over_discv5.iter().format(", ")), "evicted peers from kbuckets, nodes connected over primary discovery network"
+            );
+        }
+
         // disconnect nodes that are already connected over discv5
         for node_id in connected_over_discv5 {
-            self.kbuckets.remove(&kad_key(node_id));
+            self.remove_node(node_id);
         }
     }
 }
@@ -2296,7 +2301,7 @@ enum PingReason {
 }
 
 /// Represents node related updates state changes in the underlying node table
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoveryUpdate {
     /// A new node was discovered _and_ added to the table.
     Added(NodeRecord),
