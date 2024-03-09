@@ -2026,7 +2026,7 @@ mod tests {
 
             let p = peers.peers.get(&peer).unwrap();
             if p.is_banned() {
-                break;
+                break
             }
         }
 
