@@ -36,21 +36,23 @@ impl<DB: Database> Segment<DB> for Headers {
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let block_range = match input.get_next_block_range() {
-            Some(range) => range,
+        let block_range_start = match input.get_next_block_range() {
+            Some(range) => *range.start(),
             None => {
                 trace!(target: "pruner", "No headers to prune");
                 return Ok(PruneOutput::done())
             }
         };
-        let last_pruned_block = *block_range.end();
+        let last_pruned_block =
+            if block_range_start == 0 { None } else { Some(block_range_start - 1) };
 
         let mut limiter = input.limiter;
 
         let tables_iter = HeaderTablesIter::new(provider, &mut limiter, last_pruned_block);
 
+        let mut last_pruned_block: Option<u64> = None;
         for res in tables_iter.into_iter() {
-            res?;
+            last_pruned_block = res?;
         }
 
         let progress = PruneProgress::new(limiter.is_limit_reached(), limiter.is_timed_out());
@@ -60,7 +62,7 @@ impl<DB: Database> Segment<DB> for Headers {
             progress,
             pruned,
             checkpoint: Some(PruneOutputCheckpoint {
-                block_number: Some(last_pruned_block),
+                block_number: last_pruned_block,
                 tx_number: None,
             }),
         })
@@ -79,7 +81,7 @@ where
 {
     provider: &'a DatabaseProviderRW<DB>,
     limiter: &'b mut PruneLimiter,
-    last_pruned_block: u64,
+    last_pruned_block: Option<u64>,
     exhausted: bool,
 }
 
@@ -90,7 +92,7 @@ where
     fn new(
         provider: &'a DatabaseProviderRW<DB>,
         limiter: &'b mut PruneLimiter,
-        last_pruned_block: u64,
+        last_pruned_block: Option<u64>,
     ) -> Self {
         Self { provider, limiter, last_pruned_block, exhausted: false }
     }
@@ -100,7 +102,7 @@ impl<'a, 'b, DB> Iterator for HeaderTablesIter<'a, 'b, DB>
 where
     DB: Database,
 {
-    type Item = Result<(), PrunerError>;
+    type Item = Result<Option<u64>, PrunerError>;
     fn next(&mut self) -> Option<Self::Item> {
         let Self { provider, limiter, last_pruned_block, exhausted } = self;
 
@@ -108,12 +110,12 @@ where
             return None
         }
 
-        let next_up_last_pruned_block = *last_pruned_block + 1;
-        let block_range = *last_pruned_block..=next_up_last_pruned_block;
+        let block_range =
+            if let Some(block) = *last_pruned_block { block..=block + 1 } else { 0..=1 };
 
         let mut last_pruned_block_headers = 0;
-        let mut last_pruned_block_headers_td = 0;
-        let mut last_pruned_block_canonical_headers = 0;
+        let mut last_pruned_block_td = 0;
+        let mut last_pruned_block_canonical = 0;
 
         // todo: guarantee skip filter and delete callback are same for all header table types
 
@@ -134,7 +136,7 @@ where
             block_range.clone(),
             |ref mut walker| {
                 provider.step_prune_table(walker, limiter, &mut |_| false, &mut |row| {
-                    last_pruned_block_headers_td = row.0
+                    last_pruned_block_td = row.0
                 })
             },
         ) {
@@ -144,10 +146,10 @@ where
         }
 
         match provider.with_walker::<tables::CanonicalHeaders, _, _>(
-            block_range,
+            block_range.clone(),
             |ref mut walker| {
                 provider.step_prune_table(walker, limiter, &mut |_| false, &mut |row| {
-                    last_pruned_block_canonical_headers = row.0
+                    last_pruned_block_canonical = row.0
                 })
             },
         ) {
@@ -157,10 +159,10 @@ where
         }
 
         if ![
-            next_up_last_pruned_block,
+            *block_range.end() - 1,
             last_pruned_block_headers,
-            last_pruned_block_headers_td,
-            last_pruned_block_canonical_headers,
+            last_pruned_block_td,
+            last_pruned_block_canonical,
         ]
         .iter()
         .all_equal()
@@ -170,9 +172,9 @@ where
             )))
         }
 
-        *last_pruned_block += 1;
+        *last_pruned_block = Some(*block_range.end() - 1);
 
-        Some(Ok(()))
+        Some(Ok(*last_pruned_block))
     }
 }
 
