@@ -735,11 +735,6 @@ impl PeersManager {
                     _ => break,
                 };
 
-                // If best peer does not meet reputation threshold exit immediately.
-                if peer.is_banned() {
-                    break
-                }
-
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
                 peer.state = PeerConnectionState::PendingOut;
