@@ -53,7 +53,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     Ok(())
 }
 fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u64;
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     let attributes = PayloadAttributes {
         timestamp,
