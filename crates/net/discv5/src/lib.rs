@@ -27,7 +27,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
 pub struct Discv5WithDiscv4Downgrade {
-    discv5: Arc<RwLock<discv5::Discv5>>,
+    discv5: Arc<RwLock<discv5::Discv5>>, // todo: remove not needed lock
     discv4: Discv4,
     discv5_kbuckets_change_tx: watch::Sender<()>,
 }
@@ -47,6 +47,30 @@ impl Discv5WithDiscv4Downgrade {
     /// [`reth_discv4::proto::Neighbours`] message.
     pub fn notify_discv4_of_kbuckets_update(&self) -> Result<(), watch::error::SendError<()>> {
         self.discv5_kbuckets_change_tx.send(())
+    }
+
+    /// Exposes methods on [`Discv4`] that take a reference to self.
+    pub fn with_discv4<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&Discv4) -> R,
+    {
+        f(&self.discv4)
+    }
+
+    /// Exposes methods on [`Discv4`] that take a mutable reference to self.
+    pub fn with_discv4_mut<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut Discv4) -> R,
+    {
+        f(&mut self.discv4)
+    }
+
+    /// Exposes API of [`discv5::Discv5`].
+    pub fn with_discv5<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&discv5::Discv5) -> R,
+    {
+        f(&self.discv5.read())
     }
 }
 
