@@ -14,7 +14,9 @@ use reth_provider::{
 };
 use reth_tokio_util::EventListeners;
 use std::{
-    collections::BTreeMap, num::NonZeroUsize, time::{Duration, Instant}
+    collections::BTreeMap,
+    num::NonZeroUsize,
+    time::{Duration, Instant},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::debug;
@@ -109,7 +111,8 @@ impl<DB: Database> Pruner<DB> {
             }))
             .min(self.prune_max_blocks_per_run);
         let limiter = {
-            let mut limiter_builder = PruneLimiterBuilder::default().deleted_entries_limit(self.delete_limit * blocks_since_last_run);
+            let mut limiter_builder = PruneLimiterBuilder::default()
+                .deleted_entries_limit(self.delete_limit * blocks_since_last_run);
             if let Some(timeout) = self.timeout {
                 limiter_builder = limiter_builder.job_timeout(timeout, start);
             }
@@ -117,7 +120,11 @@ impl<DB: Database> Pruner<DB> {
         };
 
         let provider = self.provider_factory.provider_rw()?;
-        let segments_limiter = PruneLimiterBuilder::with_fraction_of_entries_limit(&limiter, NonZeroUsize::new(1).unwrap()).build();
+        let segments_limiter = PruneLimiterBuilder::with_fraction_of_entries_limit(
+            &limiter,
+            NonZeroUsize::new(1).unwrap(),
+        )
+        .build();
         let (stats, deleted_entries, progress) =
             self.prune_segments(&provider, tip_block_number, segments_limiter)?;
         provider.commit()?;

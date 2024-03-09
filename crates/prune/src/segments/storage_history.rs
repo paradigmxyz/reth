@@ -313,8 +313,7 @@ mod tests {
 
         let start = Instant::now();
 
-        let limiter =
-            PruneLimiterBuilder::default().job_timeout(PRUNE_JOB_TIMEOUT, start).build();
+        let limiter = PruneLimiterBuilder::default().job_timeout(PRUNE_JOB_TIMEOUT, start).build();
         let segment = StorageHistory::new(PRUNE_MODE);
         let test_rig = TestRig::new();
         let input = test_rig.get_input(TO_BLOCK, limiter);

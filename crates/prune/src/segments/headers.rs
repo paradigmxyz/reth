@@ -3,14 +3,11 @@ use crate::{
     PrunerError,
 };
 use itertools::Itertools;
-use reth_db::{
-    database::Database,
-    tables,
-};
+use reth_db::{database::Database, tables};
 
 use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder};
-use std::{num::NonZeroUsize};
+use std::num::NonZeroUsize;
 use tracing::{instrument, trace};
 
 #[derive(Debug)]

@@ -134,7 +134,8 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
 
             // Delete receipts, except the ones in the inclusion list
             let mut last_skipped_transaction = 0;
-            let limiter = <Self as Segment<DB>>::new_limiter_from_parent_scope_limiter(self, &input.limiter);
+            let limiter =
+                <Self as Segment<DB>>::new_limiter_from_parent_scope_limiter(self, &input.limiter);
             let (deleted, progress) = provider.prune_table_with_range::<tables::Receipts>(
                 tx_range,
                 limiter,
@@ -224,9 +225,7 @@ mod tests {
         generators::{random_block_range, random_eoa_account, random_log, random_receipt},
     };
     use reth_primitives::{PruneMode, PruneProgress, PruneSegment, ReceiptsLogPruneConfig, B256};
-    use reth_provider::{
-        PruneCheckpointReader, PruneLimiterBuilder, TransactionsProvider,
-    };
+    use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder, TransactionsProvider};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::collections::BTreeMap;
 
