@@ -6,14 +6,11 @@ use revm::{
 };
 use std::fmt::Debug;
 
-/// One can hook on inspector execution in 3 ways:
-/// - Block: Hook on block execution
-/// - BlockWithIndex: Hook on block execution transaction index
-/// - Transaction: Hook on a specific transaction hash
+/// A hook to inspect the execution of the EVM.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Hook {
-    #[default]
     /// No hook.
+    #[default]
     None,
     /// Hook on a specific block.
     Block(u64),
@@ -23,11 +20,20 @@ pub enum Hook {
     All,
 }
 
+impl Hook {
+    /// Returns `true` if this hook should be used.
+    #[inline]
+    pub fn is_enabled(&self, block_number: u64, tx_hash: &B256) -> bool {
+        match self {
+            Hook::None => false,
+            Hook::Block(block) => block_number == *block,
+            Hook::Transaction(hash) => hash == tx_hash,
+            Hook::All => true,
+        }
+    }
+}
+
 /// An inspector that calls multiple inspectors in sequence.
-///
-/// If a call to an inspector returns a value other than
-/// [revm::interpreter::InstructionResult::Continue] (or equivalent) the remaining inspectors are
-/// not called.
 #[derive(Clone, Default)]
 pub struct InspectorStack {
     /// An inspector that prints the opcode traces to the console.
@@ -46,7 +52,8 @@ impl Debug for InspectorStack {
 }
 
 impl InspectorStack {
-    /// Create a new inspector stack.
+    /// Creates a new inspector stack with the given configuration.
+    #[inline]
     pub fn new(config: InspectorStackConfig) -> Self {
         Self {
             hook: config.hook,
@@ -54,14 +61,11 @@ impl InspectorStack {
         }
     }
 
-    /// Check if the inspector should be used.
+    /// Returns `true` if this inspector should be used.
+    #[inline]
     pub fn should_inspect(&self, env: &Env, tx_hash: &B256) -> bool {
-        match &self.hook {
-            Hook::None => false,
-            Hook::Block(block) => env.block.number.saturating_to::<u64>() == *block,
-            Hook::Transaction(hash) => hash == tx_hash,
-            Hook::All => true,
-        }
+        self.custom_print_tracer.is_some() &&
+            self.hook.is_enabled(env.block.number.saturating_to(), tx_hash)
     }
 }
 
@@ -91,30 +95,35 @@ impl<DB> Inspector<DB> for InspectorStack
 where
     DB: Database,
 {
+    #[inline]
     fn initialize_interp(&mut self, interp: &mut Interpreter, context: &mut EvmContext<DB>) {
         call_inspectors!([&mut self.custom_print_tracer], |inspector| {
             inspector.initialize_interp(interp, context);
         });
     }
 
+    #[inline]
     fn step(&mut self, interp: &mut Interpreter, context: &mut EvmContext<DB>) {
         call_inspectors!([&mut self.custom_print_tracer], |inspector| {
             inspector.step(interp, context);
         });
     }
 
+    #[inline]
     fn step_end(&mut self, interp: &mut Interpreter, context: &mut EvmContext<DB>) {
         call_inspectors!([&mut self.custom_print_tracer], |inspector| {
             inspector.step_end(interp, context);
         });
     }
 
+    #[inline]
     fn log(&mut self, context: &mut EvmContext<DB>, log: &Log) {
         call_inspectors!([&mut self.custom_print_tracer], |inspector| {
             inspector.log(context, log);
         });
     }
 
+    #[inline]
     fn call(
         &mut self,
         context: &mut EvmContext<DB>,
@@ -129,6 +138,7 @@ where
         None
     }
 
+    #[inline]
     fn call_end(
         &mut self,
         context: &mut EvmContext<DB>,
@@ -148,6 +158,7 @@ where
         outcome
     }
 
+    #[inline]
     fn create(
         &mut self,
         context: &mut EvmContext<DB>,
@@ -162,6 +173,7 @@ where
         None
     }
 
+    #[inline]
     fn create_end(
         &mut self,
         context: &mut EvmContext<DB>,
@@ -181,6 +193,7 @@ where
         outcome
     }
 
+    #[inline]
     fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
         call_inspectors!([&mut self.custom_print_tracer], |inspector| {
             Inspector::<DB>::selfdestruct(inspector, contract, target, value);
