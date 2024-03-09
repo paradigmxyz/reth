@@ -66,12 +66,13 @@ where
             .map(|tx| tx.into_components())
             .collect::<Vec<_>>();
 
-        // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob transactions.
+        // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob
+        // transactions.
         if transactions
             .iter()
             .filter(|(tx, _)| matches!(tx, PooledTransactionsElement::BlobTransaction(..)))
-            .count()
-            > MAX_BLOB_NUMBER_PER_BLOCK as usize
+            .count() >
+            MAX_BLOB_NUMBER_PER_BLOCK as usize
         {
             return Err(EthApiError::InvalidParams(EthBundleError::TooManyBlobTxs.to_string()));
         }
@@ -114,8 +115,8 @@ where
                 let mut transactions = transactions.into_iter().peekable();
 
                 while let Some((tx, signer)) = transactions.next() {
-                    // Verify that the given blob data, commitments, and proofs are all valid for this
-                    // transaction.
+                    // Verify that the given blob data, commitments, and proofs are all valid for
+                    // this transaction.
                     if let PooledTransactionsElement::BlobTransaction(ref tx) = tx {
                         tx.validate(MAINNET_KZG_TRUSTED_SETUP.as_ref())
                             .map_err(|e| EthApiError::InvalidParams(e.to_string()))?;
@@ -242,7 +243,8 @@ pub enum EthBundleError {
     /// Thrown if the bundle does not contain a block number, or block number is 0.
     #[error("bundle missing blockNumber")]
     BundleMissingBlockNumber,
-    /// Thrown when there are more than [MAX_BLOB_NUMBER_PER_BLOCK] blob transactions in the bundle.
+    /// Thrown when there are more than [MAX_BLOB_NUMBER_PER_BLOCK] blob transactions in the
+    /// bundle.
     #[error("too many blob transactions")]
     TooManyBlobTxs,
 }
