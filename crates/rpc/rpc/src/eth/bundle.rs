@@ -8,9 +8,10 @@ use crate::eth::{
 };
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
+    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP,
     keccak256,
     revm_primitives::db::{DatabaseCommit, DatabaseRef},
-    U256,
+    PooledTransactionsElement, U256,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::EthCallBundleApiServer;
@@ -20,7 +21,7 @@ use revm::{
     db::CacheDB,
     primitives::{ResultAndState, TxEnv},
 };
-use revm_primitives::EnvWithHandlerCfg;
+use revm_primitives::{EnvWithHandlerCfg, MAX_BLOB_NUMBER_PER_BLOCK};
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
@@ -57,8 +58,24 @@ where
             ))
         }
 
-        let transactions =
-            txs.into_iter().map(recover_raw_transaction).collect::<Result<Vec<_>, _>>()?;
+        let transactions = txs
+            .into_iter()
+            .map(recover_raw_transaction)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|tx| tx.into_components())
+            .collect::<Vec<_>>();
+
+        // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob transactions.
+        if transactions
+            .iter()
+            .filter(|(tx, _)| matches!(tx, PooledTransactionsElement::BlobTransaction(..)))
+            .count()
+            > MAX_BLOB_NUMBER_PER_BLOCK as usize
+        {
+            return Err(EthApiError::InvalidParams(EthBundleError::TooManyBlobTxs.to_string()));
+        }
+
         let block_id: reth_rpc_types::BlockId = state_block_number.into();
         let (cfg, mut block_env, at) = self.inner.eth_api.evm_env_at(block_id).await?;
 
@@ -96,8 +113,16 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
 
-                while let Some(tx) = transactions.next() {
-                    let tx = tx.into_ecrecovered_transaction();
+                while let Some((tx, signer)) = transactions.next() {
+                    // Verify that the given blob data, commitments, and proofs are all valid for this
+                    // transaction.
+                    if let PooledTransactionsElement::BlobTransaction(ref tx) = tx {
+                        tx.validate(MAINNET_KZG_TRUSTED_SETUP.as_ref())
+                            .map_err(|e| EthApiError::InvalidParams(e.to_string()))?;
+                    }
+
+                    let tx = tx.into_ecrecovered_transaction(signer);
+
                     hash_bytes.extend_from_slice(tx.hash().as_slice());
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
@@ -217,4 +242,7 @@ pub enum EthBundleError {
     /// Thrown if the bundle does not contain a block number, or block number is 0.
     #[error("bundle missing blockNumber")]
     BundleMissingBlockNumber,
+    /// Thrown when there are more than [MAX_BLOB_NUMBER_PER_BLOCK] blob transactions in the bundle.
+    #[error("too many blob transactions")]
+    TooManyBlobTxs,
 }
