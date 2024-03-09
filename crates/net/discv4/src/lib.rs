@@ -1623,6 +1623,10 @@ where
             let local_node_id = self.local_node_record.id;
             if self.config.enable_lookup {
                 while self.lookup_interval.poll_tick(cx).is_ready() {
+                    // disconnect to nodes that are in discv5 kbuckets if node is running as
+                    // downgrade from discv5.
+                    self.filter_kbuckets_against_primary_kbuckets();
+
                     let target = self.lookup_rotator.next(&local_node_id);
                     self.lookup_with(target, None);
                 }
@@ -1693,11 +1697,6 @@ where
                         // terminate the service
                         self.queued_events.push_back(Discv4Event::Terminated);
                     }
-
-                    #[cfg(debug_assertions)]
-                    Discv4Command::DumpKBuckets(callback) => {
-                        _ = callback.send(self.kbuckets.clone())
-                    }
                 }
             }
 
@@ -1732,7 +1731,7 @@ where
                             Message::Neighbours(mut msg) => {
                                 let nodes = &mut msg.nodes;
                                 if let Some(ref mut neighbours_filter) = self.neighbours_filter {
-                                    match neighbours_filter.filter_nodes(nodes) {
+                                    match neighbours_filter.filter_neighbours(nodes) {
                                         Err(err) => debug!(target: "discv4",
                                             src_id=format!("{:#}", src_id),
                                             nodes=format!("[{}]", nodes.iter().format(", ")),
@@ -1796,6 +1795,29 @@ where
             if self.queued_events.is_empty() {
                 return Poll::Pending
             }
+        }
+    }
+
+    /// Filters kbuckets against primary kbuckets. If this node is running as downgrade from
+    /// discv5, then discv5 kbuckets are the primary kbuckets.
+    fn filter_kbuckets_against_primary_kbuckets(&mut self) {
+        if self.neighbours_filter.is_none() {
+            return
+        }
+
+        // apply pending nodes
+        for _ in self.kbuckets.iter() {}
+
+        // refresh mirror of discv5 kbuckets
+        self.neighbours_filter.as_mut().map(|filter| filter.update_mirror());
+
+        // find intersection
+        let Some(ref filter) = self.neighbours_filter else { return };
+        let connected_over_discv5 = filter.find_intersection(&self.kbuckets);
+
+        // disconnect nodes that are already connected over discv5
+        for node_id in connected_over_discv5 {
+            self.kbuckets.remove(&kad_key(node_id));
         }
     }
 }
@@ -1938,24 +1960,15 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
 enum Discv4Command {
     Add(NodeRecord),
     SetTcpPort(u16),
-    SetEIP868RLPPair {
-        key: Vec<u8>,
-        rlp: Bytes,
-    },
+    SetEIP868RLPPair { key: Vec<u8>, rlp: Bytes },
     Ban(PeerId, IpAddr),
     BanPeer(PeerId),
     BanIp(IpAddr),
     Remove(PeerId),
-    Lookup {
-        node_id: Option<PeerId>,
-        tx: Option<NodeRecordSender>,
-    },
+    Lookup { node_id: Option<PeerId>, tx: Option<NodeRecordSender> },
     SetLookupInterval(Duration),
     Updates(OneshotSender<ReceiverStream<DiscoveryUpdate>>),
     Terminated,
-    #[doc(hidden)]
-    #[cfg(debug_assertions)]
-    DumpKBuckets(oneshot::Sender<KBucketsTable<NodeKey, NodeEntry>>),
 }
 
 /// Event type receiver produces
@@ -2197,7 +2210,7 @@ struct EnrRequestState {
 
 /// Stored node info.
 #[derive(Debug, Clone, Eq, PartialEq)]
-struct NodeEntry {
+pub struct NodeEntry {
     /// Node record info.
     record: NodeRecord,
     /// Timestamp of last pong.
@@ -2321,11 +2334,16 @@ impl From<ForkId> for EnrForkIdEntry {
 pub trait MirrorPrimaryKBuckets {
     /// Updates mirror of the primary kbuckets.
     fn update_mirror(&mut self) -> Result<(), Discv4Error>;
-    /// Filters nodes passed as parameter against the mirror of the primary kbuckets.
-    fn filter_nodes(
+    /// Filters neighbour nodes passed as parameter against the mirror of the primary kbuckets.
+    fn filter_neighbours(
         &mut self,
         nodes: &mut Vec<NodeRecord>,
-    ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error>;
+    ) -> Result<SmallVec<[PeerId; 8]>, Discv4Error>;
+    /// Finds intersection between given kbuckets and mirror.
+    fn find_intersection(
+        &self,
+        kbuckets: &KBucketsTable<NodeKey, NodeEntry>,
+    ) -> SmallVec<[PeerId; 8]>;
 }
 
 /// Mirror of keys in a kbucket table.
@@ -2364,25 +2382,43 @@ impl<F> MirrorPrimaryKBuckets for KBucketsKeysMirror<F>
 where
     F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error>,
 {
-    fn update_mirror(&mut self) -> Result<(), Discv4Error> {
-        self.mirror = (self.update_callback)()
-            .map_err(<secp256k1::Error as Into<MirrorUpdateError>>::into)?;
+    /// Finds intersection between given kbuckets and mirror.
+    fn find_intersection(
+        &self,
+        kbuckets: &KBucketsTable<NodeKey, NodeEntry>,
+    ) -> SmallVec<[PeerId; 8]> {
+        let mut connected_over_discv5: SmallVec<[PeerId; 8]> = smallvec!();
 
-        Ok(())
+        for entry in kbuckets.iter_ref() {
+            let node_id = entry.node.key.preimage();
+            if self.mirror.contains(&**node_id) {
+                connected_over_discv5.push(**node_id)
+            }
+        }
+
+        connected_over_discv5
     }
 
-    fn filter_nodes(
-        &mut self,
-        nodes: &mut Vec<NodeRecord>,
-    ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error> {
+    fn update_mirror(&mut self) -> Result<(), Discv4Error> {
         if self
             .change_tx
             .has_changed()
             .map_err(<watch::error::RecvError as Into<MirrorUpdateError>>::into)?
         {
-            self.update_mirror()?;
+            self.mirror = (self.update_callback)()
+                .map_err(<secp256k1::Error as Into<MirrorUpdateError>>::into)?;
+
             self.change_tx.borrow_and_update();
         }
+
+        Ok(())
+    }
+
+    fn filter_neighbours(
+        &mut self,
+        nodes: &mut Vec<NodeRecord>,
+    ) -> Result<SmallVec<[PeerId; 8]>, Discv4Error> {
+        self.update_mirror()?;
 
         let mut filtered_out = smallvec!();
 
@@ -2396,7 +2432,7 @@ where
             filter_out
         });
 
-        // empty unless in debug mode, just serves for tracing
+        // empty unless verbose logging enabled
         Ok(filtered_out)
     }
 }
@@ -2475,13 +2511,20 @@ impl HandleDiscovery for Discv4 {
 pub struct Noop;
 
 impl MirrorPrimaryKBuckets for Noop {
+    /// Finds intersection between given kbuckets and mirror.
+    fn find_intersection(
+        &self,
+        _kbuckets: &KBucketsTable<NodeKey, NodeEntry>,
+    ) -> SmallVec<[PeerId; 8]> {
+        smallvec!()
+    }
     fn update_mirror(&mut self) -> Result<(), Discv4Error> {
         Ok(())
     }
-    fn filter_nodes(
+    fn filter_neighbours(
         &mut self,
         _nodes: &mut Vec<NodeRecord>,
-    ) -> Result<SmallVec<[PeerId; 3]>, Discv4Error> {
+    ) -> Result<SmallVec<[PeerId; 8]>, Discv4Error> {
         Ok(smallvec!())
     }
 }
