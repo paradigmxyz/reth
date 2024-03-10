@@ -5,7 +5,7 @@ use crate::{
     RawKey, RawTable,
 };
 
-use reth_interfaces::provider::{ProviderResult, ProviderError};
+use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{ColumnResult, NippyJar, NippyJarHeader, PHFKey};
 use reth_tracing::tracing::*;
 use std::{error::Error as StdError, ops::RangeInclusive};
@@ -76,7 +76,7 @@ macro_rules! generate_static_file_func {
                                 return Err(ProviderError::NippyJar(e.to_string()));
                             }
                         }
-                       
+
                     }
 
                     // Creates the cursors for the columns
