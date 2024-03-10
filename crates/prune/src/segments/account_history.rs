@@ -89,8 +89,11 @@ impl<DB: Database> Segment<DB> for AccountHistory {
     }
 
     fn new_limiter_from_parent_scope_limiter(&self, limiter: &PruneLimiter) -> PruneLimiter {
-        PruneLimiterBuilder::with_fraction_of_entries_limit(limiter, NonZeroUsize::new(2).unwrap())
-            .build()
+        PruneLimiterBuilder::floor_deleted_entries_limit_to_multiple_of(
+            limiter,
+            NonZeroUsize::new(2).unwrap(),
+        )
+        .build()
     }
 }
 

@@ -67,8 +67,11 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
     /// Gets the limiter for this specific segment, built from the limiter used in the parent
     /// scope.
     fn new_limiter_from_parent_scope_limiter(&self, limiter: &PruneLimiter) -> PruneLimiter {
-        PruneLimiterBuilder::with_fraction_of_entries_limit(limiter, NonZeroUsize::new(1).unwrap())
-            .build()
+        PruneLimiterBuilder::floor_deleted_entries_limit_to_multiple_of(
+            limiter,
+            NonZeroUsize::new(1).unwrap(),
+        )
+        .build()
     }
 }
 
@@ -88,7 +91,7 @@ impl Clone for PruneInput {
 
         let previous_checkpoint = *previous_checkpoint;
         let to_block = *to_block;
-        let limiter = PruneLimiterBuilder::with_fraction_of_entries_limit(
+        let limiter = PruneLimiterBuilder::floor_deleted_entries_limit_to_multiple_of(
             limiter,
             NonZeroUsize::new(1).unwrap(),
         )

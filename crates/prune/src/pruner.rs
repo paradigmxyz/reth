@@ -120,7 +120,7 @@ impl<DB: Database> Pruner<DB> {
         };
 
         let provider = self.provider_factory.provider_rw()?;
-        let segments_limiter = PruneLimiterBuilder::with_fraction_of_entries_limit(
+        let segments_limiter = PruneLimiterBuilder::floor_deleted_entries_limit_to_multiple_of(
             &limiter,
             NonZeroUsize::new(1).unwrap(),
         )
