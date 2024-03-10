@@ -14,7 +14,7 @@ services:
       - mainnet_data:/root/.local/share/reth/mainnet
       - sepolia_data:/root/.local/share/reth/sepolia
       - holesky_data:/root/.local/share/reth/holesky
-      - logs:/root/rethlogs
+      - logs:/root/logs
       - ./jwttoken:/root/jwt:ro
     # For Sepolia, replace `--chain mainnet` with `--chain sepolia`
     # For Holesky, replace `--chain mainnet` with `--chain holesky`
@@ -22,7 +22,7 @@ services:
       node
       --chain mainnet
       --metrics 0.0.0.0:9001
-      --log.file.directory /root/rethlogs
+      --log.file.directory /root/logs
       --authrpc.addr 0.0.0.0
       --authrpc.port 8551
       --authrpc.jwtsecret /root/jwt/jwt.hex
