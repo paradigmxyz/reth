@@ -20,8 +20,7 @@ where
     let mut log_index: u32 = 0;
     // Iterate over transaction hashes and receipts and append matching logs.
     for (receipt_idx, (tx_hash, receipt)) in tx_hashes_and_receipts.into_iter().enumerate() {
-        let logs = &receipt.logs;
-        for log in logs {
+        for log in receipt.logs.iter() {
             if log_matches_filter(block_num_hash, log, filter) {
                 let log = Log {
                     address: log.address,
@@ -63,8 +62,10 @@ pub(crate) fn append_matching_block_logs(
 
     // Iterate over receipts and append matching logs.
     for (receipt_idx, receipt) in receipts.iter().enumerate() {
-        let logs = &receipt.logs;
-        for log in logs {
+        // The transaction hash of the current receipt.
+        let mut transaction_hash = None;
+
+        for log in receipt.logs.iter() {
             if log_matches_filter(block_num_hash, log, filter) {
                 let first_tx_num = match loaded_first_tx_num {
                     Some(num) => num,
@@ -78,11 +79,16 @@ pub(crate) fn append_matching_block_logs(
                     }
                 };
 
-                // This is safe because Transactions and Receipts have the same keys.
-                let transaction_id = first_tx_num + receipt_idx as u64;
-                let transaction = provider
-                    .transaction_by_id(transaction_id)?
-                    .ok_or(ProviderError::TransactionNotFound(transaction_id.into()))?;
+                // if this is the first match in the receipt's logs, look up the transaction hash
+                if transaction_hash.is_none() {
+                    // This is safe because Transactions and Receipts have the same keys.
+                    let transaction_id = first_tx_num + receipt_idx as u64;
+                    let transaction = provider
+                        .transaction_by_id(transaction_id)?
+                        .ok_or(ProviderError::TransactionNotFound(transaction_id.into()))?;
+
+                    transaction_hash = Some(transaction.hash());
+                }
 
                 let log = Log {
                     address: log.address,
@@ -90,7 +96,7 @@ pub(crate) fn append_matching_block_logs(
                     data: log.data.clone(),
                     block_hash: Some(block_num_hash.hash),
                     block_number: Some(U256::from(block_num_hash.number)),
-                    transaction_hash: Some(transaction.hash()),
+                    transaction_hash,
                     // The transaction and receipt index is always the same.
                     transaction_index: Some(U256::from(receipt_idx)),
                     log_index: Some(U256::from(log_index)),
