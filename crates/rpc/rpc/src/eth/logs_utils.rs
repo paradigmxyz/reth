@@ -3,7 +3,6 @@ use alloy_primitives::TxHash;
 use reth_primitives::{BlockNumHash, ChainInfo, Receipt, U256};
 use reth_provider::{BlockReader, ProviderError};
 use reth_rpc_types::{FilteredParams, Log};
-use reth_rpc_types_compat::log::from_primitive_log;
 
 /// Returns all matching of a block's receipts when the transaction hashes are known.
 pub(crate) fn matching_block_logs_with_tx_hashes<'a, I>(
@@ -119,8 +118,8 @@ pub(crate) fn log_matches_filter(
     if params.filter.is_some() &&
         (!params.filter_block_range(block.number) ||
             !params.filter_block_hash(block.hash) ||
-            !params.filter_address(&from_primitive_log(log.clone())) ||
-            !params.filter_topics(&from_primitive_log(log.clone())))
+            !params.filter_address(&log.address) ||
+            !params.filter_topics(&log.topics))
     {
         return false
     }
