@@ -103,7 +103,13 @@ impl<DB: Database> Segment<DB> for StorageHistory {
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneOutput, Segment, StorageHistory};
+    use std::{
+        collections::BTreeMap,
+        ops::AddAssign,
+        thread,
+        time::{Duration, Instant},
+    };
+
     use assert_matches::assert_matches;
     use reth_db::{models::storage_sharded_key::StorageShardedKey, tables, BlockNumberList};
     use reth_interfaces::test_utils::{
@@ -116,12 +122,10 @@ mod tests {
     };
     use reth_provider::{PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use std::{
-        collections::BTreeMap,
-        ops::AddAssign,
-        thread,
-        time::{Duration, Instant},
-    };
+    use reth_tracing;
+    use tracing::trace;
+
+    use crate::segments::{PruneInput, PruneOutput, Segment, StorageHistory};
 
     #[derive(Default)]
     struct TestRig {
@@ -195,6 +199,8 @@ mod tests {
             run: usize,
             expected_result: (PruneProgress, usize),
         ) {
+            reth_tracing::init_test_tracing();
+
             let prune_mode = PruneMode::Before(to_block);
             let segment = StorageHistory::new(prune_mode);
             let limiter = PruneLimiterBuilder::default().deleted_entries_limit(1000).build();
@@ -202,6 +208,12 @@ mod tests {
 
             let provider = test_rig.db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input.clone()).unwrap();
+            trace!(target: "pruner::test",
+                expected_prune_progress=?expected_result.0,
+                expected_pruned=?expected_result.1,
+                result=?result,
+                "PruneOutput"
+            );
             assert_matches!(
                 result,
                 PruneOutput {progress, pruned, checkpoint: Some(_)}

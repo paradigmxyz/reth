@@ -192,7 +192,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{Headers, PruneInput, PruneOutput, Segment};
     use assert_matches::assert_matches;
     use reth_db::{tables, transaction::DbTx, DatabaseEnv};
     use reth_interfaces::test_utils::{generators, generators::random_header_range};
@@ -203,7 +202,9 @@ mod tests {
     use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
     use reth_stages::test_utils::TestStageDB;
     use reth_tracing;
-    use tracing::debug;
+    use tracing::trace;
+
+    use crate::segments::{Headers, PruneInput, PruneOutput, Segment};
 
     #[test]
     fn prune() {
@@ -255,10 +256,11 @@ mod tests {
 
             let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input.clone()).unwrap();
-            debug!(
-                "PruneOutput, result: {result:?}, expected PruneProgress: {:?}, expected pruned: {:?}",
-                expected_result.0,
-                expected_result.1
+            trace!(target: "pruner::test",
+                expected_prune_progress=?expected_result.0,
+                expected_pruned=?expected_result.1,
+                result=?result,
+                "PruneOutput"
             );
             assert_matches!(
                 result,
