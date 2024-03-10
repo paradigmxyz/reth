@@ -9,6 +9,9 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+/// CLI argument parsing for the optimism node.
+pub mod args;
+
 /// Exports optimism-specific implementations of the [EngineTypes](reth_node_api::EngineTypes)
 /// trait.
 pub mod engine;
@@ -19,6 +22,7 @@ pub use engine::OptimismEngineTypes;
 pub mod evm;
 pub use evm::OptimismEvmConfig;
 
-pub mod args;
 pub mod node;
 pub use node::OptimismNode;
+
+pub mod txpool;

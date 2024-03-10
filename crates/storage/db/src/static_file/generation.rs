@@ -10,7 +10,7 @@ use reth_nippy_jar::{ColumnResult, NippyJar, NippyJarHeader, PHFKey};
 use reth_tracing::tracing::*;
 use std::{error::Error as StdError, ops::RangeInclusive};
 
-/// Macro that generates static file creation functions that take an arbitratry number of [`Table`]
+/// Macro that generates static file creation functions that take an arbitrary number of [`Table`]
 /// and creates a [`NippyJar`] file out of their [`Table::Value`]. Each list of [`Table::Value`]
 /// from a table is a column of values.
 ///
@@ -26,7 +26,7 @@ macro_rules! generate_static_file_func {
                 /// * `tx`: Database transaction.
                 /// * `range`: Data range for columns in tables.
                 /// * `additional`: Additional columns which can't be straight straightforwardly walked on.
-                /// * `keys`: Iterator of keys (eg. `TxHash` or `BlockHash`) with length equal to `row_count` and ordered by future column insertion from `range`.
+                /// * `keys`: IntoIterator of keys (eg. `TxHash` or `BlockHash`) with length equal to `row_count` and ordered by future column insertion from `range`.
                 /// * `dict_compression_set`: Sets of column data for compression dictionaries. Max size is 2GB. Row count is independent.
                 /// * `row_count`: Total rows to add to `NippyJar`. Must match row count in `range`.
                 /// * `nippy_jar`: Static File object responsible for file generation.

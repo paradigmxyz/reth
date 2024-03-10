@@ -62,21 +62,6 @@ impl EthBuiltPayload {
     pub fn extend_sidecars(&mut self, sidecars: Vec<BlobTransactionSidecar>) {
         self.sidecars.extend(sidecars)
     }
-
-    /// Converts the type into the response expected by `engine_getPayloadV1`
-    pub fn into_v1_payload(self) -> ExecutionPayloadV1 {
-        self.into()
-    }
-
-    /// Converts the type into the response expected by `engine_getPayloadV2`
-    pub fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2 {
-        self.into()
-    }
-
-    /// Converts the type into the response expected by `engine_getPayloadV3`
-    pub fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
-        self.into()
-    }
 }
 
 impl BuiltPayload for EthBuiltPayload {
@@ -87,17 +72,15 @@ impl BuiltPayload for EthBuiltPayload {
     fn fees(&self) -> U256 {
         self.fees
     }
+}
 
-    fn into_v1_payload(self) -> ExecutionPayloadV1 {
-        self.into()
+impl<'a> BuiltPayload for &'a EthBuiltPayload {
+    fn block(&self) -> &SealedBlock {
+        (**self).block()
     }
 
-    fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2 {
-        self.into()
-    }
-
-    fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3 {
-        self.into()
+    fn fees(&self) -> U256 {
+        (**self).fees()
     }
 }
 
@@ -137,10 +120,6 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
-            // Optimism-specific: Post-cancun, the parent beacon block root is included in the
-            // enveloped payload. We set this as `None` here so that optimism-specific
-            // handling can fill the value.
-            parent_beacon_block_root: None,
         }
     }
 }

@@ -335,17 +335,17 @@ impl TxTypesCounter {
             TxType::Legacy => {
                 self.legacy += 1;
             }
-            TxType::EIP2930 => {
+            TxType::Eip2930 => {
                 self.eip2930 += 1;
             }
-            TxType::EIP1559 => {
+            TxType::Eip1559 => {
                 self.eip1559 += 1;
             }
-            TxType::EIP4844 => {
+            TxType::Eip4844 => {
                 self.eip4844 += 1;
             }
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => {}
+            TxType::Deposit => {}
         }
     }
 }

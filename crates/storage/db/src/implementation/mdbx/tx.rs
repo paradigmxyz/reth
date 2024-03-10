@@ -183,6 +183,8 @@ struct MetricsHandler<K: TransactionKind> {
     txn_id: u64,
     /// The time when transaction has started.
     start: Instant,
+    /// Duration after which we emit the log about long-lived database transactions.
+    long_transaction_duration: Duration,
     /// If `true`, the metric about transaction closing has already been recorded and we don't need
     /// to do anything on [Drop::drop].
     close_recorded: bool,
@@ -201,6 +203,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
         Self {
             txn_id,
             start: Instant::now(),
+            long_transaction_duration: LONG_TRANSACTION_DURATION,
             close_recorded: false,
             record_backtrace: true,
             backtrace_recorded: AtomicBool::new(false),
@@ -241,7 +244,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
             self.transaction_mode().is_read_only()
         {
             let open_duration = self.start.elapsed();
-            if open_duration > LONG_TRANSACTION_DURATION {
+            if open_duration >= self.long_transaction_duration {
                 self.backtrace_recorded.store(true, Ordering::Relaxed);
                 warn!(
                     target: "storage::db::mdbx",
@@ -389,11 +392,8 @@ impl DbTxMut for Tx<RW> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        database::Database,
-        mdbx::{tx::LONG_TRANSACTION_DURATION, DatabaseArguments},
-        tables,
-        transaction::DbTx,
-        DatabaseEnv, DatabaseEnvKind,
+        database::Database, mdbx::DatabaseArguments, tables, transaction::DbTx, DatabaseEnv,
+        DatabaseEnvKind,
     };
     use reth_interfaces::db::DatabaseError;
     use reth_libmdbx::MaxReadTransactionDuration;
@@ -410,15 +410,18 @@ mod tests {
         let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
 
         let mut tx = db.tx().unwrap();
+        tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
         tx.disable_long_read_transaction_safety();
-        sleep(MAX_DURATION.max(LONG_TRANSACTION_DURATION));
+        // Give the `TxnManager` some time to time out the transaction.
+        sleep(MAX_DURATION + Duration::from_millis(100));
 
+        // Transaction has not timed out.
         assert_eq!(
-            tx.get::<tables::Transactions>(0).err(),
-            Some(DatabaseError::Open(reth_libmdbx::Error::NotFound.into()))
-        ); // Transaction is not timeout-ed
+            tx.get::<tables::Transactions>(0),
+            Err(DatabaseError::Open(reth_libmdbx::Error::NotFound.into()))
+        );
+        // Backtrace is not recorded.
         assert!(!tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
-        // Backtrace is not recorded
     }
 
     #[test]
@@ -430,14 +433,17 @@ mod tests {
             .max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(MAX_DURATION)));
         let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
 
-        let tx = db.tx().unwrap();
-        sleep(MAX_DURATION.max(LONG_TRANSACTION_DURATION));
+        let mut tx = db.tx().unwrap();
+        tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
+        // Give the `TxnManager` some time to time out the transaction.
+        sleep(MAX_DURATION + Duration::from_millis(100));
 
+        // Transaction has timed out.
         assert_eq!(
-            tx.get::<tables::Transactions>(0).err(),
-            Some(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionTimeout.into()))
-        ); // Transaction is timeout-ed
+            tx.get::<tables::Transactions>(0),
+            Err(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionTimeout.into()))
+        );
+        // Backtrace is recorded.
         assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
-        // Backtrace is recorded
     }
 }

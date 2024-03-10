@@ -33,17 +33,16 @@ pub fn validate_header_standalone(
     let wd_root_missing = header.withdrawals_root.is_none() && !chain_spec.is_optimism();
 
     // EIP-4895: Beacon chain push withdrawals as operations
-    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) && wd_root_missing
-    {
+    if chain_spec.is_shanghai_active_at_timestamp(header.timestamp) && wd_root_missing {
         return Err(ConsensusError::WithdrawalsRootMissing)
-    } else if !chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) &&
+    } else if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
         header.withdrawals_root.is_some()
     {
         return Err(ConsensusError::WithdrawalsRootUnexpected)
     }
 
     // Ensures that EIP-4844 fields are valid once cancun is active.
-    if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(header.timestamp) {
+    if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
         validate_4844_header_standalone(header)?;
     } else if header.blob_gas_used.is_some() {
         return Err(ConsensusError::BlobGasUsedUnexpected)
@@ -109,7 +108,7 @@ pub fn validate_transaction_regarding_header(
             ..
         }) => {
             // EIP-4844: Shard Blob Transactions https://eips.ethereum.org/EIPS/eip-4844
-            if !chain_spec.fork(Hardfork::Cancun).active_at_timestamp(at_timestamp) {
+            if !chain_spec.is_cancun_active_at_timestamp(at_timestamp) {
                 return Err(InvalidTransactionError::Eip4844Disabled.into())
             }
 
@@ -219,7 +218,7 @@ pub fn validate_block_standalone(
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
-    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block.timestamp) {
+    if chain_spec.is_shanghai_active_at_timestamp(block.timestamp) {
         let withdrawals =
             block.withdrawals.as_ref().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
         let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
