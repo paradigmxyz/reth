@@ -1,8 +1,10 @@
 use crate::{
     error::{BackoffKind, SessionError},
     peers::{
-        reputation::{is_banned_reputation, DEFAULT_REPUTATION},
-        ReputationChangeWeights, DEFAULT_MAX_COUNT_CONCURRENT_DIALS,
+        reputation::{
+            is_banned_reputation, DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE,
+        },
+        ReputationChangeWeights, DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS,
         DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND,
     },
     session::{Direction, PendingSessionHandshakeError},
@@ -156,10 +158,7 @@ impl PeersManager {
             handle_rx: UnboundedReceiverStream::new(handle_rx),
             queued_actions: Default::default(),
             reputation_weights,
-            refill_slots_interval: tokio::time::interval_at(
-                now + refill_slots_interval,
-                refill_slots_interval,
-            ),
+            refill_slots_interval: tokio::time::interval(refill_slots_interval),
             release_interval: tokio::time::interval_at(now + unban_interval, unban_interval),
             connection_info,
             ban_list,
@@ -352,15 +351,37 @@ impl PeersManager {
         self.peers.get(peer_id).map(|peer| peer.reputation)
     }
 
-    /// Apply the corresponding reputation change to the given peer
+    /// Apply the corresponding reputation change to the given peer.
+    ///
+    /// If the peer is a trusted peer, it will be exempt from reputation slashing for certain
+    /// reputation changes that can be attributed to network conditions. If the peer is a
+    /// trusted peer, it will also be less strict with the reputation slashing.
     pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
         let outcome = if let Some(peer) = self.peers.get_mut(peer_id) {
             // First check if we should reset the reputation
             if rep.is_reset() {
                 peer.reset_reputation()
             } else {
-                let reputation_change = self.reputation_weights.change(rep);
-                peer.apply_reputation(reputation_change.as_i32())
+                let mut reputation_change = self.reputation_weights.change(rep).as_i32();
+                if peer.is_trusted() {
+                    // exempt trusted peers from reputation slashing for
+                    if matches!(
+                        rep,
+                        ReputationChangeKind::Dropped |
+                            ReputationChangeKind::BadAnnouncement |
+                            ReputationChangeKind::Timeout |
+                            ReputationChangeKind::AlreadySeenTransaction
+                    ) {
+                        return
+                    }
+
+                    // also be less strict with the reputation slashing for trusted peers
+                    if reputation_change < MAX_TRUSTED_PEER_REPUTATION_CHANGE {
+                        // this caps the reputation change to the maximum allowed for trusted peers
+                        reputation_change = MAX_TRUSTED_PEER_REPUTATION_CHANGE;
+                    }
+                }
+                peer.apply_reputation(reputation_change)
             }
         } else {
             return
@@ -714,11 +735,6 @@ impl PeersManager {
                     _ => break,
                 };
 
-                // If best peer does not meet reputation threshold exit immediately.
-                if peer.is_banned() {
-                    break
-                }
-
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
                 peer.state = PeerConnectionState::PendingOut;
@@ -895,7 +911,7 @@ impl Default for ConnectionInfo {
             num_inbound: 0,
             max_outbound: DEFAULT_MAX_COUNT_PEERS_OUTBOUND as usize,
             max_inbound: DEFAULT_MAX_COUNT_PEERS_INBOUND as usize,
-            max_concurrent_outbound_dials: DEFAULT_MAX_COUNT_CONCURRENT_DIALS,
+            max_concurrent_outbound_dials: DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS,
             num_pendingout: 0,
         }
     }
@@ -1314,6 +1330,16 @@ impl PeersConfig {
         let nodes: HashSet<NodeRecord> = serde_json::from_reader(reader)?;
         Ok(self.with_basic_nodes(nodes))
     }
+
+    /// Returns settings for testing
+    #[cfg(test)]
+    fn test() -> Self {
+        Self {
+            refill_slots_interval: Duration::from_millis(100),
+            backoff_durations: PeerBackoffDurations::test(),
+            ..Default::default()
+        }
+    }
 }
 
 /// The durations to use when a backoff should be applied to a peer.
@@ -1356,6 +1382,17 @@ impl PeerBackoffDurations {
         let backoff_time = backoff_time + backoff_time * backoff_counter as u32;
         let now = std::time::Instant::now();
         now + backoff_time.min(self.max)
+    }
+
+    /// Returns durations for testing.
+    #[cfg(test)]
+    const fn test() -> Self {
+        PeerBackoffDurations {
+            low: Duration::from_millis(200),
+            medium: Duration::from_millis(200),
+            high: Duration::from_millis(200),
+            max: Duration::from_millis(200),
+        }
     }
 }
 
@@ -1520,10 +1557,7 @@ mod tests {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
 
-        let backoff_durations =
-            PeerBackoffDurations { low: Duration::from_millis(200), ..Default::default() };
-        let config = PeersConfig { backoff_durations, ..Default::default() };
-        let mut peers = PeersManager::new(config);
+        let mut peers = PeersManager::new(PeersConfig::test());
         peers.add_peer(peer, socket_addr, None);
 
         match event!(peers) {
@@ -1562,7 +1596,7 @@ mod tests {
         assert!(peers.backed_off_peers.contains_key(&peer));
         assert!(peers.peers.get(&peer).unwrap().is_backed_off());
 
-        tokio::time::sleep(backoff_durations.low).await;
+        tokio::time::sleep(peers.backoff_durations.low).await;
 
         match event!(peers) {
             PeerAction::Connect { peer_id, .. } => {
@@ -1580,12 +1614,8 @@ mod tests {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
 
-        let backoff_durations = PeerBackoffDurations {
-            high: Duration::from_millis(200),
-            low: Duration::from_millis(200),
-            ..Default::default()
-        };
-        let config = PeersConfig { backoff_durations, ..Default::default() };
+        let backoff_durations = PeerBackoffDurations::test();
+        let config = PeersConfig { backoff_durations, ..PeersConfig::test() };
         let mut peers = PeersManager::new(config);
         peers.add_peer(peer, socket_addr, None);
 
@@ -1642,7 +1672,7 @@ mod tests {
     async fn test_low_backoff() {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
-        let config = PeersConfig::default();
+        let config = PeersConfig::test();
         let mut peers = PeersManager::new(config);
         peers.add_peer(peer, socket_addr, None);
         let peer_struct = peers.peers.get_mut(&peer).unwrap();
@@ -1744,7 +1774,7 @@ mod tests {
     async fn test_remove_on_max_backoff_count() {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
-        let config = PeersConfig::default();
+        let config = PeersConfig::test();
         let mut peers = PeersManager::new(config.clone());
         peers.add_peer(peer, socket_addr, None);
         let peer_struct = peers.peers.get_mut(&peer).unwrap();
@@ -1877,7 +1907,7 @@ mod tests {
     async fn test_dropped_incoming() {
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 0, 1, 2)), 8008);
         let ban_duration = Duration::from_millis(500);
-        let config = PeersConfig { ban_duration, ..Default::default() };
+        let config = PeersConfig { ban_duration, ..PeersConfig::test() };
         let mut peers = PeersManager::new(config);
 
         assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
@@ -1942,6 +1972,58 @@ mod tests {
         let p = peers.peers.get(&peer).unwrap();
         assert_eq!(p.state, PeerConnectionState::Idle);
         assert!(p.is_banned());
+
+        match event!(peers) {
+            PeerAction::Disconnect { peer_id, .. } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reputation_change_trusted_peer() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_trusted_peer(peer, socket_addr);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { peer_id, remote_addr } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(remote_addr, socket_addr);
+            }
+            _ => unreachable!(),
+        }
+
+        assert_eq!(peers.peers.get_mut(&peer).unwrap().state, PeerConnectionState::PendingOut);
+        peers.on_active_outgoing_established(peer);
+        assert_eq!(peers.peers.get_mut(&peer).unwrap().state, PeerConnectionState::Out);
+
+        peers.apply_reputation_change(&peer, ReputationChangeKind::BadMessage);
+
+        {
+            let p = peers.peers.get(&peer).unwrap();
+            assert_eq!(p.state, PeerConnectionState::Out);
+            // not banned yet
+            assert!(!p.is_banned());
+        }
+
+        // ensure peer is banned eventually
+        loop {
+            peers.apply_reputation_change(&peer, ReputationChangeKind::BadMessage);
+
+            let p = peers.peers.get(&peer).unwrap();
+            if p.is_banned() {
+                break
+            }
+        }
 
         match event!(peers) {
             PeerAction::Disconnect { peer_id, .. } => {
@@ -2068,7 +2150,7 @@ mod tests {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
         let ban_list = BanList::new(HashSet::new(), vec![ip]);
-        let config = PeersConfig::default().with_ban_list(ban_list);
+        let config = PeersConfig::test().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         let a = peer_manager.on_incoming_pending_session(socket_addr.ip());
         // because we have no active peers this should be fine for testings
@@ -2089,7 +2171,7 @@ mod tests {
         let socket_addr = SocketAddr::new(ip, 8008);
         let given_peer_id = PeerId::random();
         let ban_list = BanList::new(vec![given_peer_id], HashSet::new());
-        let config = PeersConfig::default().with_ban_list(ban_list);
+        let config = PeersConfig::test().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         peer_manager.on_incoming_session_established(given_peer_id, socket_addr);
 
@@ -2144,7 +2226,7 @@ mod tests {
     async fn test_trusted_peers_are_prioritized() {
         let trusted_peer = PeerId::random();
         let trusted_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
-        let config = PeersConfig::default().with_trusted_nodes(HashSet::from([NodeRecord {
+        let config = PeersConfig::test().with_trusted_nodes(HashSet::from([NodeRecord {
             address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
             tcp_port: 8008,
             udp_port: 8008,
@@ -2182,7 +2264,7 @@ mod tests {
     async fn test_connect_trusted_nodes_only() {
         let trusted_peer = PeerId::random();
         let trusted_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
-        let config = PeersConfig::default()
+        let config = PeersConfig::test()
             .with_trusted_nodes(HashSet::from([NodeRecord {
                 address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
                 tcp_port: 8008,
@@ -2220,7 +2302,7 @@ mod tests {
     async fn test_tick() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
-        let config = PeersConfig::default();
+        let config = PeersConfig::test();
         let mut peer_manager = PeersManager::new(config);
         let peer_id = PeerId::random();
         peer_manager.add_peer(peer_id, socket_addr, None);

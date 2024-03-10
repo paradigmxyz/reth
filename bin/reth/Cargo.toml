@@ -45,7 +45,7 @@ reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
 reth-prune.workspace = true
 reth-static-file = { workspace = true, features = ["clap"] }
-reth-trie.workspace = true
+reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true

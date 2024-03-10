@@ -121,7 +121,7 @@ impl Case for BlockchainTestCase {
                     .static_file_provider()
                     .latest_writer(StaticFileSegment::Headers)
                     .unwrap()
-                    .commit()
+                    .commit_without_sync_all()
                     .unwrap();
 
                 // Execute the execution stage using the EVM processor factory for the test case

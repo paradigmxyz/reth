@@ -26,7 +26,7 @@ pub struct StaticFileJarProvider<'a> {
     /// Main static file segment
     jar: LoadedJarRef<'a>,
     /// Another kind of static file segment to help query data from the main one.
-    auxiliar_jar: Option<Box<Self>>,
+    auxiliary_jar: Option<Box<Self>>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
 }
 
@@ -39,7 +39,7 @@ impl<'a> Deref for StaticFileJarProvider<'a> {
 
 impl<'a> From<LoadedJarRef<'a>> for StaticFileJarProvider<'a> {
     fn from(value: LoadedJarRef<'a>) -> Self {
-        StaticFileJarProvider { jar: value, auxiliar_jar: None, metrics: None }
+        StaticFileJarProvider { jar: value, auxiliary_jar: None, metrics: None }
     }
 }
 
@@ -62,9 +62,9 @@ impl<'a> StaticFileJarProvider<'a> {
         Ok(result)
     }
 
-    /// Adds a new auxiliar static file to help query data from the main one
-    pub fn with_auxiliar(mut self, auxiliar_jar: StaticFileJarProvider<'a>) -> Self {
-        self.auxiliar_jar = Some(Box::new(auxiliar_jar));
+    /// Adds a new auxiliary static file to help query data from the main one
+    pub fn with_auxiliary(mut self, auxiliary_jar: StaticFileJarProvider<'a>) -> Self {
+        self.auxiliary_jar = Some(Box::new(auxiliary_jar));
         self
     }
 
@@ -296,7 +296,7 @@ impl<'a> ReceiptProvider for StaticFileJarProvider<'a> {
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
-        if let Some(tx_static_file) = &self.auxiliar_jar {
+        if let Some(tx_static_file) = &self.auxiliary_jar {
             if let Some(num) = tx_static_file.transaction_id(hash)? {
                 return self.receipt(num)
             }

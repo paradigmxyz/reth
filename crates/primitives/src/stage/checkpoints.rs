@@ -148,7 +148,11 @@ impl EntitiesCheckpoint {
             return None
         }
 
-        Some(format!("{:.2}%", 100.0 * self.processed as f64 / self.total as f64))
+        // Calculate percentage with 2 decimal places.
+        let percentage = 100.0 * self.processed as f64 / self.total as f64;
+
+        // Truncate to 2 decimal places, rounding down so that 99.999% becomes 99.99% and not 100%.
+        Some(format!("{:.2}%", (percentage * 100.0).floor() / 100.0))
     }
 }
 

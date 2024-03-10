@@ -21,7 +21,7 @@ use reth::{
 use reth::rpc::builder::{
     RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig,
 };
-// Configuring the network parts, ideally also wouldn't ned to think about this.
+// Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 use reth::{
     blockchain_tree::noop::NoopBlockchainTree, providers::test_utils::TestCanonStateSubscriptions,

@@ -214,7 +214,7 @@ impl proptest::arbitrary::Arbitrary for Receipt {
             {
                 // Only receipts for deposit transactions may contain a deposit nonce
                 #[cfg(feature = "optimism")]
-                let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::DEPOSIT {
+                let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::Deposit {
                     // The deposit receipt version is only present if the deposit nonce is present
                     let deposit_receipt_version = _deposit_nonce.and(_deposit_receipt_version);
                     (_deposit_nonce, deposit_receipt_version)
@@ -251,7 +251,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
 
         // Only receipts for deposit transactions may contain a deposit nonce
         #[cfg(feature = "optimism")]
-        let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::DEPOSIT {
+        let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::Deposit {
             let deposit_nonce = Option::<u64>::arbitrary(u)?;
             let deposit_nonce_version =
                 deposit_nonce.map(|_| Option::<u64>::arbitrary(u)).transpose()?.flatten();
@@ -295,7 +295,7 @@ impl ReceiptWithBloom {
 
         let receipt = match tx_type {
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => {
+            TxType::Deposit => {
                 let remaining = |b: &[u8]| rlp_head.payload_length - (started_len - b.len()) > 0;
                 let deposit_nonce =
                     remaining(b).then(|| alloy_rlp::Decodable::decode(b)).transpose()?;
@@ -364,20 +364,20 @@ impl Decodable for ReceiptWithBloom {
                 match receipt_type {
                     0x01 => {
                         buf.advance(1);
-                        Self::decode_receipt(buf, TxType::EIP2930)
+                        Self::decode_receipt(buf, TxType::Eip2930)
                     }
                     0x02 => {
                         buf.advance(1);
-                        Self::decode_receipt(buf, TxType::EIP1559)
+                        Self::decode_receipt(buf, TxType::Eip1559)
                     }
                     0x03 => {
                         buf.advance(1);
-                        Self::decode_receipt(buf, TxType::EIP4844)
+                        Self::decode_receipt(buf, TxType::Eip4844)
                     }
                     #[cfg(feature = "optimism")]
                     0x7E => {
                         buf.advance(1);
-                        Self::decode_receipt(buf, TxType::DEPOSIT)
+                        Self::decode_receipt(buf, TxType::Deposit)
                     }
                     _ => Err(alloy_rlp::Error::Custom("invalid receipt type")),
                 }
@@ -448,7 +448,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         rlp_head.payload_length += self.receipt.logs.length();
 
         #[cfg(feature = "optimism")]
-        if self.receipt.tx_type == TxType::DEPOSIT {
+        if self.receipt.tx_type == TxType::Deposit {
             if let Some(deposit_nonce) = self.receipt.deposit_nonce {
                 rlp_head.payload_length += deposit_nonce.length();
             }
@@ -468,7 +468,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         self.bloom.encode(out);
         self.receipt.logs.encode(out);
         #[cfg(feature = "optimism")]
-        if self.receipt.tx_type == TxType::DEPOSIT {
+        if self.receipt.tx_type == TxType::Deposit {
             if let Some(deposit_nonce) = self.receipt.deposit_nonce {
                 deposit_nonce.encode(out)
             }
@@ -497,17 +497,17 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         match self.receipt.tx_type {
             TxType::Legacy => unreachable!("legacy already handled"),
 
-            TxType::EIP2930 => {
+            TxType::Eip2930 => {
                 out.put_u8(0x01);
             }
-            TxType::EIP1559 => {
+            TxType::Eip1559 => {
                 out.put_u8(0x02);
             }
-            TxType::EIP4844 => {
+            TxType::Eip4844 => {
                 out.put_u8(0x03);
             }
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => {
+            TxType::Deposit => {
                 out.put_u8(0x7E);
             }
         }
@@ -617,7 +617,7 @@ mod tests {
         // Deposit Receipt (post-regolith)
         let expected = ReceiptWithBloom {
             receipt: Receipt {
-                tx_type: TxType::DEPOSIT,
+                tx_type: TxType::Deposit,
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
@@ -643,7 +643,7 @@ mod tests {
         // Deposit Receipt (post-regolith)
         let expected = ReceiptWithBloom {
             receipt: Receipt {
-                tx_type: TxType::DEPOSIT,
+                tx_type: TxType::Deposit,
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,

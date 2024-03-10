@@ -8,7 +8,7 @@ use jsonrpsee::{
 };
 use reth_interfaces::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes, U256};
-use reth_revm::tracing::js::JsInspectorError;
+use reth_revm::tracing::{js::JsInspectorError, MuxError};
 use reth_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
@@ -113,6 +113,12 @@ pub enum EthApiError {
     /// Evm generic purpose error.
     #[error("Revm error: {0}")]
     EvmCustom(String),
+    /// Error encountered when converting a transaction type
+    #[error("Transaction conversion error")]
+    TransactionConversionError,
+    /// Error thrown when tracing with a muxTracer fails
+    #[error(transparent)]
+    MuxTracerError(#[from] MuxError),
 }
 
 /// Eth Optimism Api Error
@@ -146,7 +152,8 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
-            EthApiError::InvalidTracerConfig => invalid_params_rpc_err(error.to_string()),
+            EthApiError::InvalidTracerConfig |
+            EthApiError::TransactionConversionError => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
             EthApiError::PrevrandaoNotSet |
@@ -179,6 +186,7 @@ impl From<EthApiError> for ErrorObject<'static> {
                 OptimismEthApiError::L1BlockFeeError |
                 OptimismEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
             },
+            EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
         }
     }
 }
@@ -679,7 +687,7 @@ impl From<PoolError> for EthApiError {
 /// Errors returned from a sign request.
 #[derive(Debug, thiserror::Error)]
 pub enum SignError {
-    /// Error occured while trying to sign data.
+    /// Error occurred while trying to sign data.
     #[error("could not sign")]
     CouldNotSign,
     /// Signer for requested account not found.

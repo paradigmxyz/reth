@@ -36,7 +36,7 @@ use revm::{
 };
 use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
-    FourByteInspector, TracingInspector, TracingInspectorConfig,
+    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
 };
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -296,8 +296,7 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config)
-                                .set_record_logs(call_config.with_log.unwrap_or_default()),
+                            TracingInspectorConfig::from_geth_call_config(&call_config),
                         );
 
                         let frame = self
@@ -318,10 +317,7 @@ where
                             .into_pre_state_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config)
-                                // if in default mode, we need to return all touched storages, for
-                                // which we need to record steps and statediff
-                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
+                            TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
                         );
 
                         let frame =
@@ -339,6 +335,24 @@ where
                         return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
+                    GethDebugBuiltInTracerType::MuxTracer => {
+                        let mux_config = tracer_config
+                            .into_mux_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+
+                        let mut inspector = MuxInspector::try_from_config(mux_config)?;
+
+                        let frame = self
+                            .inner
+                            .eth_api
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+                                let frame = inspector.try_into_mux_frame(&res, &db)?;
+                                Ok(frame.into())
+                            })
+                            .await?;
+                        return Ok(frame)
+                    }
                 },
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
@@ -522,8 +536,7 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config)
-                                .set_record_logs(call_config.with_log.unwrap_or_default()),
+                            TracingInspectorConfig::from_geth_call_config(&call_config),
                         );
 
                         let (res, _) = inspect(db, env, &mut inspector)?;
@@ -540,23 +553,31 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_config(&config)
-                                // if in default mode, we need to return all touched storages, for
-                                // which we need to record steps and statediff
-                                .set_steps_and_state_diffs(prestate_config.is_default_mode()),
+                            TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
                         );
-                        let (res, _) = inspect(&mut *db, env, &mut inspector)?;
+                        let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
 
                         let frame = inspector.into_geth_builder().geth_prestate_traces(
                             &res,
                             prestate_config,
-                            &*db,
+                            db,
                         )?;
 
                         return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::NoopTracer => {
                         Ok((NoopFrame::default().into(), Default::default()))
+                    }
+                    GethDebugBuiltInTracerType::MuxTracer => {
+                        let mux_config = tracer_config
+                            .into_mux_config()
+                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
+
+                        let mut inspector = MuxInspector::try_from_config(mux_config)?;
+
+                        let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+                        let frame = inspector.try_into_mux_frame(&res, db)?;
+                        return Ok((frame.into(), res.state))
                     }
                 },
                 GethDebugTracerType::JsTracer(code) => {

@@ -168,8 +168,7 @@ impl FromStr for NodeRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rlp::{Decodable, Encodable};
-    use bytes::BytesMut;
+    use alloy_rlp::Decodable;
     use rand::{thread_rng, Rng, RngCore};
 
     #[test]
@@ -219,10 +218,7 @@ mod tests {
                 id: rng.gen(),
             };
 
-            let mut buf = BytesMut::new();
-            record.encode(&mut buf);
-
-            let decoded = NodeRecord::decode(&mut buf.as_ref()).unwrap();
+            let decoded = NodeRecord::decode(&mut alloy_rlp::encode(record).as_slice()).unwrap();
             assert_eq!(record, decoded);
         }
     }
@@ -240,10 +236,7 @@ mod tests {
                 id: rng.gen(),
             };
 
-            let mut buf = BytesMut::new();
-            record.encode(&mut buf);
-
-            let decoded = NodeRecord::decode(&mut buf.as_ref()).unwrap();
+            let decoded = NodeRecord::decode(&mut alloy_rlp::encode(record).as_slice()).unwrap();
             assert_eq!(record, decoded);
         }
     }

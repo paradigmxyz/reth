@@ -295,7 +295,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             let (block_root, updates) = StateRoot::incremental_root_with_updates(tx, range)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
-            // Validate the calulated state root
+            // Validate the calculated state root
             let target = provider
                 .header_by_number(input.unwind_to)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;

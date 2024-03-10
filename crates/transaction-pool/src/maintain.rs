@@ -525,10 +525,11 @@ fn load_accounts<Client, I>(
     addresses: I,
 ) -> Result<LoadedAccounts, Box<(HashSet<Address>, ProviderError)>>
 where
-    I: Iterator<Item = Address>,
+    I: IntoIterator<Item = Address>,
 
     Client: StateProviderFactory,
 {
+    let addresses = addresses.into_iter();
     let mut res = LoadedAccounts::default();
     let state = match client.history_by_block_hash(at) {
         Ok(state) => state,

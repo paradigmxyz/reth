@@ -321,13 +321,23 @@ where
             let encoded_len = transaction.encoded_length();
             let tx = transaction.to_recovered_transaction().into_signed();
             let pooled = if tx.is_eip4844() {
+                // for EIP-4844 transactions, we need to fetch the blob sidecar from the blob store
                 if let Some(blob) = self.get_blob_transaction(tx) {
                     PooledTransactionsElement::BlobTransaction(blob)
                 } else {
                     continue
                 }
             } else {
-                PooledTransactionsElement::from(tx)
+                match PooledTransactionsElement::try_from(tx) {
+                    Ok(element) => element,
+                    Err(err) => {
+                        debug!(
+                            target: "txpool", %err,
+                            "failed to convert transaction to pooled element; skipping",
+                        );
+                        continue
+                    }
+                }
             };
 
             size += encoded_len;
@@ -351,7 +361,7 @@ where
             if tx.is_eip4844() {
                 self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
             } else {
-                Some(PooledTransactionsElement::from(tx))
+                PooledTransactionsElement::try_from(tx).ok()
             }
         })
     }

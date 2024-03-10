@@ -848,10 +848,6 @@ pub trait PoolTransaction:
 
     /// Returns chain_id
     fn chain_id(&self) -> Option<u64>;
-
-    /// Returns whether or not the transaction is an Optimism Deposited transaction.
-    #[cfg(feature = "optimism")]
-    fn is_deposit(&self) -> bool;
 }
 
 /// An extension trait that provides additional interfaces for the
@@ -915,6 +911,9 @@ pub enum EthBlobTransactionSidecar {
 
 impl EthPooledTransaction {
     /// Create new instance of [Self].
+    ///
+    /// Caution: In case of blob transactions, this does marks the blob sidecar as
+    /// [EthBlobTransactionSidecar::Missing]
     pub fn new(transaction: TransactionSignedEcRecovered, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
         let gas_cost = match &transaction.transaction {
@@ -1085,12 +1084,6 @@ impl PoolTransaction for EthPooledTransaction {
     /// Returns chain_id
     fn chain_id(&self) -> Option<u64> {
         self.transaction.chain_id()
-    }
-
-    /// Returns whether or not the transaction is an Optimism Deposited transaction.
-    #[cfg(feature = "optimism")]
-    fn is_deposit(&self) -> bool {
-        matches!(self.transaction.transaction, Transaction::Deposit(_))
     }
 }
 

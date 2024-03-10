@@ -54,8 +54,8 @@ fn fill(
 
     let (gas_price, max_fee_per_gas) = match signed_tx.tx_type() {
         TxType::Legacy => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
-        TxType::EIP2930 => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
-        TxType::EIP1559 | TxType::EIP4844 => {
+        TxType::Eip2930 => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
+        TxType::Eip1559 | TxType::Eip4844 => {
             // the gas price field for EIP1559 is set to `min(tip, gasFeeCap - baseFee) +
             // baseFee`
             let gas_price = base_fee
@@ -69,7 +69,7 @@ fn fill(
             (Some(U128::from(gas_price)), Some(U128::from(signed_tx.max_fee_per_gas())))
         }
         #[cfg(feature = "optimism")]
-        TxType::DEPOSIT => (None, None),
+        TxType::Deposit => (None, None),
     };
 
     let chain_id = signed_tx.chain_id().map(U64::from);

@@ -268,7 +268,7 @@ impl BundleStateWithReceipts {
 
     /// Extend one state from another
     ///
-    /// For state this is very sensitive opperation and should be used only when
+    /// For state this is very sensitive operation and should be used only when
     /// we know that other state was build on top of this one.
     /// In most cases this would be true.
     pub fn extend(&mut self, other: Self) {
