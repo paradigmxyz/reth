@@ -540,6 +540,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                     AddedTransaction::Parked { transaction, subpool: move_to, replaced }
                 };
 
+                // Update size metrics after adding and potentially moving transactions.
+                self.update_size_metrics();
+
                 Ok(res)
             }
             Err(err) => {
@@ -648,7 +651,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        hashes.into_iter().filter_map(|hash| self.remove_transaction_by_hash(&hash)).collect()
+        let txs =
+            hashes.into_iter().filter_map(|hash| self.remove_transaction_by_hash(&hash)).collect();
+        self.update_size_metrics();
+        txs
     }
 
     /// Remove the transaction from the __entire__ pool.
