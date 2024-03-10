@@ -132,7 +132,7 @@ impl StaticFileProviderRW {
         let start = Instant::now();
 
         // Commits offsets and new user_header to disk
-        self.writer.commit_without_sync_all()?;
+        self.writer.commit_without_sync_all().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
