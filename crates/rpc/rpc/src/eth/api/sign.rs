@@ -42,7 +42,7 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
             .ok_or(SignError::NoAccount)
     }
 
-    /// Generates 20 developer accounts.
+    /// Generates 20 random developer accounts.
     /// Used in DEV mode.
     pub async fn with_dev_accounts(&mut self) {
         let mut signers = self.inner.signers.write().await;
