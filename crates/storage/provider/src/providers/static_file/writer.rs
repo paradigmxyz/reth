@@ -120,12 +120,43 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
+    /// Commits configuration changes to disk and updates the reader index with the new changes.
+    ///
+    /// CAUTION: does not call `sync_all` on the files.
+    #[cfg(feature = "test-utils")]
+    pub fn commit_without_sync_all(&mut self) -> ProviderResult<()> {
+        let start = Instant::now();
+
+        // Commits offsets and new user_header to disk
+        self.writer.commit_without_sync_all()?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                self.writer.user_header().segment(),
+                StaticFileProviderOperation::CommitWriter,
+                Some(start.elapsed()),
+            );
+        }
+
+        debug!(
+            target: "provider::static_file",
+            segment = ?self.writer.user_header().segment(),
+            path = ?self.data_path,
+            duration = ?start.elapsed(),
+            "Commit"
+        );
+
+        self.update_index()?;
+
+        Ok(())
+    }
+
     /// Updates the `self.reader` internal index.
     fn update_index(&self) -> ProviderResult<()> {
         // We find the maximum block of the segment by checking this writer's last block.
         //
         // However if there's no block range (because there's no data), we try to calculate it by
-        // substracting 1 from the expected block start, resulting on the last block of the
+        // subtracting 1 from the expected block start, resulting on the last block of the
         // previous file.
         //
         // If that expected block start is 0, then it means that there's no actual block data, and

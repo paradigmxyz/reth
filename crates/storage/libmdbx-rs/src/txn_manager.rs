@@ -217,20 +217,20 @@ mod read_transactions {
 
                         if duration > self.max_duration {
                             let result = tx.txn_execute_fail_on_timeout(|txn_ptr| {
-                                (
-                                    txn_ptr,
-                                    duration,
-                                    // Time out the transaction.
-                                    //
-                                    // We use `mdbx_txn_reset` instead of `mdbx_txn_abort` here to
-                                    // prevent MDBX from reusing the pointer of the aborted
-                                    // transaction for new read-only transactions. This is
-                                    // important because we store the pointer in the `active` list
-                                    // and assume that it is unique.
-                                    //
-                                    // See https://erthink.github.io/libmdbx/group__c__transactions.html#gae9f34737fe60b0ba538d5a09b6a25c8d for more info.
-                                    mdbx_result(unsafe { ffi::mdbx_txn_reset(txn_ptr) }),
-                                )
+                                // Time out the transaction.
+                                //
+                                // We use `mdbx_txn_reset` instead of `mdbx_txn_abort` here to
+                                // prevent MDBX from reusing the pointer of the aborted
+                                // transaction for new read-only transactions. This is
+                                // important because we store the pointer in the `active` list
+                                // and assume that it is unique.
+                                //
+                                // See https://erthink.github.io/libmdbx/group__c__transactions.html#gae9f34737fe60b0ba538d5a09b6a25c8d for more info.
+                                let result = mdbx_result(unsafe { ffi::mdbx_txn_reset(txn_ptr) });
+                                if result.is_ok() {
+                                    tx.set_timed_out();
+                                }
+                                (txn_ptr, duration, result)
                             });
 
                             match result {

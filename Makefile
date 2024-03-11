@@ -10,7 +10,7 @@ FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 
 BUILD_PATH = "target"
 
-# List of features to use when building. Can be overriden via the environment.
+# List of features to use when building. Can be overridden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
     FEATURES ?=

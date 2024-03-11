@@ -259,7 +259,7 @@ impl Command {
             "Mismatched trie updates"
         );
 
-        // Drop without comitting.
+        // Drop without committing.
         drop(provider_rw);
 
         Ok(())

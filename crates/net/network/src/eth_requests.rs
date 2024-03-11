@@ -1,6 +1,9 @@
 //! Blocks/Headers management for the p2p network.
 
-use crate::{metrics::EthRequestHandlerMetrics, peers::PeersHandle};
+use crate::{
+    budget::DEFAULT_BUDGET_TRY_DRAIN_STREAM, metrics::EthRequestHandlerMetrics, peers::PeersHandle,
+    poll_nested_stream_with_budget,
+};
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
@@ -240,11 +243,13 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        loop {
-            match this.incoming_requests.poll_next_unpin(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(None) => return Poll::Ready(()),
-                Poll::Ready(Some(incoming)) => match incoming {
+        let maybe_more_incoming_requests = poll_nested_stream_with_budget!(
+            "net::eth",
+            "Incoming eth requests stream",
+            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            this.incoming_requests.poll_next_unpin(cx),
+            |incoming| {
+                match incoming {
                     IncomingEthRequest::GetBlockHeaders { peer_id, request, response } => {
                         this.on_headers_request(peer_id, request, response)
                     }
@@ -255,9 +260,18 @@ where
                     IncomingEthRequest::GetReceipts { peer_id, request, response } => {
                         this.on_receipts_request(peer_id, request, response)
                     }
-                },
-            }
+                }
+            },
+        );
+
+        // stream is fully drained and import futures pending
+        if maybe_more_incoming_requests {
+            // make sure we're woken up again
+            cx.waker().wake_by_ref();
+            return Poll::Pending
         }
+
+        Poll::Pending
     }
 }
 

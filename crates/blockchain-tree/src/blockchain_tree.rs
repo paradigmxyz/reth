@@ -1164,7 +1164,7 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
         if self.block_indices().canonical_tip().number <= unwind_to {
             return Ok(())
         }
-        // revert `N` blocks from current canonical chain and put them inside BlockchanTree
+        // revert `N` blocks from current canonical chain and put them inside BlockchainTree
         let old_canon_chain = self.revert_canonical_from_database(unwind_to)?;
 
         // check if there is block in chain

@@ -8,7 +8,6 @@ use reth_db::{database::Database, mdbx, static_file::iter_static_files, Database
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
 use reth_provider::providers::StaticFileProvider;
-use std::fs::File;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
@@ -85,11 +84,11 @@ impl Command {
             }
 
             let max_widths = table.column_max_content_widths();
-            let mut seperator = Row::new();
+            let mut separator = Row::new();
             for width in max_widths {
-                seperator.add_cell(Cell::new("-".repeat(width as usize)));
+                separator.add_cell(Cell::new("-".repeat(width as usize)));
             }
-            table.add_row(seperator);
+            table.add_row(separator);
 
             let mut row = Row::new();
             row.add_cell(Cell::new("Tables"))
@@ -101,8 +100,8 @@ impl Command {
             table.add_row(row);
 
             let freelist = tx.inner.env().freelist()?;
-            let freelist_size =
-                freelist * tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
+            let pagesize = tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
+            let freelist_size = freelist * pagesize;
 
             let mut row = Row::new();
             row.add_cell(Cell::new("Freelist"))
@@ -170,24 +169,23 @@ impl Command {
                 let fixed_block_range = find_fixed_range(block_range.start());
                 let jar_provider = static_file_provider
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
-                    .expect("something went wrong");
+                    .ok_or_else(|| {
+                        eyre::eyre!("Failed to get segment provider for segment: {}", segment)
+                    })?;
 
                 let columns = jar_provider.columns();
                 let rows = jar_provider.rows();
-                let data_size = File::open(jar_provider.data_path())
-                    .and_then(|file| file.metadata())
+
+                let data_size = reth_primitives::fs::metadata(jar_provider.data_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let index_size = File::open(jar_provider.index_path())
-                    .and_then(|file| file.metadata())
+                let index_size = reth_primitives::fs::metadata(jar_provider.index_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let offsets_size = File::open(jar_provider.offsets_path())
-                    .and_then(|file| file.metadata())
+                let offsets_size = reth_primitives::fs::metadata(jar_provider.offsets_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let config_size = File::open(jar_provider.config_path())
-                    .and_then(|file| file.metadata())
+                let config_size = reth_primitives::fs::metadata(jar_provider.config_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
 
@@ -263,11 +261,11 @@ impl Command {
         }
 
         let max_widths = table.column_max_content_widths();
-        let mut seperator = Row::new();
+        let mut separator = Row::new();
         for width in max_widths {
-            seperator.add_cell(Cell::new("-".repeat(width as usize)));
+            separator.add_cell(Cell::new("-".repeat(width as usize)));
         }
-        table.add_row(seperator);
+        table.add_row(separator);
 
         let mut row = Row::new();
         row.add_cell(Cell::new("Total"))

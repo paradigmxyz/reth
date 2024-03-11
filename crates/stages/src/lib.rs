@@ -60,7 +60,6 @@
 //!             bodies_downloader,
 //!             executor_factory,
 //!         )
-//!         .unwrap(),
 //!     )
 //!     .build(provider_factory, static_file_producer);
 //! ```

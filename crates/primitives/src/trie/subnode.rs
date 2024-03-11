@@ -54,8 +54,8 @@ impl Compact for StoredSubNode {
         let nibbles_exists = buf.get_u8() != 0;
         let nibble = if nibbles_exists { Some(buf.get_u8()) } else { None };
 
-        let node_exsists = buf.get_u8() != 0;
-        let node = if node_exsists {
+        let node_exists = buf.get_u8() != 0;
+        let node = if node_exists {
             let (node, rest) = StoredBranchNode::from_compact(buf, 0);
             buf = rest;
             Some(node.0)

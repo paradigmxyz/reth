@@ -98,6 +98,7 @@ where
     }
 
     /// Endless future that [Self::clear_stale_filters] every `stale_filter_ttl` interval.
+    /// Nonetheless, this endless future frees the thread at every await point.
     async fn watch_and_clear_stale_filters(&self) {
         let mut interval = tokio::time::interval(self.inner.stale_filter_ttl);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -202,7 +203,7 @@ where
     /// Returns an error if no matching log filter exists.
     ///
     /// Handler for `eth_getFilterLogs`
-    pub async fn filter_logs(&self, id: FilterId) -> Result<FilterChanges, FilterError> {
+    pub async fn filter_logs(&self, id: FilterId) -> Result<Vec<Log>, FilterError> {
         let filter = {
             let filters = self.inner.active_filters.inner.lock().await;
             if let FilterKind::Log(ref filter) =
@@ -215,8 +216,7 @@ where
             }
         };
 
-        let logs = self.inner.logs_for_filter(filter).await?;
-        Ok(FilterChanges::Logs(logs))
+        self.inner.logs_for_filter(filter).await
     }
 }
 
@@ -277,7 +277,7 @@ where
     /// Returns an error if no matching log filter exists.
     ///
     /// Handler for `eth_getFilterLogs`
-    async fn filter_logs(&self, id: FilterId) -> RpcResult<FilterChanges> {
+    async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getFilterLogs");
         Ok(EthFilter::filter_logs(self, id).await?)
     }

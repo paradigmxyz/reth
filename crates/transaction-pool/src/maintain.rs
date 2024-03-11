@@ -525,10 +525,11 @@ fn load_accounts<Client, I>(
     addresses: I,
 ) -> Result<LoadedAccounts, Box<(HashSet<Address>, ProviderError)>>
 where
-    I: Iterator<Item = Address>,
+    I: IntoIterator<Item = Address>,
 
     Client: StateProviderFactory,
 {
+    let addresses = addresses.into_iter();
     let mut res = LoadedAccounts::default();
     let state = match client.history_by_block_hash(at) {
         Ok(state) => state,
@@ -608,7 +609,7 @@ where
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();
-    let mut buf = alloy_rlp::BytesMut::new();
+    let mut buf = Vec::new();
     alloy_rlp::encode_list(&local_transactions, &mut buf);
     info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();

@@ -262,10 +262,10 @@ impl Command {
             // TODO: add support for withdrawals
             withdrawals: None,
         };
-        #[cfg(feature = "optimism")]
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
+            #[cfg(feature = "optimism")]
             OptimismPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 OptimismPayloadAttributes {
@@ -275,13 +275,7 @@ impl Command {
                     gas_limit: None,
                 },
             )?,
-            self.chain.clone(),
-        );
-
-        #[cfg(not(feature = "optimism"))]
-        let payload_config = PayloadConfig::new(
-            Arc::clone(&best_block),
-            Bytes::default(),
+            #[cfg(not(feature = "optimism"))]
             EthPayloadBuilderAttributes::try_new(best_block.hash(), payload_attrs)?,
             self.chain.clone(),
         );
@@ -296,8 +290,9 @@ impl Command {
         );
 
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
-            .compute_pending_block();
+        let payload_builder =
+            reth_optimism_payload_builder::OptimismPayloadBuilder::new(self.chain.clone())
+                .compute_pending_block();
 
         #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
