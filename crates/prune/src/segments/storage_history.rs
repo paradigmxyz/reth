@@ -96,9 +96,11 @@ mod tests {
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::{collections::BTreeMap, ops::AddAssign};
+    use reth_tracing;
 
     #[test]
     fn prune() {
+        reth_tracing::init_test_tracing();
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 

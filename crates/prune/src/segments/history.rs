@@ -28,6 +28,7 @@ where
     let mut deleted = 0;
     let mut cursor = provider.tx_ref().cursor_write::<T>()?;
 
+    tracing::debug!(target: "pruner", "pruning history");
     // Prune history table:
     // 1. If the shard has `highest_block_number` less than or equal to the target block number
     // for pruning, delete the shard completely.
@@ -36,10 +37,10 @@ where
     // block number for pruning.
     while let Some(result) = cursor.next()? {
         let (key, blocks): (T::Key, BlockNumberList) = result;
-
         // If shard consists only of block numbers less than the target one, delete shard
         // completely.
         if key.as_ref().highest_block_number <= to_block {
+            tracing::info!(target: "pruner", "pruning history");
             cursor.delete_current()?;
             deleted += 1;
             if key.as_ref().highest_block_number == to_block {
@@ -53,6 +54,8 @@ where
         // filter it. It is guaranteed that further shards for this sharded key will not
         // contain the target block number, as it's in this shard.
         else {
+
+            
             let new_blocks =
                 blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
 
@@ -98,6 +101,8 @@ where
                     cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(new_blocks))?;
                 }
             }
+
+            tracing::info!(target: "pruner", "pruning history, shard hasn't changed");
 
             // Jump to the last shard for this key, if current key isn't already the last shard.
             if key.as_ref().highest_block_number != u64::MAX {

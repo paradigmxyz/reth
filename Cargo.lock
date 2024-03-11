@@ -6453,6 +6453,7 @@ dependencies = [
  "reth-provider",
  "reth-stages",
  "reth-tokio-util",
+ "reth-tracing",
  "thiserror",
  "tokio-stream",
  "tracing",
