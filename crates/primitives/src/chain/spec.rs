@@ -216,7 +216,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        fork_timestamps: ForkTimestamps::default().shanghai(0),
+        fork_timestamps: ForkTimestamps::default().shanghai(0).cancun(0),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
             (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -235,6 +235,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(0)),
         ]),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         deposit_contract: None, // TODO: do we even have?
