@@ -687,7 +687,7 @@ where
             .into_iter()
             .map(|receipt| {
                 let mut buf = Vec::new();
-                receipt.with_bloom().encode(&mut buf);
+                receipt.with_bloom().encode_inner(&mut buf, false);
                 Bytes::from(buf)
             })
             .collect())
