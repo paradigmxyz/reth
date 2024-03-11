@@ -559,6 +559,7 @@ where
         // Configure the pipeline
         let (mut pipeline, client) = if config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
+
             for (idx, (address, alloc)) in config.chain.genesis.alloc.iter().enumerate() {
                 info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
             }
@@ -691,7 +692,7 @@ where
 
         // Start RPC servers
 
-        let (rpc_server_handles, rpc_registry) = crate::rpc::launch_rpc_servers(
+        let (rpc_server_handles, mut rpc_registry) = crate::rpc::launch_rpc_servers(
             node_components.clone(),
             engine_api,
             &config,
@@ -699,6 +700,11 @@ where
             rpc,
         )
         .await?;
+
+        // in dev mode we generate 20 random dev-signer accounts
+        if config.dev.dev {
+            rpc_registry.eth_api().with_dev_accounts();
+        }
 
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();

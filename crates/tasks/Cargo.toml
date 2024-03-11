@@ -25,7 +25,7 @@ metrics.workspace = true
 # misc
 tracing.workspace = true
 thiserror.workspace = true
-dyn-clone = "1.0"
+dyn-clone.workspace = true 
 
 # feature `rayon`
 rayon = { workspace = true, optional = true }
