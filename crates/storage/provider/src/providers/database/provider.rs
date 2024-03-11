@@ -829,18 +829,18 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut walker = cursor.walk_range(keys)?;
         loop {
             // check for time out must be done in this scope since it's not done in
-            // `step_prune_table`
+            // `step_prune_range`
             if limiter.is_limit_reached() {
                 break
             }
-            match self.step_prune_table(
+            match self.step_prune_range(
                 &mut walker,
                 &mut limiter,
                 &mut skip_filter,
                 &mut delete_callback,
             )? {
-                PruneStepResult::Finished | PruneStepResult::ReachedEntriesLimit => break,
-                PruneStepResult::MaybeMoreData => continue,
+                PruneStepResult::Finished | PruneStepResult::ReachedDeletedEntriesLimit => break,
+                PruneStepResult::MaybeMoreData => (),
             }
         }
 
@@ -858,17 +858,27 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     where
         F: FnOnce(RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>) -> Result<R, DatabaseError>,
     {
-        let mut cursor = self.tx.cursor_write::<T>()?;
-        let walker = cursor.walk_range(range)?;
+        self.with_cursor(|mut cursor| {
+            let walker = cursor.walk_range(range)?;
 
-        f(walker)
+            f(walker)
+        })
     }
 
-    /// Steps once with the given walker and prunes the entry at the destination. Caution! Timeout
-    /// is not checked, only limit on deleted entries count. This allows for a clean exit of a
-    /// prune job that's pruning different tables concurrently, by letting them step to the same
-    /// height before timing out.
-    pub fn step_prune_table<T: Table>(
+    /// Gets walker for given table.
+    pub fn with_cursor<T: Table, F, R>(&self, f: F) -> Result<R, DatabaseError>
+    where
+        F: FnOnce(<TX as DbTxMut>::CursorMut<T>) -> Result<R, DatabaseError>,
+    {
+        f(self.tx.cursor_write::<T>()?)
+    }
+
+    /// Steps once with the given walker and prunes the entry at the destination.
+    ///
+    /// Caution! Prune job timeout is not checked, only limit on deleted entries count. This allows
+    /// for a clean exit of a prune job that's pruning different tables concurrently, by letting
+    /// them step to the same height before timing out.
+    pub fn step_prune_range<T: Table>(
         &self,
         walker: &mut RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>,
         limiter: &mut PruneLimiter,
@@ -877,7 +887,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ) -> Result<PruneStepResult, DatabaseError> {
         if let Some(limit) = limiter.deleted_entries_limit() {
             if limiter.deleted_entries_count() == limit {
-                return Ok(PruneStepResult::ReachedEntriesLimit)
+                return Ok(PruneStepResult::ReachedDeletedEntriesLimit)
             }
         }
 
@@ -2577,9 +2587,9 @@ pub struct PruneLimiter {
     /// job.
     deleted_entries_count: usize,
     /// Highest block number to prune to.
-    to_block: Option<usize>,
+    to_block: Option<u64>,
     /// Last pruned block number.
-    last_pruned_block: Option<usize>,
+    last_pruned_block: Option<u64>,
     /// The max time one prune job can run.
     job_timeout: Option<Duration>,
     /// Time at which the prune job was started.
@@ -2601,8 +2611,13 @@ impl PruneLimiter {
     }
 
     /// Returns the highest block number to prune.
-    pub fn to_block(&self) -> Option<usize> {
+    pub fn to_block(&self) -> Option<u64> {
         self.to_block
+    }
+
+    /// Returns the last pruned block number.
+    pub fn last_pruned_block(&self) -> Option<u64> {
+        self.last_pruned_block
     }
 
     /// Returns max time one prune job can run. `None` is equivalent to unlimited time.
@@ -2683,9 +2698,9 @@ pub struct PruneLimiterBuilder {
     /// job.
     deleted_entries_count: usize,
     /// Highest block number to prune to.
-    to_block: Option<usize>,
+    to_block: Option<u64>,
     /// Last pruned block number.
-    last_pruned_block: Option<usize>,
+    last_pruned_block: Option<u64>,
     /// Time at which the prune job was started.
     start: Option<Instant>,
     /// The max time one prune job can run.
@@ -2708,14 +2723,14 @@ impl PruneLimiterBuilder {
     }
 
     /// Sets the highest block number to delete database entries for.
-    pub fn to_block(mut self, block: usize) -> Self {
+    pub fn to_block(mut self, block: u64) -> Self {
         self.to_block = Some(block);
 
         self
     }
 
     /// Carries the highest block number for which entries have been pruned.
-    pub fn last_pruned_block(mut self, block: usize) -> Self {
+    pub fn last_pruned_block(mut self, block: u64) -> Self {
         self.last_pruned_block = Some(block);
 
         self
@@ -2788,14 +2803,19 @@ pub enum PruneStepResult {
     /// Walker has no further destination.
     Finished,
     /// Limiter has interrupted walk.
-    ReachedEntriesLimit,
+    ReachedDeletedEntriesLimit,
     /// Data was pruned at current destination.
     MaybeMoreData,
 }
 
 impl PruneStepResult {
+        /// Returns `true` if there are no more entries to prune in given range.
+        pub fn is_done(&self) -> bool {
+            matches!(self, Self::Finished)
+        }
+
     /// Returns `true` if range is exhausted, i.e. no more rows to prune.
     pub fn is_exhausted(&self) -> bool {
-        matches!(self, Self::Finished) || matches!(self, Self::ReachedEntriesLimit)
+        matches!(self, Self::Finished) || matches!(self, Self::ReachedDeletedEntriesLimit)
     }
 }

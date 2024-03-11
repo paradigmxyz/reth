@@ -1,9 +1,7 @@
 use std::num::NonZeroUsize;
 
 use crate::{
-    segments::{
-        history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
-    },
+    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
     PrunerError,
 };
 use reth_db::{
@@ -11,9 +9,11 @@ use reth_db::{
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
     tables,
 };
-use reth_primitives::{PruneMode, PruneSegment};
+use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder};
-use tracing::{instrument, trace, debug};
+use tracing::{instrument, trace};
+
+use super::history::step_prune_indices;
 
 #[derive(Debug)]
 pub struct StorageHistory {
@@ -41,53 +41,49 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let range = match input.get_next_block_range() {
-            Some(range) => range,
+        let (block_range_start, block_range_end) = match input.get_next_block_range() {
+            Some(range) => (*range.start(), *range.end()),
             None => {
-                trace!(target: "pruner", "No storage history to prune");
+                trace!(target: "pruner", "No headers to prune");
                 return Ok(PruneOutput::done())
             }
         };
-        let range_end = *range.end();
 
-        let mut last_changeset_pruned_block = None;
-        debug!("limiter {:?}", input.limiter);
-        let (pruned_changesets, progress) = provider
-            .prune_table_with_range::<tables::StorageChangeSets>(
-                BlockNumberAddress::range(range),
-                input.limiter,
-                |_| false,
-                |row| last_changeset_pruned_block = Some(row.0.block_number()),
-            )?;
-        trace!(target: "pruner", deleted = %pruned_changesets, ?progress, "Pruned storage history (changesets)");
+        let mut last_pruned_block =
+            if block_range_start == 0 { None } else { Some(block_range_start - 1) };
 
-        let last_changeset_pruned_block = last_changeset_pruned_block
-            // If there's more storage storage changesets to prune, set the checkpoint block number
-            // to previous, so we could finish pruning its storage changesets on the next run.
-            .map(
-                |block_number| {
-                    if progress.is_done() {
-                        block_number
-                    } else {
-                        block_number.saturating_sub(1)
-                    }
-                },
-            )
-            .unwrap_or(range_end);
+        let mut limiter = input.limiter;
 
-        let (processed, pruned_indices) = prune_history_indices::<DB, tables::StoragesHistory, _>(
+        let tables_iter = StorageHistoryTablesIter::new(
             provider,
-            last_changeset_pruned_block,
-            |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
-            |key| StorageShardedKey::last(key.address, key.sharded_key.key),
-        )?;
-        trace!(target: "pruner", %processed, deleted = %pruned_indices, ?progress, "Pruned storage history (history)" );
+            &mut limiter,
+            last_pruned_block,
+            block_range_end,
+        );
+
+        for res in tables_iter.into_iter() {
+            last_pruned_block = res?;
+        }
+
+        let done = || -> bool {
+            let Some(block) = last_pruned_block else { return false };
+            block == block_range_end
+        }();
+
+        let progress = PruneProgress::new(done, limiter.is_timed_out());
+        let pruned = limiter.deleted_entries_count();
+
+        // If there's more storage storage changesets to prune, set the checkpoint block number
+        // to previous, so we could finish pruning its storage changesets on the next run.
+        let last_pruned_block = last_pruned_block
+            .map(|block| block.checked_sub(if progress.is_done() { 0 } else { 1 }))
+            .flatten();
 
         Ok(PruneOutput {
             progress,
-            pruned: pruned_changesets + pruned_indices,
+            pruned,
             checkpoint: Some(PruneOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
+                block_number: last_pruned_block,
                 tx_number: None,
             }),
         })
@@ -102,6 +98,96 @@ impl<DB: Database> Segment<DB> for StorageHistory {
     }
 }
 
+#[allow(missing_debug_implementations)]
+struct StorageHistoryTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    provider: &'a DatabaseProviderRW<DB>,
+    limiter: &'b mut PruneLimiter,
+    last_pruned_block: Option<u64>,
+    to_block: u64,
+}
+
+impl<'a, 'b, DB> StorageHistoryTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    fn new(
+        provider: &'a DatabaseProviderRW<DB>,
+        limiter: &'b mut PruneLimiter,
+        last_pruned_block: Option<u64>,
+        to_block: u64,
+    ) -> Self {
+        Self { provider, limiter, last_pruned_block, to_block }
+    }
+}
+
+impl<'a, 'b, DB> Iterator for StorageHistoryTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    type Item = Result<Option<u64>, PrunerError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let Self { provider, limiter, last_pruned_block, to_block } = self;
+
+        if limiter.is_limit_reached() || Some(*to_block) == *last_pruned_block {
+            return None
+        }
+
+        let block_step =
+            BlockNumberAddress::range_inclusive(if let Some(block) = *last_pruned_block {
+                block + 1..=block + 2
+            } else {
+                0..=1
+            });
+
+        let next_up_last_pruned_block = Some(block_step.start().block_number());
+        let mut last_pruned_block_changesets = None;
+        // todo: guarantee skip filter and delete callback are same for all header table types
+
+        match provider.with_walker::<tables::StorageChangeSets, _, _>(
+            block_step,
+            |ref mut walker| {
+                provider.step_prune_range(walker, limiter, &mut |_| false, &mut |row| {
+                    last_pruned_block_changesets = Some(row.0.block_number())
+                })
+            },
+        ) {
+            Err(err) => return Some(Err(err.into())),
+            Ok(res) if !res.is_done() => {
+                _ = limiter.last_pruned_block().map(|block| block.saturating_sub(1))
+            }
+            _ => (),
+        }
+
+        if limiter.last_pruned_block() < last_pruned_block_changesets {
+            limiter.increment_last_pruned_block();
+        }
+
+        if let Err(err) = provider.with_cursor::<tables::StoragesHistory, _, _>(|ref mut cursor| {
+            step_prune_indices::<DB, _, _>(
+                cursor,
+                limiter,
+                &|a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
+                &|key| StorageShardedKey::last(key.address, key.sharded_key.key),
+            )
+        }) {
+            return Some(Err(err.into()))
+        }
+
+        if next_up_last_pruned_block != last_pruned_block_changesets {
+            return Some(Err(PrunerError::InconsistentData(
+                "All headers-related tables should be pruned up to the same height",
+            )))
+        }
+
+        *last_pruned_block = next_up_last_pruned_block;
+
+        Some(Ok(*last_pruned_block))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -112,7 +198,9 @@ mod tests {
     };
 
     use assert_matches::assert_matches;
-    use reth_db::{models::storage_sharded_key::StorageShardedKey, tables, BlockNumberList, DatabaseEnv};
+    use reth_db::{
+        models::storage_sharded_key::StorageShardedKey, tables, BlockNumberList, DatabaseEnv,
+    };
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_changeset_range, random_eoa_accounts},
@@ -205,10 +293,11 @@ mod tests {
             let prune_mode = PruneMode::Before(to_block);
             let segment = StorageHistory::new(prune_mode);
             let job_limiter = PruneLimiterBuilder::default().deleted_entries_limit(1000).build();
-            let limiter = <StorageHistory as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
-                &segment,
-                &job_limiter,
-            );
+            let limiter =
+                <StorageHistory as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
+                    &segment,
+                    &job_limiter,
+                );
             let input = test_rig.get_input(to_block, limiter);
 
             let provider = test_rig.db.factory.provider_rw().unwrap();

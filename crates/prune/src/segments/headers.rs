@@ -133,15 +133,16 @@ where
         let block_step =
             if let Some(block) = *last_pruned_block { block + 1..=block + 2 } else { 0..=1 };
 
-        let mut last_pruned_block_headers = 0;
-        let mut last_pruned_block_td = 0;
-        let mut last_pruned_block_canonical = 0;
+        let next_up_last_pruned_block = Some(*block_step.start());
+        let mut last_pruned_block_headers = None;
+        let mut last_pruned_block_td = None;
+        let mut last_pruned_block_canonical = None;
         // todo: guarantee skip filter and delete callback are same for all header table types
 
         if let Err(err) =
             provider.with_walker::<tables::Headers, _, _>(block_step.clone(), |ref mut walker| {
-                provider.step_prune_table(walker, limiter, &mut |_| false, &mut |row| {
-                    last_pruned_block_headers = row.0
+                provider.step_prune_range(walker, limiter, &mut |_| false, &mut |row| {
+                    last_pruned_block_headers = Some(row.0)
                 })
             })
         {
@@ -151,27 +152,26 @@ where
         if let Err(err) = provider.with_walker::<tables::HeaderTerminalDifficulties, _, _>(
             block_step.clone(),
             |ref mut walker| {
-                provider.step_prune_table(walker, limiter, &mut |_| false, &mut |row| {
-                    last_pruned_block_td = row.0
+                provider.step_prune_range(walker, limiter, &mut |_| false, &mut |row| {
+                    last_pruned_block_td = Some(row.0)
                 })
             },
         ) {
             return Some(Err(err.into()))
         }
 
-        if let Err(err) = provider.with_walker::<tables::CanonicalHeaders, _, _>(
-            block_step.clone(),
-            |ref mut walker| {
-                provider.step_prune_table(walker, limiter, &mut |_| false, &mut |row| {
-                    last_pruned_block_canonical = row.0
+        if let Err(err) =
+            provider.with_walker::<tables::CanonicalHeaders, _, _>(block_step, |ref mut walker| {
+                provider.step_prune_range(walker, limiter, &mut |_| false, &mut |row| {
+                    last_pruned_block_canonical = Some(row.0)
                 })
-            },
-        ) {
+            })
+        {
             return Some(Err(err.into()))
         }
 
         if ![
-            *block_step.start(),
+            next_up_last_pruned_block,
             last_pruned_block_headers,
             last_pruned_block_td,
             last_pruned_block_canonical,
@@ -184,7 +184,7 @@ where
             )))
         }
 
-        *last_pruned_block = Some(*block_step.start());
+        *last_pruned_block = next_up_last_pruned_block;
 
         Some(Ok(*last_pruned_block))
     }
