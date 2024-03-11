@@ -231,7 +231,7 @@ The storage history indexing stage builds an index of what blocks a particular s
 #
 # Lower threshold corresponds to more frequent flushes,
 # but lowers temporary storage usage
-etl_file_size = 524_288_000 # 500 * 1024 * 1024
+file_size = 524_288_000 # 500 * 1024 * 1024
 ```
 
 ## The `[peers]` section

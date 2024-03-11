@@ -86,8 +86,8 @@ where
             mode,
             consensus,
             sync_gap: None,
-            hash_collector: Collector::new(tempdir.clone(), etl_file_size),
-            header_collector: Collector::new(tempdir, etl_file_size),
+            hash_collector: Collector::new(tempdir.clone(), etl_file_size / 2),
+            header_collector: Collector::new(tempdir, etl_file_size / 2),
             is_etl_ready: false,
         }
     }
