@@ -23,6 +23,13 @@ jobs:
       packages: write
       contents: read
     steps:
+      - name: Check latest
+        id: check-latest
+        # Return `true` only if the tag matches the beta version regex
+        run: |
+          if [[ ${{ github.event.ref }} =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+\.beta.*$ ]]; then
+              echo "match=true" >> $GITHUB_OUTPUT
+          fi
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -36,5 +43,9 @@ jobs:
         run: |
           docker run --privileged --rm tonistiigi/binfmt --install arm64,amd64
           docker buildx create --use --name cross-builder
+      - name: Build and push image, tag as "latest"
+        if: steps.check-latest.outputs.match == 'true'
+        run: make PROFILE=maxperf docker-build-push-latest
       - name: Build and push image
-        run: make PROFILE=maxperf docker-build-latest
+        if: steps.check-latest.outputs.match != 'true'
+        run: make PROFILE=maxperf docker-build-push
