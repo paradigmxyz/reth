@@ -121,14 +121,14 @@ where
         // Shard contains block numbers that are higher than the target one, so we need to
         // filter it. It is guaranteed that further shards for this sharded key will not
         // contain the target block number, as it's in this shard.
-        let old_blocks = blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
+        let lower_blocks = blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
 
         // If there were blocks less than or equal to the target one
         // (so the shard has changed), update the shard.
-        if blocks.len() as usize != old_blocks.len() {
+        if blocks.len() as usize != lower_blocks.len() {
             // If there are no more blocks in this shard, we need to remove it, as empty
             // shards are not allowed.
-            if old_blocks.is_empty() {
+            if lower_blocks.is_empty() {
                 if key.as_ref().highest_block_number == u64::MAX {
                     let prev_row = cursor.prev()?;
                     match prev_row {
@@ -175,7 +175,7 @@ where
                     );
                 }
             } else {
-                cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(old_blocks))?;
+                cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(lower_blocks))?;
 
                 trace!(target: "pruner::history",
                     "no blocks to prune in shard"
