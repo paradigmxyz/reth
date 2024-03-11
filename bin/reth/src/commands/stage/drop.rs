@@ -18,7 +18,7 @@ use reth_node_core::init::{insert_genesis_header, insert_genesis_state};
 use reth_primitives::{
     fs, stage::StageId, static_file::find_fixed_range, ChainSpec, StaticFileSegment,
 };
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::StaticFileWriter, ProviderFactory};
 use std::sync::Arc;
 
 /// `reth drop-stage` command
@@ -103,7 +103,7 @@ impl Command {
                         StageId::Headers.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, static_file_provider, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.chain)?;
                 }
                 StageEnum::Bodies => {
                     tx.clear::<tables::BlockBodyIndices>()?;
@@ -115,7 +115,7 @@ impl Command {
                         StageId::Bodies.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, static_file_provider, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.chain)?;
                 }
                 StageEnum::Senders => {
                     tx.clear::<tables::TransactionSenders>()?;
@@ -200,11 +200,13 @@ impl Command {
                         StageId::TransactionLookup.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, static_file_provider, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.chain)?;
                 }
             }
 
             tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;
+
+            static_file_provider.commit()?;
 
             Ok::<_, eyre::Error>(())
         })??;
