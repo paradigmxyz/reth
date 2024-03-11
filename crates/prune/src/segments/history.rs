@@ -59,7 +59,7 @@ where
             // If there were blocks less than or equal to the target one
             // (so the shard has changed), update the shard.
             if blocks.len() as usize != higher_blocks.len() {
-                // If there will be no more blocks in the shard after pruning blocks below target 
+                // If there will be no more blocks in the shard after pruning blocks below target
                 // block, we need to remove it, as empty shards are not allowed.
                 if higher_blocks.is_empty() {
                     if key.as_ref().highest_block_number == u64::MAX {
