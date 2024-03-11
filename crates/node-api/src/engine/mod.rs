@@ -11,7 +11,7 @@ pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 
 /// Contains error types used in the traits defined in this crate.
 pub mod error;
-pub use error::{AttributesValidationError, PayloadOrAttributesValidationError};
+pub use error::{EngineObjectValidationError, PayloadOrAttributesValidationError};
 
 /// Contains types used in implementations of the [PayloadAttributes] trait.
 pub mod payload;
@@ -50,7 +50,7 @@ pub trait EngineTypes:
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, Self::PayloadAttributes>,
-    ) -> Result<(), AttributesValidationError>;
+    ) -> Result<(), EngineObjectValidationError>;
 }
 
 /// Validates the timestamp depending on the version called:
@@ -58,12 +58,12 @@ pub trait EngineTypes:
 /// * If V2, this ensure that the payload timestamp is pre-Cancun.
 /// * If V3, this ensures that the payload timestamp is within the Cancun timestamp.
 ///
-/// Otherwise, this will return [AttributesValidationError::UnsupportedFork].
+/// Otherwise, this will return [EngineObjectValidationError::UnsupportedFork].
 pub fn validate_payload_timestamp(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
     timestamp: u64,
-) -> Result<(), AttributesValidationError> {
+) -> Result<(), EngineObjectValidationError> {
     let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);
     if version == EngineApiMessageVersion::V2 && is_cancun {
         // From the Engine API spec:
@@ -83,7 +83,7 @@ pub fn validate_payload_timestamp(
         //
         // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
         //    payload or payloadAttributes is greater or equal to the Cancun activation timestamp.
-        return Err(AttributesValidationError::UnsupportedFork)
+        return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
     if version == EngineApiMessageVersion::V3 && !is_cancun {
@@ -105,7 +105,7 @@ pub fn validate_payload_timestamp(
         //
         // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
         //    the payload does not fall within the time frame of the Cancun fork.
-        return Err(AttributesValidationError::UnsupportedFork)
+        return Err(EngineObjectValidationError::UnsupportedFork)
     }
     Ok(())
 }
@@ -119,7 +119,7 @@ pub fn validate_withdrawals_presence(
     message_validation_kind: MessageValidationKind,
     timestamp: u64,
     has_withdrawals: bool,
-) -> Result<(), AttributesValidationError> {
+) -> Result<(), EngineObjectValidationError> {
     let is_shanghai = chain_spec.is_shanghai_active_at_timestamp(timestamp);
 
     match version {
@@ -156,10 +156,10 @@ pub fn validate_withdrawals_presence(
 /// Before Cancun, the `parentBeaconBlockRoot` field must be [None].
 ///
 /// If the engine API message version is V1 or V2, and the timestamp is post-Cancun, then this will
-/// return [AttributesValidationError::UnsupportedFork].
+/// return [EngineObjectValidationError::UnsupportedFork].
 ///
 /// If the timestamp is before the Cancun fork and the engine API message version is V3, then this
-/// will return [AttributesValidationError::UnsupportedFork].
+/// will return [EngineObjectValidationError::UnsupportedFork].
 ///
 /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
 /// this will return [PayloadOrAttributesValidationError::NoParentBeaconBlockRootPostCancun].
@@ -203,7 +203,7 @@ pub fn validate_parent_beacon_block_root_presence(
     validation_kind: MessageValidationKind,
     timestamp: u64,
     has_parent_beacon_block_root: bool,
-) -> Result<(), AttributesValidationError> {
+) -> Result<(), EngineObjectValidationError> {
     // 1. Client software **MUST** check that provided set of parameters and their fields strictly
     //    matches the expected one and return `-32602: Invalid params` error if this check fails.
     //    Any field having `null` value **MUST** be considered as not provided.
@@ -266,23 +266,31 @@ pub enum MessageValidationKind {
 }
 
 impl MessageValidationKind {
-    /// Returns an `AttributesValidationError` based on the given
+    /// Returns an `EngineObjectValidationError` based on the given
     /// `PayloadOrAttributesValidationError` and the current validation kind.
-    pub fn to_error(self, error: PayloadOrAttributesValidationError) -> AttributesValidationError {
+    pub fn to_error(
+        self,
+        error: PayloadOrAttributesValidationError,
+    ) -> EngineObjectValidationError {
         match self {
-            Self::Payload => AttributesValidationError::Payload(error),
-            Self::PayloadAttributes => AttributesValidationError::PayloadAttributes(error),
+            Self::Payload => EngineObjectValidationError::Payload(error),
+            Self::PayloadAttributes => EngineObjectValidationError::PayloadAttributes(error),
         }
     }
 }
 
-/// Validates the presence or exclusion of fork-specific fields based on the ethereum payload
-/// attributes and the message version.
+/// Validates the presence or exclusion of fork-specific fields based on the ethereum execution
+/// payload, or payload attributes, and the message version.
+///
+/// The object being validated is provided by the [PayloadOrAttributes] argument, which can be
+/// either an execution payload, or payload attributes.
+///
+/// The version is provided by the [EngineApiMessageVersion] argument.
 pub fn validate_version_specific_fields<Type>(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
     payload_or_attrs: PayloadOrAttributes<'_, Type>,
-) -> Result<(), AttributesValidationError>
+) -> Result<(), EngineObjectValidationError>
 where
     Type: PayloadAttributes,
 {

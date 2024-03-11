@@ -2,8 +2,12 @@
 use thiserror::Error;
 
 /// Thrown when the payload or attributes are known to be invalid before processing.
+///
+/// This is used mainly for
+/// [validate_version_specific_fields](crate::validate_version_specific_fields), which validates
+/// both execution payloads and forkchoice update attributes with respect to a method version.
 #[derive(Error, Debug)]
-pub enum AttributesValidationError {
+pub enum EngineObjectValidationError {
     /// Thrown when the underlying validation error occured while validating an `ExecutionPayload`.
     #[error("Payload validation error: {0}")]
     Payload(PayloadOrAttributesValidationError),
@@ -46,7 +50,7 @@ pub enum PayloadOrAttributesValidationError {
     NoParentBeaconBlockRootPostCancun,
 }
 
-impl AttributesValidationError {
+impl EngineObjectValidationError {
     /// Creates an instance of the `InvalidParams` variant with the given error.
     pub fn invalid_params<E>(error: E) -> Self
     where

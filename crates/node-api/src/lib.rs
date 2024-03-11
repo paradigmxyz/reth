@@ -14,7 +14,7 @@
 pub mod engine;
 pub use engine::{
     validate_payload_timestamp, validate_version_specific_fields, validate_withdrawals_presence,
-    AttributesValidationError, BuiltPayload, EngineApiMessageVersion, EngineTypes,
+    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, EngineTypes,
     MessageValidationKind, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
     PayloadOrAttributesValidationError,
 };

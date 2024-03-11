@@ -2,7 +2,7 @@ use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
-use reth_node_api::AttributesValidationError;
+use reth_node_api::EngineObjectValidationError;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{B256, U256};
 use thiserror::Error;
@@ -85,7 +85,7 @@ pub enum EngineApiError {
     GetPayloadError(#[from] PayloadBuilderError),
     /// The payload or attributes are known to be malformed before processing.
     #[error(transparent)]
-    AttributesValidationError(#[from] AttributesValidationError),
+    AttributesValidationError(#[from] EngineObjectValidationError),
     /// If the optimism feature flag is enabled, the payload attributes must have a present
     /// gas limit for the forkchoice updated method.
     #[cfg(feature = "optimism")]
@@ -111,9 +111,9 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EngineApiError) -> Self {
         match error {
             EngineApiError::InvalidBodiesRange { .. } |
-            EngineApiError::AttributesValidationError(AttributesValidationError::Payload(_)) |
+            EngineApiError::AttributesValidationError(EngineObjectValidationError::Payload(_)) |
             EngineApiError::AttributesValidationError(
-                AttributesValidationError::InvalidParams(_),
+                EngineObjectValidationError::InvalidParams(_),
             ) => {
                 // Note: the data field is not required by the spec, but is also included by other
                 // clients
@@ -124,7 +124,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 )
             }
             EngineApiError::AttributesValidationError(
-                AttributesValidationError::PayloadAttributes(_),
+                EngineObjectValidationError::PayloadAttributes(_),
             ) => {
                 // Note: the data field is not required by the spec, but is also included by other
                 // clients
@@ -147,7 +147,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 )
             }
             EngineApiError::AttributesValidationError(
-                AttributesValidationError::UnsupportedFork,
+                EngineObjectValidationError::UnsupportedFork,
             ) => jsonrpsee_types::error::ErrorObject::owned(
                 UNSUPPORTED_FORK_CODE,
                 error.to_string(),
@@ -238,7 +238,7 @@ mod tests {
         ensure_engine_rpc_error(
             UNSUPPORTED_FORK_CODE,
             "Unsupported fork",
-            EngineApiError::AttributesValidationError(AttributesValidationError::UnsupportedFork),
+            EngineApiError::AttributesValidationError(EngineObjectValidationError::UnsupportedFork),
         );
 
         ensure_engine_rpc_error(

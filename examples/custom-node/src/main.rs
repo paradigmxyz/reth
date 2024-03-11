@@ -34,7 +34,7 @@ use reth_basic_payload_builder::{
     PayloadBuilder, PayloadConfig,
 };
 use reth_node_api::{
-    validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
+    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
     EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
@@ -94,12 +94,14 @@ impl PayloadAttributes for CustomPayloadAttributes {
         &self,
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-    ) -> Result<(), AttributesValidationError> {
+    ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(chain_spec, version, self.into())?;
 
         // custom validation logic - ensure that the custom field is not zero
         if self.custom == 0 {
-            return Err(AttributesValidationError::invalid_params(CustomError::CustomFieldIsNotZero))
+            return Err(EngineObjectValidationError::invalid_params(
+                CustomError::CustomFieldIsNotZero,
+            ))
         }
 
         Ok(())
@@ -173,7 +175,7 @@ impl EngineTypes for CustomEngineTypes {
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, CustomPayloadAttributes>,
-    ) -> Result<(), AttributesValidationError> {
+    ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(chain_spec, version, payload_or_attrs)
     }
 }
