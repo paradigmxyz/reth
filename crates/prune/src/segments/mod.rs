@@ -166,10 +166,6 @@ impl PruneInput {
         Some(range)
     }
 
-    pub(crate) fn get_last_pruned_block(&self) -> Option<u64> {
-        self.previous_checkpoint?.block_number
-    }
-
     /// Returns the start of the next block range.
     ///
     /// 1. If checkpoint exists, use next block.
@@ -181,6 +177,10 @@ impl PruneInput {
             .map(|block_number| block_number + 1)
             // No checkpoint exists, prune from genesis
             .unwrap_or(0)
+    }
+
+    pub(crate) fn _get_last_pruned_block(&self) -> Option<u64> {
+        self.previous_checkpoint?.block_number
     }
 }
 

@@ -307,6 +307,30 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(self.tx.commit()?)
     }
 
+    /// Gets walker for given table.
+    pub fn with_walker<T: Table, F, R>(
+        &self,
+        range: RangeInclusive<<T as Table>::Key>,
+        f: F,
+    ) -> Result<R, DatabaseError>
+    where
+        F: FnOnce(RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>) -> Result<R, DatabaseError>,
+    {
+        self.with_cursor(|mut cursor| {
+            let walker = cursor.walk_range(range)?;
+
+            f(walker)
+        })
+    }
+
+    /// Gets walker for given table.
+    pub fn with_cursor<T: Table, F, R>(&self, f: F) -> Result<R, DatabaseError>
+    where
+        F: FnOnce(<TX as DbTxMut>::CursorMut<T>) -> Result<R, DatabaseError>,
+    {
+        f(self.tx.cursor_write::<T>()?)
+    }
+
     // TODO(joshie) TEMPORARY should be moved to trait providers
 
     /// Unwind or peek at last N blocks of state recreating the [`BundleStateWithReceipts`].
@@ -786,7 +810,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// Prune the table for the specified pre-sorted key iterator.
     ///
     /// Returns number of rows pruned.
-    pub fn prune_table_with_iterator<'a, T: Table>(
+    pub fn prune_table_with_iterator<T: Table>(
         &self,
         keys: impl IntoIterator<Item = T::Key>,
         mut limiter: PruneLimiter,
@@ -818,7 +842,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// Prune the table for the specified key range.
     ///
     /// Returns number of rows pruned.
-    pub fn prune_table_with_range<'a, T: Table>(
+    pub fn prune_table_with_range<T: Table>(
         &self,
         keys: impl RangeBounds<T::Key> + Clone + Debug,
         mut limiter: PruneLimiter,
@@ -827,50 +851,26 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ) -> Result<(usize, PruneProgress), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
-        loop {
-            // check for time out must be done in this scope since it's not done in
-            // `step_prune_range`
-            if limiter.is_limit_reached() {
-                break
-            }
+        let done = loop {
             match self.step_prune_range(
                 &mut walker,
                 &mut limiter,
                 &mut skip_filter,
                 &mut delete_callback,
             )? {
-                PruneStepResult::Finished | PruneStepResult::ReachedDeletedEntriesLimit => break,
-                PruneStepResult::MaybeMoreData => (),
+                PruneStepResult::Finished => break true,
+                PruneStepResult::ReachedDeletedEntriesLimit => break false,
+                PruneStepResult::MaybeMoreData => {
+                    // check for time out must be done in this scope since it's not done in
+                    // `step_prune_range`
+                    if limiter.is_limit_reached() {
+                        break false
+                    }
+                }
             }
-        }
-
-        let done = walker.next().is_none();
+        };
 
         Ok((limiter.deleted_entries_count(), PruneProgress::new(done, limiter.is_timed_out())))
-    }
-
-    /// Gets walker for given table.
-    pub fn with_walker<T: Table, F, R>(
-        &self,
-        range: RangeInclusive<<T as Table>::Key>,
-        f: F,
-    ) -> Result<R, DatabaseError>
-    where
-        F: FnOnce(RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>) -> Result<R, DatabaseError>,
-    {
-        self.with_cursor(|mut cursor| {
-            let walker = cursor.walk_range(range)?;
-
-            f(walker)
-        })
-    }
-
-    /// Gets walker for given table.
-    pub fn with_cursor<T: Table, F, R>(&self, f: F) -> Result<R, DatabaseError>
-    where
-        F: FnOnce(<TX as DbTxMut>::CursorMut<T>) -> Result<R, DatabaseError>,
-    {
-        f(self.tx.cursor_write::<T>()?)
     }
 
     /// Steps once with the given walker and prunes the entry at the destination.
@@ -885,15 +885,15 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
         delete_callback: &mut impl FnMut(TableRow<T>),
     ) -> Result<PruneStepResult, DatabaseError> {
-        if let Some(limit) = limiter.deleted_entries_limit() {
-            if limiter.deleted_entries_count() == limit {
-                return Ok(PruneStepResult::ReachedDeletedEntriesLimit)
-            }
-        }
-
         match walker.next() {
             Some(Err(err)) => Err(err),
             Some(Ok(row)) => {
+                if let Some(limit) = limiter.deleted_entries_limit() {
+                    if limiter.deleted_entries_count() == limit {
+                        return Ok(PruneStepResult::ReachedDeletedEntriesLimit)
+                    }
+                }
+
                 if !skip_filter(&row) {
                     walker.delete_current()?;
                     limiter.increment_deleted_entries_count();
@@ -2684,11 +2684,14 @@ impl PruneLimiter {
     /// Increments the last pruned block number by one.
     pub fn increment_last_pruned_block(&mut self) {
         let next_to_last_pruned_block = self.last_pruned_block;
-        self.last_pruned_block =
-            Some(if let Some(block) = next_to_last_pruned_block { block + 1 } else { 0 })
+        self.last_pruned_block = next_to_last_pruned_block.map(|block| block + 1).or(Some(0))
+    }
+
+    /// Sets the last pruned block to the given number.
+    pub fn set_last_pruned_block(&mut self, block: Option<u64>) {
+        self.last_pruned_block = block
     }
 }
-
 /// Builder for [`PruneLimiter`].
 #[derive(Debug, Default)]
 pub struct PruneLimiterBuilder {
@@ -2809,10 +2812,10 @@ pub enum PruneStepResult {
 }
 
 impl PruneStepResult {
-        /// Returns `true` if there are no more entries to prune in given range.
-        pub fn is_done(&self) -> bool {
-            matches!(self, Self::Finished)
-        }
+    /// Returns `true` if there are no more entries to prune in given range.
+    pub fn is_done(&self) -> bool {
+        matches!(self, Self::Finished)
+    }
 
     /// Returns `true` if range is exhausted, i.e. no more rows to prune.
     pub fn is_exhausted(&self) -> bool {

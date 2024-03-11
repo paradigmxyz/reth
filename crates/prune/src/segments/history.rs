@@ -8,6 +8,7 @@ use reth_db::{
 };
 use reth_interfaces::db::DatabaseError;
 use reth_provider::{DatabaseProviderRW, PruneLimiter};
+use tracing::trace;
 
 /// Prune history indices up to the provided block, inclusive.
 ///
@@ -66,23 +67,44 @@ where
     T: Table<Value = BlockNumberList>,
     T::Key: AsRef<ShardedKey<SK>>,
 {
+    trace!(target: "pruner::history", "pruning history");
+
+    let Some((key, blocks)) = cursor.next()? else {
+        trace!(target: "pruner::history",
+            "cursor is at end of search, nothing more to prune",
+        );
+
+        return Ok(PruneStepResult::Finished)
+    };
+
     let Some(to_block) = limiter.last_pruned_block() else {
+        trace!(target: "pruner::history",
+            "missing target block"
+        );
+
         return Ok(PruneStepResult::ReachedBlockLimit)
     };
 
     if let Some(limit) = limiter.deleted_entries_limit() {
         if limiter.deleted_entries_count() == limit {
+            trace!(target: "pruner::history",
+                "reached limit on deleted entries"
+            );
+
             return Ok(PruneStepResult::ReachedDeletedEntriesLimit)
         }
     }
-
-    let Some((key, blocks)) = cursor.next()? else { return Ok(PruneStepResult::Finished) };
 
     // If shard consists only of block numbers less than the target one, delete shard
     // completely.
     if key.as_ref().highest_block_number <= to_block {
         cursor.delete_current()?;
         limiter.increment_deleted_entries_count();
+
+        trace!(target: "pruner::history",
+            "deleted complete shard"
+        );
+
         if key.as_ref().highest_block_number == to_block {
             // Shard contains only block numbers up to the target one, so we can skip to
             // the last shard for this key. It is guaranteed that further shards for this
@@ -90,17 +112,23 @@ where
             cursor.seek_exact(last_key(&key))?;
         }
     } else {
+        trace!(target: "pruner::history",
+            to_block,
+            highest_block_shard=key.as_ref().highest_block_number,
+            "cannot prune complete shard"
+        );
+
         // Shard contains block numbers that are higher than the target one, so we need to
         // filter it. It is guaranteed that further shards for this sharded key will not
         // contain the target block number, as it's in this shard.
-        let new_blocks = blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
+        let old_blocks = blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
 
         // If there were blocks less than or equal to the target one
         // (so the shard has changed), update the shard.
-        if blocks.len() as usize != new_blocks.len() {
+        if blocks.len() as usize != old_blocks.len() {
             // If there are no more blocks in this shard, we need to remove it, as empty
             // shards are not allowed.
-            if new_blocks.is_empty() {
+            if old_blocks.is_empty() {
                 if key.as_ref().highest_block_number == u64::MAX {
                     let prev_row = cursor.prev()?;
                     match prev_row {
@@ -109,6 +137,11 @@ where
                         Some((prev_key, prev_value)) if key_matches(&prev_key, &key) => {
                             cursor.delete_current()?;
                             limiter.increment_deleted_entries_count();
+
+                            trace!(target: "pruner::history",
+                                "deleted shard, shard is last shard of sharded key and has predecessors"
+                            );
+
                             // Upsert will replace the last shard for this sharded key with
                             // the previous value.
                             cursor.upsert(key.clone(), prev_value)?;
@@ -124,6 +157,10 @@ where
                             // Delete shard.
                             cursor.delete_current()?;
                             limiter.increment_deleted_entries_count();
+
+                            trace!(target: "pruner::history",
+                                "deleted shard, shard is last and first shard of sharded key"
+                            );
                         }
                     }
                 }
@@ -132,11 +169,23 @@ where
                 else {
                     cursor.delete_current()?;
                     limiter.increment_deleted_entries_count();
+
+                    trace!(target: "pruner::history",
+                        "deleted shard"
+                    );
                 }
             } else {
-                cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(new_blocks))?;
+                cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(old_blocks))?;
+
+                trace!(target: "pruner::history",
+                    "no blocks to prune in shard"
+                );
             }
         }
+
+        trace!(target: "pruner::history",
+            "shard unchanged, nothing to prune"
+        )
     }
 
     // Jump to the last shard for this key, if current key isn't already the last
