@@ -61,11 +61,11 @@ impl DevSigner {
     pub(crate) fn random_signers(num: u32) -> Vec<Box<dyn EthSigner + 'static>> {
         let mut signers = Vec::new();
         for _ in 0..num {
-            let (pk, sk) = secp256k1::generate_keypair(&mut rand::thread_rng());
+            let (sk, pk) = secp256k1::generate_keypair(&mut rand::thread_rng());
 
-            let address = reth_primitives::public_key_to_address(sk);
+            let address = reth_primitives::public_key_to_address(pk);
             let addresses = vec![address];
-            let accounts = HashMap::from([(address, pk)]);
+            let accounts = HashMap::from([(address, sk)]);
             signers.push(Box::new(DevSigner { addresses, accounts }) as Box<dyn EthSigner>);
         }
         signers
