@@ -813,7 +813,7 @@ mod tests {
         assert_eq!(pubkey.to_vec(), expected_pubkey);
         assert!(enr.0.verify());
 
-        let mut encoded = BytesMut::new();
+        let mut encoded = Vec::new();
         enr.encode(&mut encoded);
         assert_eq!(&encoded[..], &valid_record[..]);
 
@@ -867,7 +867,7 @@ mod tests {
             EnrWrapper::new(builder.build(&key).unwrap())
         };
 
-        let mut encoded = BytesMut::new();
+        let mut encoded = Vec::new();
         enr.encode(&mut encoded);
         let mut encoded_bytes = &encoded[..];
         let decoded_enr = EnrWrapper::<SecretKey>::decode(&mut encoded_bytes).unwrap();
