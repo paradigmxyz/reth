@@ -22,7 +22,7 @@ pub enum AttributesValidationError {
     InvalidParams(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Thrown when validating a payload or attributes fails.
+/// Thrown when validating an execution payload OR payload attributes fails.
 #[derive(Error, Debug)]
 pub enum PayloadOrAttributesValidationError {
     /// Thrown if the pre-V3 `PayloadAttributes` or `ExecutionPayload` contains a parent beacon
