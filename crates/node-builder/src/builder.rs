@@ -701,9 +701,9 @@ where
         )
         .await?;
 
-        /// in dev mode we generate 20 random dev-signer accounts
+        // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
-            rpc_registry.eth_api().with_dev_accounts().await;
+            rpc_registry.eth_api().with_dev_accounts();
         }
 
         // Run consensus engine to completion

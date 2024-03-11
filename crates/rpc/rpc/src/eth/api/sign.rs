@@ -13,13 +13,12 @@ use serde_json::Value;
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
     pub(crate) async fn sign(&self, account: Address, message: Bytes) -> EthResult<Bytes> {
-        Ok(self.find_signer(&account).await?.sign(account, &message).await?.to_hex_bytes())
+        Ok(self.find_signer(&account)?.sign(account, &message).await?.to_hex_bytes())
     }
 
-    pub(crate) async fn sign_typed_data(&self, data: Value, account: Address) -> EthResult<Bytes> {
+    pub(crate) fn sign_typed_data(&self, data: Value, account: Address) -> EthResult<Bytes> {
         Ok(self
-            .find_signer(&account)
-            .await?
+            .find_signer(&account)?
             .sign_typed_data(
                 account,
                 &serde_json::from_value::<TypedData>(data)
@@ -28,14 +27,13 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
             .to_hex_bytes())
     }
 
-    pub(crate) async fn find_signer(
+    pub(crate) fn find_signer(
         &self,
         account: &Address,
     ) -> Result<Box<(dyn EthSigner + 'static)>, SignError> {
         self.inner
             .signers
             .read()
-            .await
             .iter()
             .find(|signer| signer.is_signer_for(account))
             .map(|signer| dyn_clone::clone_box(&**signer))
@@ -44,8 +42,8 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
 
     /// Generates 20 random developer accounts.
     /// Used in DEV mode.
-    pub async fn with_dev_accounts(&mut self) {
-        let mut signers = self.inner.signers.write().await;
+    pub fn with_dev_accounts(&mut self) {
+        let mut signers = self.inner.signers.write();
         *signers = DevSigner::random_signers(20);
     }
 }

@@ -36,6 +36,10 @@ use std::{
 };
 use tokio::sync::{oneshot, Mutex};
 
+mod block;
+mod call;
+pub(crate) mod fee_history;
+
 mod fees;
 #[cfg(feature = "optimism")]
 mod optimism;
