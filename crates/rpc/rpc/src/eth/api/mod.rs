@@ -34,7 +34,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex};
 
 mod fees;
 #[cfg(feature = "optimism")]
@@ -62,7 +62,7 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
     fn chain_info(&self) -> RethResult<ChainInfo>;
 
     /// Returns a list of addresses owned by provider.
-    async fn accounts(&self) -> Vec<Address>;
+    fn accounts(&self) -> Vec<Address>;
 
     /// Returns `true` if the network is undergoing sync.
     fn is_syncing(&self) -> bool;
@@ -141,7 +141,7 @@ where
             provider,
             pool,
             network,
-            signers: RwLock::new(Default::default()),
+            signers: parking_lot::RwLock::new(Default::default()),
             eth_cache,
             gas_oracle,
             gas_cap,
@@ -400,8 +400,8 @@ where
         Ok(self.provider().chain_info()?)
     }
 
-    async fn accounts(&self) -> Vec<Address> {
-        self.inner.signers.read().await.iter().flat_map(|s| s.accounts()).collect()
+    fn accounts(&self) -> Vec<Address> {
+        self.inner.signers.read().iter().flat_map(|s| s.accounts()).collect()
     }
 
     fn is_syncing(&self) -> bool {
@@ -466,7 +466,7 @@ struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// An interface to interact with the network
     network: Network,
     /// All configured Signers
-    signers: RwLock<Vec<Box<dyn EthSigner>>>,
+    signers: parking_lot::RwLock<Vec<Box<dyn EthSigner>>>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache,
     /// The async gas oracle frontend for gas price suggestions

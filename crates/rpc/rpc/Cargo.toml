@@ -59,6 +59,7 @@ tokio = { workspace = true, features = ["sync"] }
 tower = "0.4"
 tokio-stream = { workspace = true, features = ["sync"] }
 pin-project.workspace = true
+parking_lot.workspace = true
 
 # metrics
 reth-metrics.workspace = true

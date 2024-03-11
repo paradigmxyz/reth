@@ -56,7 +56,7 @@ impl DevSigner {
         signers.pop().expect("expect to generate at leas one signer")
     }
 
-    /// Generates provided number of random dev signers 
+    /// Generates provided number of random dev signers
     /// which satisfy [EthSigner] trait
     pub(crate) fn random_signers(num: u32) -> Vec<Box<dyn EthSigner + 'static>> {
         let mut signers = Vec::new();
