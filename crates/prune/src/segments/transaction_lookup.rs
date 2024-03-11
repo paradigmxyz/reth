@@ -109,7 +109,7 @@ mod tests {
         FoldWhile::{Continue, Done},
         Itertools,
     };
-    use reth_db::{DatabaseEnv, tables};
+    use reth_db::{tables, DatabaseEnv};
     use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, TxNumber, B256,
@@ -147,10 +147,11 @@ mod tests {
             let prune_mode = PruneMode::Before(to_block);
             let segment = TransactionLookup::new(prune_mode);
             let job_limiter = PruneLimiterBuilder::default().deleted_entries_limit(10).build();
-            let limiter = <TransactionLookup as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
-                &segment,
-                &job_limiter,
-            );
+            let limiter =
+                <TransactionLookup as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
+                    &segment,
+                    &job_limiter,
+                );
             let input = PruneInput {
                 previous_checkpoint: db
                     .factory

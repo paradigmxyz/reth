@@ -92,7 +92,7 @@ mod tests {
         FoldWhile::{Continue, Done},
         Itertools,
     };
-    use reth_db::{DatabaseEnv, tables};
+    use reth_db::{tables, DatabaseEnv};
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_receipt},
