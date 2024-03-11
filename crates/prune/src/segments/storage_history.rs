@@ -13,7 +13,7 @@ use reth_db::{
 };
 use reth_primitives::{PruneMode, PruneSegment};
 use reth_provider::{DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder};
-use tracing::{instrument, trace};
+use tracing::{instrument, trace, debug};
 
 #[derive(Debug)]
 pub struct StorageHistory {
@@ -51,6 +51,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         let range_end = *range.end();
 
         let mut last_changeset_pruned_block = None;
+        debug!("limiter {:?}", input.limiter);
         let (pruned_changesets, progress) = provider
             .prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
@@ -111,7 +112,7 @@ mod tests {
     };
 
     use assert_matches::assert_matches;
-    use reth_db::{models::storage_sharded_key::StorageShardedKey, tables, BlockNumberList};
+    use reth_db::{models::storage_sharded_key::StorageShardedKey, tables, BlockNumberList, DatabaseEnv};
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_changeset_range, random_eoa_accounts},
@@ -203,7 +204,11 @@ mod tests {
 
             let prune_mode = PruneMode::Before(to_block);
             let segment = StorageHistory::new(prune_mode);
-            let limiter = PruneLimiterBuilder::default().deleted_entries_limit(1000).build();
+            let job_limiter = PruneLimiterBuilder::default().deleted_entries_limit(1000).build();
+            let limiter = <StorageHistory as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
+                &segment,
+                &job_limiter,
+            );
             let input = test_rig.get_input(to_block, limiter);
 
             let provider = test_rig.db.factory.provider_rw().unwrap();

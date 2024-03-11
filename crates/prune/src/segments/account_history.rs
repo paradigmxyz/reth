@@ -101,7 +101,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
 mod tests {
     use crate::segments::{AccountHistory, PruneInput, PruneOutput, Segment};
     use assert_matches::assert_matches;
-    use reth_db::{tables, BlockNumberList};
+    use reth_db::{tables, BlockNumberList, DatabaseEnv};
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_changeset_range, random_eoa_accounts},
@@ -152,6 +152,12 @@ mod tests {
         let test_prune =
             |to_block: BlockNumber, run: usize, expected_result: (PruneProgress, usize)| {
                 let prune_mode = PruneMode::Before(to_block);
+                let segment = AccountHistory::new(prune_mode);
+                let job_limiter = PruneLimiterBuilder::default().deleted_entries_limit(2000).build();
+                let limiter = <AccountHistory as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
+                    &segment,
+                    &job_limiter,
+                );
                 let input = PruneInput {
                     previous_checkpoint: db
                         .factory
@@ -160,9 +166,8 @@ mod tests {
                         .get_prune_checkpoint(PruneSegment::AccountHistory)
                         .unwrap(),
                     to_block,
-                    limiter: PruneLimiterBuilder::default().deleted_entries_limit(2000).build(),
+                    limiter,
                 };
-                let segment = AccountHistory::new(prune_mode);
 
                 let provider = db.factory.provider_rw().unwrap();
                 let result = segment.prune(&provider, input.clone()).unwrap();

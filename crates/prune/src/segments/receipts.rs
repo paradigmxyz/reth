@@ -92,7 +92,7 @@ mod tests {
         FoldWhile::{Continue, Done},
         Itertools,
     };
-    use reth_db::tables;
+    use reth_db::{DatabaseEnv, tables};
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_receipt},
@@ -132,6 +132,12 @@ mod tests {
 
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
+            let segment = Receipts::new(prune_mode);
+            let job_limiter = PruneLimiterBuilder::default().deleted_entries_limit(10).build();
+            let limiter = <Receipts as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
+                &segment,
+                &job_limiter,
+            );
             let input = PruneInput {
                 previous_checkpoint: db
                     .factory
@@ -140,9 +146,8 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Receipts)
                     .unwrap(),
                 to_block,
-                limiter: PruneLimiterBuilder::default().deleted_entries_limit(10).build(),
+                limiter,
             };
-            let segment = Receipts::new(prune_mode);
 
             let next_tx_number_to_prune = db
                 .factory
