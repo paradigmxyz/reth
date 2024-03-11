@@ -56,7 +56,7 @@ use std::{
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB> = DatabaseProvider<<DB as Database>::TX>;
@@ -542,10 +542,16 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         // NOTE: Transactions are always guaranteed to be in the database whereas
         // senders might be pruned.
         if senders.len() != transactions.len() {
-            senders.reserve(transactions.len() - senders.len());
+            if senders.len() > transactions.len() {
+                error!(target: "providers::db", senders=%senders.len(), transactions=%transactions.len(),
+                    first_tx=%first_transaction, last_tx=%last_transaction,
+                    "unexpected senders and transactions mismatch");
+            }
+            let missing = transactions.len().saturating_sub(senders.len());
+            senders.reserve(missing);
             // Find all missing senders, their corresponding tx numbers and indexes to the original
             // `senders` vector at which the recovered senders will be inserted.
-            let mut missing_senders = Vec::with_capacity(transactions.len() - senders.len());
+            let mut missing_senders = Vec::with_capacity(missing);
             {
                 let mut senders = senders.iter().peekable();
 
