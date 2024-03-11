@@ -305,7 +305,7 @@ impl PeersManager {
             }
         }
 
-        self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + self.ban_duration);
+        self.ban_list.ban_peer_until(peer_id, until);
         self.queued_actions.push_back(PeerAction::BanPeer { peer_id });
     }
 
