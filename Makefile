@@ -183,15 +183,15 @@ ef-tests: $(EF_TESTS_DIR) ## Runs Ethereum Foundation tests.
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --driver docker-container --name cross-builder`
-.PHONY: docker-build-latest
-docker-build-push: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
+.PHONY: docker-build-push
+docker-build-push: ## Build and push a cross-arch Docker image tagged with the latest git tag.
 	$(call docker_build_push,$(GIT_TAG),$(GIT_TAG))
 
 # Note: This requires a buildx builder with emulation support. For example:
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --driver docker-container --name cross-builder`
-.PHONY: docker-build-latest
+.PHONY: docker-build-push-latest
 docker-build-push-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
 	$(call docker_build_push,$(GIT_TAG),latest)
 
@@ -199,7 +199,7 @@ docker-build-push-latest: ## Build and push a cross-arch Docker image tagged wit
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --name cross-builder`
-.PHONY: docker-build-nightly
+.PHONY: docker-build-push-nightly
 docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
 	$(call docker_build_push,$(GIT_TAG)-nightly,latest-nightly)
 
