@@ -1271,10 +1271,9 @@ where
     ) -> EthResult<OptimismTxMeta> {
         let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
 
-        let mut envelope_buf = bytes::BytesMut::new();
-        tx.encode_enveloped(&mut envelope_buf);
-
         let (l1_fee, l1_data_gas) = if !tx.is_deposit() {
+            let envelope_buf = tx.envelope_encoded();
+
             let inner_l1_fee = l1_block_info
                 .l1_tx_data_fee(
                     &self.inner.provider.chain_spec(),

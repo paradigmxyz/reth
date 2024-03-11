@@ -3,7 +3,7 @@ use crate::{
     logs_bloom, Bloom, Log, PruneSegmentError, TxType, B256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::strategy::Strategy;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact, CompactZstd};
@@ -485,7 +485,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
             return
         }
 
-        let mut payload = BytesMut::new();
+        let mut payload = Vec::new();
         self.encode_fields(&mut payload);
 
         if with_header {
@@ -630,9 +630,9 @@ mod tests {
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
         assert_eq!(receipt, expected);
 
-        let mut buf = BytesMut::default();
+        let mut buf = Vec::new();
         receipt.encode_inner(&mut buf, false);
-        assert_eq!(buf.freeze(), &data[..]);
+        assert_eq!(buf, &data[..]);
     }
 
     #[cfg(feature = "optimism")]
@@ -656,9 +656,9 @@ mod tests {
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
         assert_eq!(receipt, expected);
 
-        let mut buf = BytesMut::default();
+        let mut buf = Vec::new();
         expected.encode_inner(&mut buf, false);
-        assert_eq!(buf.freeze(), &data[..]);
+        assert_eq!(buf, &data[..]);
     }
 
     #[test]
