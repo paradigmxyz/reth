@@ -858,7 +858,7 @@ where
             None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
         };
 
-        let signed_tx = self.sign_request(&from, transaction).await?;
+        let signed_tx = self.sign_request(&from, transaction)?;
 
         let recovered =
             signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
@@ -1335,7 +1335,7 @@ where
     Network: NetworkInfo + Send + Sync + 'static,
     EvmConfig: ConfigureEvmEnv + 'static,
 {
-    pub(crate) async fn sign_request(
+    pub(crate) fn sign_request(
         &self,
         from: &Address,
         request: TypedTransactionRequest,
