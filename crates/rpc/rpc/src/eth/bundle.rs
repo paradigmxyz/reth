@@ -21,7 +21,7 @@ use revm::{
     db::CacheDB,
     primitives::{ResultAndState, TxEnv},
 };
-use revm_primitives::{EnvWithHandlerCfg, MAX_BLOB_NUMBER_PER_BLOCK};
+use revm_primitives::{EnvWithHandlerCfg, MAX_BLOB_GAS_PER_BLOCK};
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
@@ -70,11 +70,19 @@ where
         // transactions.
         if transactions
             .iter()
-            .filter(|(tx, _)| matches!(tx, PooledTransactionsElement::BlobTransaction(..)))
-            .count() >
-            MAX_BLOB_NUMBER_PER_BLOCK as usize
+            .filter_map(|(tx, _)| {
+                if let PooledTransactionsElement::BlobTransaction(tx) = tx {
+                    Some(tx.transaction.blob_gas())
+                } else {
+                    None
+                }
+            })
+            .sum::<u64>() >
+            MAX_BLOB_GAS_PER_BLOCK
         {
-            return Err(EthApiError::InvalidParams(EthBundleError::TooManyBlobTxs.to_string()));
+            return Err(EthApiError::InvalidParams(
+                EthBundleError::Eip4844BlobGasExceeded.to_string(),
+            ));
         }
 
         let block_id: reth_rpc_types::BlockId = state_block_number.into();
@@ -243,8 +251,8 @@ pub enum EthBundleError {
     /// Thrown if the bundle does not contain a block number, or block number is 0.
     #[error("bundle missing blockNumber")]
     BundleMissingBlockNumber,
-    /// Thrown when there are more than [MAX_BLOB_NUMBER_PER_BLOCK] blob transactions in the
-    /// bundle.
-    #[error("too many blob transactions")]
-    TooManyBlobTxs,
+    /// Thrown when the blob gas usage of the blob transactions in a bundle exceed
+    /// [MAX_BLOB_GAS_PER_BLOCK].
+    #[error("blob gas usage exceeds the limit of {MAX_BLOB_GAS_PER_BLOCK} gas per block.")]
+    Eip4844BlobGasExceeded,
 }
