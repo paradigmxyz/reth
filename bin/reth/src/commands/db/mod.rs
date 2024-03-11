@@ -96,15 +96,13 @@ impl Command {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
+        let db_log_level = DatabaseArguments::default().log_level(self.db.log_level);
         let static_files_path = data_dir.static_files_path();
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
-                let db = open_db_read_only(
-                    &db_path,
-                    DatabaseArguments::default().log_level(self.db.log_level),
-                )?;
+                let db = open_db_read_only(&db_path, db_log_level)?;
                 let provider_factory =
                     ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
 
@@ -112,10 +110,7 @@ impl Command {
                 command.execute(data_dir, &tool)?;
             }
             Subcommands::List(command) => {
-                let db = open_db_read_only(
-                    &db_path,
-                    DatabaseArguments::default().log_level(self.db.log_level),
-                )?;
+                let db = open_db_read_only(&db_path, db_log_level)?;
                 let provider_factory =
                     ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
 
@@ -123,10 +118,7 @@ impl Command {
                 command.execute(&tool)?;
             }
             Subcommands::Diff(command) => {
-                let db = open_db_read_only(
-                    &db_path,
-                    DatabaseArguments::default().log_level(self.db.log_level),
-                )?;
+                let db = open_db_read_only(&db_path, db_log_level)?;
                 let provider_factory =
                     ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
 
@@ -134,10 +126,7 @@ impl Command {
                 command.execute(&tool)?;
             }
             Subcommands::Get(command) => {
-                let db = open_db_read_only(
-                    &db_path,
-                    DatabaseArguments::default().log_level(self.db.log_level),
-                )?;
+                let db = open_db_read_only(&db_path, db_log_level)?;
                 let provider_factory =
                     ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
 
@@ -160,8 +149,7 @@ impl Command {
                     }
                 }
 
-                let db =
-                    open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
+                let db = open_db(&db_path, db_log_level)?;
                 let provider_factory =
                     ProviderFactory::new(db, self.chain.clone(), static_files_path.clone())?;
 
@@ -169,8 +157,7 @@ impl Command {
                 tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {
-                let db =
-                    open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
+                let db = open_db(&db_path, db_log_level)?;
                 let provider_factory =
                     ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
 
