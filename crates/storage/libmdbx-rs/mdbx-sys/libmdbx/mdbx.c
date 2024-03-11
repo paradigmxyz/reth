@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define xMDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY cd9d526652f8327384fdca9e5942a61289a5580c33de34f8fd0773fc2835ff49_v0_12_9_50_g4f770999
+#define MDBX_BUILD_SOURCERY cd9d526652f8327384fdca9e5942a61289a5580c33de34f8fd0773fc2835ff49_v0_12_9_50_g4f770999_dirty
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -9626,6 +9626,14 @@ __cold static void meta_troika_dump(const MDBX_env *env,
 
 /*----------------------------------------------------------------------------*/
 
+static __inline MDBX_CONST_FUNCTION MDBX_lockinfo *
+lckless_stub(const MDBX_env *env) {
+  uintptr_t stub = (uintptr_t)&env->x_lckless_stub;
+  /* align to avoid false-positive alarm from UndefinedBehaviorSanitizer */
+  stub = (stub + MDBX_CACHELINE_SIZE - 1) & ~(MDBX_CACHELINE_SIZE - 1);
+  return (MDBX_lockinfo *)stub;
+}
+
 /* Find oldest txnid still referenced. */
 static txnid_t find_oldest_reader(MDBX_env *const env, const txnid_t steady) {
   const uint32_t nothing_changed = MDBX_STRING_TETRAD("None");
@@ -9633,7 +9641,7 @@ static txnid_t find_oldest_reader(MDBX_env *const env, const txnid_t steady) {
 
   MDBX_lockinfo *const lck = env->me_lck_mmap.lck;
   if (unlikely(lck == NULL /* exclusive without-lck mode */)) {
-    eASSERT(env, env->me_lck == (void *)&env->x_lckless_stub);
+    eASSERT(env, env->me_lck == lckless_stub(env));
     env->me_lck->mti_readers_refresh_flag.weak = nothing_changed;
     return env->me_lck->mti_oldest_reader.weak = steady;
   }
@@ -12931,8 +12939,7 @@ static int txn_renew(MDBX_txn *txn, const unsigned flags) {
                        mo_AcquireRelease);
       } else {
         /* exclusive mode without lck */
-        eASSERT(env, !env->me_lck_mmap.lck &&
-                         env->me_lck == (void *)&env->x_lckless_stub);
+        eASSERT(env, !env->me_lck_mmap.lck && env->me_lck == lckless_stub(env));
       }
       jitter4testing(true);
 
@@ -17151,14 +17158,6 @@ __cold static void setup_pagesize(MDBX_env *env, const size_t pagesize) {
     env->me_options.dp_initial = env->me_options.dp_limit;
 }
 
-static __inline MDBX_CONST_FUNCTION MDBX_lockinfo *
-lckless_stub(const MDBX_env *env) {
-  uintptr_t stub = (uintptr_t)&env->x_lckless_stub;
-  /* align to avoid false-positive alarm from UndefinedBehaviorSanitizer */
-  stub = (stub + MDBX_CACHELINE_SIZE - 1) & ~(MDBX_CACHELINE_SIZE - 1);
-  return (MDBX_lockinfo *)stub;
-}
-
 __cold int mdbx_env_create(MDBX_env **penv) {
   if (unlikely(!penv))
     return MDBX_EINVAL;
@@ -19267,6 +19266,7 @@ __cold int mdbx_env_openW(MDBX_env *env, const wchar_t *pathname,
   if (rc == MDBX_RESULT_TRUE) {
     env->me_incore = true;
     NOTICE("%s", "in-core database");
+    rc = MDBX_SUCCESS;
   } else if (unlikely(rc != MDBX_SUCCESS)) {
     ERROR("check_fs_incore(), err %d", rc);
     goto bailout;
@@ -31656,8 +31656,8 @@ MDBX_INTERNAL_FUNC int osal_check_fs_rdonly(mdbx_filehandle_t handle,
 #else
   struct statvfs info;
   if (err != MDBX_ENOFILE) {
-    if (statvfs(pathname, &info) == 0 && (info.f_flag & ST_RDONLY) == 0)
-      return err;
+    if (statvfs(pathname, &info) == 0)
+      return (info.f_flag & ST_RDONLY) ? MDBX_SUCCESS : err;
     if (errno != MDBX_ENOFILE)
       return errno;
   }
