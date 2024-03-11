@@ -170,14 +170,9 @@ where
             return Some(Err(err.into()))
         }
 
-        if ![
-            next_up_last_pruned_block,
-            last_pruned_block_headers,
-            last_pruned_block_td,
-            last_pruned_block_canonical,
-        ]
-        .iter()
-        .all_equal()
+        if ![last_pruned_block_headers, last_pruned_block_td, last_pruned_block_canonical]
+            .iter()
+            .all_equal()
         {
             return Some(Err(PrunerError::InconsistentData(
                 "All headers-related tables should be pruned up to the same height",
@@ -201,7 +196,6 @@ mod tests {
     };
     use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
     use reth_stages::test_utils::TestStageDB;
-    use reth_tracing;
     use tracing::trace;
 
     use crate::segments::{Headers, PruneInput, PruneOutput, Segment};
