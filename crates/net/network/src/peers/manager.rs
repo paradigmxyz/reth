@@ -298,7 +298,15 @@ impl PeersManager {
 
     /// Bans the peer temporarily with the configured ban timeout
     fn ban_peer(&mut self, peer_id: PeerId) {
-        self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + self.ban_duration);
+        let mut ban_duration = self.ban_duration;
+        if let Some(peer) = self.peers.get(&peer_id) {
+            if peer.is_trusted() {
+                // For misbehaving trusted peers, we provide a bit more leeway when penalizing them.
+                ban_duration = self.backoff_durations.medium;
+            }
+        }
+
+        self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + ban_duration);
         self.queued_actions.push_back(PeerAction::BanPeer { peer_id });
     }
 
