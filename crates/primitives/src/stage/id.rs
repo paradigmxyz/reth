@@ -56,6 +56,7 @@ impl StageId {
     /// Return stage id formatted as string.
     pub fn as_str(&self) -> &str {
         match self {
+            #[allow(deprecated)]
             StageId::StaticFile => "StaticFile",
             StageId::Headers => "Headers",
             StageId::Bodies => "Bodies",
