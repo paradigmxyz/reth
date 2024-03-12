@@ -93,3 +93,15 @@ impl MaintainPoolMetrics {
         self.drift_count.increment(1);
     }
 }
+
+/// All Transactions metrics
+#[derive(Metrics)]
+#[metrics(scope = "transaction_pool")]
+pub struct AllTransactionsMetrics {
+    /// Number of all transactions by hash in the pool
+    pub(crate) all_transactions_by_hash: Gauge,
+    /// Number of all transactions by id in the pool
+    pub(crate) all_transactions_by_id: Gauge,
+    /// Number of all transactions by all senders in the pool
+    pub(crate) all_transactions_by_all_senders: Gauge,
+}
