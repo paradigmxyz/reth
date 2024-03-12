@@ -1,6 +1,6 @@
 use reth_node_api::{
-    engine::validate_parent_beacon_block_root_presence, AttributesValidationError,
-    EngineApiMessageVersion, EngineTypes, MessageValidationKind, PayloadOrAttributes,
+    engine::validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
+    EngineObjectValidationError, EngineTypes, MessageValidationKind, PayloadOrAttributes,
     VersionSpecificValidationError,
 };
 use reth_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
@@ -29,7 +29,7 @@ impl EngineTypes for OptimismEngineTypes {
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, Self::PayloadAttributes>,
-    ) -> Result<(), AttributesValidationError> {
+    ) -> Result<(), EngineObjectValidationError> {
         validate_withdrawals_presence(
             chain_spec,
             version,
@@ -60,7 +60,7 @@ pub fn validate_withdrawals_presence(
     message_validation_kind: MessageValidationKind,
     timestamp: u64,
     has_withdrawals: bool,
-) -> Result<(), AttributesValidationError> {
+) -> Result<(), EngineObjectValidationError> {
     let is_shanghai = chain_spec.fork(Hardfork::Canyon).active_at_timestamp(timestamp);
 
     match version {
