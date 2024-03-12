@@ -15,6 +15,7 @@ use tracing::trace;
 /// Returns total number of processed (walked) and deleted entities.
 pub(crate) fn prune_history_indices<DB, T, SK>(
     provider: &DatabaseProviderRW<DB>,
+    to_block: u64,
     mut limiter: PruneLimiter,
     key_matches: impl Fn(&T::Key, &T::Key) -> bool,
     last_key: impl Fn(&T::Key) -> T::Key,
@@ -40,10 +41,14 @@ where
             break
         }
 
-        match step_prune_indices::<DB, T, SK>(&mut cursor, &mut limiter, &key_matches, &last_key)? {
-            PruneStepResult::Finished |
-            PruneStepResult::ReachedDeletedEntriesLimit |
-            PruneStepResult::ReachedBlockLimit => break,
+        match step_prune_indices::<DB, T, SK>(
+            &mut cursor,
+            to_block,
+            &mut limiter,
+            &key_matches,
+            &last_key,
+        )? {
+            PruneStepResult::Finished | PruneStepResult::ReachedDeletedEntriesLimit => break,
             PruneStepResult::MaybeMoreData => processed += 1,
         }
     }
@@ -58,6 +63,7 @@ where
 /// to the same height before timing out.
 pub(crate) fn step_prune_indices<DB, T, SK>(
     cursor: &mut <<DB as Database>::TXMut as DbTxMut>::CursorMut<T>,
+    to_block: u64,
     limiter: &mut PruneLimiter,
     key_matches: &impl Fn(&T::Key, &T::Key) -> bool,
     last_key: &impl Fn(&T::Key) -> T::Key,
@@ -77,13 +83,7 @@ where
         return Ok(PruneStepResult::Finished)
     };
 
-    let Some(to_block) = limiter.last_pruned_block() else {
-        trace!(target: "pruner::history",
-            "missing target block"
-        );
-
-        return Ok(PruneStepResult::ReachedBlockLimit)
-    };
+    trace!(target: "pruner::history", blocks_len=blocks.len(), "current shard");
 
     if let Some(limit) = limiter.deleted_entries_limit() {
         if limiter.deleted_entries_count() == limit {
@@ -112,21 +112,24 @@ where
             cursor.seek_exact(last_key(&key))?;
         }
     } else {
-        trace!(target: "pruner::history",
-            to_block,
-            highest_block_shard=key.as_ref().highest_block_number,
-            "cannot prune complete shard"
-        );
-
         // Shard contains block numbers that are higher than the target one, so we need to
         // filter it. It is guaranteed that further shards for this sharded key will not
         // contain the target block number, as it's in this shard.
-        let higher_blocks = blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
+        let higher_blocks =
+            blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
+
+        trace!(target: "pruner::history",
+            to_block,
+            highest_block_shard=key.as_ref().highest_block_number,
+            higher_blocks_len=higher_blocks.len(),
+            blocks_len=blocks.len(),
+            "cannot prune complete shard"
+        );
 
         // If there were blocks less than or equal to the target one
         // (so the shard has changed), update the shard.
         if blocks.len() as usize != higher_blocks.len() {
-            // If there will be no more shards in the block after pruning blocks below target 
+            // If there will be no more shards in the block after pruning blocks below target
             // block, we need to remove it, as empty shards are not allowed.
             if higher_blocks.is_empty() {
                 if key.as_ref().highest_block_number == u64::MAX {
@@ -176,16 +179,17 @@ where
                 }
             } else {
                 cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(higher_blocks))?;
+                limiter.increment_deleted_entries_count();
 
                 trace!(target: "pruner::history",
-                    "no blocks to prune in shard"
+                    "partially pruned shard"
                 );
             }
+        } else {
+            trace!(target: "pruner::history",
+                "shard unchanged, nothing to prune"
+            )
         }
-
-        trace!(target: "pruner::history",
-            "shard unchanged, nothing to prune"
-        )
     }
 
     // Jump to the last shard for this key, if current key isn't already the last
@@ -205,8 +209,6 @@ pub(crate) enum PruneStepResult {
     /// Limiter has interrupted search because the maximum number of entries for one prune job have
     /// been deleted.
     ReachedDeletedEntriesLimit,
-    /// Limiter has interrupted search because the max block height was reached.
-    ReachedBlockLimit,
     /// Data was pruned at current destination.
     MaybeMoreData,
 }

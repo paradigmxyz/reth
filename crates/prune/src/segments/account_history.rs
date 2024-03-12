@@ -79,6 +79,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
 
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountsHistory, _>(
             provider,
+            last_changeset_pruned_block,
             input.limiter,
             |a, b| a.key == b.key,
             |key| ShardedKey::last(key.key),

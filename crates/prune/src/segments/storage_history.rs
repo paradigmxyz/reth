@@ -73,11 +73,6 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         let progress = PruneProgress::new(done, limiter.is_timed_out());
         let pruned = limiter.deleted_entries_count();
 
-        // If there's more storage storage changesets to prune, set the checkpoint block number
-        // to previous, so we could finish pruning its storage changesets on the next run.
-        let last_pruned_block = last_pruned_block
-            .and_then(|block| block.checked_sub(if progress.is_done() { 0 } else { 1 }));
-
         Ok(PruneOutput {
             progress,
             pruned,
@@ -145,8 +140,8 @@ where
         let mut last_pruned_block_changesets = None;
         // todo: guarantee skip filter and delete callback are same for all header table types
 
-        match provider.with_walker::<tables::StorageChangeSets, _, _>(
-            block_step,
+        let to_block = match provider.with_walker::<tables::StorageChangeSets, _, _>(
+            block_step.clone(),
             |ref mut walker| {
                 provider.step_prune_range(walker, limiter, &mut |_| false, &mut |row| {
                     last_pruned_block_changesets = Some(row.0.block_number())
@@ -154,15 +149,18 @@ where
             },
         ) {
             Err(err) => return Some(Err(err.into())),
-            Ok(res) if !res.is_done() => {
-                _ = limiter.last_pruned_block().map(|block| block.saturating_sub(1))
+            Ok(res) => if res.is_done() {
+                last_pruned_block_changesets
+            } else {
+                last_pruned_block_changesets.map(|block| block.saturating_sub(1))
             }
-            _ => (),
-        }
+            .unwrap_or(block_step.end().block_number()),
+        };
 
         if let Err(err) = provider.with_cursor::<tables::StoragesHistory, _, _>(|ref mut cursor| {
             step_prune_indices::<DB, _, _>(
                 cursor,
+                to_block,
                 limiter,
                 &|a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
                 &|key| StorageShardedKey::last(key.address, key.sharded_key.key),
@@ -186,7 +184,6 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use assert_matches::assert_matches;
     use reth_db::{models::storage_sharded_key::StorageShardedKey, tables, DatabaseEnv};
     use reth_interfaces::test_utils::{
         generators,
@@ -200,13 +197,17 @@ mod tests {
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use tracing::trace;
 
-    use crate::segments::{PruneInput, PruneOutput, Segment, StorageHistory};
+    use crate::segments::{PruneInput, Segment, StorageHistory};
 
     #[derive(Default)]
     struct TestRig {
         db: TestStageDB,
-        _original_shards: Vec<(StorageShardedKey, IntegerList)>,
+        original_shards: Vec<(StorageShardedKey, IntegerList)>,
         changesets: Vec<Vec<(Address, Account, Vec<StorageEntry>)>>,
+        pruned_changesets_run_1: usize,
+        pruned_changesets_run_2: usize,
+        pruned_shards_run_1: usize,
+        pruned_shards_run_2: usize,
     }
 
     impl TestRig {
@@ -244,9 +245,9 @@ mod tests {
                 changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
             );
 
-            let _original_shards = db.table::<tables::StoragesHistory>().unwrap();
+            let original_shards = db.table::<tables::StoragesHistory>().unwrap();
 
-            Self { db, _original_shards, changesets }
+            Self { db, original_shards, changesets, ..Default::default() }
         }
 
         fn get_input(&self, to_block: BlockNumber, limiter: PruneLimiter) -> PruneInput {
@@ -262,151 +263,167 @@ mod tests {
                 limiter,
             }
         }
+
+        fn pruned_changesets(&mut self, run: usize) -> usize {
+            // change sets
+            let changesets = self.db.table::<tables::StorageChangeSets>().unwrap();
+            let pruned_changesets = self.changesets.len() - changesets.len();
+
+            if run == 1 {
+                self.pruned_changesets_run_1 = pruned_changesets;
+
+                self.pruned_changesets_run_1
+            } else if run == 2 {
+                self.pruned_changesets_run_2 = pruned_changesets - self.pruned_changesets_run_1;
+
+                self.pruned_changesets_run_2
+            } else if run == 3 {
+                pruned_changesets - self.pruned_changesets_run_1 - self.pruned_changesets_run_2
+            } else {
+                unreachable!()
+            }
+        }
+
+        fn pruned_shards(&mut self, run: usize) -> usize {
+            // shards
+            let shards = self.db.table::<tables::StoragesHistory>().unwrap();
+
+            let completely_pruned_shards = self.original_shards.len() - shards.len();
+            // branch not covered in test
+            assert_eq!(0, completely_pruned_shards);
+
+            let partially_pruned_shards = self.partially_pruned_shards();
+
+            if run == 1 {
+                self.pruned_shards_run_1 = partially_pruned_shards;
+
+                self.pruned_shards_run_1
+            } else if run == 2 {
+                self.pruned_shards_run_2 = partially_pruned_shards - self.pruned_shards_run_1;
+
+                self.pruned_shards_run_2
+            } else if run == 3 {
+                partially_pruned_shards - self.pruned_shards_run_1 - self.pruned_shards_run_2
+            } else {
+                unreachable!()
+            }
+        }
+
+        fn partially_pruned_shards(&self) -> usize {
+            let mut partially_pruned_shards = 0;
+
+            for (pruned_shard, original_shard) in self
+                .db
+                .table::<tables::StoragesHistory>()
+                .unwrap()
+                .iter()
+                .zip(self.original_shards.iter())
+            {
+                let original_shard_blocks = &original_shard.1;
+                let pruned_shard_blocks = &pruned_shard.1;
+                if original_shard_blocks != pruned_shard_blocks {
+                    let original_shard_blocks_len = original_shard_blocks.len() as usize;
+                    let pruned_shard_blocks_len = pruned_shard_blocks.len() as usize;
+
+                    trace!(target: "pruner::test",
+                        original_shard_blocks_len,
+                        pruned_shard_blocks_len,
+                        "partially pruned shard"
+                    );
+
+                    // since each step in pruning indices, if partially pruning the shard, makes a
+                    // new shard (upserts) with at most one block less than the current one, the
+                    // number of partially pruned shards is equal to the number of blocks pruned
+                    // from that shard
+                    partially_pruned_shards += original_shard_blocks_len - pruned_shard_blocks_len;
+                }
+            }
+
+            partially_pruned_shards
+        }
+    }
+
+    fn test_prune_with_entries_delete_limit(
+        test_rig: &mut TestRig,
+        to_block: BlockNumber,
+        run: usize,
+        expected_progress: PruneProgress,
+    ) {
+        reth_tracing::init_test_tracing();
+
+        let prune_mode = PruneMode::Before(to_block);
+        let segment = StorageHistory::new(prune_mode);
+
+        let prune_job_limit = 1000;
+
+        let job_limiter =
+            PruneLimiterBuilder::default().deleted_entries_limit(prune_job_limit).build();
+        let limiter =
+            <StorageHistory as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
+                &segment,
+                &job_limiter,
+            );
+
+        // expected to be the same since 1000 is a multiple of 2
+        assert_eq!(prune_job_limit, limiter.deleted_entries_limit().unwrap());
+
+        let input = test_rig.get_input(to_block, limiter);
+
+        let provider = test_rig.db.factory.provider_rw().unwrap();
+        let result = segment.prune(&provider, input.clone()).unwrap();
+
+        assert_eq!(result.progress, expected_progress,);
+
+        if !expected_progress.is_done() {
+            assert_eq!(result.pruned, prune_job_limit, "run {run}")
+        }
+
+        segment
+            .save_checkpoint(&provider, result.checkpoint.unwrap().as_prune_checkpoint(prune_mode))
+            .unwrap();
+        provider.commit().expect("commit");
+
+        let pruned_changesets = test_rig.pruned_changesets(run);
+        let pruned_shards = test_rig.pruned_shards(run);
+
+        trace!(target: "pruner::test",
+            pruned_changesets,
+            pruned_shards,
+            run,
+            "total pruned entries in run"
+        );
+
+        assert_eq!(pruned_changesets + pruned_shards, result.pruned, "run {run}");
+
+        assert_eq!(
+            test_rig
+                .db
+                .factory
+                .provider()
+                .unwrap()
+                .get_prune_checkpoint(PruneSegment::StorageHistory)
+                .unwrap(),
+            Some(PruneCheckpoint {
+                block_number: result.checkpoint.unwrap().block_number,
+                tx_number: None,
+                prune_mode
+            })
+        );
     }
 
     #[test]
     fn prune() {
-        let test_rig = TestRig::new();
+        let mut test_rig = TestRig::new();
 
-        fn test_prune(
-            test_rig: &TestRig,
-            to_block: BlockNumber,
-            run: usize,
-            expected_result: (PruneProgress, usize),
-        ) {
-            reth_tracing::init_test_tracing();
-
-            let prune_mode = PruneMode::Before(to_block);
-            let segment = StorageHistory::new(prune_mode);
-            let job_limiter = PruneLimiterBuilder::default().deleted_entries_limit(500).build();
-            let limiter =
-                <StorageHistory as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
-                    &segment,
-                    &job_limiter,
-                );
-            let input = test_rig.get_input(to_block, limiter);
-
-            let provider = test_rig.db.factory.provider_rw().unwrap();
-            let result = segment.prune(&provider, input.clone()).unwrap();
-            trace!(target: "pruner::test",
-                expected_prune_progress=?expected_result.0,
-                expected_pruned=?expected_result.1,
-                result=?result,
-                "PruneOutput"
-            );
-            assert_matches!(
-                result,
-                PruneOutput {progress, pruned, checkpoint: Some(_)}
-                    if (progress, pruned) == expected_result
-            );
-            segment
-                .save_checkpoint(
-                    &provider,
-                    result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
-                )
-                .unwrap();
-            provider.commit().expect("commit");
-
-            let changesets = test_rig
-                .changesets
-                .iter()
-                .enumerate()
-                .flat_map(|(block_number, changeset)| {
-                    changeset.iter().flat_map(move |(address, _, entries)| {
-                        entries.iter().map(move |entry| (block_number, address, entry))
-                    })
-                })
-                .collect::<Vec<_>>();
-
-            #[allow(clippy::skip_while_next)]
-            let pruned = changesets
-                .iter()
-                .enumerate()
-                .skip_while(|(i, (block_number, _, _))| {
-                    if let Some(limit) = input.limiter.deleted_entries_limit() {
-                        if *i >= limit * run {
-                            return false
-                        }
-                    }
-                    *block_number <= to_block as usize
-                })
-                .next()
-                .map(|(i, _)| i)
-                .unwrap_or_default();
-
-            let mut pruned_changesets = changesets
-                .iter()
-                // Skip what we've pruned so far, subtracting one to get last pruned block number
-                // further down
-                .skip(pruned.saturating_sub(1));
-
-            let last_pruned_block_number = pruned_changesets
-            .next()
-            .map(|(block_number, _, _)| if result.progress.is_done() {
-                *block_number
-            } else {
-                block_number.saturating_sub(1)
-            } as BlockNumber)
-            .unwrap_or(to_block);
-
-            let pruned_changesets = pruned_changesets.fold(
-                BTreeMap::<_, Vec<_>>::new(),
-                |mut acc, (block_number, address, entry)| {
-                    acc.entry((block_number, address)).or_default().push(entry);
-                    acc
-                },
-            );
-
-            assert_eq!(
-                test_rig.db.table::<tables::StorageChangeSets>().unwrap().len(),
-                pruned_changesets.values().flatten().count()
-            );
-
-            // todo: modify test rig to cover pruning shards
-            //
-            // <https://github.com/emhane/reth/pull/1/files#diff-b1e8d56c9c48b14b0f6932f857d094e549ec2cefddf866ef2bf51b0f21bbfc90>
-            //
-            /*let actual_shards = test_rig.db.table::<tables::StoragesHistory>().unwrap();
-
-            let expected_shards = test_rig
-                .original_shards
-                .iter()
-                .filter(|(key, _)| key.sharded_key.highest_block_number > last_pruned_block_number)
-                .map(|(key, blocks)| {
-                    let new_blocks = blocks
-                        .iter()
-                        .skip_while(|block| *block <= last_pruned_block_number)
-                        .collect::<Vec<_>>();
-                    (key.clone(), BlockNumberList::new_pre_sorted(new_blocks))
-                })
-                .collect::<Vec<_>>();
-
-            trace!(target: "pruner::test",
-                actual_shards_len=actual_shards.len(),
-                expected_shards=expected_shards.len(),
-                "Pruning history indices result"
-            );
-            assert_eq!(actual_shards, expected_shards);*/
-
-            assert_eq!(
-                test_rig
-                    .db
-                    .factory
-                    .provider()
-                    .unwrap()
-                    .get_prune_checkpoint(PruneSegment::StorageHistory)
-                    .unwrap(),
-                Some(PruneCheckpoint {
-                    block_number: Some(last_pruned_block_number),
-                    tx_number: None,
-                    prune_mode
-                })
-            );
-        }
-
-        test_prune(&test_rig, 998, 1, (PruneProgress::new_entries_limit_reached(), 500));
-        test_prune(&test_rig, 998, 2, (PruneProgress::new_finished(), 499));
-        test_prune(&test_rig, 1200, 3, (PruneProgress::new_finished(), 202));
+        // limit on deleted entries is 1000
+        test_prune_with_entries_delete_limit(
+            &mut test_rig,
+            998,
+            1,
+            PruneProgress::new_entries_limit_reached(),
+        );
+        test_prune_with_entries_delete_limit(&mut test_rig, 998, 2, PruneProgress::new_finished());
+        test_prune_with_entries_delete_limit(&mut test_rig, 1200, 3, PruneProgress::new_finished());
     }
 
     #[test]
