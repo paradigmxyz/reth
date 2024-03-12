@@ -36,23 +36,19 @@ fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> B256 {
     B256::from_slice(&secp256k1::ecdh::shared_secret_point(public_key, secret_key)[..32])
 }
 
+/// This is the NIST SP 800-56A Concatenation Key Derivation Function (KDF) using SHA-256.
+///
+/// Internally this uses [`concat_kdf::derive_key_into`] to derive a key into the given `dest`
+/// slice.
+///
+/// # Panics
+/// * If the `dest` is empty
+/// * If `s1` is empty
+/// * If the `dest` len is greater than or equal to the hash output len * the max counter value. In
+/// this case, the hash output len is 32 bytes, and the max counter value is 2^32 - 1. So the dest
+/// cannot have a len greater than 32 * 2^32 - 1.
 fn kdf(secret: B256, s1: &[u8], dest: &mut [u8]) {
-    // SEC/ISO/Shoup specify counter size SHOULD be equivalent
-    // to size of hash output, however, it also notes that
-    // the 4 bytes is okay. NIST specifies 4 bytes.
-    let mut ctr = 1_u32;
-    let mut written = 0_usize;
-    while written < dest.len() {
-        let mut hasher = Sha256::default();
-        let ctrs = [(ctr >> 24) as u8, (ctr >> 16) as u8, (ctr >> 8) as u8, ctr as u8];
-        hasher.update(ctrs);
-        hasher.update(secret.as_slice());
-        hasher.update(s1);
-        let d = hasher.finalize();
-        dest[written..(written + 32)].copy_from_slice(&d);
-        written += 32;
-        ctr += 1;
-    }
+    concat_kdf::derive_key_into::<Sha256>(secret.as_slice(), s1, dest).unwrap();
 }
 
 #[derive(Educe)]
@@ -777,5 +773,20 @@ mod tests {
 
         test_client.read_ack(&mut ack2.to_vec()).unwrap();
         test_client.read_ack(&mut ack3.to_vec()).unwrap();
+    }
+
+    #[test]
+    fn kdf_out_of_bounds() {
+        // ensures that the kdf method does not panic if the dest is too small
+        let len_range = 1..65;
+        for len in len_range {
+            let mut dest = vec![1u8; len];
+            kdf(
+                b256!("7000000000000000000000000000000000000000000000000000000000000007"),
+                &[0x01, 0x33, 0x70, 0xbe, 0xef],
+                &mut dest,
+            );
+        }
+        std::hint::black_box(());
     }
 }
