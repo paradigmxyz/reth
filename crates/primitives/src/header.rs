@@ -12,7 +12,7 @@ use crate::{
     ChainSpec, GotExpected, GotExpectedBoxed, Hardfork, B256, B64, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
-use bytes::{BufMut, BytesMut};
+use bytes::BufMut;
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
@@ -206,7 +206,7 @@ impl Header {
     /// Heavy function that will calculate hash of data and will *not* save the change to metadata.
     /// Use [`Header::seal`], [`SealedHeader`] and unlock if you need hash to be persistent.
     pub fn hash_slow(&self) -> B256 {
-        let mut out = BytesMut::new();
+        let mut out = Vec::new();
         self.encode(&mut out);
         keccak256(&out)
     }

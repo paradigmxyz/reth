@@ -238,7 +238,7 @@ RPC:
       --rpc-max-tracing-requests <COUNT>
           Maximum number of concurrent tracing requests
           
-          [default: 25]
+          [default: 8]
 
       --rpc-max-blocks-per-filter <COUNT>
           Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
@@ -344,13 +344,13 @@ TxPool:
           [default: 100]
 
       --txpool.max_tx_input_bytes <MAX_TX_INPUT_BYTES>
-          Maximum size a single transaction can have
-
+          Max size in bytes of a single transaction allowed to enter the pool
+          
           [default: 131072]
 
       --txpool.max_cached_entries <MAX_CACHED_ENTRIES>
           The maximum number of blobs to keep in the in memory blob cache
-
+          
           [default: 100]
 
       --txpool.nolocals
@@ -533,3 +533,4 @@ Display:
 
   -q, --quiet
           Silence all log output
+```

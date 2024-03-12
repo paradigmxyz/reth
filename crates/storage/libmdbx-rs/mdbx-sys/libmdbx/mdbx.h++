@@ -362,8 +362,11 @@ using default_allocator = polymorphic_allocator;
 using default_allocator = legacy_allocator;
 #endif /* __cpp_lib_memory_resource >= 201603L */
 
-/// \brief Default singe-byte string.
-template <class ALLOCATOR = legacy_allocator>
+/// \brief Default buffer.
+using default_buffer = buffer<default_allocator, default_capacity_policy>;
+
+/// \brief Default single-byte string.
+template <class ALLOCATOR = default_allocator>
 using string = ::std::basic_string<char, ::std::char_traits<char>, ALLOCATOR>;
 
 using filehandle = ::mdbx_filehandle_t;
@@ -558,6 +561,7 @@ MDBX_DECLARE_EXCEPTION(something_busy);
 MDBX_DECLARE_EXCEPTION(thread_mismatch);
 MDBX_DECLARE_EXCEPTION(transaction_full);
 MDBX_DECLARE_EXCEPTION(transaction_overlapping);
+MDBX_DECLARE_EXCEPTION(duplicated_lck_file);
 #undef MDBX_DECLARE_EXCEPTION
 
 [[noreturn]] LIBMDBX_API void throw_too_small_target_buffer();
@@ -732,6 +736,8 @@ struct LIBMDBX_API_TYPE slice : public ::MDBX_val {
   slice &operator=(const slice &) noexcept = default;
   inline slice &operator=(slice &&src) noexcept;
   inline slice &operator=(::MDBX_val &&src);
+  operator MDBX_val *() noexcept { return this; }
+  operator const MDBX_val *() const noexcept { return this; }
 
 #if defined(DOXYGEN) ||                                                        \
     (defined(__cpp_lib_string_view) && __cpp_lib_string_view >= 201606L)
@@ -1321,8 +1327,7 @@ struct LIBMDBX_API to_base58 {
   /// \brief Returns the buffer size in bytes needed for
   /// [Base58](https://en.wikipedia.org/wiki/Base58) dump of passed slice.
   MDBX_CXX11_CONSTEXPR size_t envisage_result_length() const noexcept {
-    const size_t bytes =
-        source.length() / 8 * 11 + (source.length() % 8 * 43 + 31) / 32;
+    const size_t bytes = (source.length() * 11 + 7) / 8;
     return wrap_width ? bytes + bytes / wrap_width : bytes;
   }
 
@@ -1487,7 +1492,7 @@ struct LIBMDBX_API from_base58 {
   /// [Base58](https://en.wikipedia.org/wiki/Base58) dump from a passed slice to
   /// decoded data.
   MDBX_CXX11_CONSTEXPR size_t envisage_result_length() const noexcept {
-    return source.length() / 11 * 8 + source.length() % 11 * 32 / 43;
+    return source.length() /* могут быть все нули кодируемые один-к-одному */;
   }
 
   /// \brief Fills the destination with data decoded from
@@ -1575,10 +1580,6 @@ public:
 private:
   friend class txn;
   struct silo;
-  using move_assign_alloc =
-      allocation_aware_details::move_assign_alloc<silo, allocator_type>;
-  using copy_assign_alloc =
-      allocation_aware_details::copy_assign_alloc<silo, allocator_type>;
   using swap_alloc = allocation_aware_details::swap_alloc<silo, allocator_type>;
   struct silo /* Empty Base Class Optimization */ : public allocator_type {
     MDBX_CXX20_CONSTEXPR const allocator_type &get_allocator() const noexcept {
@@ -2070,6 +2071,11 @@ public:
   /// \todo buffer& operator>>(buffer&, ...) for reading (delegated to slice)
   /// \todo template<class X> key(X) for encoding keys while writing
 
+  using move_assign_alloc =
+      allocation_aware_details::move_assign_alloc<silo, allocator_type>;
+  using copy_assign_alloc =
+      allocation_aware_details::copy_assign_alloc<silo, allocator_type>;
+
   /// \brief Returns the associated allocator.
   MDBX_CXX20_CONSTEXPR allocator_type get_allocator() const {
     return silo_.get_allocator();
@@ -2336,6 +2342,126 @@ public:
 
   template <typename POD> MDBX_CXX14_CONSTEXPR POD as_pod() const {
     return slice_.as_pod<POD>();
+  }
+
+  /// \brief Returns a new buffer with a hexadecimal dump of the slice content.
+  static buffer hex(const ::mdbx::slice &source, bool uppercase = false,
+                    unsigned wrap_width = 0,
+                    const allocator_type &allocator = allocator_type()) {
+    return source.template encode_hex<ALLOCATOR, CAPACITY_POLICY>(
+        uppercase, wrap_width, allocator);
+  }
+
+  /// \brief Returns a new buffer with a
+  /// [Base58](https://en.wikipedia.org/wiki/Base58) dump of the slice content.
+  static buffer base58(const ::mdbx::slice &source, unsigned wrap_width = 0,
+                       const allocator_type &allocator = allocator_type()) {
+    return source.template encode_base58<ALLOCATOR, CAPACITY_POLICY>(wrap_width,
+                                                                     allocator);
+  }
+  /// \brief Returns a new buffer with a
+  /// [Base64](https://en.wikipedia.org/wiki/Base64) dump of the slice content.
+  static buffer base64(const ::mdbx::slice &source, unsigned wrap_width = 0,
+                       const allocator_type &allocator = allocator_type()) {
+    return source.template encode_base64<ALLOCATOR, CAPACITY_POLICY>(wrap_width,
+                                                                     allocator);
+  }
+
+  /// \brief Returns a new buffer with a hexadecimal dump of the given pod.
+  template <typename POD>
+  static buffer hex(const POD &pod, bool uppercase = false,
+                    unsigned wrap_width = 0,
+                    const allocator_type &allocator = allocator_type()) {
+    return hex(mdbx::slice::wrap(pod), uppercase, wrap_width, allocator);
+  }
+
+  /// \brief Returns a new buffer with a
+  /// [Base58](https://en.wikipedia.org/wiki/Base58) dump of the given pod.
+  template <typename POD>
+  static buffer base58(const POD &pod, unsigned wrap_width = 0,
+                       const allocator_type &allocator = allocator_type()) {
+    return base58(mdbx::slice::wrap(pod), wrap_width, allocator);
+  }
+
+  /// \brief Returns a new buffer with a
+  /// [Base64](https://en.wikipedia.org/wiki/Base64) dump of the given pod.
+  template <typename POD>
+  static buffer base64(const POD &pod, unsigned wrap_width = 0,
+                       const allocator_type &allocator = allocator_type()) {
+    return base64(mdbx::slice::wrap(pod), wrap_width, allocator);
+  }
+
+  /// \brief Returns a new buffer with a hexadecimal dump of the slice content.
+  buffer encode_hex(bool uppercase = false, unsigned wrap_width = 0,
+                    const allocator_type &allocator = allocator_type()) const {
+    return slice().template encode_hex<ALLOCATOR, CAPACITY_POLICY>(
+        uppercase, wrap_width, allocator);
+  }
+
+  /// \brief Returns a new buffer with a
+  /// [Base58](https://en.wikipedia.org/wiki/Base58) dump of the slice content.
+  buffer
+  encode_base58(unsigned wrap_width = 0,
+                const allocator_type &allocator = allocator_type()) const {
+    return slice().template encode_base58<ALLOCATOR, CAPACITY_POLICY>(
+        wrap_width, allocator);
+  }
+  /// \brief Returns a new buffer with a
+  /// [Base64](https://en.wikipedia.org/wiki/Base64) dump of the slice content.
+  buffer
+  encode_base64(unsigned wrap_width = 0,
+                const allocator_type &allocator = allocator_type()) const {
+    return slice().template encode_base64<ALLOCATOR, CAPACITY_POLICY>(
+        wrap_width, allocator);
+  }
+
+  /// \brief Decodes hexadecimal dump from the slice content to returned buffer.
+  static buffer hex_decode(const ::mdbx::slice &source,
+                           bool ignore_spaces = false,
+                           const allocator_type &allocator = allocator_type()) {
+    return source.template hex_decode<ALLOCATOR, CAPACITY_POLICY>(ignore_spaces,
+                                                                  allocator);
+  }
+
+  /// \brief Decodes [Base58](https://en.wikipedia.org/wiki/Base58) dump
+  /// from the slice content to returned buffer.
+  static buffer
+  base58_decode(const ::mdbx::slice &source, bool ignore_spaces = false,
+                const allocator_type &allocator = allocator_type()) {
+    return source.template base58_decode<ALLOCATOR, CAPACITY_POLICY>(
+        ignore_spaces, allocator);
+  }
+
+  /// \brief Decodes [Base64](https://en.wikipedia.org/wiki/Base64) dump
+  /// from the slice content to returned buffer.
+  static buffer
+  base64_decode(const ::mdbx::slice &source, bool ignore_spaces = false,
+                const allocator_type &allocator = allocator_type()) {
+    return source.template base64_decode<ALLOCATOR, CAPACITY_POLICY>(
+        ignore_spaces, allocator);
+  }
+
+  /// \brief Decodes hexadecimal dump
+  /// from the buffer content to new returned buffer.
+  buffer hex_decode(bool ignore_spaces = false,
+                    const allocator_type &allocator = allocator_type()) const {
+    return hex_decode(slice(), ignore_spaces, allocator);
+  }
+
+  /// \brief Decodes [Base58](https://en.wikipedia.org/wiki/Base58) dump
+  /// from the buffer content to new returned buffer.
+  buffer
+  base58_decode(bool ignore_spaces = false,
+                const allocator_type &allocator = allocator_type()) const {
+    return base58_decode(slice(), ignore_spaces, allocator);
+  }
+
+  /// \brief Decodes [Base64](https://en.wikipedia.org/wiki/Base64) dump
+  /// from the buffer content to new returned buffer.
+  buffer
+  base64_decode(bool ignore_spaces = false,
+                const allocator_type &allocator = allocator_type()) const {
+    return base64_decode(slice(), ignore_spaces, allocator);
   }
 
   /// \brief Reserves storage space.
@@ -2982,6 +3108,7 @@ struct LIBMDBX_API_TYPE map_handle {
   map_handle(const map_handle &) noexcept = default;
   map_handle &operator=(const map_handle &) noexcept = default;
   operator bool() const noexcept { return dbi != 0; }
+  operator MDBX_dbi() const { return dbi; }
 
   using flags = ::MDBX_db_flags_t;
   using state = ::MDBX_dbi_state_t;
@@ -3006,6 +3133,14 @@ struct LIBMDBX_API_TYPE map_handle {
     ::mdbx::value_mode value_mode() const noexcept;
   };
 };
+
+using comparator = ::MDBX_cmp_func *;
+inline comparator default_comparator(key_mode mode) noexcept {
+  return ::mdbx_get_keycmp(static_cast<MDBX_db_flags_t>(mode));
+}
+inline comparator default_comparator(value_mode mode) noexcept {
+  return ::mdbx_get_keycmp(static_cast<MDBX_db_flags_t>(mode));
+}
 
 /// \brief Key-value pairs put mode.
 enum put_mode {
@@ -3444,7 +3579,7 @@ public:
   inline void *get_context() const noexcept;
 
   /// \brief Sets the application context associated with the environment.
-  inline env &set_context(void *);
+  inline env &set_context(void *your_context);
 
   /// \brief Sets threshold to force flush the data buffers to disk, for
   /// non-sync durability modes.
@@ -3802,6 +3937,12 @@ public:
   /// \brief Return the transaction's ID.
   inline uint64_t id() const;
 
+  /// \brief Returns the application context associated with the transaction.
+  inline void *get_context() const noexcept;
+
+  /// \brief Sets the application context associated with the transaction.
+  inline txn &set_context(void *your_context);
+
   /// \brief Checks whether the given data is on a dirty page.
   inline bool is_dirty(const void *ptr) const;
 
@@ -3838,7 +3979,7 @@ public:
   txn_managed start_nested();
 
   /// \brief Opens cursor for specified key-value map handle.
-  inline cursor_managed open_cursor(map_handle map);
+  inline cursor_managed open_cursor(map_handle map) const;
 
   /// \brief Open existing key-value map.
   inline map_handle open_map(
@@ -4037,10 +4178,12 @@ public:
     put_multiple(map, key, vector.data(), vector.size(), mode);
   }
 
-  inline ptrdiff_t estimate(map_handle map, pair from, pair to) const;
-  inline ptrdiff_t estimate(map_handle map, slice from, slice to) const;
-  inline ptrdiff_t estimate_from_first(map_handle map, slice to) const;
-  inline ptrdiff_t estimate_to_last(map_handle map, slice from) const;
+  inline ptrdiff_t estimate(map_handle map, const pair &from,
+                            const pair &to) const;
+  inline ptrdiff_t estimate(map_handle map, const slice &from,
+                            const slice &to) const;
+  inline ptrdiff_t estimate_from_first(map_handle map, const slice &to) const;
+  inline ptrdiff_t estimate_to_last(map_handle map, const slice &from) const;
 };
 
 /// \brief Managed database transaction.
@@ -4121,6 +4264,7 @@ public:
   inline cursor &operator=(cursor &&other) noexcept;
   inline cursor(cursor &&other) noexcept;
   inline ~cursor() noexcept;
+  inline cursor_managed clone(void *your_context = nullptr) const;
   MDBX_CXX14_CONSTEXPR operator bool() const noexcept;
   MDBX_CXX14_CONSTEXPR operator const MDBX_cursor *() const;
   MDBX_CXX14_CONSTEXPR operator MDBX_cursor *();
@@ -4128,6 +4272,12 @@ public:
                                               const cursor &b) noexcept;
   friend MDBX_CXX11_CONSTEXPR bool operator!=(const cursor &a,
                                               const cursor &b) noexcept;
+
+  /// \brief Returns the application context associated with the cursor.
+  inline void *get_context() const noexcept;
+
+  /// \brief Sets the application context associated with the cursor.
+  inline cursor &set_context(void *your_context);
 
   enum move_operation {
     first = MDBX_FIRST,
@@ -4153,15 +4303,32 @@ public:
 
   struct move_result : public pair_result {
     inline move_result(const cursor &cursor, bool throw_notfound);
-    inline move_result(cursor &cursor, move_operation operation,
-                       bool throw_notfound);
-    inline move_result(cursor &cursor, move_operation operation,
-                       const slice &key, bool throw_notfound);
+    move_result(cursor &cursor, move_operation operation, bool throw_notfound)
+        : move_result(cursor, operation, slice::invalid(), slice::invalid(),
+                      throw_notfound) {}
+    move_result(cursor &cursor, move_operation operation, const slice &key,
+                bool throw_notfound)
+        : move_result(cursor, operation, key, slice::invalid(),
+                      throw_notfound) {}
     inline move_result(cursor &cursor, move_operation operation,
                        const slice &key, const slice &value,
                        bool throw_notfound);
     move_result(const move_result &) noexcept = default;
     move_result &operator=(const move_result &) noexcept = default;
+  };
+
+  struct estimate_result : public pair {
+    ptrdiff_t approximate_quantity;
+    estimate_result(const cursor &cursor, move_operation operation)
+        : estimate_result(cursor, operation, slice::invalid(),
+                          slice::invalid()) {}
+    estimate_result(const cursor &cursor, move_operation operation,
+                    const slice &key)
+        : estimate_result(cursor, operation, key, slice::invalid()) {}
+    inline estimate_result(const cursor &cursor, move_operation operation,
+                           const slice &key, const slice &value);
+    estimate_result(const estimate_result &) noexcept = default;
+    estimate_result &operator=(const estimate_result &) noexcept = default;
   };
 
 protected:
@@ -4208,19 +4375,20 @@ public:
   inline bool eof() const;
   inline bool on_first() const;
   inline bool on_last() const;
-  inline ptrdiff_t estimate(slice key, slice value) const;
-  inline ptrdiff_t estimate(slice key) const;
-  inline ptrdiff_t estimate(move_operation operation) const;
+  inline estimate_result estimate(const slice &key, const slice &value) const;
+  inline estimate_result estimate(const slice &key) const;
+  inline estimate_result estimate(move_operation operation) const;
+  inline estimate_result estimate(move_operation operation, slice &key) const;
 
   //----------------------------------------------------------------------------
 
   /// \brief Renew/bind a cursor with a new transaction and previously used
   /// key-value map handle.
-  inline void renew(::mdbx::txn &txn);
+  inline void renew(const ::mdbx::txn &txn);
 
   /// \brief Bind/renew a cursor with a new transaction and specified key-value
   /// map handle.
-  inline void bind(::mdbx::txn &txn, ::mdbx::map_handle map_handle);
+  inline void bind(const ::mdbx::txn &txn, ::mdbx::map_handle map_handle);
 
   /// \brief Returns the cursor's transaction.
   inline ::mdbx::txn txn() const;
@@ -4274,7 +4442,8 @@ class LIBMDBX_API_TYPE cursor_managed : public cursor {
 
 public:
   /// \brief Creates a new managed cursor with underlying object.
-  cursor_managed() : cursor_managed(::mdbx_cursor_create(nullptr)) {
+  cursor_managed(void *your_context = nullptr)
+      : cursor_managed(::mdbx_cursor_create(your_context)) {
     if (MDBX_UNLIKELY(!handle_))
       MDBX_CXX20_UNLIKELY error::throw_exception(MDBX_ENOMEM);
   }
@@ -5416,6 +5585,15 @@ MDBX_CXX11_CONSTEXPR bool operator!=(const txn &a, const txn &b) noexcept {
   return a.handle_ != b.handle_;
 }
 
+inline void *txn::get_context() const noexcept {
+  return mdbx_txn_get_userctx(handle_);
+}
+
+inline txn &txn::set_context(void *ptr) {
+  error::success_or_throw(::mdbx_txn_set_userctx(handle_, ptr));
+  return *this;
+}
+
 inline bool txn::is_dirty(const void *ptr) const {
   int err = ::mdbx_is_dirty(handle_, ptr);
   switch (err) {
@@ -5456,7 +5634,7 @@ inline txn::info txn::get_info(bool scan_reader_lock_table) const {
   return r;
 }
 
-inline cursor_managed txn::open_cursor(map_handle map) {
+inline cursor_managed txn::open_cursor(map_handle map) const {
   MDBX_cursor *ptr;
   error::success_or_throw(::mdbx_cursor_open(handle_, map.dbi, &ptr));
   return cursor_managed(ptr);
@@ -5854,28 +6032,32 @@ inline size_t txn::put_multiple(map_handle map, const slice &key,
   return args[1].iov_len /* done item count */;
 }
 
-inline ptrdiff_t txn::estimate(map_handle map, pair from, pair to) const {
+inline ptrdiff_t txn::estimate(map_handle map, const pair &from,
+                               const pair &to) const {
   ptrdiff_t result;
   error::success_or_throw(mdbx_estimate_range(
       handle_, map.dbi, &from.key, &from.value, &to.key, &to.value, &result));
   return result;
 }
 
-inline ptrdiff_t txn::estimate(map_handle map, slice from, slice to) const {
+inline ptrdiff_t txn::estimate(map_handle map, const slice &from,
+                               const slice &to) const {
   ptrdiff_t result;
   error::success_or_throw(mdbx_estimate_range(handle_, map.dbi, &from, nullptr,
                                               &to, nullptr, &result));
   return result;
 }
 
-inline ptrdiff_t txn::estimate_from_first(map_handle map, slice to) const {
+inline ptrdiff_t txn::estimate_from_first(map_handle map,
+                                          const slice &to) const {
   ptrdiff_t result;
   error::success_or_throw(mdbx_estimate_range(handle_, map.dbi, nullptr,
                                               nullptr, &to, nullptr, &result));
   return result;
 }
 
-inline ptrdiff_t txn::estimate_to_last(map_handle map, slice from) const {
+inline ptrdiff_t txn::estimate_to_last(map_handle map,
+                                       const slice &from) const {
   ptrdiff_t result;
   error::success_or_throw(mdbx_estimate_range(handle_, map.dbi, &from, nullptr,
                                               nullptr, nullptr, &result));
@@ -5885,6 +6067,21 @@ inline ptrdiff_t txn::estimate_to_last(map_handle map, slice from) const {
 //------------------------------------------------------------------------------
 
 MDBX_CXX11_CONSTEXPR cursor::cursor(MDBX_cursor *ptr) noexcept : handle_(ptr) {}
+
+inline cursor_managed cursor::clone(void *your_context) const {
+  cursor_managed clone(your_context);
+  error::success_or_throw(::mdbx_cursor_copy(handle_, clone.handle_));
+  return clone;
+}
+
+inline void *cursor::get_context() const noexcept {
+  return mdbx_cursor_get_userctx(handle_);
+}
+
+inline cursor &cursor::set_context(void *ptr) {
+  error::success_or_throw(::mdbx_cursor_set_userctx(handle_, ptr));
+  return *this;
+}
 
 inline cursor &cursor::operator=(cursor &&other) noexcept {
   handle_ = other.handle_;
@@ -5924,22 +6121,8 @@ MDBX_CXX11_CONSTEXPR bool operator!=(const cursor &a,
 
 inline cursor::move_result::move_result(const cursor &cursor,
                                         bool throw_notfound)
-    : pair_result(key, value, false) {
-  done = cursor.move(get_current, &key, &value, throw_notfound);
-}
-
-inline cursor::move_result::move_result(cursor &cursor,
-                                        move_operation operation,
-                                        bool throw_notfound)
-    : pair_result(key, value, false) {
-  done = cursor.move(operation, &key, &value, throw_notfound);
-}
-
-inline cursor::move_result::move_result(cursor &cursor,
-                                        move_operation operation,
-                                        const slice &key, bool throw_notfound)
-    : pair_result(key, slice(), false) {
-  this->done = cursor.move(operation, &this->key, &this->value, throw_notfound);
+    : pair_result(slice(), slice(), false) {
+  done = cursor.move(get_current, &this->key, &this->value, throw_notfound);
 }
 
 inline cursor::move_result::move_result(cursor &cursor,
@@ -5964,6 +6147,14 @@ inline bool cursor::move(move_operation operation, MDBX_val *key,
   default:
     MDBX_CXX20_UNLIKELY error::throw_exception(err);
   }
+}
+
+inline cursor::estimate_result::estimate_result(const cursor &cursor,
+                                                move_operation operation,
+                                                const slice &key,
+                                                const slice &value)
+    : pair(key, value), approximate_quantity(PTRDIFF_MIN) {
+  approximate_quantity = cursor.estimate(operation, &this->key, &this->value);
 }
 
 inline ptrdiff_t cursor::estimate(move_operation operation, MDBX_val *key,
@@ -6088,24 +6279,26 @@ inline bool cursor::on_last() const {
   return error::boolean_or_throw(::mdbx_cursor_on_last(*this));
 }
 
-inline ptrdiff_t cursor::estimate(slice key, slice value) const {
-  return estimate(multi_exactkey_lowerboundvalue, &key, &value);
+inline cursor::estimate_result cursor::estimate(const slice &key,
+                                                const slice &value) const {
+  return estimate_result(*this, multi_exactkey_lowerboundvalue, key, value);
 }
 
-inline ptrdiff_t cursor::estimate(slice key) const {
-  return estimate(key_lowerbound, &key, nullptr);
+inline cursor::estimate_result cursor::estimate(const slice &key) const {
+  return estimate_result(*this, key_lowerbound, key);
 }
 
-inline ptrdiff_t cursor::estimate(move_operation operation) const {
-  slice unused_key;
-  return estimate(operation, &unused_key, nullptr);
+inline cursor::estimate_result
+cursor::estimate(move_operation operation) const {
+  return estimate_result(*this, operation);
 }
 
-inline void cursor::renew(::mdbx::txn &txn) {
+inline void cursor::renew(const ::mdbx::txn &txn) {
   error::success_or_throw(::mdbx_cursor_renew(txn, handle_));
 }
 
-inline void cursor::bind(::mdbx::txn &txn, ::mdbx::map_handle map_handle) {
+inline void cursor::bind(const ::mdbx::txn &txn,
+                         ::mdbx::map_handle map_handle) {
   error::success_or_throw(::mdbx_cursor_bind(txn, handle_, map_handle.dbi));
 }
 

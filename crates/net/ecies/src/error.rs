@@ -54,6 +54,9 @@ pub enum ECIESErrorImpl {
     /// Error when converting to integer
     #[error(transparent)]
     FromInt(std::num::TryFromIntError),
+    /// The encrypted data is not large enough for all fields
+    #[error("encrypted data is not large enough for all fields")]
+    EncryptedDataTooSmall,
     /// Error when trying to split an array beyond its length
     #[error("requested {idx} but array len is {len}")]
     OutOfBounds {

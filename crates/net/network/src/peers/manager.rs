@@ -1,8 +1,10 @@
 use crate::{
     error::{BackoffKind, SessionError},
     peers::{
-        reputation::{is_banned_reputation, DEFAULT_REPUTATION},
-        ReputationChangeWeights, DEFAULT_MAX_COUNT_CONCURRENT_DIALS,
+        reputation::{
+            is_banned_reputation, DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE,
+        },
+        ReputationChangeWeights, DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS,
         DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND,
     },
     session::{Direction, PendingSessionHandshakeError},
@@ -296,7 +298,15 @@ impl PeersManager {
 
     /// Bans the peer temporarily with the configured ban timeout
     fn ban_peer(&mut self, peer_id: PeerId) {
-        self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + self.ban_duration);
+        let mut ban_duration = self.ban_duration;
+        if let Some(peer) = self.peers.get(&peer_id) {
+            if peer.is_trusted() {
+                // For misbehaving trusted peers, we provide a bit more leeway when penalizing them.
+                ban_duration = self.backoff_durations.medium;
+            }
+        }
+
+        self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + ban_duration);
         self.queued_actions.push_back(PeerAction::BanPeer { peer_id });
     }
 
@@ -349,15 +359,37 @@ impl PeersManager {
         self.peers.get(peer_id).map(|peer| peer.reputation)
     }
 
-    /// Apply the corresponding reputation change to the given peer
+    /// Apply the corresponding reputation change to the given peer.
+    ///
+    /// If the peer is a trusted peer, it will be exempt from reputation slashing for certain
+    /// reputation changes that can be attributed to network conditions. If the peer is a
+    /// trusted peer, it will also be less strict with the reputation slashing.
     pub(crate) fn apply_reputation_change(&mut self, peer_id: &PeerId, rep: ReputationChangeKind) {
         let outcome = if let Some(peer) = self.peers.get_mut(peer_id) {
             // First check if we should reset the reputation
             if rep.is_reset() {
                 peer.reset_reputation()
             } else {
-                let reputation_change = self.reputation_weights.change(rep);
-                peer.apply_reputation(reputation_change.as_i32())
+                let mut reputation_change = self.reputation_weights.change(rep).as_i32();
+                if peer.is_trusted() {
+                    // exempt trusted peers from reputation slashing for
+                    if matches!(
+                        rep,
+                        ReputationChangeKind::Dropped |
+                            ReputationChangeKind::BadAnnouncement |
+                            ReputationChangeKind::Timeout |
+                            ReputationChangeKind::AlreadySeenTransaction
+                    ) {
+                        return
+                    }
+
+                    // also be less strict with the reputation slashing for trusted peers
+                    if reputation_change < MAX_TRUSTED_PEER_REPUTATION_CHANGE {
+                        // this caps the reputation change to the maximum allowed for trusted peers
+                        reputation_change = MAX_TRUSTED_PEER_REPUTATION_CHANGE;
+                    }
+                }
+                peer.apply_reputation(reputation_change)
             }
         } else {
             return
@@ -711,11 +743,6 @@ impl PeersManager {
                     _ => break,
                 };
 
-                // If best peer does not meet reputation threshold exit immediately.
-                if peer.is_banned() {
-                    break
-                }
-
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
                 peer.state = PeerConnectionState::PendingOut;
@@ -892,7 +919,7 @@ impl Default for ConnectionInfo {
             num_inbound: 0,
             max_outbound: DEFAULT_MAX_COUNT_PEERS_OUTBOUND as usize,
             max_inbound: DEFAULT_MAX_COUNT_PEERS_INBOUND as usize,
-            max_concurrent_outbound_dials: DEFAULT_MAX_COUNT_CONCURRENT_DIALS,
+            max_concurrent_outbound_dials: DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS,
             num_pendingout: 0,
         }
     }
@@ -1953,6 +1980,58 @@ mod tests {
         let p = peers.peers.get(&peer).unwrap();
         assert_eq!(p.state, PeerConnectionState::Idle);
         assert!(p.is_banned());
+
+        match event!(peers) {
+            PeerAction::Disconnect { peer_id, .. } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reputation_change_trusted_peer() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_trusted_peer(peer, socket_addr);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { peer_id, remote_addr } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(remote_addr, socket_addr);
+            }
+            _ => unreachable!(),
+        }
+
+        assert_eq!(peers.peers.get_mut(&peer).unwrap().state, PeerConnectionState::PendingOut);
+        peers.on_active_outgoing_established(peer);
+        assert_eq!(peers.peers.get_mut(&peer).unwrap().state, PeerConnectionState::Out);
+
+        peers.apply_reputation_change(&peer, ReputationChangeKind::BadMessage);
+
+        {
+            let p = peers.peers.get(&peer).unwrap();
+            assert_eq!(p.state, PeerConnectionState::Out);
+            // not banned yet
+            assert!(!p.is_banned());
+        }
+
+        // ensure peer is banned eventually
+        loop {
+            peers.apply_reputation_change(&peer, ReputationChangeKind::BadMessage);
+
+            let p = peers.peers.get(&peer).unwrap();
+            if p.is_banned() {
+                break
+            }
+        }
 
         match event!(peers) {
             PeerAction::Disconnect { peer_id, .. } => {

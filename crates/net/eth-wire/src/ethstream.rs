@@ -215,11 +215,10 @@ where
         &mut self,
         item: EthBroadcastMessage,
     ) -> Result<(), EthStreamError> {
-        let mut bytes = BytesMut::new();
+        let mut bytes = Vec::new();
         ProtocolBroadcastMessage::from(item).encode(&mut bytes);
-        let bytes = bytes.freeze();
 
-        self.inner.start_send_unpin(bytes)?;
+        self.inner.start_send_unpin(bytes.into())?;
 
         Ok(())
     }
@@ -297,11 +296,10 @@ where
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
         }
 
-        let mut bytes = BytesMut::new();
+        let mut bytes = Vec::new();
         ProtocolMessage::from(item).encode(&mut bytes);
-        let bytes = bytes.freeze();
 
-        self.project().inner.start_send(bytes)?;
+        self.project().inner.start_send(bytes.into())?;
 
         Ok(())
     }
