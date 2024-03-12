@@ -1,6 +1,6 @@
 use crate::{
     compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
-    logs_bloom, Bloom, Log, PruneSegmentError, TxType, B256,
+    logs_bloom, Bloom, Bytes, Log, PruneSegmentError, TxType, B256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{Buf, BufMut};
@@ -274,6 +274,28 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
 }
 
 impl ReceiptWithBloom {
+    /// Returns the enveloped encoded receipt.
+    ///
+    /// See also [ReceiptWithBloom::encode_enveloped]
+    pub fn envelope_encoded(&self) -> Bytes {
+        let mut buf = Vec::new();
+        self.encode_enveloped(&mut buf);
+        buf.into()
+    }
+
+    /// Encodes the receipt into its "raw" format.
+    /// This format is also referred to as "binary" encoding.
+    ///
+    /// For legacy receipts, it encodes the RLP of the receipt into the buffer:
+    /// `rlp([status, cumulativeGasUsed, logsBloom, logs])` as per EIP-2718.
+    /// For EIP-2718 typed transactions, it encodes the type of the transaction followed by the rlp
+    /// of the receipt:
+    /// - EIP-1559, 2930 and 4844 transactions: `tx-type || rlp([status, cumulativeGasUsed,
+    ///   logsBloom, logs])`
+    pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
+        self.encode_inner(out, false)
+    }
+
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         self.as_encoder().encode_inner(out, with_header)
@@ -542,7 +564,7 @@ impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
 mod tests {
     use super::*;
     use crate::hex_literal::hex;
-    use alloy_primitives::{address, b256, bytes, Bytes};
+    use alloy_primitives::{address, b256, bytes};
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
