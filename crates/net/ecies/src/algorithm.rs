@@ -94,14 +94,26 @@ fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), EC
     Ok(arr.split_at_mut(idx))
 }
 
-/// A parsed encrypted message
+/// A parsed RLPx encrypted message
+///
+/// From the devp2p spec, this should help perform the following operations:
+///
+/// For Bob to decrypt the message `R || iv || c || d`, he derives the shared secret `S = Px` where
+/// `(Px, Py) = kB * R` as well as the encryption and authentication keys `kE || kM = KDF(S, 32)`.
+///
+/// Bob verifies the authenticity of the message by checking whether `d == MAC(sha256(kM), iv ||
+/// c)` then obtains the plaintext as `m = AES(kE, iv || c)`.
 #[derive(Debug)]
 pub struct EncryptedMessage<'a> {
-    /// The auth data
+    /// The auth data, used when checking the `tag` with HMAC-SHA256.
+    ///
+    /// This is not mentioned in the RLPx spec, but included in implementations.
+    ///
+    /// See source comments of [Self::check_integrity] for more information.
     auth_data: [u8; 2],
     /// The remote secp256k1 public key
     public_key: PublicKey,
-    /// The IV
+    /// The IV, for use in AES during decryption, in the tag check
     iv: B128,
     /// The encrypted data
     encrypted_data: &'a mut [u8],
@@ -159,8 +171,25 @@ impl<'a> EncryptedMessage<'a> {
         // the given secret key
         let x = ecdh_x(&self.public_key, secret_key);
         let mut key = [0u8; 32];
+
+        // The RLPx spec describes the key derivation process as:
+        //
+        // kE || kM = KDF(S, 32)
+        //
+        // where kE is the encryption key, and kM is used to determine the MAC key (see below)
+        //
+        // NOTE: The RLPx spec does not define an `OtherInfo` parameter, and this is unused in
+        // other implementations, so we use an empty slice.
         kdf(x, &[], &mut key);
+
         let enc_key = B128::from_slice(&key[..16]);
+
+        // The MAC tag check operation described is:
+        //
+        // d == MAC(sha256(kM), iv || c)
+        //
+        // where kM is the result of the above KDF, iv is the IV, and c is the encrypted data.
+        // Because the hash of kM is ultimately used as the mac key, we perform that hashing here.
         let mac_key = sha256(&key[16..32]);
 
         RLPxSymmetricKeys { enc_key, mac_key }
@@ -168,6 +197,27 @@ impl<'a> EncryptedMessage<'a> {
 
     /// Use the given ECIES keys to check the message integrity using the contained tag.
     pub fn check_integrity(&self, keys: &RLPxSymmetricKeys) -> Result<(), ECIESError> {
+        // The MAC tag check operation described is:
+        //
+        // d == MAC(sha256(kM), iv || c)
+        //
+        // NOTE: The RLPx spec does not show here that the `auth_data` is required for checking the
+        // tag.
+        //
+        // Geth refers to SEC 1's definition of ECIES:
+        //
+        // Encrypt encrypts a message using ECIES as specified in SEC 1, section 5.1.
+        //
+        // s1 and s2 contain shared information that is not part of the resulting
+        // ciphertext. s1 is fed into key derivation, s2 is fed into the MAC. If the
+        // shared information parameters aren't being used, they should be nil.
+        //
+        // ```
+        // prefix := make([]byte, 2)
+        // binary.BigEndian.PutUint16(prefix, uint16(len(h.wbuf.data)+eciesOverhead))
+        //
+        // enc, err := ecies.Encrypt(rand.Reader, h.remote, h.wbuf.data, nil, prefix)
+        // ```
         let check_tag = hmac_sha256(
             keys.mac_key.as_ref(),
             &[self.iv.as_slice(), self.encrypted_data],
@@ -185,6 +235,7 @@ impl<'a> EncryptedMessage<'a> {
     pub fn decrypt(self, keys: &RLPxSymmetricKeys) -> &'a mut [u8] {
         let Self { iv, encrypted_data, .. } = self;
 
+        // rename for clarity once it's decrypted
         let decrypted_data = encrypted_data;
 
         let mut decryptor = Ctr64BE::<Aes128>::new((&keys.enc_key.0).into(), (&*iv).into());
