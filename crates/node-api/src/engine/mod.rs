@@ -11,7 +11,7 @@ pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 
 /// Contains error types used in the traits defined in this crate.
 pub mod error;
-pub use error::{EngineObjectValidationError, PayloadOrAttributesValidationError};
+pub use error::{EngineObjectValidationError, VersionSpecificValidationError};
 
 /// Contains types used in implementations of the [PayloadAttributes] trait.
 pub mod payload;
@@ -126,21 +126,21 @@ pub fn validate_withdrawals_presence(
         EngineApiMessageVersion::V1 => {
             if has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(PayloadOrAttributesValidationError::WithdrawalsNotSupportedInV1))
+                    .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
             }
             if is_shanghai {
                 return Err(message_validation_kind
-                    .to_error(PayloadOrAttributesValidationError::NoWithdrawalsPostShanghai))
+                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
             }
         }
         EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
             if is_shanghai && !has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(PayloadOrAttributesValidationError::NoWithdrawalsPostShanghai))
+                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
             }
             if !is_shanghai && has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(PayloadOrAttributesValidationError::HasWithdrawalsPreShanghai))
+                    .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai))
             }
         }
     };
@@ -162,7 +162,7 @@ pub fn validate_withdrawals_presence(
 /// will return [EngineObjectValidationError::UnsupportedFork].
 ///
 /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
-/// this will return [PayloadOrAttributesValidationError::NoParentBeaconBlockRootPostCancun].
+/// this will return [VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun].
 ///
 /// This implements the following Engine API spec rules:
 ///
@@ -225,15 +225,14 @@ pub fn validate_parent_beacon_block_root_presence(
         EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 => {
             if has_parent_beacon_block_root {
                 return Err(validation_kind.to_error(
-                    PayloadOrAttributesValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
+                    VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
                 ))
             }
         }
         EngineApiMessageVersion::V3 => {
             if !has_parent_beacon_block_root {
-                return Err(validation_kind.to_error(
-                    PayloadOrAttributesValidationError::NoParentBeaconBlockRootPostCancun,
-                ))
+                return Err(validation_kind
+                    .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
             }
         }
     };
@@ -267,11 +266,8 @@ pub enum MessageValidationKind {
 
 impl MessageValidationKind {
     /// Returns an `EngineObjectValidationError` based on the given
-    /// `PayloadOrAttributesValidationError` and the current validation kind.
-    pub fn to_error(
-        self,
-        error: PayloadOrAttributesValidationError,
-    ) -> EngineObjectValidationError {
+    /// `VersionSpecificValidationError` and the current validation kind.
+    pub fn to_error(self, error: VersionSpecificValidationError) -> EngineObjectValidationError {
         match self {
             Self::Payload => EngineObjectValidationError::Payload(error),
             Self::PayloadAttributes => EngineObjectValidationError::PayloadAttributes(error),

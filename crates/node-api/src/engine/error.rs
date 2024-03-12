@@ -10,11 +10,11 @@ use thiserror::Error;
 pub enum EngineObjectValidationError {
     /// Thrown when the underlying validation error occured while validating an `ExecutionPayload`.
     #[error("Payload validation error: {0}")]
-    Payload(PayloadOrAttributesValidationError),
+    Payload(VersionSpecificValidationError),
 
     /// Thrown when the underlying validation error occured while validating a `PayloadAttributes`.
     #[error("Payload attributes validation error: {0}")]
-    PayloadAttributes(PayloadOrAttributesValidationError),
+    PayloadAttributes(VersionSpecificValidationError),
 
     /// Thrown if `PayloadAttributes` or `ExecutionPayload` were provided with a timestamp, but the
     /// version of the engine method called is meant for a fork that occurs after the provided
@@ -26,9 +26,11 @@ pub enum EngineObjectValidationError {
     InvalidParams(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Thrown when validating an execution payload OR payload attributes fails.
+/// Thrown when validating an execution payload OR payload attributes fails due to:
+/// * The existence of a new field that is not supported in the given engine method version, or
+/// * The absence of a field that is required in the given engine method version
 #[derive(Error, Debug)]
-pub enum PayloadOrAttributesValidationError {
+pub enum VersionSpecificValidationError {
     /// Thrown if the pre-V3 `PayloadAttributes` or `ExecutionPayload` contains a parent beacon
     /// block root
     #[error("parent beacon block root not supported before V3")]

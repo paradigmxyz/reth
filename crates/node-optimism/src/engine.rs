@@ -1,7 +1,7 @@
 use reth_node_api::{
     engine::validate_parent_beacon_block_root_presence, AttributesValidationError,
     EngineApiMessageVersion, EngineTypes, MessageValidationKind, PayloadOrAttributes,
-    PayloadOrAttributesValidationError,
+    VersionSpecificValidationError,
 };
 use reth_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
 use reth_primitives::{ChainSpec, Hardfork};
@@ -67,21 +67,21 @@ pub fn validate_withdrawals_presence(
         EngineApiMessageVersion::V1 => {
             if has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(PayloadOrAttributesValidationError::WithdrawalsNotSupportedInV1))
+                    .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
             }
             if is_shanghai {
                 return Err(message_validation_kind
-                    .to_error(PayloadOrAttributesValidationError::NoWithdrawalsPostShanghai))
+                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
             }
         }
         EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
             if is_shanghai && !has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(PayloadOrAttributesValidationError::NoWithdrawalsPostShanghai))
+                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
             }
             if !is_shanghai && has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(PayloadOrAttributesValidationError::HasWithdrawalsPreShanghai))
+                    .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai))
             }
         }
     };
