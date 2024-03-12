@@ -154,7 +154,7 @@ impl<'a> EncryptedMessage<'a> {
 
     /// Use the given secret and this encrypted message to derive the shared secret, and use the
     /// shared secret to derive the mac and encryption keys.
-    pub fn derive_keys(&self, secret_key: &SecretKey) -> ECIESKeys {
+    pub fn derive_keys(&self, secret_key: &SecretKey) -> RLPxSymmetricKeys {
         // perform ECDH to get the shared secret, using the remote public key from the message and
         // the given secret key
         let x = ecdh_x(&self.public_key, secret_key);
@@ -163,11 +163,11 @@ impl<'a> EncryptedMessage<'a> {
         let enc_key = B128::from_slice(&key[..16]);
         let mac_key = sha256(&key[16..32]);
 
-        ECIESKeys { enc_key, mac_key }
+        RLPxSymmetricKeys { enc_key, mac_key }
     }
 
     /// Use the given ECIES keys to check the message integrity using the contained tag.
-    pub fn check_integrity(&self, keys: &ECIESKeys) -> Result<(), ECIESError> {
+    pub fn check_integrity(&self, keys: &RLPxSymmetricKeys) -> Result<(), ECIESError> {
         let check_tag = hmac_sha256(
             keys.mac_key.as_ref(),
             &[self.iv.as_slice(), self.encrypted_data],
@@ -182,7 +182,7 @@ impl<'a> EncryptedMessage<'a> {
 
     /// Use the given ECIES keys to decrypt the contained encrypted data, consuming the message and
     /// returning the decrypted data.
-    pub fn decrypt(self, keys: &ECIESKeys) -> &'a mut [u8] {
+    pub fn decrypt(self, keys: &RLPxSymmetricKeys) -> &'a mut [u8] {
         let Self { iv, encrypted_data, .. } = self;
 
         let decrypted_data = encrypted_data;
@@ -194,15 +194,15 @@ impl<'a> EncryptedMessage<'a> {
 
     /// Use the given ECIES keys to check the integrity of the message, returning an error if the
     /// tag check fails, and then decrypt the message, returning the decrypted data.
-    pub fn check_and_decrypt(self, keys: ECIESKeys) -> Result<&'a mut [u8], ECIESError> {
+    pub fn check_and_decrypt(self, keys: RLPxSymmetricKeys) -> Result<&'a mut [u8], ECIESError> {
         self.check_integrity(&keys)?;
         Ok(self.decrypt(&keys))
     }
 }
 
-/// The keys derived from an ECIES message.
+/// The symmetric keys derived from an ECIES message.
 #[derive(Debug)]
-pub struct ECIESKeys {
+pub struct RLPxSymmetricKeys {
     /// The key used for decryption, specifically with AES-128 in CTR mode, using a 64-bit big
     /// endian counter.
     pub enc_key: B128,
