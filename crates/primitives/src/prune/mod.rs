@@ -102,7 +102,7 @@ pub enum PruneInterruptReason {
     /// Prune job timed out.
     Timeout,
     /// Limit on the number of deleted entries (rows in the database) per prune job was reached.
-    LimitEntriesDeleted,
+    DeletedEntriesLimitReached,
 }
 
 impl PruneInterruptReason {
