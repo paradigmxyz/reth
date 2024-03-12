@@ -53,6 +53,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
     /// collect transactions within that range, recover signer for each transaction and store
     /// entries in the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
+    #[instrument(target = "sync::stages::sender_recovery", skip_all)]
     fn execute(
         &mut self,
         provider: &DatabaseProviderRW<DB>,
@@ -68,7 +69,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 
         // No transactions to walk over
         if tx_range.is_empty() {
-            info!(target: "sync::stages::sender_recovery", ?tx_range, "Target transaction already reached");
+            info!(?tx_range, "Target transaction already reached");
             return Ok(ExecOutput {
                 checkpoint: StageCheckpoint::new(end_block)
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
@@ -82,7 +83,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         let mut senders_cursor = tx.cursor_write::<tables::TransactionSenders>()?;
 
         // Iterate over transactions in chunks
-        info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
+        info!(?tx_range, "Recovering senders");
 
         // Spawn recovery jobs onto the default rayon threadpool and send the result through the
         // channel.
@@ -109,7 +110,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             // This task will send the results through the channel after it has read the transaction
             // and calculated the sender.
             rayon::spawn(move || {
-                debug!(target: "sync::stages::sender_recovery", ?chunk_range, "Recovering senders batch");
+                debug!(?chunk_range, "Recovering senders batch");
                 let mut rlp_buf = Vec::with_capacity(128);
                 let _ = static_file_provider.fetch_range_with_predicate(
                     StaticFileSegment::Transactions,
@@ -125,13 +126,13 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                     },
                     |_| true,
                 );
-                debug!(target: "sync::stages::sender_recovery", ?chunk_range, "Finished recovering senders batch");
+                debug!(?chunk_range, "Finished recovering senders batch");
             });
         }
 
         // Iterate over channels and append the sender in the order that they are received.
         for (chunk_range, channel) in channels {
-            debug!(target: "sync::stages::sender_recovery", ?chunk_range, "Appending recovered senders to the database");
+            debug!(?chunk_range, "Appending recovered senders to the database");
             while let Ok(recovered) = channel.recv() {
                 let (tx_id, sender) = match recovered {
                     Ok(result) => result,
