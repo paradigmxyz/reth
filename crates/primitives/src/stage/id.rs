@@ -97,7 +97,6 @@ mod tests {
 
     #[test]
     fn stage_id_as_string() {
-        assert_eq!(StageId::StaticFile.to_string(), "StaticFile");
         assert_eq!(StageId::Headers.to_string(), "Headers");
         assert_eq!(StageId::Bodies.to_string(), "Bodies");
         assert_eq!(StageId::SenderRecovery.to_string(), "SenderRecovery");
