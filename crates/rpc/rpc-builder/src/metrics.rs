@@ -1,8 +1,4 @@
-use jsonrpsee::{
-    helpers::MethodResponseResult,
-    server::logger::{HttpRequest, Logger, MethodKind, Params, TransportProtocol},
-    RpcModule,
-};
+use jsonrpsee::RpcModule;
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,

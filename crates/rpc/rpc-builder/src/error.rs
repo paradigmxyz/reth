@@ -1,7 +1,6 @@
 use std::net::SocketAddr;
 
 use crate::RethRpcModule;
-use jsonrpsee::core::Error as JsonRpseeError;
 use std::{io, io::ErrorKind};
 
 /// Rpc server kind.
@@ -43,7 +42,6 @@ impl std::fmt::Display for ServerKind {
 /// Rpc Errors.
 #[derive(Debug, thiserror::Error)]
 pub enum RpcError {
-    /// Wrapper for `jsonrpsee::core::Error`.
     #[error(transparent)]
     RpcError(#[from] JsonRpseeError),
     /// Address already in use.

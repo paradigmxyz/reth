@@ -392,17 +392,18 @@ where
     /// Installs a new filter and returns the new identifier.
     async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
         let last_poll_block_number = self.provider.best_block_number().to_rpc_result()?;
-        let id = FilterId::from(self.id_provider.next_id());
-        let mut filters = self.active_filters.inner.lock().await;
-        filters.insert(
-            id.clone(),
-            ActiveFilter {
-                block: last_poll_block_number,
-                last_poll_timestamp: Instant::now(),
-                kind,
-            },
-        );
-        Ok(id)
+        // let id = FilterId::from(self.id_provider.next_id());
+        // let mut filters = self.active_filters.inner.lock().await;
+        // filters.insert(
+        //     id.clone(),
+        //     ActiveFilter {
+        //         block: last_poll_block_number,
+        //         last_poll_timestamp: Instant::now(),
+        //         kind,
+        //     },
+        // );
+        // Ok(id)
+        todo!("mattsse: needs alloy bump")
     }
 
     /// Returns all logs in the given _inclusive_ range that match the filter

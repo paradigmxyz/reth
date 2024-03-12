@@ -7,6 +7,7 @@ use crate::{
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
+    core::RegisterMethodError,
     http_client::HeaderMap,
     server::{RpcModule, ServerHandle},
     Methods,
@@ -286,7 +287,7 @@ impl AuthRpcModule {
     pub fn merge_auth_methods(
         &mut self,
         other: impl Into<Methods>,
-    ) -> Result<bool, jsonrpsee::core::error::Error> {
+    ) -> Result<bool, RegisterMethodError> {
         self.module_mut().merge(other.into()).map(|_| true)
     }
 

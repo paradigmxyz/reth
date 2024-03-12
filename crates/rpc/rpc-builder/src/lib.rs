@@ -165,6 +165,7 @@ use std::{
 use hyper::{header::AUTHORIZATION, HeaderMap};
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
+    core::RegisterMethodError,
     server::{IdProvider, Server, ServerHandle},
     Methods, RpcModule,
 };
@@ -1873,10 +1874,7 @@ impl TransportRpcModules {
     /// Fails if any of the methods in other is present already.
     ///
     /// Returns [Ok(false)] if no http transport is configured.
-    pub fn merge_http(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, jsonrpsee::core::error::Error> {
+    pub fn merge_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut http) = self.http {
             return http.merge(other.into()).map(|_| true)
         }
@@ -1888,10 +1886,7 @@ impl TransportRpcModules {
     /// Fails if any of the methods in other is present already.
     ///
     /// Returns [Ok(false)] if no ws transport is configured.
-    pub fn merge_ws(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, jsonrpsee::core::error::Error> {
+    pub fn merge_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ws) = self.ws {
             return ws.merge(other.into()).map(|_| true)
         }
@@ -1903,10 +1898,7 @@ impl TransportRpcModules {
     /// Fails if any of the methods in other is present already.
     ///
     /// Returns [Ok(false)] if no ipc transport is configured.
-    pub fn merge_ipc(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, jsonrpsee::core::error::Error> {
+    pub fn merge_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ipc) = self.ipc {
             return ipc.merge(other.into()).map(|_| true)
         }
@@ -1919,7 +1911,7 @@ impl TransportRpcModules {
     pub fn merge_configured(
         &mut self,
         other: impl Into<Methods>,
-    ) -> Result<(), jsonrpsee::core::error::Error> {
+    ) -> Result<(), RegisterMethodError> {
         let other = other.into();
         self.merge_http(other.clone())?;
         self.merge_ws(other.clone())?;

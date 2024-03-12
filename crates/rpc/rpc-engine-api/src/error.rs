@@ -153,7 +153,10 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             ),
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
-                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => (*err).into(),
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => {
+                    todo!("mattsse: needs version bump on alloy")
+                    // (*err).into()
+                }
                 BeaconForkChoiceUpdateError::EngineUnavailable |
                 BeaconForkChoiceUpdateError::Internal(_) => {
                     jsonrpsee_types::error::ErrorObject::owned(
@@ -206,11 +209,11 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     }
 }
 
-impl From<EngineApiError> for jsonrpsee_core::error::Error {
-    fn from(error: EngineApiError) -> Self {
-        jsonrpsee_core::error::Error::Call(error.into())
-    }
-}
+// impl From<EngineApiError> for jsonrpsee_core::error::Error {
+//     fn from(error: EngineApiError) -> Self {
+//         jsonrpsee_core::error::Error::Call(error.into())
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
