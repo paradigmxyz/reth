@@ -57,7 +57,7 @@ use std::{
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB> = DatabaseProvider<<DB as Database>::TX>;
@@ -891,25 +891,27 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
         delete_callback: &mut impl FnMut(TableRow<T>),
     ) -> Result<PruneStepResult, DatabaseError> {
-        match walker.next() {
-            Some(Err(err)) => Err(err),
-            Some(Ok(row)) => {
-                if let Some(limit) = limiter.deleted_entries_limit() {
-                    if limiter.deleted_entries_count() == limit {
-                        return Ok(PruneStepResult::ReachedDeletedEntriesLimit)
-                    }
-                }
+        let Some(res) = walker.next() else { return Ok(PruneStepResult::Finished) };
 
-                if !skip_filter(&row) {
-                    walker.delete_current()?;
-                    limiter.increment_deleted_entries_count();
-                    delete_callback(row);
-                }
+        let row = res?;
 
-                Ok(PruneStepResult::MaybeMoreData)
+        if let Some(limit) = limiter.deleted_entries_limit() {
+            if limiter.deleted_entries_count() == limit {
+                trace!(target: "provider",
+                    "reached limit on deleted entries"
+                );
+
+                return Ok(PruneStepResult::ReachedDeletedEntriesLimit)
             }
-            None => Ok(PruneStepResult::Finished),
         }
+
+        if !skip_filter(&row) {
+            walker.delete_current()?;
+            limiter.increment_deleted_entries_count();
+            delete_callback(row);
+        }
+
+        Ok(PruneStepResult::MaybeMoreData)
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
