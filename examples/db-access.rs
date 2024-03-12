@@ -5,7 +5,6 @@ use reth_provider::{
     StateProvider, TransactionsProvider,
 };
 use reth_rpc_types::{Filter, FilteredParams};
-use reth_rpc_types_compat::log::from_primitive_log;
 use std::path::Path;
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
@@ -31,7 +30,7 @@ fn main() -> eyre::Result<()> {
     // the `provider_rw` function and look for the `Writer` variants of the traits.
     let provider = factory.provider()?;
 
-    // Run basic queryies against the DB
+    // Run basic queries against the DB
     let block_num = 100;
     header_provider_example(&provider, block_num)?;
     block_provider_example(&provider, block_num)?;
@@ -201,8 +200,9 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     {
         let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
         for log in &receipts.logs {
-            let log = from_primitive_log(log.clone());
-            if filter_params.filter_address(&log) && filter_params.filter_topics(&log) {
+            if filter_params.filter_address(&log.address) &&
+                filter_params.filter_topics(&log.topics)
+            {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")
             }

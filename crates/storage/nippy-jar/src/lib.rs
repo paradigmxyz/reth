@@ -5,6 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![allow(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
@@ -1119,7 +1120,7 @@ mod tests {
         let nippy = NippyJar::load_without_header(file_path).unwrap();
         assert_eq!(initial_rows, nippy.rows);
 
-        // Data was written successfuly
+        // Data was written successfully
         let new_data_size =
             File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
         assert_eq!(new_data_size, initial_data_size + col1[2].len() + col2[2].len());
@@ -1169,7 +1170,7 @@ mod tests {
         let nippy = NippyJar::load_without_header(file_path).unwrap();
         assert_eq!(initial_rows, nippy.rows);
 
-        // Data was written successfuly
+        // Data was written successfully
         let new_data_size =
             File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
         assert_eq!(new_data_size, initial_data_size + col1[2].len() + col2[2].len());
@@ -1229,7 +1230,7 @@ mod tests {
         // Load and add 1 row
         {
             let nippy = NippyJar::load_without_header(file_path).unwrap();
-            // Check if it was committed successfuly
+            // Check if it was committed successfully
             assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
             assert_eq!(nippy.rows, 1);
 

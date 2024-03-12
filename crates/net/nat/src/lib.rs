@@ -9,6 +9,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use igd_next::aio::tokio::search_gateway;
@@ -132,7 +133,7 @@ impl ResolveNatInterval {
     }
 
     /// Creates a new [ResolveNatInterval] that attempts to resolve the public IP with interval of
-    /// period with the first attempt starting at `sart`. See also [tokio::time::interval_at]
+    /// period with the first attempt starting at `start`. See also [tokio::time::interval_at]
     #[track_caller]
     pub fn interval_at(
         resolver: NatResolver,

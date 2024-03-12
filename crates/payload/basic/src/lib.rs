@@ -5,6 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
@@ -14,11 +15,10 @@ use futures_util::FutureExt;
 use reth_interfaces::RethResult;
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, EthBuiltPayload, KeepPayloadJobAlive,
-    PayloadId, PayloadJob, PayloadJobGenerator,
+    database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
+    PayloadJobGenerator,
 };
 use reth_primitives::{
-    bytes::BytesMut,
     constants::{EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION},
     proofs, BlockNumberOrTag, Bytes, ChainSpec, SealedBlock, Withdrawals, B256, U256,
 };
@@ -300,10 +300,10 @@ impl BasicPayloadJobGeneratorConfig {
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
-        let mut extradata = BytesMut::new();
+        let mut extradata = Vec::with_capacity(RETH_CLIENT_VERSION.as_bytes().len() + 1);
         RETH_CLIENT_VERSION.as_bytes().encode(&mut extradata);
         Self {
-            extradata: extradata.freeze().into(),
+            extradata: extradata.into(),
             max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             // 12s slot time
@@ -889,7 +889,7 @@ where
 ///
 /// This compares the total fees of the blocks, higher is better.
 #[inline(always)]
-pub fn is_better_payload(best_payload: Option<&EthBuiltPayload>, new_fees: U256) -> bool {
+pub fn is_better_payload(best_payload: Option<impl BuiltPayload>, new_fees: U256) -> bool {
     if let Some(best_payload) = best_payload {
         new_fees > best_payload.fees()
     } else {

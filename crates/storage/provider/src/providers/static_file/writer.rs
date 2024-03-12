@@ -64,7 +64,11 @@ impl StaticFileProviderRW {
             block_range.start(),
             None,
         ) {
-            Ok(provider) => (NippyJar::load(provider.data_path())?, provider.data_path().into()),
+            Ok(provider) => (
+                NippyJar::load(provider.data_path())
+                    .map_err(|e| ProviderError::NippyJar(e.to_string()))?,
+                provider.data_path().into(),
+            ),
             Err(ProviderError::MissingStaticFileBlock(_, _)) => {
                 let path = static_file_provider.directory().join(segment.filename(&block_range));
                 (create_jar(segment, &path, block_range), path)
@@ -78,7 +82,7 @@ impl StaticFileProviderRW {
                 // This static file has been frozen, so we should
                 Err(ProviderError::FinalizedStaticFile(segment, block))
             }
-            Err(e) => Err(e.into()),
+            Err(e) => Err(ProviderError::NippyJar(e.to_string())),
         }?;
 
         if let Some(metrics) = &metrics {
@@ -97,7 +101,40 @@ impl StaticFileProviderRW {
         let start = Instant::now();
 
         // Commits offsets and new user_header to disk
-        self.writer.commit()?;
+        self.writer.commit().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                self.writer.user_header().segment(),
+                StaticFileProviderOperation::CommitWriter,
+                Some(start.elapsed()),
+            );
+        }
+
+        debug!(
+            target: "provider::static_file",
+            segment = ?self.writer.user_header().segment(),
+            path = ?self.data_path,
+            duration = ?start.elapsed(),
+            "Commit"
+        );
+
+        self.update_index()?;
+
+        Ok(())
+    }
+
+    /// Commits configuration changes to disk and updates the reader index with the new changes.
+    ///
+    /// CAUTION: does not call `sync_all` on the files.
+    #[cfg(feature = "test-utils")]
+    pub fn commit_without_sync_all(&mut self) -> ProviderResult<()> {
+        let start = Instant::now();
+
+        // Commits offsets and new user_header to disk
+        self.writer
+            .commit_without_sync_all()
+            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -125,7 +162,7 @@ impl StaticFileProviderRW {
         // We find the maximum block of the segment by checking this writer's last block.
         //
         // However if there's no block range (because there's no data), we try to calculate it by
-        // substracting 1 from the expected block start, resulting on the last block of the
+        // subtracting 1 from the expected block start, resulting on the last block of the
         // previous file.
         //
         // If that expected block start is 0, then it means that there's no actual block data, and
@@ -218,11 +255,16 @@ impl StaticFileProviderRW {
                     self.writer = writer;
                     self.data_path = data_path;
 
-                    NippyJar::<SegmentHeader>::load(&previous_snap)?.delete()?;
+                    NippyJar::<SegmentHeader>::load(&previous_snap)
+                        .map_err(|e| ProviderError::NippyJar(e.to_string()))?
+                        .delete()
+                        .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
                 } else {
                     // Update `SegmentHeader`
                     self.writer.user_header_mut().prune(len);
-                    self.writer.prune_rows(len as usize)?;
+                    self.writer
+                        .prune_rows(len as usize)
+                        .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
                     break
                 }
 
@@ -232,7 +274,9 @@ impl StaticFileProviderRW {
                 self.writer.user_header_mut().prune(num_rows);
 
                 // Truncate data
-                self.writer.prune_rows(num_rows as usize)?;
+                self.writer
+                    .prune_rows(num_rows as usize)
+                    .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
                 num_rows = 0;
             }
         }
@@ -254,7 +298,9 @@ impl StaticFileProviderRW {
         self.buf.clear();
         column.to_compact(&mut self.buf);
 
-        self.writer.append_column(Some(Ok(&self.buf)))?;
+        self.writer
+            .append_column(Some(Ok(&self.buf)))
+            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
         Ok(())
     }
 

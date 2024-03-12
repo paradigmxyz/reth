@@ -525,10 +525,11 @@ fn load_accounts<Client, I>(
     addresses: I,
 ) -> Result<LoadedAccounts, Box<(HashSet<Address>, ProviderError)>>
 where
-    I: Iterator<Item = Address>,
+    I: IntoIterator<Item = Address>,
 
     Client: StateProviderFactory,
 {
+    let addresses = addresses.into_iter();
     let mut res = LoadedAccounts::default();
     let state = match client.history_by_block_hash(at) {
         Ok(state) => state,
@@ -608,7 +609,7 @@ where
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();
-    let mut buf = alloy_rlp::BytesMut::new();
+    let mut buf = Vec::new();
     alloy_rlp::encode_list(&local_transactions, &mut buf);
     info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
@@ -691,7 +692,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let transactions_path = temp_dir.path().join(FILENAME).with_extension(EXTENSION);
         let tx_bytes = hex!("02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507");
-        let tx = PooledTransactionsElement::decode_enveloped(tx_bytes.into()).unwrap();
+        let tx = PooledTransactionsElement::decode_enveloped(&mut &tx_bytes[..]).unwrap();
         let provider = MockEthProvider::default();
         let transaction = EthPooledTransaction::from_recovered_pooled_transaction(
             tx.try_into_ecrecovered().unwrap(),

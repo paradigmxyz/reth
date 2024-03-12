@@ -80,7 +80,7 @@ pub fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
 ///
 /// From the yellow paper (page 15):
 ///
-/// > If there are collissions of the beneficiary addresses between ommers and the block (i.e. two
+/// > If there are collisions of the beneficiary addresses between ommers and the block (i.e. two
 /// > ommers with the same beneficiary address or an ommer with the same beneficiary address as the
 /// > present block), additions are applied cumulatively.
 ///

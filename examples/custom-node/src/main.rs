@@ -15,7 +15,7 @@
 //! Once traits are implemented and custom types are defined, the [EngineTypes] trait can be
 //! implemented:
 
-#![warn(unused_crate_dependencies)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_chains::Chain;
 use reth::{
@@ -34,7 +34,7 @@ use reth_basic_payload_builder::{
     PayloadBuilder, PayloadConfig,
 };
 use reth_node_api::{
-    validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
+    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
     EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
@@ -48,8 +48,12 @@ use reth_payload_builder::{
 };
 use reth_primitives::{Address, ChainSpec, Genesis, Header, Withdrawals, B256};
 use reth_rpc_types::{
-    engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
+    engine::{
+        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+        PayloadAttributes as EthPayloadAttributes, PayloadId,
+    },
     withdrawal::Withdrawal,
+    ExecutionPayloadV1,
 };
 use reth_tracing::{RethTracer, Tracer};
 use serde::{Deserialize, Serialize};
@@ -90,12 +94,14 @@ impl PayloadAttributes for CustomPayloadAttributes {
         &self,
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-    ) -> Result<(), AttributesValidationError> {
+    ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(chain_spec, version, self.into())?;
 
         // custom validation logic - ensure that the custom field is not zero
         if self.custom == 0 {
-            return Err(AttributesValidationError::invalid_params(CustomError::CustomFieldIsNotZero))
+            return Err(EngineObjectValidationError::invalid_params(
+                CustomError::CustomFieldIsNotZero,
+            ))
         }
 
         Ok(())
@@ -153,7 +159,7 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 
 /// Custom engine types - uses a custom payload attributes RPC type, but uses the default
 /// payload builder attributes type.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct CustomEngineTypes;
 
@@ -161,12 +167,15 @@ impl EngineTypes for CustomEngineTypes {
     type PayloadAttributes = CustomPayloadAttributes;
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
+    type ExecutionPayloadV1 = ExecutionPayloadV1;
+    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
+    type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
 
     fn validate_version_specific_fields(
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, CustomPayloadAttributes>,
-    ) -> Result<(), AttributesValidationError> {
+    ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(chain_spec, version, payload_or_attrs)
     }
 }

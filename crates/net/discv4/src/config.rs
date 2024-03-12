@@ -6,10 +6,7 @@
 use alloy_rlp::Encodable;
 use reth_net_common::ban_list::BanList;
 use reth_net_nat::{NatResolver, ResolveNatInterval};
-use reth_primitives::{
-    bytes::{Bytes, BytesMut},
-    NodeRecord,
-};
+use reth_primitives::{bytes::Bytes, NodeRecord};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -80,9 +77,7 @@ impl Discv4Config {
 
     /// Add another key value pair to include in the ENR
     pub fn add_eip868_pair(&mut self, key: impl Into<Vec<u8>>, value: impl Encodable) -> &mut Self {
-        let mut buf = BytesMut::new();
-        value.encode(&mut buf);
-        self.add_eip868_rlp_pair(key, buf.freeze())
+        self.add_eip868_rlp_pair(key, Bytes::from(alloy_rlp::encode(&value)))
     }
 
     /// Add another key value pair to include in the ENR
@@ -237,9 +232,7 @@ impl Discv4ConfigBuilder {
 
     /// Add another key value pair to include in the ENR
     pub fn add_eip868_pair(&mut self, key: impl Into<Vec<u8>>, value: impl Encodable) -> &mut Self {
-        let mut buf = BytesMut::new();
-        value.encode(&mut buf);
-        self.add_eip868_rlp_pair(key, buf.freeze())
+        self.add_eip868_rlp_pair(key, Bytes::from(alloy_rlp::encode(&value)))
     }
 
     /// Add another key value pair to include in the ENR

@@ -195,7 +195,7 @@ impl ImportCommand {
                     body_downloader,
                     factory.clone(),
                     etl_file_size,
-                )?
+                )
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
                 })

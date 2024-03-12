@@ -3,12 +3,12 @@
 //! Run with
 //!
 //! ```not_rust
-//! cargo run --release -p custom-inspector --node --http --ws --recipients 0x....,0x....
+//! cargo run --release -p custom-inspector -- node --http --ws --recipients 0x....,0x....
 //! ```
 //!
 //! If no recipients are specified, all transactions will be inspected.
 
-#![warn(unused_crate_dependencies)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use clap::Parser;
 use futures_util::StreamExt;

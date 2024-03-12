@@ -1,6 +1,6 @@
 //! This example shows how to configure custom components for a reth node.
 
-#![warn(unused_crate_dependencies)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use reth::{
     builder::{components::PoolBuilder, BuilderContext, FullNodeTypes},

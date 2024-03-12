@@ -97,7 +97,7 @@ where
         trace!(?hello, "sending p2p hello to peer");
 
         // send our hello message with the Sink
-        let mut raw_hello_bytes = BytesMut::new();
+        let mut raw_hello_bytes = Vec::with_capacity(142);
         P2PMessage::Hello(hello.message()).encode(&mut raw_hello_bytes);
         self.inner.send(raw_hello_bytes.into()).await?;
 
@@ -185,13 +185,14 @@ where
         &mut self,
         reason: DisconnectReason,
     ) -> Result<(), P2PStreamError> {
-        let mut buf = BytesMut::new();
-        P2PMessage::Disconnect(reason).encode(&mut buf);
         trace!(
             %reason,
             "Sending disconnect message during the handshake",
         );
-        self.inner.send(buf.freeze()).await.map_err(P2PStreamError::Io)
+        self.inner
+            .send(Bytes::from(alloy_rlp::encode(P2PMessage::Disconnect(reason))))
+            .await
+            .map_err(P2PStreamError::Io)
     }
 }
 

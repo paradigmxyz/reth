@@ -61,7 +61,6 @@
 //!             executor_factory,
 //!             500*1024*1024,
 //!         )
-//!         .unwrap(),
 //!     )
 //!     .build(provider_factory, static_file_producer);
 //! ```

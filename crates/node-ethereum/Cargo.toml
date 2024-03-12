@@ -23,10 +23,6 @@ reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
-revm.workspace = true
-
-# async
-async-trait.workspace = true
 
 # misc
 eyre.workspace = true

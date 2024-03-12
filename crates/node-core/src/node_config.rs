@@ -47,11 +47,15 @@ use reth_primitives::{
     BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256, MAINNET,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader,
-    BlockchainTreePendingStateProvider, CanonStateSubscriptions, HeaderProvider, HeaderSyncMode,
-    ProviderFactory, StageCheckpointReader,
+    providers::{BlockchainProvider, StaticFileProvider},
+    BlockHashReader, BlockNumReader, BlockReader, BlockchainTreePendingStateProvider,
+    CanonStateSubscriptions, HeaderProvider, HeaderSyncMode, ProviderFactory,
+    StageCheckpointReader,
 };
-use reth_revm::EvmProcessorFactory;
+use reth_revm::{
+    stack::{Hook, InspectorStackConfig},
+    EvmProcessorFactory,
+};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -67,7 +71,6 @@ use reth_transaction_pool::{
     blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
     EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
-use revm_inspectors::stack::Hook;
 use secp256k1::SecretKey;
 use std::{
     net::{SocketAddr, SocketAddrV4},
@@ -599,6 +602,7 @@ impl NodeConfig {
         &self,
         prometheus_handle: PrometheusHandle,
         db: Metrics,
+        static_file_provider: StaticFileProvider,
     ) -> eyre::Result<()>
     where
         Metrics: DatabaseMetrics + 'static + Send + Sync,
@@ -609,6 +613,7 @@ impl NodeConfig {
                 listen_addr,
                 prometheus_handle,
                 db,
+                static_file_provider,
                 metrics_process::Collector::default(),
             )
             .await?;
@@ -800,7 +805,6 @@ impl NodeConfig {
         }
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        use revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone(), evm_config);
 
         let stack_config = InspectorStackConfig {
@@ -834,7 +838,7 @@ impl NodeConfig {
                     body_downloader,
                     factory.clone(),
                     stage_config.etl.etl_file_size,
-                )?
+                )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
                 })

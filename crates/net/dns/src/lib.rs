@@ -10,6 +10,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
@@ -411,7 +412,7 @@ mod tests {
     use crate::tree::TreeRootEntry;
     use alloy_chains::Chain;
     use alloy_rlp::Encodable;
-    use enr::{EnrBuilder, EnrKey};
+    use enr::EnrKey;
     use reth_primitives::{Hardfork, MAINNET};
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
@@ -458,7 +459,7 @@ mod tests {
             LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
         resolver.insert(link.domain.clone(), root.to_string());
 
-        let mut builder = EnrBuilder::new("v4");
+        let mut builder = Enr::builder();
         let mut buf = Vec::new();
         let fork_id = MAINNET.hardfork_fork_id(Hardfork::Frontier).unwrap();
         fork_id.encode(&mut buf);
@@ -527,7 +528,7 @@ mod tests {
         // await recheck timeout
         tokio::time::sleep(config.recheck_interval).await;
 
-        let enr = EnrBuilder::new("v4").build(&secret_key).unwrap();
+        let enr = Enr::empty(&secret_key).unwrap();
         resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
 
         let event = poll_fn(|cx| service.poll(cx)).await;

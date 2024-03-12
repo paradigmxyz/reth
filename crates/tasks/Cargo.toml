@@ -25,7 +25,14 @@ metrics.workspace = true
 # misc
 tracing.workspace = true
 thiserror.workspace = true
-dyn-clone = "1.0"
+dyn-clone.workspace = true 
+
+# feature `rayon`
+rayon = { workspace = true, optional = true }
+pin-project = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
+
+[features]
+rayon = ["dep:rayon", "pin-project"]

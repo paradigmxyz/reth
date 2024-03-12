@@ -17,14 +17,12 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
     TransactionsProvider, TransactionsProviderExt,
 };
-use std::sync::Arc;
-use tempfile::TempDir;
 use tracing::*;
 
 /// The transaction lookup stage.
 ///
-/// This stage walks over the bodies table, and sets the transaction hash of each transaction in a
-/// block to the corresponding `BlockNumber` at each block. This is written to the
+/// This stage walks over existing transactions, and sets the transaction hash of each transaction
+/// in a block to the corresponding `BlockNumber` at each block. This is written to the
 /// [`tables::TransactionHashNumbers`] This is used for looking up changesets via the transaction
 /// hash.
 ///
@@ -103,7 +101,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         // 500MB temporary files
         let mut hash_collector: Collector<TxHash, TxNumber> =
-            Collector::new(Arc::new(TempDir::new()?), self.etl_file_size);
+            Collector::new(self.etl_file_size);
 
         debug!(
             target: "sync::stages::transaction_lookup",
@@ -120,7 +118,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Calculating transaction hashes");
 
             for (key, value) in provider.transaction_hashes_by_range(tx_range)? {
-                hash_collector.insert(key, value);
+                hash_collector.insert(key, value)?;
             }
 
             input.checkpoint = Some(
@@ -223,7 +221,10 @@ fn stage_checkpoint<DB: Database>(
         // number of pruned `TransactionHashNumbers` entries.
         processed: provider.count_entries::<tables::TransactionHashNumbers>()? as u64 +
             pruned_entries,
-        total: provider.count_entries::<tables::Transactions>()? as u64,
+        // Count only static files entries. If we count the database entries too, we may have
+        // duplicates. We're sure that the static files have all entries that database has,
+        // because we run the `StaticFileProducer` before starting the pipeline.
+        total: provider.static_file_provider().count_entries::<tables::Transactions>()? as u64,
     })
 }
 

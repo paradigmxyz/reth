@@ -1,7 +1,7 @@
 //! This example shows how to run a custom dev node programmatically and submit a transaction
 //! through rpc.
 
-#![warn(unused_crate_dependencies)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use futures_util::StreamExt;
 use reth::{
@@ -25,7 +25,7 @@ async fn main() -> eyre::Result<()> {
         .with_rpc(RpcServerArgs::default().with_http())
         .with_chain(custom_chain());
 
-    let NodeHandle { mut node, node_exit_future } = NodeBuilder::new(node_config)
+    let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
         .node(EthereumNode::default())
         .launch()
@@ -50,8 +50,7 @@ async fn main() -> eyre::Result<()> {
     let tx = head.tip().transactions().next().unwrap();
     assert_eq!(tx.hash(), hash);
     println!("mined transaction: {hash}");
-
-    node_exit_future.await
+    Ok(())
 }
 
 fn custom_chain() -> Arc<ChainSpec> {

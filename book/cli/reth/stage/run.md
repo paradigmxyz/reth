@@ -185,6 +185,9 @@ Database:
           
           Useful when you want to run diagnostics on the database.
 
+      --checkpoints
+          Save stage checkpoints
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
