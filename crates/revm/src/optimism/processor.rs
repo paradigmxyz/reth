@@ -75,7 +75,7 @@ where
                 block.timestamp,
             ) {
                 debug!(target: "evm", %error, ?receipts, "receipts verification failed");
-                return Err(error);
+                return Err(error)
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -92,7 +92,7 @@ where
 
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok((Vec::new(), 0));
+            return Ok((Vec::new(), 0))
         }
 
         let is_regolith =
@@ -123,14 +123,14 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             // An optimism block should never contain blob transactions.
             if matches!(transaction.tx_type(), TxType::EIP4844) {
                 return Err(BlockExecutionError::OptimismBlockExecution(
                     OptimismBlockExecutionError::BlobTransactionRejected,
-                ));
+                ))
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.

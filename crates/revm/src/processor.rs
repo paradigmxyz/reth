@@ -305,7 +305,7 @@ where
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
-            .into());
+            .into())
         }
         let time = Instant::now();
         self.apply_post_execution_state_change(block, total_difficulty)?;
@@ -364,7 +364,7 @@ where
             self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
         {
             receipts.clear();
-            return Ok(());
+            return Ok(())
         }
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
@@ -372,7 +372,7 @@ where
         let prunable_receipts =
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
         if !prunable_receipts {
-            return Ok(());
+            return Ok(())
         }
 
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
@@ -435,7 +435,7 @@ where
                 verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
             {
                 debug!(target: "evm", %error, ?receipts, "receipts verification failed");
-                return Err(error);
+                return Err(error)
             };
             self.stats.receipt_root_duration += time.elapsed();
         }
@@ -452,7 +452,7 @@ where
 
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok((Vec::new(), 0));
+            return Ok((Vec::new(), 0))
         }
 
         let mut cumulative_gas_used = 0;
@@ -467,7 +467,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, *sender)?;
@@ -565,14 +565,14 @@ pub fn compare_receipts_root_and_logs_bloom(
         return Err(BlockValidationError::ReceiptRootDiff(
             GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
         )
-        .into());
+        .into())
     }
 
     if calculated_logs_bloom != expected_logs_bloom {
         return Err(BlockValidationError::BloomLogDiff(
             GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
         )
-        .into());
+        .into())
     }
 
     Ok(())
