@@ -28,7 +28,10 @@ use tracing::{debug, info, warn};
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
-/// The current high-level state of the node.
+/// The current high-level state of the node, including the node's database environemt, network
+/// connections, current processing stage, and the latest block information. It provides
+/// methods to handle different types of events that affect the node's state, such as pipeline
+/// events, network events, and consensus engine events.
 struct NodeState<DB> {
     /// Database environment.
     /// Used for freelist calculation reported in the "Status" log message.
