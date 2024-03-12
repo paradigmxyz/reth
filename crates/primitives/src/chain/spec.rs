@@ -890,7 +890,7 @@ impl From<Genesis> for ChainSpec {
             .collect::<BTreeMap<_, _>>();
 
         // Paris
-        if let Some(ttd) = genesis.config.terminal_total_difficulty {
+        let paris_block_and_final_difficulty = if let Some(ttd) = genesis.config.terminal_total_difficulty {
             hardforks.insert(
                 Hardfork::Paris,
                 ForkCondition::TTD {
@@ -898,7 +898,11 @@ impl From<Genesis> for ChainSpec {
                     fork_block: genesis.config.merge_netsplit_block,
                 },
             );
-        }
+
+            genesis.config.merge_netsplit_block.map(|block| (block, ttd))
+        } else {
+            None
+        };
 
         // Time-based hardforks
         let time_hardfork_opts = [
@@ -921,7 +925,7 @@ impl From<Genesis> for ChainSpec {
             genesis_hash: None,
             fork_timestamps: ForkTimestamps::from_hardforks(&hardforks),
             hardforks,
-            paris_block_and_final_difficulty: None,
+            paris_block_and_final_difficulty,
             deposit_contract: None,
             ..Default::default()
         }
@@ -1229,13 +1233,22 @@ impl ChainSpecBuilder {
     /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
     /// [`Self::genesis`])
     pub fn build(self) -> ChainSpec {
+        let paris_block_and_final_difficulty = {
+            self.hardforks.get(&Hardfork::Paris).and_then(|cond| {
+                if let ForkCondition::TTD { fork_block, total_difficulty } = cond {
+                    fork_block.map(|fork_block| (fork_block, *total_difficulty))
+                } else {
+                    None
+                }
+            })
+        };
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
             genesis_hash: None,
             fork_timestamps: ForkTimestamps::from_hardforks(&self.hardforks),
             hardforks: self.hardforks,
-            paris_block_and_final_difficulty: None,
+            paris_block_and_final_difficulty,
             deposit_contract: None,
             ..Default::default()
         }
