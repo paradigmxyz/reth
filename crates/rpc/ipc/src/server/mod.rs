@@ -60,7 +60,7 @@ impl IpcServer<Identity> {
     /// use jsonrpsee::RpcModule;
     /// use reth_ipc::server::Builder;
     /// async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    ///     let server = Builder::default().build("/tmp/my-uds")?;
+    ///     let server = Builder::default().build("/tmp/my-uds");
     ///     let mut module = RpcModule::new(());
     ///     module.register_method("say_hello", |_, _| "lo")?;
     ///     let handle = server.start(module).await?;
@@ -528,10 +528,8 @@ impl<B> Builder<B> {
     /// async fn main() {
     ///     let builder = tower::ServiceBuilder::new();
     ///
-    ///     let server = reth_ipc::server::Builder::default()
-    ///         .set_middleware(builder)
-    ///         .build("/tmp/my-uds")
-    ///         .unwrap();
+    ///     let server =
+    ///         reth_ipc::server::Builder::default().set_middleware(builder).build("/tmp/my-uds");
     /// }
     /// ```
     pub fn set_middleware<T>(self, service_builder: tower::ServiceBuilder<T>) -> Builder<T> {

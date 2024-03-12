@@ -170,7 +170,6 @@ pub(crate) async fn execute_call(req: Request<'_>, call: CallData<'_>) -> CallOr
                 }
             }
             MethodCallback::Unsubscription(callback) => {
-
                 // Don't adhere to any resource or subscription limits; always let unsubscribing
                 // happen!
                 let result = callback(id, params, conn_id, max_response_body_size as usize);
