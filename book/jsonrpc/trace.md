@@ -46,7 +46,7 @@ The transaction trace filtering APIs are:
 
 Executes the given call and returns a number of possible traces for it.
 
-The first parameter is a transaction object where the `from` field is optional and the `nonce` field is ommitted.
+The first parameter is a transaction object where the `from` field is optional and the `nonce` field is omitted.
 
 The second parameter is an array of one or more trace types (`vmTrace`, `trace`, `stateDiff`).
 

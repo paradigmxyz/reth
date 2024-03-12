@@ -53,15 +53,15 @@ where
         // filter it. It is guaranteed that further shards for this sharded key will not
         // contain the target block number, as it's in this shard.
         else {
-            let new_blocks =
-                blocks.iter(0).skip_while(|block| *block <= to_block as usize).collect::<Vec<_>>();
+            let higher_blocks =
+                blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
 
             // If there were blocks less than or equal to the target one
             // (so the shard has changed), update the shard.
-            if blocks.len() != new_blocks.len() {
-                // If there are no more blocks in this shard, we need to remove it, as empty
-                // shards are not allowed.
-                if new_blocks.is_empty() {
+            if blocks.len() as usize != higher_blocks.len() {
+                // If there will be no more blocks in the shard after pruning blocks below target
+                // block, we need to remove it, as empty shards are not allowed.
+                if higher_blocks.is_empty() {
                     if key.as_ref().highest_block_number == u64::MAX {
                         let prev_row = cursor.prev()?;
                         match prev_row {
@@ -95,7 +95,7 @@ where
                         deleted += 1;
                     }
                 } else {
-                    cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(new_blocks))?;
+                    cursor.upsert(key.clone(), BlockNumberList::new_pre_sorted(higher_blocks))?;
                 }
             }
 

@@ -5,7 +5,6 @@ use reth_provider::{
     StateProvider, TransactionsProvider,
 };
 use reth_rpc_types::{Filter, FilteredParams};
-use reth_rpc_types_compat::log::from_primitive_log;
 use std::path::Path;
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
@@ -18,18 +17,20 @@ fn main() -> eyre::Result<()> {
     // Opens a RO handle to the database file.
     // TODO: Should be able to do `ProviderFactory::new_with_db_path_ro(...)` instead of
     //  doing in 2 steps.
-    let db = open_db_read_only(Path::new(&std::env::var("RETH_DB_PATH")?), Default::default())?;
+    let db_path = std::env::var("RETH_DB_PATH")?;
+    let db_path = Path::new(&db_path);
+    let db = open_db_read_only(db_path.join("db").as_path(), Default::default())?;
 
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
     let spec = ChainSpecBuilder::mainnet().build();
-    let factory = ProviderFactory::new(db, spec.into());
+    let factory = ProviderFactory::new(db, spec.into(), db_path.join("static_files"))?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.
     let provider = factory.provider()?;
 
-    // Run basic queryies against the DB
+    // Run basic queries against the DB
     let block_num = 100;
     header_provider_example(&provider, block_num)?;
     block_provider_example(&provider, block_num)?;
@@ -199,8 +200,9 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     {
         let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
         for log in &receipts.logs {
-            let log = from_primitive_log(log.clone());
-            if filter_params.filter_address(&log) && filter_params.filter_topics(&log) {
+            if filter_params.filter_address(&log.address) &&
+                filter_params.filter_topics(&log.topics)
+            {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")
             }

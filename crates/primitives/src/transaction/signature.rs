@@ -78,11 +78,6 @@ impl Signature {
     /// Output the `v` of the signature depends on chain_id
     #[inline]
     pub fn v(&self, chain_id: Option<u64>) -> u64 {
-        #[cfg(feature = "optimism")]
-        if self.r.is_zero() && self.s.is_zero() {
-            return 0
-        }
-
         if let Some(chain_id) = chain_id {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
             self.odd_y_parity as u64 + chain_id * 2 + 35
@@ -206,16 +201,6 @@ mod tests {
         assert_eq!(4, signature.payload_len_with_eip155_chain_id(Some(47)));
     }
 
-    #[cfg(feature = "optimism")]
-    #[test]
-    fn test_zero_signature_payload_len_with_eip155_chain_id() {
-        let zero_signature = Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false };
-
-        assert_eq!(3, zero_signature.payload_len_with_eip155_chain_id(None));
-        assert_eq!(3, zero_signature.payload_len_with_eip155_chain_id(Some(1)));
-        assert_eq!(3, zero_signature.payload_len_with_eip155_chain_id(Some(47)));
-    }
-
     #[test]
     fn test_v() {
         // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
@@ -226,16 +211,6 @@ mod tests {
         let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: true };
         assert_eq!(28, signature.v(None));
         assert_eq!(38, signature.v(Some(1)));
-    }
-
-    #[cfg(feature = "optimism")]
-    #[test]
-    fn test_zero_signature_v() {
-        let signature = Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false };
-
-        assert_eq!(0, signature.v(None));
-        assert_eq!(0, signature.v(Some(1)));
-        assert_eq!(0, signature.v(Some(47)));
     }
 
     #[test]

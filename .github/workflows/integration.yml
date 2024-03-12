@@ -18,14 +18,13 @@ concurrency:
 
 jobs:
   test:
-    name: test / ${{ matrix.network }} (${{ matrix.partition }}/2)
+    name: test / ${{ matrix.network }}
     runs-on:
       group: Reth
     env:
       RUST_BACKTRACE: 1
     strategy:
       matrix:
-        partition: [1, 2]
         network: ["ethereum", "optimism"]
     timeout-minutes: 60
     steps:
@@ -40,10 +39,9 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
-            --locked --features "${{ matrix.network }}" \
+            --locked --features "asm-keccak ${{ matrix.network }}" \
             --workspace --exclude examples --exclude ef-tests \
-            --partition hash:${{ matrix.partition }}/2 \
-            -E 'kind(test)'
+            -E "kind(test)"
 
   sync:
     name: sync / 100k blocks
@@ -63,7 +61,7 @@ jobs:
           cache-on-failure: true
       - name: Run sync
         run: |
-          cargo run --release --features jemalloc,min-error-logs --bin reth \
+          cargo run --release --features asm-keccak,jemalloc,min-error-logs --bin reth \
             -- node \
             --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 \
             --debug.max-block 100000 \
@@ -71,8 +69,7 @@ jobs:
       - name: Verify the target block hash
         run: |
           cargo run --release --bin reth \
-            -- db \
-            get CanonicalHeaders 100000 \
+            -- db get static-file headers 100000 \
             | grep 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4
 
   integration-success:

@@ -50,8 +50,6 @@ use tracing::{debug, trace};
 ///
 /// InspectorStack are used for optional inspecting execution. And it contains
 /// various duration of parts of execution.
-// TODO: https://github.com/bluealloy/revm/pull/745
-// #[derive(Debug)]
 #[allow(missing_debug_implementations)]
 pub struct EVMProcessor<'a, EvmConfig> {
     /// The configured chain-spec
@@ -172,7 +170,7 @@ where
 
         self.db_mut().set_state_clear_flag(state_clear_flag);
 
-        let mut cfg: CfgEnvWithHandlerCfg =
+        let mut cfg =
             CfgEnvWithHandlerCfg::new_with_spec_id(self.evm.cfg().clone(), self.evm.spec_id());
         EvmConfig::fill_cfg_and_block_env(
             &mut cfg,
@@ -262,7 +260,7 @@ where
             fill_op_tx_env(self.evm.tx_mut(), transaction, sender, envelope_buf.into());
         }
 
-        let hash = transaction.hash();
+        let hash = transaction.hash_ref();
         let should_inspect = self.evm.context.external.should_inspect(self.evm.env(), hash);
         let out = if should_inspect {
             // push inspector handle register.
@@ -270,7 +268,7 @@ where
             let output = self.evm.transact();
             tracing::trace!(
                 target: "evm",
-                ?hash, ?output, ?transaction, env = ?self.evm.context.evm.env,
+                %hash, ?output, ?transaction, env = ?self.evm.context.evm.env,
                 "Executed transaction"
             );
             // pop last handle register
@@ -502,7 +500,7 @@ where
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
-        self.stats.log_info();
+        self.stats.log_debug();
         let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
             self.evm.context.evm.db.take_bundle(),
@@ -870,7 +868,7 @@ mod tests {
 
         // there is no system contract call so there should be NO STORAGE CHANGES
         // this means we'll check the transition state
-        let state = executor.evm.context.evm.db;
+        let state = executor.evm.context.evm.inner.db;
         let transition_state = state
             .transition_state
             .clone()

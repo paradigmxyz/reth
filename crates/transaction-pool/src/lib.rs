@@ -242,8 +242,6 @@ where
     ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
         futures_util::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
             .await
-            .into_iter()
-            .collect()
     }
 
     /// Validates the given transaction
@@ -318,7 +316,6 @@ where
 }
 
 /// implements the `TransactionPool` interface for various transaction pool API consumers.
-#[async_trait::async_trait]
 impl<V, T, S> TransactionPool for Pool<V, T, S>
 where
     V: TransactionValidator,
@@ -460,7 +457,7 @@ where
         self.pool.remove_transactions(hashes)
     }
 
-    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
+    fn retain_unknown<A>(&self, announcement: &mut A)
     where
         A: HandleMempoolData,
     {

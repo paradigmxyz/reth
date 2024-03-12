@@ -60,6 +60,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Traits defining the database abstractions, such as cursors and transactions.
@@ -67,7 +68,7 @@ pub mod abstraction;
 
 mod implementation;
 mod metrics;
-pub mod snapshot;
+pub mod static_file;
 pub mod tables;
 mod utils;
 pub mod version;
@@ -98,7 +99,7 @@ pub fn init_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result
 
     let rpath = path.as_ref();
     if is_database_empty(rpath) {
-        std::fs::create_dir_all(rpath)
+        reth_primitives::fs::create_dir_all(rpath)
             .wrap_err_with(|| format!("Could not create database directory {}", rpath.display()))?;
         create_db_version_file(rpath)?;
     } else {
@@ -163,6 +164,8 @@ pub mod test_utils {
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
     /// Error during database creation
     pub const ERROR_DB_CREATION: &str = "Not able to create the database file.";
+    /// Error during database creation
+    pub const ERROR_STATIC_FILES_CREATION: &str = "Not able to create the static file path.";
     /// Error during table creation
     pub const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
     /// Error during tempdir creation
@@ -223,6 +226,15 @@ pub mod test_utils {
         fn metadata(&self) -> DatabaseMetadataValue {
             self.db().metadata()
         }
+    }
+
+    /// Create static_files path for testing
+    pub fn create_test_static_files_dir() -> PathBuf {
+        let path = tempdir_path();
+        let emsg = format!("{}: {:?}", ERROR_STATIC_FILES_CREATION, path);
+
+        reth_primitives::fs::create_dir_all(path.clone()).expect(&emsg);
+        path
     }
 
     /// Get a temporary directory path to use for the database

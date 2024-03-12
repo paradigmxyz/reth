@@ -187,6 +187,11 @@ impl TransactionOutcome {
             TransactionOutcome::Drop => "drop",
         }
     }
+
+    /// Returns `true` if the transaction outcome is a commit.
+    pub(crate) const fn is_commit(&self) -> bool {
+        matches!(self, TransactionOutcome::Commit)
+    }
 }
 
 /// Types of operations conducted on the database: get, put, delete, and various cursor operations.

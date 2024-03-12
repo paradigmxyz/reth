@@ -187,7 +187,7 @@ where
         S: StateProvider,
     {
         // Disabled because eth_estimateGas is sometimes used with eoa senders
-        // See <htps://github.com/paradigmxyz/reth/issues/1959>
+        // See <https://github.com/paradigmxyz/reth/issues/1959>
         cfg.disable_eip3607 = true;
 
         // The basefee should be ignored for eth_createAccessList

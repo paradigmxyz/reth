@@ -5,18 +5,13 @@ use crate::{
         types::{MaxU32, ZeroAsNoneU64},
         GasPriceOracleArgs, RpcStateCacheArgs,
     },
-    cli::{
-        components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
-        config::RethRpcConfig,
-        ext::RethNodeCommandConfig,
-    },
+    cli::config::RethRpcConfig,
     utils::get_or_create_jwt_secret_from_path,
 };
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
-use futures::TryFutureExt;
 use rand::Rng;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::{ConfigureEvmEnv, EngineTypes};
@@ -32,10 +27,10 @@ use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
     error::RpcError,
-    EthConfig, IpcServerBuilder, RethRpcModule, RpcModuleBuilder, RpcModuleConfig,
-    RpcModuleSelection, RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
+    EthConfig, IpcServerBuilder, RethRpcModule, RpcModuleConfig, RpcModuleSelection,
+    RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
-use reth_rpc_engine_api::{EngineApi, EngineApiServer};
+use reth_rpc_engine_api::EngineApi;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -43,7 +38,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Default max number of subscriptions per connection.
 pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
@@ -61,7 +56,7 @@ pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
-#[clap(next_help_heading = "RPC")]
+#[command(next_help_heading = "RPC")]
 pub struct RpcServerArgs {
     /// Enable the HTTP-RPC server
     #[arg(long, default_value_if("dev", "true", "true"))]
@@ -96,7 +91,7 @@ pub struct RpcServerArgs {
     pub ws_port: u16,
 
     /// Origins from which to accept WebSocket requests
-    #[arg(long = "ws.origins", name = "ws.origins")]
+    #[arg(id = "ws.origins", long = "ws.origins")]
     pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for the WS server
@@ -144,7 +139,7 @@ pub struct RpcServerArgs {
     #[arg(long, visible_alias = "--rpc.returndata.limit", default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into())]
     pub rpc_max_response_size: MaxU32,
 
-    /// Set the the maximum concurrent subscriptions per connection.
+    /// Set the maximum concurrent subscriptions per connection.
     #[arg(long, default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN.into())]
     pub rpc_max_subscriptions_per_connection: MaxU32,
 
@@ -153,8 +148,8 @@ pub struct RpcServerArgs {
     pub rpc_max_connections: MaxU32,
 
     /// Maximum number of concurrent tracing requests.
-    #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_TRACING_REQUESTS)]
-    pub rpc_max_tracing_requests: u32,
+    #[arg(long, value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
+    pub rpc_max_tracing_requests: usize,
 
     /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
     #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
@@ -175,11 +170,11 @@ pub struct RpcServerArgs {
     pub rpc_gas_cap: u64,
 
     /// State cache configuration.
-    #[clap(flatten)]
+    #[command(flatten)]
     pub rpc_state_cache: RpcStateCacheArgs,
 
     /// Gas price oracle configuration.
-    #[clap(flatten)]
+    #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
 }
 
@@ -266,81 +261,6 @@ impl RpcServerArgs {
         self = self.with_auth_unused_port();
         self = self.with_ipc_random_path();
         self
-    }
-
-    /// Configures and launches _all_ servers.
-    ///
-    /// Returns the handles for the launched regular RPC server(s) (if any) and the server handle
-    /// for the auth server that handles the `engine_` API that's accessed by the consensus
-    /// layer.
-    pub async fn start_servers<Reth, Engine, Conf, EngineT>(
-        &self,
-        components: &Reth,
-        engine_api: Engine,
-        jwt_secret: JwtSecret,
-        conf: &mut Conf,
-    ) -> eyre::Result<RethRpcServerHandles>
-    where
-        EngineT: EngineTypes + 'static,
-        Engine: EngineApiServer<EngineT>,
-        Reth: RethNodeComponents,
-        Conf: RethNodeCommandConfig,
-    {
-        let auth_config = self.auth_server_config(jwt_secret)?;
-
-        let module_config = self.transport_rpc_module_config();
-        debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
-
-        let (mut modules, mut auth_module, mut registry) = RpcModuleBuilder::default()
-            .with_provider(components.provider())
-            .with_pool(components.pool())
-            .with_network(components.network())
-            .with_events(components.events())
-            .with_executor(components.task_executor())
-            .with_evm_config(components.evm_config())
-            .build_with_auth_server(module_config, engine_api);
-
-        let rpc_components = RethRpcComponents {
-            registry: &mut registry,
-            modules: &mut modules,
-            auth_module: &mut auth_module,
-        };
-        // apply configured customization
-        conf.extend_rpc_modules(self, components, rpc_components)?;
-
-        let server_config = self.rpc_server_config();
-        let launch_rpc = modules.clone().start_server(server_config).map_ok(|handle| {
-            if let Some(url) = handle.ipc_endpoint() {
-                info!(target: "reth::cli", url=%url, "RPC IPC server started");
-            }
-            if let Some(addr) = handle.http_local_addr() {
-                info!(target: "reth::cli", url=%addr, "RPC HTTP server started");
-            }
-            if let Some(addr) = handle.ws_local_addr() {
-                info!(target: "reth::cli", url=%addr, "RPC WS server started");
-            }
-            handle
-        });
-
-        let launch_auth = auth_module.clone().start_server(auth_config).map_ok(|handle| {
-            let addr = handle.local_addr();
-            info!(target: "reth::cli", url=%addr, "RPC auth server started");
-            handle
-        });
-
-        // launch servers concurrently
-        let (rpc, auth) = futures::future::try_join(launch_rpc, launch_auth).await?;
-        let handles = RethRpcServerHandles { rpc, auth };
-
-        // call hook
-        let rpc_components = RethRpcComponents {
-            registry: &mut registry,
-            modules: &mut modules,
-            auth_module: &mut auth_module,
-        };
-        conf.on_rpc_server_started(self, components, rpc_components, handles.clone())?;
-
-        Ok(handles)
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.
@@ -579,7 +499,7 @@ impl Default for RpcServerArgs {
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
             rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN.into(),
             rpc_max_connections: RPC_DEFAULT_MAX_CONNECTIONS.into(),
-            rpc_max_tracing_requests: constants::DEFAULT_MAX_TRACING_REQUESTS,
+            rpc_max_tracing_requests: constants::default_max_tracing_requests(),
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
@@ -631,7 +551,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

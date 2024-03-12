@@ -84,13 +84,13 @@ jobs:
         shell: bash
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
           path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
 
       - name: Upload signature
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz.asc
           path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz.asc
@@ -111,7 +111,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Download artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
       - name: Generate full changelog
         id: changelog
         run: |

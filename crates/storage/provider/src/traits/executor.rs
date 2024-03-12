@@ -89,8 +89,8 @@ pub struct BlockExecutorStats {
 }
 
 impl BlockExecutorStats {
-    /// Log duration to info level log.
-    pub fn log_info(&self) {
+    /// Log duration to debug level log.
+    pub fn log_debug(&self) {
         debug!(
             target: "evm",
             evm_transact = ?self.execution_duration,

@@ -15,38 +15,30 @@
 //! > "Node started"
 //! once the node has been started.
 
-use clap::Parser;
-use reth::cli::{
-    components::RethNodeComponents,
-    ext::{NoArgsCliExt, RethNodeCommandConfig},
-    Cli,
-};
+use reth::cli::Cli;
+use reth_node_ethereum::EthereumNode;
 
 fn main() {
-    Cli::<NoArgsCliExt<MyRethConfig>>::parse()
-        .with_node_extension(MyRethConfig::default())
-        .run()
+    Cli::parse_args()
+        .run(|builder, _| async move {
+            let handle = builder
+                .node(EthereumNode::default())
+                .on_node_started(|_ctx| {
+                    println!("Node started");
+                    Ok(())
+                })
+                .on_rpc_started(|_ctx, _handles| {
+                    println!("RPC started");
+                    Ok(())
+                })
+                .on_component_initialized(|_ctx| {
+                    println!("All components initialized");
+                    Ok(())
+                })
+                .launch()
+                .await?;
+
+            handle.wait_for_node_exit().await
+        })
         .unwrap();
-}
-
-/// Our custom cli args extension that adds one flag to reth default CLI.
-#[derive(Debug, Clone, Copy, Default)]
-#[non_exhaustive]
-struct MyRethConfig;
-
-impl RethNodeCommandConfig for MyRethConfig {
-    fn on_components_initialized<Reth: RethNodeComponents>(
-        &mut self,
-        _components: &Reth,
-    ) -> eyre::Result<()> {
-        println!("All components initialized");
-        Ok(())
-    }
-    fn on_node_started<Reth: RethNodeComponents>(
-        &mut self,
-        _components: &Reth,
-    ) -> eyre::Result<()> {
-        println!("Node started");
-        Ok(())
-    }
 }

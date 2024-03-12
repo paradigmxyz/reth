@@ -3,7 +3,7 @@ use reth_interfaces::{
     consensus, db::DatabaseError as DbError, executor, p2p::error::DownloadError,
     provider::ProviderError, RethError,
 };
-use reth_primitives::SealedHeader;
+use reth_primitives::{BlockNumber, SealedHeader, StaticFileSegment, TxNumber};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -76,6 +76,36 @@ pub enum StageError {
     /// rely on external downloaders
     #[error("invalid download response: {0}")]
     Download(#[from] DownloadError),
+    /// Database is ahead of static file data.
+    #[error("missing static file data for block number: {number}", number = block.number)]
+    MissingStaticFileData {
+        /// Starting block with  missing data.
+        block: Box<SealedHeader>,
+        /// Static File segment
+        segment: StaticFileSegment,
+    },
+    /// Unrecoverable inconsistency error related to a transaction number in a static file segment.
+    #[error(
+        "inconsistent transaction number for {segment}. db: {database}, static_file: {static_file}"
+    )]
+    InconsistentTxNumber {
+        /// Static File segment where this error was encountered.
+        segment: StaticFileSegment,
+        /// Expected database transaction number.
+        database: TxNumber,
+        /// Expected static file transaction number.
+        static_file: TxNumber,
+    },
+    /// Unrecoverable inconsistency error related to a block number in a static file segment.
+    #[error("inconsistent block number for {segment}. db: {database}, static_file: {static_file}")]
+    InconsistentBlockNumber {
+        /// Static File segment where this error was encountered.
+        segment: StaticFileSegment,
+        /// Expected database block number.
+        database: BlockNumber,
+        /// Expected static file block number.
+        static_file: BlockNumber,
+    },
     /// Internal error
     #[error(transparent)]
     Internal(#[from] RethError),
@@ -104,8 +134,17 @@ impl StageError {
                 StageError::MissingDownloadBuffer |
                 StageError::MissingSyncGap |
                 StageError::ChannelClosed |
+                StageError::InconsistentBlockNumber { .. } |
+                StageError::InconsistentTxNumber { .. } |
+                StageError::Internal(_) |
                 StageError::Fatal(_)
         )
+    }
+}
+
+impl From<std::io::Error> for StageError {
+    fn from(source: std::io::Error) -> Self {
+        StageError::Fatal(Box::new(source))
     }
 }
 
@@ -124,7 +163,7 @@ pub enum PipelineError {
     /// The pipeline encountered an error while trying to send an event.
     #[error("pipeline encountered an error while trying to send an event")]
     Channel(#[from] Box<SendError<PipelineEvent>>),
-    /// The stage encountered an internal error.
+    /// Internal error
     #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] RethError),
 }

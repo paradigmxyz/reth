@@ -7,5 +7,4 @@ license.workspace = true
 
 [dependencies]
 reth.workspace = true
-clap.workspace = true
-eyre.workspace = true
+reth-node-ethereum.workspace = true

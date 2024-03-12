@@ -8,35 +8,65 @@
 //!
 //! If no recipients are specified, all transactions will be traced.
 
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
-    cli::{
-        components::{RethNodeComponents, RethRpcComponents, RethRpcServerHandles},
-        config::RethRpcConfig,
-        ext::{RethCliExt, RethNodeCommandConfig},
-        Cli,
-    },
+    builder::NodeHandle,
+    cli::Cli,
     primitives::{Address, IntoRecoveredTransaction},
     rpc::{
         compat::transaction::transaction_to_call_request,
         types::trace::{parity::TraceType, tracerequest::TraceCallRequest},
     },
-    tasks::TaskSpawner,
     transaction_pool::TransactionPool,
 };
+use reth_node_ethereum::node::EthereumNode;
 use std::collections::HashSet;
 
 fn main() {
-    Cli::<MyRethCliExt>::parse().run().unwrap();
-}
+    Cli::<RethCliTxpoolExt>::parse()
+        .run(|builder, args| async move {
+            // launch the node
+            let NodeHandle { mut node, node_exit_future } =
+                builder.node(EthereumNode::default()).launch().await?;
 
-/// The type that tells the reth CLI what extensions to use
-struct MyRethCliExt;
+            let recipients = args.recipients.iter().copied().collect::<HashSet<_>>();
 
-impl RethCliExt for MyRethCliExt {
-    /// This tells the reth CLI to trace addresses via `RethCliTxpoolExt`
-    type Node = RethCliTxpoolExt;
+            // create a new subscription to pending transactions
+            let mut pending_transactions = node.pool.new_pending_pool_transactions_listener();
+
+            // get an instance of the `trace_` API handler
+            let traceapi = node.rpc_registry.trace_api();
+
+            println!("Spawning trace task!");
+            // Spawn an async block to listen for transactions.
+            node.task_executor.spawn(Box::pin(async move {
+                // Waiting for new transactions
+                while let Some(event) = pending_transactions.next().await {
+                    let tx = event.transaction;
+                    println!("Transaction received: {tx:?}");
+
+                    if let Some(tx_recipient_address) = tx.to() {
+                        if recipients.is_empty() || recipients.contains(&tx_recipient_address) {
+                            // trace the transaction with `trace_call`
+                            let callrequest =
+                                transaction_to_call_request(tx.to_recovered_transaction());
+                            let tracerequest = TraceCallRequest::new(callrequest)
+                                .with_trace_type(TraceType::Trace);
+                            if let Ok(trace_result) = traceapi.trace_call(tracerequest).await {
+                                let hash = tx.hash();
+                                println!("trace result for transaction {hash}: {trace_result:?}");
+                            }
+                        }
+                    }
+                }
+            }));
+
+            node_exit_future.await
+        })
+        .unwrap();
 }
 
 /// Our custom cli args extension that adds one flag to reth default CLI.
@@ -45,51 +75,4 @@ struct RethCliTxpoolExt {
     /// recipients addresses that we want to trace
     #[arg(long, value_delimiter = ',')]
     pub recipients: Vec<Address>,
-}
-
-impl RethNodeCommandConfig for RethCliTxpoolExt {
-    fn on_rpc_server_started<Conf, Reth>(
-        &mut self,
-        _config: &Conf,
-        components: &Reth,
-        rpc_components: RethRpcComponents<'_, Reth>,
-        _handles: RethRpcServerHandles,
-    ) -> eyre::Result<()>
-    where
-        Conf: RethRpcConfig,
-        Reth: RethNodeComponents,
-    {
-        let recipients = self.recipients.iter().copied().collect::<HashSet<_>>();
-
-        // create a new subscription to pending transactions
-        let mut pending_transactions = components.pool().new_pending_pool_transactions_listener();
-
-        // get an instance of the `trace_` API handler
-        let traceapi = rpc_components.registry.trace_api();
-
-        println!("Spawning trace task!");
-        // Spawn an async block to listen for transactions.
-        components.task_executor().spawn(Box::pin(async move {
-            // Waiting for new transactions
-            while let Some(event) = pending_transactions.next().await {
-                let tx = event.transaction;
-                println!("Transaction received: {tx:?}");
-
-                if let Some(tx_recipient_address) = tx.to() {
-                    if recipients.is_empty() || recipients.contains(&tx_recipient_address) {
-                        // trace the transaction with `trace_call`
-                        let callrequest =
-                            transaction_to_call_request(tx.to_recovered_transaction());
-                        let tracerequest =
-                            TraceCallRequest::new(callrequest).with_trace_type(TraceType::Trace);
-                        if let Ok(trace_result) = traceapi.trace_call(tracerequest).await {
-                            let hash = tx.hash();
-                            println!("trace result for transaction {hash}: {trace_result:?}");
-                        }
-                    }
-                }
-            }
-        }));
-        Ok(())
-    }
 }

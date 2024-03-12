@@ -2,7 +2,7 @@
 
 use alloy_rlp::Encodable;
 use reth_network::protocol::IntoRlpxSubProtocol;
-use reth_primitives::{Bytes, BytesMut};
+use reth_primitives::Bytes;
 use reth_rpc::{
     eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig},
     JwtError, JwtSecret,
@@ -89,9 +89,9 @@ pub trait PayloadBuilderConfig {
 
     /// Returns the rlp-encoded extradata bytes.
     fn extradata_rlp_bytes(&self) -> Bytes {
-        let mut extradata = BytesMut::new();
+        let mut extradata = Vec::with_capacity(self.extradata().as_bytes().len() + 1);
         self.extradata().as_bytes().encode(&mut extradata);
-        extradata.freeze().into()
+        extradata.into()
     }
 
     /// The interval at which the job should build a new payload after the last.
@@ -105,10 +105,6 @@ pub trait PayloadBuilderConfig {
 
     /// Maximum number of tasks to spawn for building a payload.
     fn max_payload_tasks(&self) -> usize;
-
-    /// Returns whether or not to construct the pending block.
-    #[cfg(feature = "optimism")]
-    fn compute_pending_block(&self) -> bool;
 }
 
 /// A trait that represents the configured network and can be used to apply additional configuration
