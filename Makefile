@@ -10,6 +10,15 @@ FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 
 BUILD_PATH = "target"
 
+# Configure environment variable which will be used when building jemalloc.
+# This tells jemalloc to use 64-KiB pages. This is necessary when cross
+# compiling for a system that uses a different page size. See the following
+# links for more information:
+#
+# (1) https://github.com/paradigmxyz/reth/issues/6742
+# (2) https://github.com/tikv/jemallocator/blob/af6e6529c087dc1d0ac159372111a859031269f6/jemalloc-sys/README.md?plain=1#L112-L117
+export JEMALLOC_SYS_WITH_LG_PAGE=16
+
 # List of features to use when building. Can be overridden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
@@ -85,10 +94,8 @@ op-build-native-%:
 # No jemalloc on Windows
 build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
 
-# Disable asm-keccak optimizations and jemalloc.
-# Some aarch64 systems use larger page sizes and jemalloc doesn't play well.
-# See: https://github.com/paradigmxyz/reth/issues/6742
-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak jemalloc jemalloc-prof,$(FEATURES))
+# Disable asm-keccak optimizations.
+build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
