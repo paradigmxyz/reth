@@ -3,6 +3,8 @@
 use clap::Args;
 use reth_interfaces::db::LogLevel;
 
+use crate::version::default_client_version;
+
 /// Parameters for database configuration
 #[derive(Debug, Args, PartialEq, Default, Clone, Copy)]
 #[command(next_help_heading = "Database")]
@@ -10,6 +12,15 @@ pub struct DatabaseArgs {
     /// Database logging level. Levels higher than "notice" require a debug build.
     #[arg(long = "db.log-level", value_enum)]
     pub log_level: Option<LogLevel>,
+}
+
+impl DatabaseArgs {
+    /// Returns default database arguments with configured log level and client version.
+    pub fn database_args(&self) -> reth_db::mdbx::DatabaseArguments {
+        reth_db::mdbx::DatabaseArguments::default()
+            .with_log_level(self.log_level)
+            .with_client_version(Some(default_client_version()))
+    }
 }
 
 #[cfg(test)]

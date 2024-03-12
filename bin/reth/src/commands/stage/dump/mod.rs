@@ -31,7 +31,6 @@ use execution::dump_execution_stage;
 
 mod merkle;
 use merkle::dump_merkle_stage;
-use reth_db::mdbx::DatabaseArguments;
 
 /// `reth dump-stage` command
 #[derive(Debug, Parser)]
@@ -104,8 +103,7 @@ impl Command {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db =
-            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
+        let db = Arc::new(init_db(db_path, self.db.database_args())?);
         let provider_factory =
             ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 

@@ -405,8 +405,9 @@ mod tests {
         const MAX_DURATION: Duration = Duration::from_secs(1);
 
         let dir = tempdir().unwrap();
-        let args = DatabaseArguments::default()
-            .max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(MAX_DURATION)));
+        let args = DatabaseArguments::default().with_max_read_transaction_duration(Some(
+            MaxReadTransactionDuration::Set(MAX_DURATION),
+        ));
         let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
 
         let mut tx = db.tx().unwrap();
@@ -429,8 +430,9 @@ mod tests {
         const MAX_DURATION: Duration = Duration::from_secs(1);
 
         let dir = tempdir().unwrap();
-        let args = DatabaseArguments::default()
-            .max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(MAX_DURATION)));
+        let args = DatabaseArguments::default().with_max_read_transaction_duration(Some(
+            MaxReadTransactionDuration::Set(MAX_DURATION),
+        ));
         let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
 
         let mut tx = db.tx().unwrap();
