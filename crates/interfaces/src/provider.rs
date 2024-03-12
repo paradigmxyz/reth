@@ -130,12 +130,6 @@ pub enum ProviderError {
     BlockNumberOverflow(U256),
 }
 
-impl From<reth_nippy_jar::NippyJarError> for ProviderError {
-    fn from(err: reth_nippy_jar::NippyJarError) -> Self {
-        ProviderError::NippyJar(err.to_string())
-    }
-}
-
 impl From<reth_primitives::fs::FsPathError> for ProviderError {
     fn from(err: reth_primitives::fs::FsPathError) -> Self {
         ProviderError::FsPathError(err.to_string())

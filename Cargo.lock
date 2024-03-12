@@ -5926,7 +5926,6 @@ dependencies = [
  "rand 0.8.5",
  "reth-eth-wire",
  "reth-network-api",
- "reth-nippy-jar",
  "reth-primitives",
  "reth-rpc-types",
  "secp256k1 0.27.0",
