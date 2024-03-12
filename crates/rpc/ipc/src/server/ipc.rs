@@ -87,7 +87,8 @@ pub(crate) async fn process_batch_request(b: Batch<'_>) -> Option<String> {
         if got_notif && batch_response.is_empty() {
             None
         } else {
-            Some(batch_response.finish())
+            let batch_resp = batch_response.finish();
+            Some(MethodResponse::from_batch(batch_resp).to_result())
         }
     } else {
         Some(batch_response_error(Id::Null, ErrorObject::from(ErrorCode::ParseError)))
@@ -136,36 +137,15 @@ pub(crate) async fn execute_call(req: Request<'_>, call: CallData<'_>) -> CallOr
 
     let response = match methods.method_with_name(name) {
         None => {
-            // TODO(logger)
-            // logger.on_call(
-            //     name,
-            //     params.clone(),
-            //     logger::MethodKind::Unknown,
-            //     TransportProtocol::Http,
-            // );
             let response = MethodResponse::error(id, ErrorObject::from(ErrorCode::MethodNotFound));
             CallOrSubscription::Call(response)
         }
-        Some((name, method)) => match method {
+        Some((_name, method)) => match method {
             MethodCallback::Sync(callback) => {
-                // TODO(logger)
-                // logger.on_call(
-                //     name,
-                //     params.clone(),
-                //     logger::MethodKind::MethodCall,
-                //     TransportProtocol::Http,
-                // );
                 let response = (callback)(id, params, max_response_body_size as usize);
                 CallOrSubscription::Call(response)
             }
             MethodCallback::Async(callback) => {
-                // TODO(logger)
-                // logger.on_call(
-                //     name,
-                //     params.clone(),
-                //     logger::MethodKind::MethodCall,
-                //     TransportProtocol::Http,
-                // );
                 let id = id.into_owned();
                 let params = params.into_owned();
                 let response =
@@ -190,13 +170,6 @@ pub(crate) async fn execute_call(req: Request<'_>, call: CallData<'_>) -> CallOr
                 }
             }
             MethodCallback::Unsubscription(callback) => {
-                // TODO(logger)
-                // logger.on_call(
-                //     name,
-                //     params.clone(),
-                //     logger::MethodKind::Unsubscription,
-                //     TransportProtocol::WebSocket,
-                // );
 
                 // Don't adhere to any resource or subscription limits; always let unsubscribing
                 // happen!
@@ -208,13 +181,6 @@ pub(crate) async fn execute_call(req: Request<'_>, call: CallData<'_>) -> CallOr
 
     tx_log_from_str(response.as_response().as_result(), max_log_length);
     let _ = request_start;
-    // TODO(logger)
-    // logger.on_result(
-    //     name,
-    //     response.as_response().success_or_error,
-    //     request_start,
-    //     TransportProtocol::Http,
-    // );
     response
 }
 
@@ -266,8 +232,6 @@ pub(crate) async fn handle_request(request: String, input: HandleRequest) -> Opt
         })
         .unwrap_or(Kind::Single);
 
-    // let request_start = logger.on_request(TransportProtocol::Http);
-
     let call = CallData {
         conn_id: 0,
         methods: &methods,
@@ -278,6 +242,7 @@ pub(crate) async fn handle_request(request: String, input: HandleRequest) -> Opt
         request_start: Instant::now(),
         bounded_subscriptions,
     };
+
     // Single request or notification
     let res = if matches!(request_kind, Kind::Single) {
         let response = process_single_request(request.into_bytes(), call).await;
