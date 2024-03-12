@@ -9,7 +9,7 @@ pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 
 mod metrics;
 
-use reth_interfaces::provider::ProviderResult;
+use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
 use std::{ops::Deref, sync::Arc};
@@ -28,8 +28,13 @@ pub struct LoadedJar {
 
 impl LoadedJar {
     fn new(jar: NippyJar<SegmentHeader>) -> ProviderResult<Self> {
-        let mmap_handle = Arc::new(jar.open_data_reader()?);
-        Ok(Self { jar, mmap_handle })
+        match jar.open_data_reader() {
+            Ok(data_reader) => {
+                let mmap_handle = Arc::new(data_reader);
+                Ok(Self { jar, mmap_handle })
+            }
+            Err(e) => Err(ProviderError::NippyJar(e.to_string())),
+        }
     }
 
     /// Returns a clone of the mmap handle that can be used to instantiate a cursor.

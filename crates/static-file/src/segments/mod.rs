@@ -21,7 +21,9 @@ use reth_primitives::{
     },
     BlockNumber, StaticFileSegment,
 };
-use reth_provider::{providers::StaticFileProvider, DatabaseProviderRO, TransactionsProviderExt};
+use reth_provider::{
+    providers::StaticFileProvider, DatabaseProviderRO, ProviderError, TransactionsProviderExt,
+};
 use std::{ops::RangeInclusive, path::Path};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
@@ -82,7 +84,9 @@ pub(crate) fn prepare_jar<DB: Database, const COLUMNS: usize>(
             let dataset = prepare_compression()?;
 
             nippy_jar = nippy_jar.with_zstd(true, 5_000_000);
-            nippy_jar.prepare_compression(dataset.to_vec())?;
+            nippy_jar
+                .prepare_compression(dataset.to_vec())
+                .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
             nippy_jar
         }
         Compression::Uncompressed => nippy_jar,

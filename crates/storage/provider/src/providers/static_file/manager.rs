@@ -118,7 +118,8 @@ impl StaticFileProvider {
     pub fn report_metrics(&self) -> ProviderResult<()> {
         let Some(metrics) = &self.metrics else { return Ok(()) };
 
-        let static_files = iter_static_files(&self.path)?;
+        let static_files =
+            iter_static_files(&self.path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
         for (segment, ranges) in static_files {
             let mut entries = 0;
             let mut size = 0;
@@ -243,14 +244,15 @@ impl StaticFileProvider {
         } else {
             let mut jar = NippyJar::<SegmentHeader>::load(
                 &self.path.join(segment.filename(&fixed_block_range)),
-            )?;
+            )
+            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
             if self.load_filters {
-                jar.load_filters()?;
+                jar.load_filters().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
             }
             jar
         };
 
-        jar.delete()?;
+        jar.delete().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
 
         let mut segment_max_block = None;
         if fixed_block_range.start() > 0 {
@@ -276,9 +278,10 @@ impl StaticFileProvider {
             jar.into()
         } else {
             let path = self.path.join(segment.filename(fixed_block_range));
-            let mut jar = NippyJar::load(&path)?;
+            let mut jar =
+                NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
             if self.load_filters {
-                jar.load_filters()?;
+                jar.load_filters().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
             }
 
             self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
@@ -353,7 +356,8 @@ impl StaticFileProvider {
 
                 let jar = NippyJar::<SegmentHeader>::load(
                     &self.path.join(segment.filename(&fixed_range)),
-                )?;
+                )
+                .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
 
                 // Updates the tx index by first removing all entries which have a higher
                 // block_start than our current static file.
@@ -416,7 +420,9 @@ impl StaticFileProvider {
 
         tx_index.clear();
 
-        for (segment, ranges) in iter_static_files(&self.path)? {
+        for (segment, ranges) in
+            iter_static_files(&self.path).map_err(|e| ProviderError::NippyJar(e.to_string()))?
+        {
             // Update last block for each segment
             if let Some((block_range, _)) = ranges.last() {
                 max_block.insert(segment, block_range.end());
