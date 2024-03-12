@@ -637,6 +637,13 @@ impl ECIES {
     }
 
     pub fn read_header(&mut self, data: &mut [u8]) -> Result<usize, ECIESError> {
+        // If the data is not large enough to fit the header and mac bytes, return an error
+        //
+        // The header is 16 bytes, and the mac is 16 bytes, so the data must be at least 32 bytes
+        if data.len() < 32 {
+            return Err(ECIESErrorImpl::InvalidHeader.into())
+        }
+
         let (header_bytes, mac_bytes) = split_at_mut(data, 16)?;
         let header = HeaderBytes::from_mut_slice(header_bytes);
         let mac = B128::from_slice(&mac_bytes[..16]);
