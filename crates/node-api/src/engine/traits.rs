@@ -1,4 +1,6 @@
-use crate::{validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion};
+use crate::{
+    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
+};
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
@@ -98,7 +100,7 @@ pub trait PayloadAttributes:
         &self,
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-    ) -> Result<(), AttributesValidationError>;
+    ) -> Result<(), EngineObjectValidationError>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -118,7 +120,7 @@ impl PayloadAttributes for EthPayloadAttributes {
         &self,
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-    ) -> Result<(), AttributesValidationError> {
+    ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(chain_spec, version, self.into())
     }
 }
@@ -140,11 +142,11 @@ impl PayloadAttributes for OptimismPayloadAttributes {
         &self,
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-    ) -> Result<(), AttributesValidationError> {
+    ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(chain_spec, version, self.into())?;
 
         if self.gas_limit.is_none() && chain_spec.is_optimism() {
-            return Err(AttributesValidationError::InvalidParams(
+            return Err(EngineObjectValidationError::InvalidParams(
                 "MissingGasLimitInPayloadAttributes".to_string().into(),
             ))
         }
