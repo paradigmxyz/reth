@@ -1,9 +1,8 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
-use num_traits::Zero;
 use reth_db::{
     codecs::CompactU256,
-    cursor::{DbCursorRO, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbDupCursorRW},
     database::Database,
     models::BlockNumberAddress,
     table::Decompress,
@@ -14,19 +13,11 @@ use reth_etl::Collector;
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
-    stage::{
-        CheckpointBlockRange, EntitiesCheckpoint, StageCheckpoint, StageId,
-        StorageHashingCheckpoint,
-    },
-    BufMut, StorageEntry, B256, U256,
+    stage::{EntitiesCheckpoint, StageCheckpoint, StageId, StorageHashingCheckpoint},
+    BufMut, StorageEntry, B256,
 };
 use reth_provider::{DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
-use std::{
-    collections::BTreeMap,
-    fmt::Debug,
-    sync::{mpsc, Arc},
-};
-use tempfile::TempDir;
+use std::{fmt::Debug, sync::mpsc};
 use tracing::*;
 
 /// Storage hashing stage hashes plain storage.
@@ -184,14 +175,17 @@ mod tests {
     use assert_matches::assert_matches;
     use rand::Rng;
     use reth_db::{
-        cursor::{DbCursorRO, DbCursorRW},
+        cursor::{DbCursorRW, DbDupCursorRO},
         models::StoredBlockBodyIndices,
     };
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_contract_account_range},
     };
-    use reth_primitives::{stage::StageUnitCheckpoint, Address, SealedBlock, B256, U256};
+    use reth_primitives::{
+        stage::{CheckpointBlockRange, StageUnitCheckpoint},
+        Address, SealedBlock, U256,
+    };
     use reth_provider::providers::StaticFileWriter;
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);

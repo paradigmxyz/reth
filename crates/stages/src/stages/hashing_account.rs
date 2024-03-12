@@ -1,6 +1,5 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
-use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -12,15 +11,11 @@ use reth_etl::Collector;
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
-    stage::{
-        AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, StageCheckpoint,
-        StageId,
-    },
+    stage::{AccountHashingCheckpoint, EntitiesCheckpoint, StageCheckpoint, StageId},
     Account, B256,
 };
 use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
 use std::{
-    cmp::max,
     fmt::Debug,
     ops::{Range, RangeInclusive},
     sync::mpsc,
@@ -89,7 +84,7 @@ impl AccountHashingStage {
             generators,
             generators::{random_block_range, random_eoa_accounts},
         };
-        use reth_primitives::{Account, B256, U256};
+        use reth_primitives::U256;
         use reth_provider::providers::StaticFileWriter;
 
         let mut rng = generators::rng();
@@ -261,7 +256,10 @@ mod tests {
         UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
+    use reth_primitives::{
+        stage::{CheckpointBlockRange, StageUnitCheckpoint},
+        Account, U256,
+    };
     use reth_provider::providers::StaticFileWriter;
     use test_utils::*;
 
