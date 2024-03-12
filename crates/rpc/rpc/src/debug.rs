@@ -685,11 +685,7 @@ where
             .to_rpc_result()?
             .unwrap_or_default()
             .into_iter()
-            .map(|receipt| {
-                let mut buf = Vec::new();
-                receipt.with_bloom().encode(&mut buf);
-                Bytes::from(buf)
-            })
+            .map(|receipt| receipt.with_bloom().envelope_encoded())
             .collect())
     }
 
