@@ -99,7 +99,7 @@ fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), EC
 pub struct EncryptedMessage<'a> {
     /// The auth data
     auth_data: [u8; 2],
-    /// The remote public key
+    /// The remote secp256k1 public key
     public_key: PublicKey,
     /// The IV
     iv: B128,
@@ -200,13 +200,15 @@ impl<'a> EncryptedMessage<'a> {
     }
 }
 
-/// The keys derived from an ECIES message
+/// The keys derived from an ECIES message.
 #[derive(Debug)]
 pub struct ECIESKeys {
-    /// The key used for decryption
+    /// The key used for decryption, specifically with AES-128 in CTR mode, using a 64-bit big
+    /// endian counter.
     pub enc_key: B128,
 
-    /// The key used for verifying message integrity
+    /// The key used for verifying message integrity, specifically with the NIST SP 800-56A Concat
+    /// KDF.
     pub mac_key: B256,
 }
 
