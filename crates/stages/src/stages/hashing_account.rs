@@ -157,7 +157,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // genesis accounts are not in changeset.
         if to_block - from_block > self.clean_threshold || from_block == 1 {
             let tx = provider.tx_ref();
-            
+
             // clear table, load all accounts and hash it
             tx.clear::<tables::HashedAccounts>()?;
 
@@ -173,6 +173,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
+                    debug!(target: "sync::stages::hashing_account",  "Hashing from {:?} to {:?}", chunk.first().map(|(address, _)| address), chunk.last().map(|(address, _)| address));
                     for (address, account) in chunk.into_iter() {
                         let address = address.key().unwrap();
                         let _ = tx.send((RawKey::new(keccak256(address)), account));
@@ -187,10 +188,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     collector.insert(key, v)?;
                 }
             }
-            
+
             let mut hashed_account_cursor =
                 tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
-            
+
             for item in collector.iter()? {
                 let (key, value) = item?;
                 hashed_account_cursor

@@ -91,6 +91,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
+                    debug!(target: "sync::stages::hashing_storage",  "Hashing from {:?} to {:?}", chunk.first(), chunk.last());
                     for (address, slot) in chunk.into_iter() {
                         let mut addr_key = Vec::with_capacity(64);
                         addr_key.put_slice(keccak256(address).as_slice());
