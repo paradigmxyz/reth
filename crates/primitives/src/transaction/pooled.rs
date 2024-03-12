@@ -11,7 +11,7 @@ use crate::{
     EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
-use bytes::{Buf, BytesMut};
+use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
@@ -302,9 +302,9 @@ impl PooledTransactionsElement {
     ///
     /// See also [TransactionSigned::encode_enveloped]
     pub fn envelope_encoded(&self) -> Bytes {
-        let mut buf = BytesMut::new();
+        let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
-        buf.freeze().into()
+        buf.into()
     }
 
     /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).

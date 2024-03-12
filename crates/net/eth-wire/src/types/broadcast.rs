@@ -740,7 +740,6 @@ impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::BytesMut;
     use reth_primitives::{b256, hex};
     use std::str::FromStr;
 
@@ -750,7 +749,7 @@ mod tests {
         input: (T, &[u8]),
     ) {
         let (expected_decoded, expected_encoded) = input;
-        let mut encoded = BytesMut::new();
+        let mut encoded = Vec::new();
         expected_decoded.encode(&mut encoded);
 
         assert_eq!(hex::encode(&encoded), hex::encode(expected_encoded));

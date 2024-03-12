@@ -97,7 +97,7 @@ where
         trace!(?hello, "sending p2p hello to peer");
 
         // send our hello message with the Sink
-        let mut raw_hello_bytes = BytesMut::new();
+        let mut raw_hello_bytes = Vec::with_capacity(142);
         P2PMessage::Hello(hello.message()).encode(&mut raw_hello_bytes);
         self.inner.send(raw_hello_bytes.into()).await?;
 

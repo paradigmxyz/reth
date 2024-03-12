@@ -100,8 +100,8 @@ impl Command {
             table.add_row(row);
 
             let freelist = tx.inner.env().freelist()?;
-            let freelist_size =
-                freelist * tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
+            let pagesize = tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
+            let freelist_size = freelist * pagesize;
 
             let mut row = Row::new();
             row.add_cell(Cell::new("Freelist"))
@@ -169,7 +169,9 @@ impl Command {
                 let fixed_block_range = find_fixed_range(block_range.start());
                 let jar_provider = static_file_provider
                     .get_segment_provider(segment, || Some(fixed_block_range), None)?
-                    .expect("something went wrong");
+                    .ok_or_else(|| {
+                        eyre::eyre!("Failed to get segment provider for segment: {}", segment)
+                    })?;
 
                 let columns = jar_provider.columns();
                 let rows = jar_provider.rows();
