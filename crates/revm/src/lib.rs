@@ -35,6 +35,10 @@ pub mod stack;
 #[cfg(feature = "optimism")]
 pub mod optimism;
 
+/// Common test helpers
+#[cfg(test)]
+pub mod test_utils;
+
 // Convenience re-exports.
 pub use revm::{self, *};
 pub use revm_inspectors::*;
