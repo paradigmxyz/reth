@@ -13,9 +13,7 @@ use reth_interfaces::p2p::error::RequestResult;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
 use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
-    borrow::Borrow,
     future::Future,
-    hash::Hash,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -272,21 +270,6 @@ where
         }
 
         Poll::Pending
-    }
-}
-
-/// Represents a handled [`GetBlockHeaders`] requests
-///
-/// This is the key type for spam detection cache. The counter is ignored during `PartialEq` and
-/// `Hash`.
-#[derive(Debug, PartialEq, Hash)]
-struct RespondedGetBlockHeaders {
-    req: (PeerId, GetBlockHeaders),
-}
-
-impl Borrow<(PeerId, GetBlockHeaders)> for RespondedGetBlockHeaders {
-    fn borrow(&self) -> &(PeerId, GetBlockHeaders) {
-        &self.req
     }
 }
 
