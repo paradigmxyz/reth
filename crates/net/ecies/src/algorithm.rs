@@ -691,7 +691,11 @@ impl ECIES {
     }
 
     pub fn read_body<'a>(&mut self, data: &'a mut [u8]) -> Result<&'a mut [u8], ECIESError> {
-        let (body, mac_bytes) = split_at_mut(data, data.len() - 16)?;
+        // error if the data is too small to contain the tag
+        // TODO: create a custom type similar to EncryptedMessage for parsing, checking MACs, and
+        // decrypting the body
+        let mac_index = data.len().checked_sub(16).ok_or(ECIESErrorImpl::EncryptedDataTooSmall)?;
+        let (body, mac_bytes) = split_at_mut(data, mac_index)?;
         let mac = B128::from_slice(mac_bytes);
         self.ingress_mac.as_mut().unwrap().update_body(body);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
