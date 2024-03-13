@@ -83,8 +83,8 @@ where
             mode,
             consensus,
             sync_gap: None,
-            hash_collector: Collector::new(etl_config.file_size / 2),
-            header_collector: Collector::new(etl_config.file_size / 2),
+            hash_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
+            header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
             is_etl_ready: false,
         }
     }

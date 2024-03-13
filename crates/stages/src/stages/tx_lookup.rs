@@ -102,7 +102,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         // 500MB temporary files
         let mut hash_collector: Collector<TxHash, TxNumber> =
-            Collector::new(self.etl_config.file_size);
+            Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
 
         debug!(
             target: "sync::stages::transaction_lookup",
