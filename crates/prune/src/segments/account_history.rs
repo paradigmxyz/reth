@@ -287,37 +287,18 @@ mod tests {
 
         // Run pruning
         let result = segment.prune(&provider, input).unwrap();
+        let checkpoint = result.checkpoint.unwrap().as_prune_checkpoint(prune_mode);
 
         trace!(target: "pruner::test",
-            checkpoint=result.checkpoint.unwrap().as_prune_checkpoint(),
+            ?checkpoint,
+            progress=?result.progress,
             run,
             "stopped pruning"
         );
 
         // must commit to db before reading new state of data
-        segment
-            .save_checkpoint(&provider, result.checkpoint.unwrap().as_prune_checkpoint(prune_mode))
-            .unwrap();
+        segment.save_checkpoint(&provider, checkpoint).unwrap();
         provider.commit().expect("commit");
-
-        // Read new state of data
-        let pruned_changesets = test_rig.pruned_changesets::<tables::AccountChangeSets>(run);
-        let pruned_shards = test_rig.pruned_shards::<tables::AccountsHistory>(run);
-
-        trace!(target: "pruner::test",
-            pruned_changesets,
-            pruned_shards,
-            run,
-            "total pruned entries in run"
-        );
-
-        assert_eq!(result.progress, expected_progress, "run {run}");
-
-        if expected_progress.is_entries_limit_reached() {
-            assert_eq!(limit, result.pruned, "run {run}")
-        }
-
-        assert_eq!(pruned_changesets + pruned_shards, result.pruned, "run {run}");
 
         assert_eq!(
             test_rig
@@ -333,6 +314,25 @@ mod tests {
                 prune_mode
             })
         );
+
+        // Read new state of data
+        let pruned_changesets = test_rig.pruned_changesets::<tables::AccountChangeSets>(run);
+        let pruned_shards = test_rig.pruned_shards::<tables::AccountsHistory>(run);
+
+        trace!(target: "pruner::test",
+            pruned_changesets,
+            pruned_shards,
+            run,
+            "total pruned entries in run"
+        );
+
+        // verify result
+        assert_eq!(result.progress, expected_progress, "run {run}");
+        if expected_progress.is_entries_limit_reached() {
+            assert_eq!(limit, result.pruned, "run {run}")
+        }
+        // verify new state of data against result
+        assert_eq!(pruned_changesets + pruned_shards, result.pruned, "run {run}");
     }
 
     #[test]
