@@ -303,7 +303,8 @@ lint:
 	make lint-op-reth && \
 	make lint-other-targets
 
-rustdocs:
+.PHONY: rustdocs
+rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
 	RUSTDOCFLAGS="\
 	--cfg docsrs \
 	--show-type-layout \
@@ -340,9 +341,14 @@ test-other-targets:
 	--benches \
 	--all-features
 
+test-doc:
+	cargo test --doc --workspace --features "ethereum"
+	cargo test --doc --workspace --features "optimism"
+
 test:
 	make test-reth && \
 	make test-op-reth && \
+	make test-doc && \
 	make test-other-targets
 
 pr:
