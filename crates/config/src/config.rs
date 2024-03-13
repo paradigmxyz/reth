@@ -70,6 +70,8 @@ pub struct StageConfig {
     pub index_account_history: IndexHistoryConfig,
     /// Index Storage History stage configuration.
     pub index_storage_history: IndexHistoryConfig,
+    /// Common ETL related configuration.
+    pub etl: EtlConfig,
 }
 
 /// Header stage configuration.
@@ -235,7 +237,21 @@ impl Default for TransactionLookupConfig {
     }
 }
 
-/// History History stage configuration.
+/// Common ETL related configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct EtlConfig {
+    /// The maximum size in bytes of data held in memory before being flushed to disk as a file.
+    pub etl_file_size: usize,
+}
+
+impl Default for EtlConfig {
+    fn default() -> Self {
+        Self { etl_file_size: 500 * (1024 * 1024) }
+    }
+}
+
+/// History stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct IndexHistoryConfig {

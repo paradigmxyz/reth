@@ -61,6 +61,9 @@ Options:
       --batch-size <BATCH_SIZE>
           Batch size for stage execution and unwind
 
+      --etl-file-size <ETL_FILE_SIZE>
+          Size for temporary file during ETL stages
+
   -s, --skip-unwind
           Normally, running the stage requires unwinding for stages that already have been run, in order to not rewrite to the same database slots.
           
