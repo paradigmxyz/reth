@@ -657,12 +657,12 @@ pub(crate) struct ForkTracker {
 }
 
 impl ForkTracker {
-    /// Returns true if the Shanghai fork is activated.
+    /// Returns `true` if Shanghai fork is activated.
     pub(crate) fn is_shanghai_activated(&self) -> bool {
         self.shanghai.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Returns true if the Shanghai fork is activated.
+    /// Returns `true` if Cancun fork is activated.
     pub(crate) fn is_cancun_activated(&self) -> bool {
         self.cancun.load(std::sync::atomic::Ordering::Relaxed)
     }
