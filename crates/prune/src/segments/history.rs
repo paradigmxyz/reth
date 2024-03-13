@@ -335,7 +335,7 @@ pub(in crate::segments) mod test {
             let changesets_len = self.db.table::<T>().unwrap().len();
             let original_changesets_len = self.changesets.len();
 
-            trace!(target: "pruner::test",
+            trace!(target: "pruner::history::test",
                 original_changesets_len,
                 changesets_len,
                 run
@@ -367,7 +367,7 @@ pub(in crate::segments) mod test {
             let shards_len = self.db.table::<T>().unwrap().len();
             let original_shards_len = self.original_shards.len();
 
-            trace!(target: "pruner::test",
+            trace!(target: "pruner::history::test",
                 original_shards_len,
                 shards_len,
                 run,
@@ -410,7 +410,7 @@ pub(in crate::segments) mod test {
                     let original_shard_blocks_len = original_shard_blocks.len() as usize;
                     let pruned_shard_blocks_len = pruned_shard_blocks.len() as usize;
 
-                    trace!(target: "pruner::test",
+                    trace!(target: "pruner::history::test",
                         original_shard_blocks_len,
                         pruned_shard_blocks_len,
                         "partially pruned shard"
