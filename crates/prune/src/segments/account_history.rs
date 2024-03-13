@@ -201,6 +201,8 @@ mod tests {
         }
 
         fn build(self) -> TestRig<ShardedKey<Address>> {
+            reth_tracing::init_test_tracing();
+
             let Self { block_range, n_storage_changes, key_range, prune_job_deleted_entries_limit } =
                 self;
 
@@ -231,6 +233,13 @@ mod tests {
             let job_limiter = PruneLimiterBuilder::default()
                 .deleted_entries_limit(prune_job_deleted_entries_limit)
                 .build();
+
+            trace!(target: "pruner::test",
+                changesets_len=changesets.len(),
+                original_shards_len=original_shards.len(),
+                job_deleted_entries_limit=job_limiter.deleted_entries_limit(),
+                "new account history test rig"
+            );
 
             TestRig::new(db, changesets, original_shards, job_limiter)
         }
@@ -267,11 +276,17 @@ mod tests {
             (segment_limiter, maybe_adjusted_limit)
         };
 
+        trace!(target: "pruner::test",
+            deleted_entries_limit=limit,
+            run,
+            "limit for run"
+        );
+
         let input = test_rig.get_input(to_block, PruneSegment::AccountHistory, limiter);
         let provider = test_rig.db().factory.provider_rw().unwrap();
 
         // Run pruning
-        let result = segment.prune(&provider, input.clone()).unwrap();
+        let result = segment.prune(&provider, input).unwrap();
 
         // Data results
         let pruned_changesets = test_rig.pruned_changesets::<tables::AccountChangeSets>(run);
@@ -286,7 +301,7 @@ mod tests {
 
         assert_eq!(result.progress, expected_progress, "run {run}");
 
-        if !expected_progress.is_done() {
+        if expected_progress.is_entries_limit_reached() {
             assert_eq!(limit, result.pruned, "run {run}")
         }
 
