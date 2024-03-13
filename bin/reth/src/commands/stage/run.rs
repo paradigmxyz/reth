@@ -14,7 +14,7 @@ use crate::{
 };
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
-use reth_config::Config;
+use reth_config::{config::EtlConfig, Config};
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_node_ethereum::EthEvmConfig;
@@ -86,6 +86,10 @@ pub struct Command {
     #[arg(long)]
     etl_file_size: Option<usize>,
 
+    /// Directory where to collect ETL files
+    #[arg(long)]
+    etl_dir: Option<PathBuf>,
+
     /// Normally, running the stage requires unwinding for stages that already
     /// have been run, in order to not rewrite to the same database slots.
     ///
@@ -155,7 +159,12 @@ impl Command {
 
         let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
 
-        let etl_file_size = self.etl_file_size.unwrap_or(500 * 1024 * 1024);
+        let etl_config = EtlConfig::new(
+            Some(
+                self.etl_dir.unwrap_or_else(|| EtlConfig::from_datadir(&data_dir.data_dir_path())),
+            ),
+            self.etl_file_size.unwrap_or(EtlConfig::default_file_size()),
+        );
 
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
@@ -235,7 +244,7 @@ impl Command {
                     )
                 }
                 StageEnum::TxLookup => {
-                    (Box::new(TransactionLookupStage::new(batch_size, etl_file_size, None)), None)
+                    (Box::new(TransactionLookupStage::new(batch_size, etl_config, None)), None)
                 }
                 StageEnum::AccountHashing => {
                     (Box::new(AccountHashingStage::new(1, batch_size)), None)

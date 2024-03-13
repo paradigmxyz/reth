@@ -127,7 +127,7 @@ impl Command {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                    stage_conf.etl.etl_file_size,
+                    stage_conf.etl.clone(),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
