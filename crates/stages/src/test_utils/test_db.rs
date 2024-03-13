@@ -251,7 +251,10 @@ impl TestStageDB {
                 });
 
                 if let Some(txs_writer) = &mut txs_writer {
-                    txs_writer.increment_block(reth_primitives::StaticFileSegment::Transactions)?;
+                    txs_writer.increment_block(
+                        reth_primitives::StaticFileSegment::Transactions,
+                        block.number,
+                    )?;
                 }
                 res
             })?;

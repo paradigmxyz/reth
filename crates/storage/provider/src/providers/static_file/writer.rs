@@ -185,7 +185,26 @@ impl StaticFileProviderRW {
     /// and create the next one if we are past the end range.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
-    pub fn increment_block(&mut self, segment: StaticFileSegment) -> ProviderResult<BlockNumber> {
+    pub fn increment_block(
+        &mut self,
+        segment: StaticFileSegment,
+        expected_block_number: BlockNumber,
+    ) -> ProviderResult<BlockNumber> {
+        let next_static_file_block = self
+            .writer
+            .user_header()
+            .block_end()
+            .map(|b| b + 1)
+            .unwrap_or(self.writer.user_header().expected_block_start());
+
+        if expected_block_number != next_static_file_block {
+            return Err(ProviderError::UnexpectedStaticFileBlock(
+                segment,
+                expected_block_number,
+                next_static_file_block,
+            ))
+        }
+
         let start = Instant::now();
         if let Some(last_block) = self.writer.user_header().block_end() {
             // We have finished the previous static file and must freeze it
@@ -342,7 +361,7 @@ impl StaticFileProviderRW {
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        let block_number = self.increment_block(StaticFileSegment::Headers)?;
+        let block_number = self.increment_block(StaticFileSegment::Headers, header.number)?;
 
         self.append_column(header)?;
         self.append_column(CompactU256::from(terminal_difficulty))?;
