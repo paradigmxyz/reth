@@ -341,9 +341,14 @@ test-other-targets:
 	--benches \
 	--all-features
 
+test-doc:
+	cargo test --doc --workspace --features "ethereum"
+	cargo test --doc --workspace --features "optimism"
+
 test:
 	make test-reth && \
 	make test-op-reth && \
+	make test-doc && \
 	make test-other-targets
 
 pr:
