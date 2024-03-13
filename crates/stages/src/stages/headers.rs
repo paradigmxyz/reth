@@ -74,6 +74,7 @@ where
         downloader: Downloader,
         mode: HeaderSyncMode,
         consensus: Arc<dyn Consensus>,
+        etl_file_size: usize,
     ) -> Self {
         Self {
             provider: database,
@@ -81,8 +82,8 @@ where
             mode,
             consensus,
             sync_gap: None,
-            hash_collector: Collector::new(100 * (1024 * 1024)),
-            header_collector: Collector::new(100 * (1024 * 1024)),
+            hash_collector: Collector::new(etl_file_size / 2),
+            header_collector: Collector::new(etl_file_size / 2),
             is_etl_ready: false,
         }
     }
@@ -419,6 +420,7 @@ mod tests {
                     (*self.downloader_factory)(),
                     HeaderSyncMode::Tip(self.channel.1.clone()),
                     self.consensus.clone(),
+                    500 * (1024 * 1024),
                 )
             }
         }

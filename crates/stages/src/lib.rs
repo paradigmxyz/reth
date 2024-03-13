@@ -59,6 +59,7 @@
 //!             headers_downloader,
 //!             bodies_downloader,
 //!             executor_factory,
+//!             500*1024*1024,
 //!         )
 //!     )
 //!     .build(provider_factory, static_file_producer);

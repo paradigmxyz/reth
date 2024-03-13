@@ -82,6 +82,10 @@ pub struct Command {
     #[arg(long)]
     batch_size: Option<u64>,
 
+    /// The maximum size in bytes of data held in memory before being flushed to disk as a file.
+    #[arg(long)]
+    etl_file_size: Option<usize>,
+
     /// Normally, running the stage requires unwinding for stages that already
     /// have been run, in order to not rewrite to the same database slots.
     ///
@@ -150,6 +154,8 @@ impl Command {
         }
 
         let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
+
+        let etl_file_size = self.etl_file_size.unwrap_or(500 * 1024 * 1024);
 
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
@@ -229,7 +235,7 @@ impl Command {
                     )
                 }
                 StageEnum::TxLookup => {
-                    (Box::new(TransactionLookupStage::new(batch_size, None)), None)
+                    (Box::new(TransactionLookupStage::new(batch_size, etl_file_size, None)), None)
                 }
                 StageEnum::AccountHashing => {
                     (Box::new(AccountHashingStage::new(1, batch_size)), None)

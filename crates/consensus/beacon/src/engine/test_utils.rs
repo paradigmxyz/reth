@@ -406,6 +406,7 @@ where
                     header_downloader,
                     body_downloader,
                     executor_factory.clone(),
+                    500 * (1024 * 1024),
                 ))
             }
         };
