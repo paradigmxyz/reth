@@ -168,7 +168,7 @@ pub(crate) fn setup<DB: Database>(
     output_db: &PathBuf,
     db_tool: &DbTool<DB>,
 ) -> eyre::Result<(DatabaseEnv, u64)> {
-    assert!(from < to, "FROM block should not be smaller than TO block.");
+    assert!(from < to, "FROM block should be smaller than TO block.");
 
     info!(target: "reth::cli", ?output_db, "Creating separate db");
 
