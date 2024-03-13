@@ -227,7 +227,7 @@ An ETL (extract, transform, load) data collector. Used mainly to insert data int
 
 ```toml
 [stages.etl]
-# The size of temporary file in bytes for ETL data collector.
+# The maximum size in bytes of data held in memory before being flushed to disk as a file.
 #
 # Lower threshold corresponds to more frequent flushes,
 # but lowers temporary storage usage

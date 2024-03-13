@@ -82,7 +82,7 @@ pub struct Command {
     #[arg(long)]
     batch_size: Option<u64>,
 
-    /// Size for temporary file during ETL stages
+    /// The maximum size in bytes of data held in memory before being flushed to disk as a file.
     #[arg(long)]
     etl_file_size: Option<usize>,
 

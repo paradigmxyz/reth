@@ -241,7 +241,7 @@ impl Default for TransactionLookupConfig {
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct EtlConfig {
-    /// The size of temporary file in bytes for ETL data collector.
+    /// The maximum size in bytes of data held in memory before being flushed to disk as a file.
     pub etl_file_size: usize,
 }
 
