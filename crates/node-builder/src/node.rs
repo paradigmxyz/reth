@@ -38,7 +38,7 @@ pub trait Node<N>: NodeTypes + Clone {
 pub trait NodeTypes: Send + Sync + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
-    /// The node's engine types, defining the interaction with the blockchain engine.
+    /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
     type Evm: ConfigureEvm;
