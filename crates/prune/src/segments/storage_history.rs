@@ -279,19 +279,10 @@ mod tests {
 
         let input = test_rig.get_input(to_block, PruneSegment::StorageHistory, limiter);
         let provider = test_rig.db().factory.provider_rw().unwrap();
+        // Run pruning
         let result = segment.prune(&provider, input.clone()).unwrap();
 
-        assert_eq!(result.progress, expected_progress, "run {run}");
-
-        if !expected_progress.is_done() {
-            assert_eq!(limit, result.pruned, "run {run}")
-        }
-
-        segment
-            .save_checkpoint(&provider, result.checkpoint.unwrap().as_prune_checkpoint(prune_mode))
-            .unwrap();
-        provider.commit().expect("commit");
-
+        // Data results
         let pruned_changesets = test_rig.pruned_changesets::<tables::StorageChangeSets>(run);
         let pruned_shards = test_rig.pruned_shards::<tables::StoragesHistory>(run);
 
@@ -302,7 +293,18 @@ mod tests {
             "total pruned entries in run"
         );
 
+        assert_eq!(result.progress, expected_progress, "run {run}");
+
+        if !expected_progress.is_done() {
+            assert_eq!(limit, result.pruned, "run {run}")
+        }
+
         assert_eq!(pruned_changesets + pruned_shards, result.pruned, "run {run}");
+
+        segment
+            .save_checkpoint(&provider, result.checkpoint.unwrap().as_prune_checkpoint(prune_mode))
+            .unwrap();
+        provider.commit().expect("commit");
 
         assert_eq!(
             test_rig
