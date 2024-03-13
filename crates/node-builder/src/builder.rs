@@ -557,6 +557,11 @@ where
         hooks.add(StaticFileHook::new(static_file_producer.clone(), Box::new(executor.clone())));
         info!(target: "reth::cli", "StaticFileProducer initialized");
 
+        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
+        if reth_config.stages.etl.dir.is_none() {
+            reth_config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+        }
+
         // Configure the pipeline
         let (mut pipeline, client) = if config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
@@ -577,12 +582,6 @@ where
                 evm_config.clone(),
             )
             .build();
-
-            // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
-            if reth_config.stages.etl.dir.is_none() {
-                reth_config.stages.etl.dir =
-                    Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
-            }
 
             let mut pipeline = config
                 .build_networked_pipeline(

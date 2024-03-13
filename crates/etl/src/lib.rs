@@ -119,7 +119,12 @@ where
     fn dir(&mut self) -> io::Result<&TempDir> {
         if self.dir.is_none() {
             self.dir = match &self.parent_dir {
-                Some(dir) => Some(TempDir::new_in(dir)?),
+                Some(dir) => {
+                    if !dir.exists() {
+                        std::fs::create_dir_all(dir)?;
+                    }
+                    Some(TempDir::new_in(dir)?)
+                }
                 None => Some(TempDir::new()?),
             };
         }
