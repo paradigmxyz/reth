@@ -15,7 +15,7 @@ use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
 use reth_config::Config;
-use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db::{init_db, DatabaseEnv};
 use reth_interfaces::consensus::Consensus;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
@@ -124,8 +124,7 @@ impl Command {
         fs::create_dir_all(&db_path)?;
 
         // Initialize the database
-        let db =
-            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
+        let db = Arc::new(init_db(db_path, self.db.database_args())?);
         let provider_factory =
             ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
 

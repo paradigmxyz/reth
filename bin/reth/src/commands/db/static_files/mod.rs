@@ -7,7 +7,6 @@ use reth_db::{
     mdbx::{DatabaseArguments, MaxReadTransactionDuration},
     open_db_read_only, DatabaseEnv,
 };
-use reth_interfaces::db::LogLevel;
 use reth_nippy_jar::{NippyJar, NippyJarCursor};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::{
@@ -83,7 +82,7 @@ impl Command {
     pub fn execute(
         self,
         data_dir: ChainPath<DataDirPath>,
-        log_level: Option<LogLevel>,
+        db_args: DatabaseArguments,
         chain: Arc<ChainSpec>,
     ) -> eyre::Result<()> {
         let all_combinations = self
@@ -98,9 +97,7 @@ impl Command {
 
         let db = open_db_read_only(
             data_dir.db_path().as_path(),
-            DatabaseArguments::default()
-                .log_level(log_level)
-                .max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
+            db_args.with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )?;
         let provider_factory =
             Arc::new(ProviderFactory::new(db, chain.clone(), data_dir.static_files_path())?);
