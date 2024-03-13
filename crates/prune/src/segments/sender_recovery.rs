@@ -210,7 +210,7 @@ mod tests {
             6,
             (
                 PruneProgress::HasMoreData(
-                    reth_primitives::PruneInterruptReason::LimitEntriesDeleted,
+                    reth_primitives::PruneInterruptReason::DeletedEntriesLimitReached,
                 ),
                 10,
             ),

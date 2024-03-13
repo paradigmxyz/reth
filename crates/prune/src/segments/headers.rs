@@ -50,7 +50,7 @@ impl<DB: Database> Segment<DB> for Headers {
         if limiter.is_limit_reached() {
             // Nothing to do, `input.delete_limit` is less than 3 so we can't prune all
             // headers-related tables up to the same height
-            return Ok(PruneOutput::not_done(PruneInterruptReason::LimitEntriesDeleted))
+            return Ok(PruneOutput::not_done(PruneInterruptReason::DeletedEntriesLimitReached))
         }
 
         let last_pruned_block =
@@ -321,6 +321,6 @@ mod tests {
 
         let provider = db.factory.provider_rw().unwrap();
         let result = segment.prune(&provider, input).unwrap();
-        assert_eq!(result, PruneOutput::not_done(PruneInterruptReason::LimitEntriesDeleted));
+        assert_eq!(result, PruneOutput::not_done(PruneInterruptReason::DeletedEntriesLimitReached));
     }
 }

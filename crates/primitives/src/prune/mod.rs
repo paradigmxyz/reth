@@ -113,7 +113,7 @@ impl PruneInterruptReason {
 
     /// Returns `true` if reason is reaching limit on deleted entries.
     pub fn is_entries_limit_reached(&self) -> bool {
-        matches!(self, Self::LimitEntriesDeleted)
+        matches!(self, Self::DeletedEntriesLimitReached)
     }
 }
 
@@ -144,9 +144,9 @@ impl PruneProgress {
     }
 
     /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
-    /// [`PruneInterruptReason::LimitEntriesDeleted`].
+    /// [`PruneInterruptReason::DeletedEntriesLimitReached`].
     pub const fn new_entries_limit_reached() -> Self {
-        Self::HasMoreData(PruneInterruptReason::LimitEntriesDeleted)
+        Self::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached)
     }
 
     /// Returns `true` if prune job is done.
