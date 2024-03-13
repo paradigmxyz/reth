@@ -19,6 +19,7 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
+use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -512,7 +513,7 @@ where
             executor,
             data_dir,
             mut config,
-            reth_config,
+            mut reth_config,
             ..
         } = ctx;
 
@@ -555,6 +556,11 @@ where
         let static_file_producer_events = static_file_producer.events();
         hooks.add(StaticFileHook::new(static_file_producer.clone(), Box::new(executor.clone())));
         info!(target: "reth::cli", "StaticFileProducer initialized");
+
+        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
+        if reth_config.stages.etl.dir.is_none() {
+            reth_config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+        }
 
         // Configure the pipeline
         let (mut pipeline, client) = if config.dev.dev {
