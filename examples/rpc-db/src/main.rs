@@ -17,7 +17,7 @@ use reth::{
     providers::{providers::BlockchainProvider, ProviderFactory},
     utils::db::open_db_read_only,
 };
-use reth_db::mdbx::{models::client_version::ClientVersion, DatabaseArguments};
+use reth_db::{mdbx::DatabaseArguments, models::client_version::ClientVersion};
 // Bringing up the RPC
 use reth::rpc::builder::{
     RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig,
