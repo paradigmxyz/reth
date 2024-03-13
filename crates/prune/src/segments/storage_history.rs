@@ -336,13 +336,17 @@ mod tests {
         );
 
         // verify result
-        assert_eq!(result.progress, expected_progress, "run {run}");
+        let progress = result.progress;
+        let pruned = result.pruned;
+
+        // verify new state of data against result
+        assert_eq!(pruned_changesets + pruned_shards, pruned, "run {run}");
+
+        assert_eq!(expected_progress, progress, "run {run}");
 
         if expected_progress.is_entries_limit_reached() {
-            assert_eq!(limit, result.pruned, "run {run}")
+            assert_eq!(limit, pruned, "run {run}")
         }
-        // verify new state of data against result
-        assert_eq!(pruned_changesets + pruned_shards, result.pruned, "run {run}");
     }
 
     #[test]
