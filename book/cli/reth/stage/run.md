@@ -64,6 +64,9 @@ Options:
       --etl-file-size <ETL_FILE_SIZE>
           Size for temporary file during ETL stages
 
+      --etl-dir <ETL_DIR>
+          Directory where to collect ETL files
+
   -s, --skip-unwind
           Normally, running the stage requires unwinding for stages that already have been run, in order to not rewrite to the same database slots.
           

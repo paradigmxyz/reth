@@ -54,6 +54,7 @@ use crate::{
     },
     StageSet, StageSetBuilder,
 };
+use reth_config::config::EtlConfig;
 use reth_db::database::Database;
 use reth_interfaces::{
     consensus::Consensus,
@@ -100,7 +101,7 @@ impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
         header_downloader: H,
         body_downloader: B,
         executor_factory: EF,
-        etl_file_size: usize,
+        etl_config: EtlConfig,
     ) -> Self
     where
         EF: ExecutorFactory,
@@ -112,7 +113,7 @@ impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
                 consensus,
                 header_downloader,
                 body_downloader,
-                etl_file_size,
+                etl_config,
             ),
             executor_factory,
         }
@@ -164,8 +165,8 @@ pub struct OnlineStages<Provider, H, B> {
     header_downloader: H,
     /// The block body downloader
     body_downloader: B,
-    /// The size of temporary files in bytes for ETL data collector.
-    etl_file_size: usize,
+    /// ETL configuration
+    etl_config: EtlConfig,
 }
 
 impl<Provider, H, B> OnlineStages<Provider, H, B> {
@@ -176,9 +177,9 @@ impl<Provider, H, B> OnlineStages<Provider, H, B> {
         consensus: Arc<dyn Consensus>,
         header_downloader: H,
         body_downloader: B,
-        etl_file_size: usize,
+        etl_config: EtlConfig,
     ) -> Self {
-        Self { provider, header_mode, consensus, header_downloader, body_downloader, etl_file_size }
+        Self { provider, header_mode, consensus, header_downloader, body_downloader, etl_config }
     }
 }
 
@@ -203,7 +204,7 @@ where
         mode: HeaderSyncMode,
         header_downloader: H,
         consensus: Arc<dyn Consensus>,
-        etl_file_size: usize,
+        etl_config: EtlConfig,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(HeaderStage::new(
@@ -211,7 +212,7 @@ where
                 header_downloader,
                 mode,
                 consensus.clone(),
-                etl_file_size,
+                etl_config,
             ))
             .add_stage(bodies)
     }
@@ -231,7 +232,7 @@ where
                 self.header_downloader,
                 self.header_mode,
                 self.consensus.clone(),
-                self.etl_file_size,
+                self.etl_config.clone(),
             ))
             .add_stage(BodyStage::new(self.body_downloader))
     }
