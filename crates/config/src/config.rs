@@ -244,15 +244,15 @@ impl Default for TransactionLookupConfig {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct EtlConfig {
-    /// The maximum size in bytes of data held in memory before being flushed to disk as a file.
+    /// Data directory where temporary files are created.
     pub dir: Option<PathBuf>,
-    /// The size of temporary file in bytes for ETL data collector.
+    /// The maximum size in bytes of data held in memory before being flushed to disk as a file.
     pub file_size: usize,
 }
 
 impl Default for EtlConfig {
     fn default() -> Self {
-        Self { dir: None, file_size: 500 * (1024 * 1024) }
+        Self { dir: None, file_size: Self::default_file_size() }
     }
 }
 
@@ -265,6 +265,12 @@ impl EtlConfig {
     /// Return default ETL directory from datadir path.
     pub fn from_datadir(path: &Path) -> PathBuf {
         path.join("etl-tmp")
+    }
+
+    /// Default size in bytes of data held in memory before being flushed to disk as a file.
+    pub const fn default_file_size() -> usize {
+        // 500 MB
+        500 * (1024 * 1024)
     }
 }
 

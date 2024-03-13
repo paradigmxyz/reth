@@ -163,7 +163,7 @@ impl Command {
             Some(
                 self.etl_dir.unwrap_or_else(|| EtlConfig::from_datadir(&data_dir.data_dir_path())),
             ),
-            self.etl_file_size.unwrap_or(500 * 1024 * 1024),
+            self.etl_file_size.unwrap_or(EtlConfig::default_file_size()),
         );
 
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
