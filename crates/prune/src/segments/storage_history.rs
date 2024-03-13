@@ -179,57 +179,45 @@ where
 mod tests {
     use std::{
         collections::BTreeMap,
-        ops::AddAssign,
+        ops::{AddAssign, Range, RangeInclusive},
         thread,
         time::{Duration, Instant},
     };
 
     use reth_db::{models::storage_sharded_key::StorageShardedKey, tables, DatabaseEnv};
-    use reth_interfaces::test_utils::{
-        generators,
-        generators::{random_block_range, random_changeset_range, random_eoa_accounts},
-    };
-    use reth_primitives::{
-        Account, Address, BlockNumber, IntegerList, PruneCheckpoint, PruneMode, PruneProgress,
-        PruneSegment, StorageEntry, B256,
-    };
-    use reth_provider::{PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder};
-    use reth_stages::test_utils::{StorageKind, TestStageDB};
+
+    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
+    use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
+
     use tracing::trace;
 
-    use crate::segments::{PruneInput, Segment, StorageHistory};
+    use crate::segments::{history::test::TestRig, Segment, StorageHistory};
 
-    #[derive(Default)]
-    struct TestRig {
-        db: TestStageDB,
-        original_shards: Vec<(StorageShardedKey, IntegerList)>,
-        changesets: Vec<Vec<(Address, Account, Vec<StorageEntry>)>>,
-        pruned_changesets_run_1: usize,
-        pruned_changesets_run_2: usize,
-        pruned_shards_run_1: usize,
-        pruned_shards_run_2: usize,
+    struct StorageHistoryTestRigBuilder {
+        block_range: RangeInclusive<u64>,
+        n_storage_changes: Range<u64>,
+        key_range: Range<u64>,
+        prune_job_deleted_entries_limit: usize,
     }
 
-    impl TestRig {
-        fn new() -> Self {
-            let db = TestStageDB::default();
-            let mut rng = generators::rng();
+    impl StorageHistoryTestRigBuilder {
+        fn new(
+            block_range: RangeInclusive<u64>,
+            n_storage_changes: Range<u64>,
+            key_range: Range<u64>,
+            prune_job_deleted_entries_limit: usize,
+        ) -> Self {
+            Self { block_range, n_storage_changes, key_range, prune_job_deleted_entries_limit }
+        }
 
-            let blocks = random_block_range(&mut rng, 0..=5000, B256::ZERO, 0..1);
-            db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        fn build(self) -> TestRig<StorageShardedKey> {
+            let Self { block_range, n_storage_changes, key_range, prune_job_deleted_entries_limit } =
+                self;
 
-            let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
+            let (db, changesets) =
+                TestRig::<StorageShardedKey>::init_db(block_range, n_storage_changes, key_range);
 
-            let (changesets, _) = random_changeset_range(
-                &mut rng,
-                blocks.iter(),
-                accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
-                1..2,
-                1..2,
-            );
-            db.insert_changesets(changesets.clone(), None).expect("insert changesets");
-            db.insert_history(changesets.clone(), None).expect("insert history");
-
+            // verify db init
             let storage_occurrences = db
                 .table::<tables::StoragesHistory>()
                 .unwrap()
@@ -245,106 +233,21 @@ mod tests {
                 changesets.iter().flatten().flat_map(|(_, _, entries)| entries).count()
             );
 
+            // save original shards
             let original_shards = db.table::<tables::StoragesHistory>().unwrap();
 
-            Self { db, original_shards, changesets, ..Default::default() }
-        }
+            // get limiter for whole prune job (each prune job would call prune on each segment
+            // once)
+            let job_limiter = PruneLimiterBuilder::default()
+                .deleted_entries_limit(prune_job_deleted_entries_limit)
+                .build();
 
-        fn get_input(&self, to_block: BlockNumber, limiter: PruneLimiter) -> PruneInput {
-            PruneInput {
-                previous_checkpoint: self
-                    .db
-                    .factory
-                    .provider()
-                    .unwrap()
-                    .get_prune_checkpoint(PruneSegment::StorageHistory)
-                    .unwrap(),
-                to_block,
-                limiter,
-            }
-        }
-
-        fn pruned_changesets(&mut self, run: usize) -> usize {
-            // change sets
-            let changesets = self.db.table::<tables::StorageChangeSets>().unwrap();
-            let pruned_changesets = self.changesets.len() - changesets.len();
-
-            if run == 1 {
-                self.pruned_changesets_run_1 = pruned_changesets;
-
-                self.pruned_changesets_run_1
-            } else if run == 2 {
-                self.pruned_changesets_run_2 = pruned_changesets - self.pruned_changesets_run_1;
-
-                self.pruned_changesets_run_2
-            } else if run == 3 {
-                pruned_changesets - self.pruned_changesets_run_1 - self.pruned_changesets_run_2
-            } else {
-                unreachable!()
-            }
-        }
-
-        fn pruned_shards(&mut self, run: usize) -> usize {
-            // shards
-            let shards = self.db.table::<tables::StoragesHistory>().unwrap();
-
-            let completely_pruned_shards = self.original_shards.len() - shards.len();
-            // branch not covered in test
-            assert_eq!(0, completely_pruned_shards);
-
-            let partially_pruned_shards = self.partially_pruned_shards();
-
-            if run == 1 {
-                self.pruned_shards_run_1 = partially_pruned_shards;
-
-                self.pruned_shards_run_1
-            } else if run == 2 {
-                self.pruned_shards_run_2 = partially_pruned_shards - self.pruned_shards_run_1;
-
-                self.pruned_shards_run_2
-            } else if run == 3 {
-                partially_pruned_shards - self.pruned_shards_run_1 - self.pruned_shards_run_2
-            } else {
-                unreachable!()
-            }
-        }
-
-        fn partially_pruned_shards(&self) -> usize {
-            let mut partially_pruned_shards = 0;
-
-            for (pruned_shard, original_shard) in self
-                .db
-                .table::<tables::StoragesHistory>()
-                .unwrap()
-                .iter()
-                .zip(self.original_shards.iter())
-            {
-                let original_shard_blocks = &original_shard.1;
-                let pruned_shard_blocks = &pruned_shard.1;
-                if original_shard_blocks != pruned_shard_blocks {
-                    let original_shard_blocks_len = original_shard_blocks.len() as usize;
-                    let pruned_shard_blocks_len = pruned_shard_blocks.len() as usize;
-
-                    trace!(target: "pruner::test",
-                        original_shard_blocks_len,
-                        pruned_shard_blocks_len,
-                        "partially pruned shard"
-                    );
-
-                    // since each step in pruning indices, if partially pruning the shard, makes a
-                    // new shard (upserts) with at most one block less than the current one, the
-                    // number of partially pruned shards is equal to the number of blocks pruned
-                    // from that shard
-                    partially_pruned_shards += original_shard_blocks_len - pruned_shard_blocks_len;
-                }
-            }
-
-            partially_pruned_shards
+            TestRig::new(db, changesets, original_shards, job_limiter)
         }
     }
 
-    fn test_prune_with_entries_delete_limit(
-        test_rig: &mut TestRig,
+    fn test_prune_until_entries_delete_limit(
+        test_rig: &mut TestRig<StorageShardedKey>,
         to_block: BlockNumber,
         run: usize,
         expected_progress: PruneProgress,
@@ -354,28 +257,34 @@ mod tests {
         let prune_mode = PruneMode::Before(to_block);
         let segment = StorageHistory::new(prune_mode);
 
-        let prune_job_limit = 1000;
+        // a new segment limiter is made on each run as if each call to prune is ran as part of a
+        // separate prune job (each prune job prunes every segment at most once)
+        let (limiter, limit) = {
+            let segment_limiter =
+                <StorageHistory as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
+                    &segment,
+                    test_rig.job_limiter(),
+                );
 
-        let job_limiter =
-            PruneLimiterBuilder::default().deleted_entries_limit(prune_job_limit).build();
-        let limiter =
-            <StorageHistory as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
-                &segment,
-                &job_limiter,
+            // expected to be the same as `prune_job_limit` if `prune_job_limit` is a multiple of 2
+            let job_limit = test_rig.job_limiter().deleted_entries_limit().unwrap();
+            let maybe_adjusted_limit = segment_limiter.deleted_entries_limit().unwrap();
+            assert_eq!(
+                if job_limit % 2 == 0 { job_limit } else { job_limit - 1 },
+                maybe_adjusted_limit
             );
 
-        // expected to be the same since 1000 is a multiple of 2
-        assert_eq!(prune_job_limit, limiter.deleted_entries_limit().unwrap());
+            (segment_limiter, maybe_adjusted_limit)
+        };
 
-        let input = test_rig.get_input(to_block, limiter);
-
-        let provider = test_rig.db.factory.provider_rw().unwrap();
+        let input = test_rig.get_input(to_block, PruneSegment::StorageHistory, limiter);
+        let provider = test_rig.db().factory.provider_rw().unwrap();
         let result = segment.prune(&provider, input.clone()).unwrap();
 
-        assert_eq!(result.progress, expected_progress,);
+        assert_eq!(result.progress, expected_progress, "run {run}");
 
         if !expected_progress.is_done() {
-            assert_eq!(result.pruned, prune_job_limit, "run {run}")
+            assert_eq!(limit, result.pruned, "run {run}")
         }
 
         segment
@@ -383,8 +292,8 @@ mod tests {
             .unwrap();
         provider.commit().expect("commit");
 
-        let pruned_changesets = test_rig.pruned_changesets(run);
-        let pruned_shards = test_rig.pruned_shards(run);
+        let pruned_changesets = test_rig.pruned_changesets::<tables::StorageChangeSets>(run);
+        let pruned_shards = test_rig.pruned_shards::<tables::StoragesHistory>(run);
 
         trace!(target: "pruner::test",
             pruned_changesets,
@@ -397,7 +306,7 @@ mod tests {
 
         assert_eq!(
             test_rig
-                .db
+                .db()
                 .factory
                 .provider()
                 .unwrap()
@@ -413,17 +322,22 @@ mod tests {
 
     #[test]
     fn prune() {
-        let mut test_rig = TestRig::new();
+        let mut test_rig = StorageHistoryTestRigBuilder::new(0..=5000, 1..2, 1..2, 1000).build();
 
         // limit on deleted entries is 1000
-        test_prune_with_entries_delete_limit(
+        test_prune_until_entries_delete_limit(
             &mut test_rig,
             998,
             1,
             PruneProgress::new_entries_limit_reached(),
         );
-        test_prune_with_entries_delete_limit(&mut test_rig, 998, 2, PruneProgress::new_finished());
-        test_prune_with_entries_delete_limit(&mut test_rig, 1200, 3, PruneProgress::new_finished());
+        test_prune_until_entries_delete_limit(&mut test_rig, 998, 2, PruneProgress::new_finished());
+        test_prune_until_entries_delete_limit(
+            &mut test_rig,
+            1200,
+            3,
+            PruneProgress::new_finished(),
+        );
     }
 
     #[test]
@@ -436,12 +350,17 @@ mod tests {
 
         let limiter = PruneLimiterBuilder::default().job_timeout(PRUNE_JOB_TIMEOUT, start).build();
         let segment = StorageHistory::new(PRUNE_MODE);
-        let test_rig = TestRig::new();
-        let input = test_rig.get_input(TO_BLOCK, limiter);
+        let test_rig = TestRig::<StorageHistory>::default_with_job_limiter(limiter);
+        let segment_limiter =
+            <StorageHistory as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
+                &segment,
+                test_rig.job_limiter(),
+            );
+        let input = test_rig.get_input(TO_BLOCK, PruneSegment::StorageHistory, segment_limiter);
 
         thread::sleep(PRUNE_JOB_TIMEOUT);
 
-        let provider = test_rig.db.factory.provider_rw().unwrap();
+        let provider = test_rig.db().factory.provider_rw().unwrap();
         let result = segment.prune(&provider, input).unwrap();
 
         assert!(result.progress.is_timed_out())

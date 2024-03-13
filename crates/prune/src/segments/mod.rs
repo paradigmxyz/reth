@@ -1,6 +1,6 @@
 mod account_history;
 mod headers;
-mod history;
+pub(super) mod history;
 mod receipts;
 mod receipts_by_logs;
 mod sender_recovery;

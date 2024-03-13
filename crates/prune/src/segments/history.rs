@@ -13,7 +13,7 @@ use tracing::trace;
 /// Prune history indices up to the provided block, inclusive.
 ///
 /// Returns total number of processed (walked) and deleted entities.
-pub(crate) fn prune_history_indices<DB, T, SK>(
+pub(crate) fn _prune_history_indices<DB, T, SK>(
     provider: &DatabaseProviderRW<DB>,
     to_block: u64,
     mut limiter: PruneLimiter,
@@ -211,4 +211,205 @@ pub(crate) enum PruneStepResult {
     ReachedDeletedEntriesLimit,
     /// Data was pruned at current destination.
     MaybeMoreData,
+}
+
+#[cfg(test)]
+pub(in crate::segments) mod test {
+    use std::{
+        collections::BTreeMap,
+        ops::{Range, RangeInclusive},
+    };
+
+    use reth_db::{table::Table, tables};
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_block_range, random_changeset_range, random_eoa_accounts},
+    };
+    use reth_primitives::{
+        Account, Address, BlockNumber, IntegerList, PruneSegment, StorageEntry, B256,
+    };
+    use reth_provider::{PruneCheckpointReader, PruneLimiter};
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use tracing::trace;
+
+    use crate::segments::PruneInput;
+
+    pub(crate) type ChangeSetsList = Vec<Vec<(Address, Account, Vec<StorageEntry>)>>;
+
+    pub(crate) type ShardsList<SK> = Vec<(SK, IntegerList)>;
+
+    pub(crate) struct TestRig<SK> {
+        db: TestStageDB,
+        changesets: ChangeSetsList,
+        original_shards: ShardsList<SK>,
+        job_limiter: PruneLimiter,
+        pruned_changesets_run_1: usize,
+        pruned_changesets_run_2: usize,
+        pruned_shards_run_1: usize,
+        pruned_shards_run_2: usize,
+    }
+
+    impl<SK> TestRig<SK> {
+        pub(crate) fn default_with_job_limiter(job_limiter: PruneLimiter) -> Self {
+            Self::new(TestStageDB::default(), vec![], vec![], job_limiter)
+        }
+
+        pub(crate) fn new(
+            db: TestStageDB,
+            changesets: ChangeSetsList,
+            original_shards: ShardsList<SK>,
+            job_limiter: PruneLimiter,
+        ) -> Self {
+            Self {
+                db,
+                changesets,
+                original_shards,
+                job_limiter,
+                pruned_changesets_run_1: 0,
+                pruned_changesets_run_2: 0,
+                pruned_shards_run_1: 0,
+                pruned_shards_run_2: 0,
+            }
+        }
+
+        pub(crate) fn db(&self) -> &TestStageDB {
+            &self.db
+        }
+
+        pub(crate) fn job_limiter(&self) -> &PruneLimiter {
+            &self.job_limiter
+        }
+
+        pub(crate) fn init_db(
+            block_range: RangeInclusive<u64>,
+            n_storage_changes: Range<u64>,
+            key_range: Range<u64>,
+        ) -> (TestStageDB, ChangeSetsList) {
+            let db = TestStageDB::default();
+            let mut rng = generators::rng();
+
+            let blocks = random_block_range(&mut rng, block_range, B256::ZERO, 0..1);
+            db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+            let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
+
+            let (changesets, _) = random_changeset_range(
+                &mut rng,
+                blocks.iter(),
+                accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+                n_storage_changes,
+                key_range,
+            );
+            db.insert_changesets(changesets.clone(), None).expect("insert changesets");
+            db.insert_history(changesets.clone(), None).expect("insert history");
+
+            (db, changesets)
+        }
+
+        pub(crate) fn get_input(
+            &self,
+            to_block: BlockNumber,
+            prune_segment: PruneSegment,
+            segment_limiter: PruneLimiter,
+        ) -> PruneInput {
+            PruneInput {
+                previous_checkpoint: self
+                    .db
+                    .factory
+                    .provider()
+                    .unwrap()
+                    .get_prune_checkpoint(prune_segment)
+                    .unwrap(),
+                to_block,
+                limiter: segment_limiter,
+            }
+        }
+
+        pub(crate) fn pruned_changesets<T>(&mut self, run: usize) -> usize
+        where
+            T: Table,
+            <T as Table>::Key: Default,
+        {
+            // change sets
+            let changesets = self.db.table::<T>().unwrap();
+            trace!(target: "pruner::test", original_changesets_len=self.changesets.len(), changesets_len=changesets.len());
+            let pruned_changesets = self.changesets.len() - changesets.len();
+
+            if run == 1 {
+                self.pruned_changesets_run_1 = pruned_changesets;
+
+                self.pruned_changesets_run_1
+            } else if run == 2 {
+                self.pruned_changesets_run_2 = pruned_changesets - self.pruned_changesets_run_1;
+
+                self.pruned_changesets_run_2
+            } else if run == 3 {
+                pruned_changesets - self.pruned_changesets_run_1 - self.pruned_changesets_run_2
+            } else {
+                unreachable!()
+            }
+        }
+
+        pub(crate) fn pruned_shards<T>(&mut self, run: usize) -> usize
+        where
+            T: Table<Value = IntegerList>,
+            <T as Table>::Key: Default,
+        {
+            // shards
+            let shards = self.db.table::<T>().unwrap();
+
+            let completely_pruned_shards = self.original_shards.len() - shards.len();
+            // branch not covered in test
+            assert_eq!(0, completely_pruned_shards);
+
+            let partially_pruned_shards = self.partially_pruned_shards::<tables::StoragesHistory>();
+
+            if run == 1 {
+                self.pruned_shards_run_1 = partially_pruned_shards;
+
+                self.pruned_shards_run_1
+            } else if run == 2 {
+                self.pruned_shards_run_2 = partially_pruned_shards - self.pruned_shards_run_1;
+
+                self.pruned_shards_run_2
+            } else if run == 3 {
+                partially_pruned_shards - self.pruned_shards_run_1 - self.pruned_shards_run_2
+            } else {
+                unreachable!()
+            }
+        }
+
+        pub(crate) fn partially_pruned_shards<T>(&self) -> usize
+        where
+            T: Table<Value = IntegerList>,
+            <T as Table>::Key: Default,
+        {
+            let mut partially_pruned_shards = 0;
+
+            for (pruned_shard, original_shard) in
+                self.db.table::<T>().unwrap().iter().zip(self.original_shards.iter())
+            {
+                let original_shard_blocks = &original_shard.1;
+                let pruned_shard_blocks = &pruned_shard.1;
+                if original_shard_blocks != pruned_shard_blocks {
+                    let original_shard_blocks_len = original_shard_blocks.len() as usize;
+                    let pruned_shard_blocks_len = pruned_shard_blocks.len() as usize;
+
+                    trace!(target: "pruner::test",
+                        original_shard_blocks_len,
+                        pruned_shard_blocks_len,
+                        "partially pruned shard"
+                    );
+
+                    // since each step in pruning indices, if partially pruning the shard, makes a
+                    // new shard (upserts) with at most one block less than the current one, the
+                    // number of partially pruned shards is equal to the number of blocks pruned
+                    // from that shard
+                    partially_pruned_shards += original_shard_blocks_len - pruned_shard_blocks_len;
+                }
+            }
+
+            partially_pruned_shards
+        }
+    }
 }

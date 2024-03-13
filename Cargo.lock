@@ -6426,6 +6426,7 @@ name = "reth-prune"
 version = "0.2.0-beta.1"
 dependencies = [
  "assert_matches",
+ "derive_more",
  "itertools 0.12.1",
  "metrics",
  "rayon",
