@@ -288,12 +288,13 @@ mod tests {
         // Run pruning
         let result = segment.prune(&provider, input).unwrap();
 
+        // must commit to db before reading new state of data
         segment
             .save_checkpoint(&provider, result.checkpoint.unwrap().as_prune_checkpoint(prune_mode))
             .unwrap();
         provider.commit().expect("commit");
 
-        // Data results
+        // Read new state of data
         let pruned_changesets = test_rig.pruned_changesets::<tables::AccountChangeSets>(run);
         let pruned_shards = test_rig.pruned_shards::<tables::AccountsHistory>(run);
 

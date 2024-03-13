@@ -294,15 +294,17 @@ mod tests {
 
         let input = test_rig.get_input(to_block, PruneSegment::StorageHistory, limiter);
         let provider = test_rig.db().factory.provider_rw().unwrap();
+
         // Run pruning
         let result = segment.prune(&provider, input).unwrap();
 
+        // must commit to db before reading new state of data
         segment
             .save_checkpoint(&provider, result.checkpoint.unwrap().as_prune_checkpoint(prune_mode))
             .unwrap();
         provider.commit().expect("commit");
 
-        // Data results
+        // Read new state of data
         let pruned_changesets = test_rig.pruned_changesets::<tables::StorageChangeSets>(run);
         let pruned_shards = test_rig.pruned_shards::<tables::StoragesHistory>(run);
 
