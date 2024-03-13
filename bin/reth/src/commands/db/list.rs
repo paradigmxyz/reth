@@ -93,12 +93,13 @@ impl TableViewer<()> for ListTableViewer<'_> {
             let table_db = tx.inner.open_db(Some(self.args.table.name())).wrap_err("Could not open db.")?;
             let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
             let total_entries = stats.entries();
-            if self.args.skip > total_entries - 1 {
+            let final_entry_idx = total_entries.saturating_sub(1);
+            if self.args.skip > final_entry_idx {
                 error!(
                     target: "reth::cli",
                     "Start index {start} is greater than the final entry index ({final_entry_idx}) in the table {table}",
                     start = self.args.skip,
-                    final_entry_idx = total_entries - 1,
+                    final_entry_idx = final_entry_idx,
                     table = self.args.table.name()
                 );
                 return Ok(())

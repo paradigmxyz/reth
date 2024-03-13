@@ -31,6 +31,7 @@ use crate::{
         models::{
             accounts::{AccountBeforeTx, BlockNumberAddress},
             blocks::{HeaderHash, StoredBlockOmmers},
+            client_version::ClientVersion,
             storage_sharded_key::StorageShardedKey,
             ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
         },
@@ -372,6 +373,9 @@ tables! {
 
     /// Stores the highest pruned block number and prune mode of each prune segment.
     table PruneCheckpoints<Key = PruneSegment, Value = PruneCheckpoint>;
+
+    /// Stores the history of client versions that have accessed the database with write privileges by unix timestamp in seconds.
+    table VersionHistory<Key = u64, Value = ClientVersion>;
 }
 
 // Alias types.

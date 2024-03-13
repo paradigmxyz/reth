@@ -1,5 +1,16 @@
 //! Version information for reth.
 
+use reth_db::models::client_version::ClientVersion;
+
+/// The latest version from Cargo.toml.
+pub const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The short SHA of the latest commit.
+pub const VERGEN_GIT_SHA: &str = env!("VERGEN_GIT_SHA");
+
+/// The build timestamp.
+pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
+
 /// The short version information for reth.
 ///
 /// - The latest version from Cargo.toml
@@ -79,6 +90,15 @@ pub(crate) const P2P_CLIENT_VERSION: &str = concat!(
 /// ```
 pub fn default_extradata() -> String {
     format!("reth/v{}/{}", env!("CARGO_PKG_VERSION"), std::env::consts::OS)
+}
+
+/// The default client version accessing the database.
+pub fn default_client_version() -> ClientVersion {
+    ClientVersion {
+        version: CARGO_PKG_VERSION.to_string(),
+        git_sha: VERGEN_GIT_SHA.to_string(),
+        build_timestamp: VERGEN_BUILD_TIMESTAMP.to_string(),
+    }
 }
 
 pub(crate) const fn build_profile_name() -> &'static str {
