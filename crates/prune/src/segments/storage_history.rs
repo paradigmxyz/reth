@@ -298,6 +298,12 @@ mod tests {
         // Run pruning
         let result = segment.prune(&provider, input).unwrap();
 
+        trace!(target: "pruner::test",
+            checkpoint=?result.checkpoint,
+            run,
+            "stopped pruning"
+        );
+
         // must commit to db before reading new state of data
         segment
             .save_checkpoint(&provider, result.checkpoint.unwrap().as_prune_checkpoint(prune_mode))

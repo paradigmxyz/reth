@@ -898,6 +898,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         if let Some(limit) = limiter.deleted_entries_limit() {
             if limiter.deleted_entries_count() == limit {
                 trace!(target: "provider",
+                    limit,
                     "reached limit on deleted entries"
                 );
 

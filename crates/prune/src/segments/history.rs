@@ -88,6 +88,7 @@ where
     if let Some(limit) = limiter.deleted_entries_limit() {
         if limiter.deleted_entries_count() == limit {
             trace!(target: "pruner::history",
+                limit,
                 "reached limit on deleted entries"
             );
 
