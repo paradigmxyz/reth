@@ -178,14 +178,7 @@ impl<Provider, H, B> OnlineStages<Provider, H, B> {
         body_downloader: B,
         etl_file_size: usize,
     ) -> Self {
-        Self {
-            provider,
-            header_mode,
-            consensus,
-            header_downloader,
-            body_downloader,
-            etl_file_size,
-        }
+        Self { provider, header_mode, consensus, header_downloader, body_downloader, etl_file_size }
     }
 }
 
