@@ -82,14 +82,11 @@ op-build-native-%:
 #
 # The resulting binaries will be created in the `target/` directory.
 
-# Disable asm-keccak optimizations and set the page size for jemalloc. When
-# cross compiling for aarch64, we must compile jemalloc with a bigger page
-# size, otherwise it will use the platform's page size which may not work on
-# other systems. JEMALLOC_SYS_WITH_LG_PAGE=16 tells jemalloc to use 64-KiB
-# pages. See the following links for more information:
-#
-# (1) https://github.com/paradigmxyz/reth/issues/6742
-# (2) https://github.com/tikv/jemallocator/blob/af6e6529c087dc1d0ac159372111a859031269f6/jemalloc-sys/README.md?plain=1#L112-L117
+# For aarch64, disable asm-keccak optimizations and set the page size for
+# jemalloc. When cross compiling, we must compile jemalloc with a large page
+# size, otherwise it will use the current system's page size which may not work
+# on other systems. JEMALLOC_SYS_WITH_LG_PAGE=16 tells jemalloc to use 64-KiB
+# pages. See: https://github.com/paradigmxyz/reth/issues/6742
 build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
 build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 
