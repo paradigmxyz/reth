@@ -303,7 +303,8 @@ lint:
 	make lint-op-reth && \
 	make lint-other-targets
 
-rustdocs:
+.PHONY: rustdocs
+rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
 	RUSTDOCFLAGS="\
 	--cfg docsrs \
 	--show-type-layout \
