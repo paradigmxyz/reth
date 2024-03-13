@@ -91,25 +91,21 @@ op-build-native-%:
 # (1) https://github.com/paradigmxyz/reth/issues/6742
 # (2) https://github.com/tikv/jemallocator/blob/af6e6529c087dc1d0ac159372111a859031269f6/jemalloc-sys/README.md?plain=1#L112-L117
 build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
-	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" JEMALLOC_SYS_WITH_LG_PAGE=16 \
-	    cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 
-op-build-aarch64-unknown-linux-gnu:
-	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" JEMALLOC_SYS_WITH_LG_PAGE=16 \
-	    cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
+op-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
+op-build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 
 # No jemalloc on Windows
 build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
-build-%:
-	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
- 		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+build-%: export RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc"
+	cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
-op-build-%:
-	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
- 		cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
+op-build-%: export RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc"
+	cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
