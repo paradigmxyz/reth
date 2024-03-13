@@ -58,8 +58,10 @@ impl DatabaseEnvKind {
 }
 
 /// Arguments for database initialization.
-#[derive(Debug, Default, Clone)]
+#[derive(Clone, Debug)]
 pub struct DatabaseArguments {
+    /// Client version that accesses the database.
+    client_version: ClientVersion,
     /// Database log level. If [None], the default value is used.
     log_level: Option<LogLevel>,
     /// Maximum duration of a read transaction. If [None], the default value is used.
@@ -85,11 +87,19 @@ pub struct DatabaseArguments {
     ///
     /// This flag affects only at environment opening but can't be changed after.
     exclusive: Option<bool>,
-    /// Client version that accesses the database.
-    client_version: Option<ClientVersion>,
 }
 
 impl DatabaseArguments {
+    /// Create new database arguments with given client version.
+    pub fn new(client_version: ClientVersion) -> Self {
+        Self {
+            client_version,
+            log_level: None,
+            max_read_transaction_duration: None,
+            exclusive: None,
+        }
+    }
+
     /// Set the log level.
     pub fn with_log_level(mut self, log_level: Option<LogLevel>) -> Self {
         self.log_level = log_level;
@@ -111,15 +121,9 @@ impl DatabaseArguments {
         self
     }
 
-    /// Set the client version that accesses the database.
-    pub fn with_client_version(mut self, client_version: Option<ClientVersion>) -> Self {
-        self.client_version = client_version;
-        self
-    }
-
     /// Returns the client version if any.
-    pub fn client_version(&self) -> Option<ClientVersion> {
-        self.client_version.clone()
+    pub fn client_version(&self) -> &ClientVersion {
+        &self.client_version
     }
 }
 
@@ -405,11 +409,7 @@ impl DatabaseEnv {
     }
 
     /// Records version that accesses the database with write privileges.
-    pub fn record_client_version(
-        &self,
-        version: Option<ClientVersion>,
-    ) -> Result<(), DatabaseError> {
-        let version = version.unwrap_or_default();
+    pub fn record_client_version(&self, version: ClientVersion) -> Result<(), DatabaseError> {
         if version.is_empty() {
             return Ok(())
         }
@@ -467,8 +467,8 @@ mod tests {
 
     /// Create database for testing with specified path
     fn create_test_db_with_path(kind: DatabaseEnvKind, path: &Path) -> DatabaseEnv {
-        let env =
-            DatabaseEnv::open(path, kind, DatabaseArguments::default()).expect(ERROR_DB_CREATION);
+        let env = DatabaseEnv::open(path, kind, DatabaseArguments::new(ClientVersion::default()))
+            .expect(ERROR_DB_CREATION);
         env.create_tables().expect(ERROR_TABLE_CREATION);
         env
     }
@@ -1093,8 +1093,12 @@ mod tests {
             assert_eq!(result.expect(ERROR_RETURN_VALUE), 200);
         }
 
-        let env = DatabaseEnv::open(&path, DatabaseEnvKind::RO, Default::default())
-            .expect(ERROR_DB_CREATION);
+        let env = DatabaseEnv::open(
+            &path,
+            DatabaseEnvKind::RO,
+            DatabaseArguments::new(ClientVersion::default()),
+        )
+        .expect(ERROR_DB_CREATION);
 
         // GET
         let result =

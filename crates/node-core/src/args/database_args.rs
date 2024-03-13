@@ -17,9 +17,8 @@ pub struct DatabaseArgs {
 impl DatabaseArgs {
     /// Returns default database arguments with configured log level and client version.
     pub fn database_args(&self) -> reth_db::mdbx::DatabaseArguments {
-        reth_db::mdbx::DatabaseArguments::default()
+        reth_db::mdbx::DatabaseArguments::new(default_client_version())
             .with_log_level(self.log_level)
-            .with_client_version(Some(default_client_version()))
     }
 }
 

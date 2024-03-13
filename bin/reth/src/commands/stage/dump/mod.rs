@@ -11,8 +11,9 @@ use crate::args::{
 };
 use clap::Parser;
 use reth_db::{
-    cursor::DbCursorRO, database::Database, init_db, table::TableImporter, tables,
-    transaction::DbTx, DatabaseEnv,
+    cursor::DbCursorRO, database::Database, init_db, mdbx::DatabaseArguments,
+    models::client_version::ClientVersion, table::TableImporter, tables, transaction::DbTx,
+    DatabaseEnv,
 };
 use reth_node_core::dirs::PlatformPath;
 use reth_primitives::ChainSpec;
@@ -170,7 +171,7 @@ pub(crate) fn setup<DB: Database>(
 
     info!(target: "reth::cli", ?output_db, "Creating separate db");
 
-    let output_datadir = init_db(output_db, Default::default())?;
+    let output_datadir = init_db(output_db, DatabaseArguments::new(ClientVersion::default()))?;
 
     output_datadir.update(|tx| {
         tx.import_table_with_range::<tables::BlockBodyIndices, _>(
