@@ -330,10 +330,17 @@ pub(in crate::segments) mod test {
             T: Table,
             <T as Table>::Key: Default,
         {
-            // change sets
-            let changesets = self.db.table::<T>().unwrap();
-            trace!(target: "pruner::test", original_changesets_len=self.changesets.len(), changesets_len=changesets.len());
-            let pruned_changesets = self.changesets.len() - changesets.len();
+            // changesets
+            let changesets_len = self.db.table::<T>().unwrap().len();
+            let original_changesets_len = self.changesets.len();
+
+            trace!(target: "pruner::test",
+                original_changesets_len,
+                changesets_len,
+                run
+            );
+
+            let pruned_changesets = original_changesets_len - changesets_len;
 
             if run == 1 {
                 self.pruned_changesets_run_1 = pruned_changesets;
@@ -356,13 +363,20 @@ pub(in crate::segments) mod test {
             <T as Table>::Key: Default,
         {
             // shards
-            let shards = self.db.table::<T>().unwrap();
+            let shards_len = self.db.table::<T>().unwrap().len();
+            let original_shards_len = self.original_shards.len();
 
-            let completely_pruned_shards = self.original_shards.len() - shards.len();
+            trace!(target: "pruner::test",
+                original_shards_len,
+                shards_len,
+                run,
+            );
+
+            let completely_pruned_shards = original_shards_len - shards_len;
             // branch not covered in test
             assert_eq!(0, completely_pruned_shards);
 
-            let partially_pruned_shards = self.partially_pruned_shards::<tables::StoragesHistory>();
+            let partially_pruned_shards = self.partially_pruned_shards::<T>();
 
             if run == 1 {
                 self.pruned_shards_run_1 = partially_pruned_shards;
