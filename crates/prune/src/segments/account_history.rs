@@ -206,7 +206,7 @@ mod tests {
             let Self { block_range, n_storage_changes, key_range, prune_job_deleted_entries_limit } =
                 self;
 
-            let (db, changesets) =
+            let (db, original_changesets) =
                 TestRig::<ShardedKey<Address>>::init_db(block_range, n_storage_changes, key_range);
 
             // verify db init
@@ -222,10 +222,9 @@ mod tests {
 
             assert_eq!(
                 db.table::<tables::AccountChangeSets>().unwrap().len(),
-                changesets.iter().flatten().count()
+                original_changesets.iter().flatten().count()
             );
 
-            // save original shards
             let original_shards = db.table::<tables::AccountsHistory>().unwrap();
 
             // get limiter for whole prune job (each prune job would call prune on each segment
@@ -235,13 +234,13 @@ mod tests {
                 .build();
 
             trace!(target: "pruner::test",
-                changesets_len=changesets.len(),
+                changesets_len=original_changesets.len(),
                 original_shards_len=original_shards.len(),
                 job_deleted_entries_limit=job_limiter.deleted_entries_limit(),
                 "new account history test rig"
             );
 
-            TestRig::new(db, changesets, original_shards, job_limiter)
+            TestRig::new(db, original_changesets, original_shards, job_limiter)
         }
     }
 
@@ -328,6 +327,7 @@ mod tests {
 
         // verify result
         assert_eq!(result.progress, expected_progress, "run {run}");
+
         if expected_progress.is_entries_limit_reached() {
             assert_eq!(limit, result.pruned, "run {run}")
         }
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn prune() {
-        let mut test_rig = AccountHistoryTestRigBuilder::new(1..=5000, 0..0, 0..0, 1000).build();
+        let mut test_rig = AccountHistoryTestRigBuilder::new(1..=5000, 0..0, 0..0, 2000).build();
 
         // limit on deleted entries for each run is 2000
         test_prune_until_entries_delete_limit(

@@ -217,6 +217,7 @@ pub(crate) enum PruneStepResult {
 #[cfg(test)]
 pub(in crate::segments) mod test {
     use std::{
+        any::TypeId,
         collections::BTreeMap,
         ops::{Range, RangeInclusive},
     };
@@ -235,13 +236,13 @@ pub(in crate::segments) mod test {
 
     use crate::segments::PruneInput;
 
-    pub(crate) type ChangeSetsList = Vec<Vec<(Address, Account, Vec<StorageEntry>)>>;
+    pub(crate) type ChangeSetsNestedLists = Vec<Vec<(Address, Account, Vec<StorageEntry>)>>;
 
     pub(crate) type ShardsList<SK> = Vec<(SK, IntegerList)>;
 
     pub(crate) struct TestRig<SK> {
         db: TestStageDB,
-        changesets: ChangeSetsList,
+        original_changesets: ChangeSetsNestedLists,
         original_shards: ShardsList<SK>,
         job_limiter: PruneLimiter,
         pruned_changesets_run_1: usize,
@@ -257,13 +258,13 @@ pub(in crate::segments) mod test {
 
         pub(crate) fn new(
             db: TestStageDB,
-            changesets: ChangeSetsList,
+            changesets: ChangeSetsNestedLists,
             original_shards: ShardsList<SK>,
             job_limiter: PruneLimiter,
         ) -> Self {
             Self {
                 db,
-                changesets,
+                original_changesets: changesets,
                 original_shards,
                 job_limiter,
                 pruned_changesets_run_1: 0,
@@ -285,7 +286,7 @@ pub(in crate::segments) mod test {
             block_range: RangeInclusive<u64>,
             n_storage_changes: Range<u64>,
             key_range: Range<u64>,
-        ) -> (TestStageDB, ChangeSetsList) {
+        ) -> (TestStageDB, ChangeSetsNestedLists) {
             let db = TestStageDB::default();
             let mut rng = generators::rng();
 
@@ -332,16 +333,29 @@ pub(in crate::segments) mod test {
             <T as Table>::Key: Default,
         {
             // changesets
-            let changesets_len = self.db.table::<T>().unwrap().len();
-            let original_changesets_len = self.changesets.len();
+            let changesets_ty_id = TypeId::of::<T>();
+            let original_changesets_count =
+                if changesets_ty_id == TypeId::of::<tables::AccountChangeSets>() {
+                    self.original_changesets.iter().flatten().count()
+                } else if changesets_ty_id == TypeId::of::<tables::StorageChangeSets>() {
+                    self.original_changesets
+                        .iter()
+                        .flatten()
+                        .flat_map(|(_, _, entries)| entries)
+                        .count()
+                } else {
+                    unreachable!("history pruning not implemented for anymore types")
+                };
+
+            let changesets_count = self.db.table::<T>().unwrap().len();
 
             trace!(target: "pruner::history::test",
-                original_changesets_len,
-                changesets_len,
+                original_changesets_count,
+                changesets_count,
                 run
             );
 
-            let pruned_changesets = original_changesets_len - changesets_len;
+            let pruned_changesets = original_changesets_count - changesets_count;
 
             if run == 1 {
                 self.pruned_changesets_run_1 = pruned_changesets;
