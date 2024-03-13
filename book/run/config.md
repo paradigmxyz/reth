@@ -223,7 +223,7 @@ commit_threshold = 100000
 
 ### `etl`
 
-The storage history indexing stage builds an index of what blocks a particular storage slot changed.
+An ETL (extract, transform, load) data collector. Used mainly to insert data into `MDBX` in a sorted manner.
 
 ```toml
 [stages.etl]
