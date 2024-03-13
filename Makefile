@@ -101,11 +101,13 @@ build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(F
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
-build-%: export RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc"
-	cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+build-%:
+	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
+	    cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
-op-build-%: export RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc"
-	cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
+op-build-%:
+	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
+	    cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
