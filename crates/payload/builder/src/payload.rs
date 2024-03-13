@@ -398,6 +398,9 @@ mod tests {
         assert_eq!(cfg_and_block_env.1.basefee, U256::from(EIP1559_INITIAL_BASE_FEE));
 
         // ensure the gas limit is double the previous block's gas limit
-        assert_eq!(cfg_and_block_env.1.gas_limit, U256::from(chainspec.genesis_header().gas_limit * 2));
+        assert_eq!(
+            cfg_and_block_env.1.gas_limit,
+            U256::from(chainspec.genesis_header().gas_limit * 2)
+        );
     }
 }
