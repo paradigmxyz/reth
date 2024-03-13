@@ -6,6 +6,5 @@ pre-build = [
 
 [build.env]
 passthrough = [
-    "RUST_FLAGS",
     "JEMALLOC_SYS_WITH_LG_PAGE",
 ]
