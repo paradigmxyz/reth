@@ -446,7 +446,7 @@ impl NodeConfig {
     /// supports operations like block insertion, state reversion, and transaction execution.
     ///
     /// # Example
-    /// ```
+    /// ```rust,ignore
     /// let tree = config.build_blockchain_tree(
     ///     provider_factory,
     ///     consensus,
