@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn prune() {
-        let mut test_rig = AccountHistoryTestRigBuilder::new(1..=5000, 0..0, 0..0, 2000).build();
+        let mut test_rig = AccountHistoryTestRigBuilder::new(1..=5000, 0..0, 0..0, 1000).build();
 
         // limit on deleted entries for each run is 2000
         test_prune_until_entries_delete_limit(

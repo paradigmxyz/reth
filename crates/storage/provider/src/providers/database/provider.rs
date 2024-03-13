@@ -909,6 +909,10 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             walker.delete_current()?;
             limiter.increment_deleted_entries_count();
             delete_callback(row);
+
+            trace!(target: "provider",
+                "deleted entry"
+            );
         }
 
         Ok(PruneStepResult::MaybeMoreData)
