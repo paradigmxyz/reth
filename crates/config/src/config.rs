@@ -244,7 +244,7 @@ impl Default for TransactionLookupConfig {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct EtlConfig {
-    /// Data directory where temporary files are created.
+    /// The maximum size in bytes of data held in memory before being flushed to disk as a file.
     pub dir: Option<PathBuf>,
     /// The size of temporary file in bytes for ETL data collector.
     pub file_size: usize,
