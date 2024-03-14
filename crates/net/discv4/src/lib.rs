@@ -785,7 +785,12 @@ where
     /// This takes an optional Sender through which all successfully discovered nodes are sent once
     /// the request has finished.
     fn lookup_with(&mut self, target: PeerId, tx: Option<NodeRecordSender>) {
-        trace!(target: "discv4", ?target, "Starting lookup");
+        trace!(target: "discv4",
+            ?target,
+            local_node_id=format!("{:#}", self.local_enr().id),
+            "Starting lookup"
+        );
+
         let target_key = kad_key(target);
 
         // disconnect to nodes that are in discv5 kbuckets if node is running as
@@ -821,7 +826,11 @@ where
             return
         }
 
-        trace!(target: "discv4", ?target, num = closest.len(), "Start lookup closest nodes");
+        trace!(target: "discv4",
+            local_node_id=format!("{:#}", self.local_enr().id),
+            ?target, num = closest.len(),
+            "Start lookup closest nodes"
+        );
 
         for node in closest {
             self.find_node(&node, ctx.clone());
@@ -833,6 +842,7 @@ where
     /// CAUTION: This expects there's a valid Endpoint proof to the given `node`.
     fn find_node(&mut self, node: &NodeRecord, ctx: LookupContext) {
         trace!(target: "discv4", ?node, lookup=?ctx.target(), "Sending FindNode");
+        _ = self.primary_kbuckets.as_mut().unwrap().update_mirror();
         ctx.mark_queried(node.id);
         let id = ctx.target();
         let msg = Message::FindNode(FindNode { id, expire: self.find_node_expiration() });
@@ -1626,8 +1636,14 @@ where
             }
 
             // trigger self lookup
-            let local_node_id = self.local_node_record.id;
             if self.config.enable_lookup {
+                let local_node_id = self.local_node_record.id;
+
+                trace!(target: "discv4",
+                    local_node_id=format!("{:#}", local_node_id),
+                    connected_peers=self.num_connected(),
+                    peers_in_kbuckets=self.kbuckets.iter().count()
+                );
                 while self.lookup_interval.poll_tick(cx).is_ready() {
                     let target = self.lookup_rotator.next(&local_node_id);
                     self.lookup_with(target, None);
@@ -2369,6 +2385,7 @@ impl From<ForkId> for EnrForkIdEntry {
 /// Mirrors another favoured node's kbuckets.
 pub trait MirrorPrimaryKBuckets {
     /// Updates mirror of the primary kbuckets.
+    #[must_use]
     fn update_mirror(&mut self) -> Result<(), Discv4Error>;
     /// Filters neighbour nodes passed as parameter against the mirror of the primary kbuckets.
     fn filter_neighbours(
@@ -2429,6 +2446,11 @@ where
         {
             self.mirror = (self.update_callback)()
                 .map_err(<secp256k1::Error as Into<MirrorUpdateError>>::into)?;
+
+            trace!(target: "discv4",
+                primary_kbuckets_len=self.mirror.len(),
+                "updated mirror"
+            );
 
             self.change_tx.borrow_and_update();
         }

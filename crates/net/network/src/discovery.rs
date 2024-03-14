@@ -5,7 +5,7 @@ use crate::{
     manager::DiscoveredEvent,
 };
 use discv5::enr::Enr;
-use enr::CombinedPublicKey;
+use enr::{CombinedPublicKey, EnrPublicKey};
 use futures::StreamExt;
 use parking_lot::RwLock;
 use reth_discv4::{
@@ -464,6 +464,8 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                 // internally to apply pending nodes.
                 let discv5 = Arc::new(RwLock::new(discv5));
                 let discv5_ref = discv5.clone();
+                // todo: pass mutual ref to mirror as param to filter out removed nodes and only
+                // get peer ids of additions.
                 let read_kbuckets_callback =
                     move || -> Result<HashSet<PeerId>, secp256k1::Error> {
                         let keys = discv5_ref.read().with_kbuckets(|kbuckets| {
@@ -658,11 +660,12 @@ mod discv4_tests {
 
 #[cfg(test)]
 #[cfg(feature = "discv5")]
-mod discv5_test {
+mod discv5_tests {
     use super::*;
 
     use reth_discv4::Discv4ConfigBuilder;
     use reth_discv5::EnrCombinedKeyWrapper;
+    use tracing::trace;
 
     use rand::thread_rng;
 
@@ -704,6 +707,12 @@ mod discv5_test {
         let node_2_enr = node_2.disc.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
         let node_2_enr_without_sig = node_2.local_enr;
 
+        trace!(target: "reth_network::discovery::discv5_tests",
+            node_1_node_id=format!("{:#}", node_1_enr_without_sig.id),
+            node_2_node_id=format!("{:#}", node_2_enr_without_sig.id),
+            "started nodes"
+        );
+
         // add node_2 manually to node_1:discv4 kbuckets
         node_1.disc.as_ref().unwrap().with_discv4(|discv4| {
             _ = discv4.add_node_to_routing_table(NodeFromExternalSource::NodeRecord(
@@ -727,7 +736,7 @@ mod discv5_test {
             _ => false,
         });
 
-        // add node_2 to discovery (should add node to discv5 kbuckets)
+        // add node_2 to discovery handle of node_1 (should add node to discv5 kbuckets)
         let node_2_enr_reth_compatible_ty: Enr<SecretKey> =
             EnrCombinedKeyWrapper(node_2_enr.clone()).try_into().unwrap();
         node_1
@@ -743,7 +752,7 @@ mod discv5_test {
             .unwrap()
             .with_discv5(|discv5| discv5.table_entries_id().contains(&node_2_enr.node_id())));
 
-        // make connection from node_1 to node_2
+        // manually trigger connection from node_1 to node_2
         node_1
             .disc
             .as_ref()
@@ -753,8 +762,8 @@ mod discv5_test {
             .unwrap();
 
         // verify node_1:discv5 is connected to node_2:discv5 and vv
-        let event_1_v5 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
         let event_2_v5 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
+        let event_1_v5 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
         assert!(match event_1_v5 {
             DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(node, socket))
                 if node == node_2_enr && socket == node_2_enr.udp4_socket().unwrap().into() =>
@@ -777,14 +786,8 @@ mod discv5_test {
             _ => false,
         });
 
-        // todo: store 64 byte ids in discv4 as 32 byte discv5 ids too (better since avoids
-        // recomputing discv5 node id on every call to update kbuckets for known entries).
-
-        /* failed to filter nodes against primary kbuckets mirror src_id="0x013a…6ae0" nodes="[enode://560abb39b16a9c2937d8e129484a0f45d7eaadc1f0ded9d7f1af6808b553cbd27794bc1c6690fbc9ed2355bf0a4fafb9bc543cf140b23cd5c87df24fbc5a4144@127.0.0.1:30324]" err=MirrorUpdateError(ParseNodeId(InvalidPublicKey) */
-
-        /*let event_1_v4 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
         let event_2_v4 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
-
+        let event_1_v4 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
         assert!(match event_1_v4 {
             DiscoveryUpdateV5::V4(DiscoveryUpdate::Removed(node_id))
                 if node_id == node_2_enr_without_sig.id =>
@@ -796,6 +799,6 @@ mod discv5_test {
                 if node_id == node_1_enr_without_sig.id =>
                 true,
             _ => false,
-        });*/
+        });
     }
 }
