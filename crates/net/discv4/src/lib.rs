@@ -65,7 +65,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 pub mod error;
 pub mod proto;
@@ -1716,7 +1716,28 @@ where
                     }
 
                     IngressEvent::Packet(remote_addr, Packet { msg, node_id: src_id, hash }) => {
+                        if let Some(ref mut filter) = self.primary_kbuckets {
+                            match filter.filter_incoming(&src_id) {
+                                Err(err) => debug!(target: "discv4",
+                                    src_id=format!("{:#}", src_id),
+                                    err=?err,
+                                    "failed to filter sender against primary kbuckets mirror"
+                                ),
+                                Ok(should_process) => {
+                                    if !should_process {
+                                        trace!(target: "discv4",
+                                            src_id=format!("{:#}", src_id),
+                                            "dropping message from peer, connected over primary discovery network"
+                                        );
+
+                                        continue
+                                    }
+                                }
+                            }
+                        }
+
                         trace!(target: "discv4",  r#type=?msg.msg_type(), from=?remote_addr,"received packet");
+
                         let event = match msg {
                             Message::Ping(ping) => {
                                 self.on_ping(ping, remote_addr, src_id, hash);
@@ -2354,7 +2375,10 @@ pub trait MirrorPrimaryKBuckets {
         &mut self,
         nodes: &mut Vec<NodeRecord>,
     ) -> Result<SmallVec<[PeerId; 8]>, Discv4Error>;
-    /// Finds intersection between given kbuckets and mirror.
+    /// Filters incoming packets against mirror of primary kbuckets. Returns `Ok(true)` if the
+    /// message from given peer should be processed further.
+    fn filter_incoming(&mut self, peer_id: &PeerId) -> Result<bool, Discv4Error>;
+    /// Finds intersection between given kbuckets and mirror. Note: doesn't update mirror.
     fn find_intersection(
         &self,
         kbuckets: &KBucketsTable<NodeKey, NodeEntry>,
@@ -2397,23 +2421,6 @@ impl<F> MirrorPrimaryKBuckets for KBucketsKeysMirror<F>
 where
     F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error>,
 {
-    /// Finds intersection between given kbuckets and mirror.
-    fn find_intersection(
-        &self,
-        kbuckets: &KBucketsTable<NodeKey, NodeEntry>,
-    ) -> SmallVec<[PeerId; 8]> {
-        let mut connected_over_discv5: SmallVec<[PeerId; 8]> = smallvec!();
-
-        for entry in kbuckets.iter_ref() {
-            let node_id = entry.node.key.preimage().as_ref();
-            if self.mirror.contains(node_id) {
-                connected_over_discv5.push(*node_id)
-            }
-        }
-
-        connected_over_discv5
-    }
-
     fn update_mirror(&mut self) -> Result<(), Discv4Error> {
         if self
             .change_tx
@@ -2449,6 +2456,28 @@ where
 
         // empty unless verbose logging enabled
         Ok(filtered_out)
+    }
+
+    fn filter_incoming(&mut self, peer_id: &PeerId) -> Result<bool, Discv4Error> {
+        self.update_mirror()?;
+
+        Ok(!self.mirror.contains(peer_id))
+    }
+
+    fn find_intersection(
+        &self,
+        kbuckets: &KBucketsTable<NodeKey, NodeEntry>,
+    ) -> SmallVec<[PeerId; 8]> {
+        let mut connected_over_discv5: SmallVec<[PeerId; 8]> = smallvec!();
+
+        for entry in kbuckets.iter_ref() {
+            let peer_id = entry.node.key.preimage().as_ref();
+            if self.mirror.contains(peer_id) {
+                connected_over_discv5.push(*peer_id)
+            }
+        }
+
+        connected_over_discv5
     }
 }
 
@@ -2526,13 +2555,6 @@ impl HandleDiscovery for Discv4 {
 pub struct Noop;
 
 impl MirrorPrimaryKBuckets for Noop {
-    /// Finds intersection between given kbuckets and mirror.
-    fn find_intersection(
-        &self,
-        _kbuckets: &KBucketsTable<NodeKey, NodeEntry>,
-    ) -> SmallVec<[PeerId; 8]> {
-        smallvec!()
-    }
     fn update_mirror(&mut self) -> Result<(), Discv4Error> {
         Ok(())
     }
@@ -2541,6 +2563,15 @@ impl MirrorPrimaryKBuckets for Noop {
         _nodes: &mut Vec<NodeRecord>,
     ) -> Result<SmallVec<[PeerId; 8]>, Discv4Error> {
         Ok(smallvec!())
+    }
+    fn filter_incoming(&mut self, _peer_id: &PeerId) -> Result<bool, Discv4Error> {
+        Ok(false)
+    }
+    fn find_intersection(
+        &self,
+        _kbuckets: &KBucketsTable<NodeKey, NodeEntry>,
+    ) -> SmallVec<[PeerId; 8]> {
+        smallvec!()
     }
 }
 
