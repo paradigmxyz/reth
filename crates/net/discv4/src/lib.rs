@@ -456,7 +456,7 @@ pub struct Discv4Service<M = Noop> {
     /// Mirrors some primary kbuckets if configured, and filters nodes received in [`Neighbours`]
     /// responses against them. Will be set if the node is ran alongside iscv5, to support
     /// downgrading to discv4.
-    neighbours_filter: Option<M>,
+    primary_kbuckets: Option<M>,
 }
 
 /// Hold data necessary to manage discv4 peer discovery over UDP.
@@ -635,7 +635,7 @@ where
                 received_pongs: Default::default(),
                 expire_interval: tokio::time::interval(EXPIRE_DURATION),
             },
-            neighbours_filter: None,
+            primary_kbuckets: None,
         }
     }
 
@@ -787,6 +787,12 @@ where
     fn lookup_with(&mut self, target: PeerId, tx: Option<NodeRecordSender>) {
         trace!(target: "discv4", ?target, "Starting lookup");
         let target_key = kad_key(target);
+
+        // disconnect to nodes that are in discv5 kbuckets if node is running as
+        // downgrade from discv5.
+        if let Err(err) = self.filter_kbuckets_against_primary_kbuckets() {
+            error!(target: "discv4", %err);
+        }
 
         // Start a lookup context with the 16 (MAX_NODES_PER_BUCKET) closest nodes
         let ctx = LookupContext::new(
@@ -1622,9 +1628,6 @@ where
             // trigger self lookup
             let local_node_id = self.local_node_record.id;
             if self.config.enable_lookup {
-                // disconnect to nodes that are in discv5 kbuckets if node is running as
-                // downgrade from discv5.
-                self.filter_kbuckets_against_primary_kbuckets();
                 while self.lookup_interval.poll_tick(cx).is_ready() {
                     let target = self.lookup_rotator.next(&local_node_id);
                     self.lookup_with(target, None);
@@ -1729,8 +1732,8 @@ where
                             }
                             Message::Neighbours(mut msg) => {
                                 let nodes = &mut msg.nodes;
-                                if let Some(ref mut neighbours_filter) = self.neighbours_filter {
-                                    match neighbours_filter.filter_neighbours(nodes) {
+                                if let Some(ref mut primary_kbuckets) = self.primary_kbuckets {
+                                    match primary_kbuckets.filter_neighbours(nodes) {
                                         Err(err) => debug!(target: "discv4",
                                             src_id=format!("{:#}", src_id),
                                             nodes=format!("[{}]", nodes.iter().format(", ")),
@@ -1799,31 +1802,38 @@ where
 
     /// Filters kbuckets against primary kbuckets. If this node is running as downgrade from
     /// discv5, then discv5 kbuckets are the primary kbuckets.
-    fn filter_kbuckets_against_primary_kbuckets(&mut self) {
-        if self.neighbours_filter.is_none() {
-            return
+    #[must_use]
+    fn filter_kbuckets_against_primary_kbuckets(&mut self) -> Result<(), Discv4Error> {
+        if self.primary_kbuckets.is_none() {
+            return Ok(())
         }
 
         // apply pending nodes
         for _ in self.kbuckets.iter() {}
 
         // refresh mirror of discv5 kbuckets
-        self.neighbours_filter.as_mut().map(|filter| filter.update_mirror());
+        self.primary_kbuckets.as_mut().map(|filter| filter.update_mirror()).transpose()?;
 
         // find intersection
-        let Some(ref filter) = self.neighbours_filter else { return };
-        let connected_over_discv5 = filter.find_intersection(&self.kbuckets);
+        let connected_over_discv5 =
+            self.primary_kbuckets.as_ref().unwrap().find_intersection(&self.kbuckets);
 
         if !connected_over_discv5.is_empty() {
             trace!(target: "discv4",
-                evicted_nodes=format!("[{:#}]", connected_over_discv5.iter().format(", ")), "evicted peers from kbuckets, nodes connected over primary discovery network"
+                evicted_nodes=format!("[{:#}]",
+                connected_over_discv5.iter().format(", ")),
+                local_node_id=format!("{:#}", self.local_enr().id),
+                "evicting peers from kbuckets, nodes connected over primary discovery network"
             );
         }
 
         // disconnect nodes that are already connected over discv5
-        for node_id in connected_over_discv5 {
-            self.remove_node(node_id);
+        for peer_id in connected_over_discv5 {
+            self.inner.pending_find_nodes.remove(&peer_id);
+            self.remove_node(peer_id);
         }
+
+        Ok(())
     }
 }
 
@@ -1861,7 +1871,7 @@ where
         primary_kbuckets_keys_callback: F,
     ) -> Self {
         let mut discv4 = Self::new(socket, local_address, local_node_record, secret_key, config);
-        discv4.neighbours_filter = Some(KBucketsKeysMirror::new(
+        discv4.primary_kbuckets = Some(KBucketsKeysMirror::new(
             primary_kbuckets_change_tx,
             primary_kbuckets_keys_callback,
         ));
