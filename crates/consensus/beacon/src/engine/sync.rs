@@ -468,13 +468,13 @@ mod tests {
 
             let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
 
-            let snapshotter = StaticFileProducer::new(
+            let static_file_producer = StaticFileProducer::new(
                 provider_factory.clone(),
                 provider_factory.static_file_provider(),
                 PruneModes::default(),
             );
 
-            pipeline.build(provider_factory, snapshotter)
+            pipeline.build(provider_factory, static_file_producer)
         }
     }
 
