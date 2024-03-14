@@ -1,5 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
+use reth_config::config::EtlConfig;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -31,18 +32,24 @@ pub struct AccountHashingStage {
     pub clean_threshold: u64,
     /// The maximum number of accounts to process before committing.
     pub commit_threshold: u64,
+    /// ETL configuration
+    pub etl_config: EtlConfig,
 }
 
 impl AccountHashingStage {
     /// Create new instance of [AccountHashingStage].
-    pub fn new(clean_threshold: u64, commit_threshold: u64) -> Self {
-        Self { clean_threshold, commit_threshold }
+    pub fn new(clean_threshold: u64, commit_threshold: u64, etl_config: EtlConfig) -> Self {
+        Self { clean_threshold, commit_threshold, etl_config }
     }
 }
 
 impl Default for AccountHashingStage {
     fn default() -> Self {
-        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
+        Self {
+            clean_threshold: 500_000,
+            commit_threshold: 100_000,
+            etl_config: EtlConfig::default(),
+        }
     }
 }
 
@@ -175,7 +182,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     }
                 });
             }
-            let mut collector = Collector::new(500_000 * 1024 * 1024);
+            let mut collector =
+                Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
 
             // Iterate over channels and append the hashed accounts.
             for channel in channels {
