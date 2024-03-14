@@ -2590,8 +2590,7 @@ fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {
 }
 
 /// Limits on how long one prune job can run before it's forced to stop and thereby yield the
-/// [`DatabaseProviderRW`] hook. Note: one prune job can consist of several calls to
-/// [`Segment::prune`].
+/// [`DatabaseProviderRW`] hook. Note: one prune job can consist of pruning several segments.
 #[derive(Debug)]
 pub struct PruneLimiter {
     /// Maximum entries (rows in the database) to delete from the database per block.
