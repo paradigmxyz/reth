@@ -61,11 +61,17 @@ pub enum Hardfork {
     /// Canyon
     #[cfg(feature = "optimism")]
     Canyon,
+    /// ArbOS 11
+    #[cfg(feature = "arbitrum")]
+    ArbOS11,
     /// Cancun.
     Cancun,
     /// Ecotone
     #[cfg(feature = "optimism")]
     Ecotone,
+    /// ArbOS 20 Atlas
+    #[cfg(feature = "arbitrum")]
+    ArbOS20Atlas,
 }
 
 impl Hardfork {
@@ -107,6 +113,16 @@ impl Hardfork {
             }
             if chain == Chain::base_mainnet() {
                 return self.base_mainnet_activation_block()
+            }
+        }
+
+        #[cfg(feature = "arbitrum")]
+        {
+            if chain == Chain::arbitrum_sepolia() {
+                return self.arbitrum_sepolia_activation_block()
+            }
+            if chain == Chain::arbitrum() {
+                return self.arbitrum_activation_block()
             }
         }
 
@@ -162,6 +178,64 @@ impl Hardfork {
             Hardfork::London => Some(0),
             Hardfork::ArrowGlacier => Some(0),
             Hardfork::GrayGlacier => Some(0),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the Arbitrum Sepolia testnet.
+    #[cfg(feature = "arbitrum")]
+    pub fn arbitrum_sepolia_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(0),
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            Hardfork::Paris => Some(0),
+            Hardfork::Shanghai => Some(10653737),
+            Hardfork::ArbOS11 => Some(10653737),
+            Hardfork::Cancun => Some(18683405),
+            Hardfork::ArbOS20Atlas => Some(18683405),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the Arbitrum One mainnet.
+    #[cfg(feature = "arbitrum")]
+    pub fn arbitrum_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(0),
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            Hardfork::Paris => Some(0),
+            Hardfork::Shanghai => Some(184097479),
+            Hardfork::ArbOS11 => Some(184097479),
+
+            // upcoming hardforks
+            Hardfork::Cancun => None,
+            Hardfork::ArbOS20Atlas => None,
             _ => None,
         }
     }
@@ -269,6 +343,15 @@ impl Hardfork {
                 return self.base_mainnet_activation_timestamp()
             }
         }
+        #[cfg(feature = "arbitrum")]
+        {
+            if chain == Chain::arbitrum_sepolia() {
+                return self.arbitrum_sepolia_activation_timestamp()
+            }
+            if chain == Chain::arbitrum() {
+                return self.arbitrum_activation_timestamp()
+            }
+        }
 
         None
     }
@@ -346,6 +429,65 @@ impl Hardfork {
             Hardfork::ArrowGlacier => Some(1695902100),
             Hardfork::GrayGlacier => Some(1695902100),
             Hardfork::Paris => Some(1695902100),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Arbitrum Sepolia
+    /// testnet.
+    #[cfg(feature = "arbitrum")]
+    pub fn arbitrum_sepolia_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(1692726996),
+            Hardfork::Homestead => Some(1692726996),
+            Hardfork::Dao => Some(1692726996),
+            Hardfork::Tangerine => Some(1692726996),
+            Hardfork::SpuriousDragon => Some(1692726996),
+            Hardfork::Byzantium => Some(1692726996),
+            Hardfork::Constantinople => Some(1692726996),
+            Hardfork::Petersburg => Some(1692726996),
+            Hardfork::Istanbul => Some(1692726996),
+            Hardfork::MuirGlacier => Some(1692726996),
+            Hardfork::Berlin => Some(1692726996),
+            Hardfork::London => Some(1692726996),
+            Hardfork::ArrowGlacier => Some(1692726996),
+            Hardfork::GrayGlacier => Some(1692726996),
+            Hardfork::Paris => Some(1692726996),
+            Hardfork::Shanghai => Some(1706634000),
+            Hardfork::ArbOS11 => Some(1706634000),
+            Hardfork::Cancun => Some(1709229600),
+            Hardfork::ArbOS20Atlas => Some(1709229600),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Arbitrum One mainnet.
+    #[cfg(feature = "arbitrum")]
+    pub fn arbitrum_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(1622240000),
+            Hardfork::Homestead => Some(1622240000),
+            Hardfork::Dao => Some(1622240000),
+            Hardfork::Tangerine => Some(1622240000),
+            Hardfork::SpuriousDragon => Some(1622240000),
+            Hardfork::Byzantium => Some(1622240000),
+            Hardfork::Constantinople => Some(1622240000),
+            Hardfork::Petersburg => Some(1622240000),
+            Hardfork::Istanbul => Some(1622240000),
+            Hardfork::MuirGlacier => Some(1622240000),
+            Hardfork::Berlin => Some(1622240000),
+            Hardfork::London => Some(1622240000),
+            Hardfork::ArrowGlacier => Some(1622240000),
+            Hardfork::GrayGlacier => Some(1622240000),
+            Hardfork::Paris => Some(1622240000),
+            Hardfork::Shanghai => Some(1708804873),
+            Hardfork::ArbOS11 => Some(1708804873),
+
+            // upcoming hardforks
+            Hardfork::Cancun => None,
+            Hardfork::ArbOS20Atlas => None,
             _ => None,
         }
     }
@@ -441,6 +583,10 @@ impl FromStr for Hardfork {
             "canyon" => Hardfork::Canyon,
             #[cfg(feature = "optimism")]
             "ecotone" => Hardfork::Ecotone,
+            #[cfg(feature = "arbitrum")]
+            "arbos11" => Hardfork::ArbOS11,
+            #[cfg(feature = "arbitrum")]
+            "arbos20atlas" => Hardfork::ArbOS20Atlas,
             _ => return Err(format!("Unknown hardfork: {s}")),
         })
     }
@@ -509,6 +655,18 @@ mod tests {
         let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe"];
         let expected_hardforks =
             [Hardfork::Bedrock, Hardfork::Regolith, Hardfork::Canyon, Hardfork::Ecotone];
+
+        let hardforks: Vec<Hardfork> =
+            hardfork_str.iter().map(|h| Hardfork::from_str(h).unwrap()).collect();
+
+        assert_eq!(hardforks, expected_hardforks);
+    }
+
+    #[test]
+    #[cfg(feature = "arbitrum")]
+    fn check_arbitrum_hardfork_from_str() {
+        let hardfork_str = ["ArBOs11", "ArbOs20AtLas"];
+        let expected_hardforks = [Hardfork::ArbOS11, Hardfork::ArbOS20Atlas];
 
         let hardforks: Vec<Hardfork> =
             hardfork_str.iter().map(|h| Hardfork::from_str(h).unwrap()).collect();
