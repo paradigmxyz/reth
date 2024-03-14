@@ -796,7 +796,7 @@ where
                 .closest_values(&target_key)
                 .filter(|node| {
                     node.value.has_endpoint_proof &&
-                        !self.inner.pending_find_nodes.contains_key(&node.key.preimage().0)
+                        !self.inner.pending_find_nodes.contains_key(node.key.preimage().as_ref())
                 })
                 .take(MAX_NODES_PER_BUCKET)
                 .map(|n| (target_key.distance(&n.key), n.value.record)),
@@ -2395,9 +2395,9 @@ where
         let mut connected_over_discv5: SmallVec<[PeerId; 8]> = smallvec!();
 
         for entry in kbuckets.iter_ref() {
-            let node_id = entry.node.key.preimage();
-            if self.mirror.contains(&**node_id) {
-                connected_over_discv5.push(**node_id)
+            let node_id = entry.node.key.preimage().as_ref();
+            if self.mirror.contains(node_id) {
+                connected_over_discv5.push(*node_id)
             }
         }
 
