@@ -9,7 +9,6 @@ use crate::{
 };
 use clap::Parser;
 use eyre::Context;
-use parking_lot::Mutex;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine};
 use reth_blockchain_tree::{
@@ -200,11 +199,11 @@ impl Command {
             network_client,
             Pipeline::builder().build(
                 provider_factory.clone(),
-                Arc::new(Mutex::new(StaticFileProducer::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ))),
+                ),
             ),
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),

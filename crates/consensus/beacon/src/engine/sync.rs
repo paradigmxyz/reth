@@ -394,7 +394,6 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use futures::poll;
-    use parking_lot::Mutex;
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
     use reth_primitives::{
@@ -469,11 +468,11 @@ mod tests {
 
             let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
 
-            let snapshotter = Arc::new(Mutex::new(StaticFileProducer::new(
+            let snapshotter = StaticFileProducer::new(
                 provider_factory.clone(),
                 provider_factory.static_file_provider(),
                 PruneModes::default(),
-            )));
+            );
 
             pipeline.build(provider_factory, snapshotter)
         }

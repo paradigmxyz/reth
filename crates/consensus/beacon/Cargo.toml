@@ -40,7 +40,6 @@ metrics.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 schnellru.workspace = true
-parking_lot = { workspace = true, features = ["send_guard", "arc_lock"] }
 
 [dev-dependencies]
 # reth

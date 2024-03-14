@@ -5597,7 +5597,6 @@ dependencies = [
  "assert_matches",
  "futures",
  "metrics",
- "parking_lot 0.12.1",
  "reth-beacon-consensus-core",
  "reth-blockchain-tree",
  "reth-config",
@@ -6154,7 +6153,6 @@ dependencies = [
  "eyre",
  "fdlimit",
  "futures",
- "parking_lot 0.12.1",
  "reth-auto-seal-consensus",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
@@ -6694,6 +6692,7 @@ version = "0.2.0-beta.2"
 dependencies = [
  "assert_matches",
  "clap",
+ "parking_lot 0.12.1",
  "rayon",
  "reth-db",
  "reth-interfaces",

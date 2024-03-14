@@ -1,6 +1,7 @@
 //! Support for producing static files.
 
 use crate::{segments, segments::Segment, StaticFileProducerEvent};
+use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
@@ -10,26 +11,58 @@ use reth_provider::{
     ProviderFactory,
 };
 use reth_tokio_util::EventListeners;
-use std::{ops::RangeInclusive, time::Instant};
+use std::{
+    ops::{Deref, RangeInclusive},
+    sync::Arc,
+    time::Instant,
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, trace};
 
-/// Result of [StaticFileProducer::run] execution.
+/// Result of [StaticFileProducerInner::run] execution.
 pub type StaticFileProducerResult = RethResult<StaticFileTargets>;
 
-/// The [StaticFileProducer] instance itself with the result of [StaticFileProducer::run]
+/// The [StaticFileProducer] instance itself with the result of [StaticFileProducerInner::run]
 pub type StaticFileProducerWithResult<DB> = (StaticFileProducer<DB>, StaticFileProducerResult);
 
-/// Static File producer routine. See [StaticFileProducer::run] for more detailed description.
+/// Static File producer. It's a wrapper around [StaticFileProducer] that allows to share it
+/// between threads.
+#[derive(Debug, Clone)]
+pub struct StaticFileProducer<DB>(Arc<Mutex<StaticFileProducerInner<DB>>>);
+
+impl<DB: Database> StaticFileProducer<DB> {
+    /// Creates a new [StaticFileProducer].
+    pub fn new(
+        provider_factory: ProviderFactory<DB>,
+        static_file_provider: StaticFileProvider,
+        prune_modes: PruneModes,
+    ) -> Self {
+        Self(Arc::new(Mutex::new(StaticFileProducerInner::new(
+            provider_factory,
+            static_file_provider,
+            prune_modes,
+        ))))
+    }
+}
+
+impl<DB> Deref for StaticFileProducer<DB> {
+    type Target = Arc<Mutex<StaticFileProducerInner<DB>>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Static File producer routine. See [StaticFileProducerInner::run] for more detailed description.
 #[derive(Debug)]
-pub struct StaticFileProducer<DB> {
+pub struct StaticFileProducerInner<DB> {
     /// Provider factory
     provider_factory: ProviderFactory<DB>,
     /// Static File provider
     static_file_provider: StaticFileProvider,
     /// Pruning configuration for every part of the data that can be pruned. Set by user, and
-    /// needed in [StaticFileProducer] to prevent attempting to move prunable data to static files.
-    /// See [StaticFileProducer::get_static_file_targets].
+    /// needed in [StaticFileProducerInner] to prevent attempting to move prunable data to static
+    /// files. See [StaticFileProducerInner::get_static_file_targets].
     prune_modes: PruneModes,
     listeners: EventListeners<StaticFileProducerEvent>,
 }
@@ -68,9 +101,8 @@ impl StaticFileTargets {
     }
 }
 
-impl<DB: Database> StaticFileProducer<DB> {
-    /// Creates a new [StaticFileProducer].
-    pub fn new(
+impl<DB: Database> StaticFileProducerInner<DB> {
+    fn new(
         provider_factory: ProviderFactory<DB>,
         static_file_provider: StaticFileProvider,
         prune_modes: PruneModes,
@@ -200,7 +232,7 @@ impl<DB: Database> StaticFileProducer<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{static_file_producer::StaticFileTargets, StaticFileProducer};
+    use crate::static_file_producer::{StaticFileProducerInner, StaticFileTargets};
     use assert_matches::assert_matches;
     use reth_db::{database::Database, transaction::DbTx};
     use reth_interfaces::{
@@ -252,7 +284,7 @@ mod tests {
         let provider_factory = db.factory;
         let static_file_provider = provider_factory.static_file_provider();
 
-        let mut static_file_producer = StaticFileProducer::new(
+        let mut static_file_producer = StaticFileProducerInner::new(
             provider_factory,
             static_file_provider.clone(),
             PruneModes::default(),

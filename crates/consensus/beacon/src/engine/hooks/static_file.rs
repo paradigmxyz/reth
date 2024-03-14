@@ -5,16 +5,12 @@ use crate::{
     hooks::EngineHookDBAccessLevel,
 };
 use futures::FutureExt;
-use parking_lot::Mutex;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
-use reth_static_file::{StaticFileProducer, StaticFileProducerResult};
+use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;
-use std::{
-    sync::Arc,
-    task::{ready, Context, Poll},
-};
+use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
 use tracing::trace;
 
@@ -32,7 +28,7 @@ pub struct StaticFileHook<DB> {
 impl<DB: Database + 'static> StaticFileHook<DB> {
     /// Create a new instance
     pub fn new(
-        static_file_producer: Arc<Mutex<StaticFileProducer<DB>>>,
+        static_file_producer: StaticFileProducer<DB>,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         Self { state: StaticFileProducerState::Idle(Some(static_file_producer)), task_spawner }
@@ -170,7 +166,7 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
 #[derive(Debug)]
 enum StaticFileProducerState<DB> {
     /// [StaticFileProducer] is idle.
-    Idle(Option<Arc<Mutex<StaticFileProducer<DB>>>>),
+    Idle(Option<StaticFileProducer<DB>>),
     /// [StaticFileProducer] is running and waiting for a response
-    Running(oneshot::Receiver<(Arc<Mutex<StaticFileProducer<DB>>>, StaticFileProducerResult)>),
+    Running(oneshot::Receiver<StaticFileProducerWithResult<DB>>),
 }

@@ -14,7 +14,6 @@ use crate::{
 };
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};
-use parking_lot::Mutex;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
@@ -549,11 +548,11 @@ where
         let max_block = config.max_block(&network_client, provider_factory.clone()).await?;
         let mut hooks = EngineHooks::new();
 
-        let static_file_producer = Arc::new(Mutex::new(StaticFileProducer::new(
+        let static_file_producer = StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.static_file_provider(),
             prune_config.clone().unwrap_or_default().segments,
-        )));
+        );
         let static_file_producer_events = static_file_producer.lock().events();
         hooks.add(StaticFileHook::new(static_file_producer.clone(), Box::new(executor.clone())));
         info!(target: "reth::cli", "StaticFileProducer initialized");

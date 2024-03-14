@@ -12,7 +12,6 @@ use crate::{
 };
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
-use parking_lot::Mutex;
 use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_blockchain_tree::{
@@ -545,7 +544,7 @@ impl NodeConfig {
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
-        static_file_producer: Arc<Mutex<StaticFileProducer<DB>>>,
+        static_file_producer: StaticFileProducer<DB>,
         evm_config: EvmConfig,
     ) -> eyre::Result<Pipeline<DB>>
     where
@@ -789,7 +788,7 @@ impl NodeConfig {
         continuous: bool,
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
-        static_file_producer: Arc<Mutex<StaticFileProducer<DB>>>,
+        static_file_producer: StaticFileProducer<DB>,
         evm_config: EvmConfig,
     ) -> eyre::Result<Pipeline<DB>>
     where

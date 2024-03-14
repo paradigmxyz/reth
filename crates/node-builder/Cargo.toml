@@ -49,4 +49,3 @@ tokio = { workspace = true, features = [
 eyre.workspace = true
 fdlimit = "0.3.0"
 confy.workspace = true
-parking_lot.workspace = true

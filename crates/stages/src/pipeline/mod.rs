@@ -2,7 +2,6 @@ use crate::{
     error::*, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageExt, UnwindInput,
 };
 use futures_util::Future;
-use parking_lot::Mutex;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{
@@ -16,7 +15,7 @@ use reth_provider::{
 };
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::EventListeners;
-use std::{pin::Pin, sync::Arc};
+use std::pin::Pin;
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -72,7 +71,7 @@ pub struct Pipeline<DB: Database> {
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    static_file_producer: Arc<Mutex<StaticFileProducer<DB>>>,
+    static_file_producer: StaticFileProducer<DB>,
     /// All listeners for events the pipeline emits.
     listeners: EventListeners<PipelineEvent>,
     /// Keeps track of the progress of the pipeline.
@@ -591,11 +590,11 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                Arc::new(Mutex::new(StaticFileProducer::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ))),
+                ),
             );
         let events = pipeline.events();
 
@@ -658,11 +657,11 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                Arc::new(Mutex::new(StaticFileProducer::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ))),
+                ),
             );
         let events = pipeline.events();
 
@@ -772,11 +771,11 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                Arc::new(Mutex::new(StaticFileProducer::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ))),
+                ),
             );
         let events = pipeline.events();
 
@@ -876,11 +875,11 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                Arc::new(Mutex::new(StaticFileProducer::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ))),
+                ),
             );
         let events = pipeline.events();
 
@@ -963,11 +962,11 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                Arc::new(Mutex::new(StaticFileProducer::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ))),
+                ),
             );
         let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
@@ -980,11 +979,11 @@ mod tests {
             )))
             .build(
                 provider_factory.clone(),
-                Arc::new(Mutex::new(StaticFileProducer::new(
+                StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ))),
+                ),
             );
         let result = pipeline.run().await;
         assert_matches!(
