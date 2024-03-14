@@ -5,10 +5,10 @@ use crate::{
     },
     to_range,
     traits::{BlockSource, ReceiptProvider},
-    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
-    HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
+    EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
@@ -205,6 +205,12 @@ impl<DB: Database> ProviderFactory<DB> {
         let state_provider = self.state_provider_by_block_number(provider, block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block hash");
         Ok(state_provider)
+    }
+}
+
+impl<DB: Database> DatabaseProviderFactory<DB> for ProviderFactory<DB> {
+    fn database_provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
+        self.provider()
     }
 }
 
@@ -607,6 +613,7 @@ mod tests {
     use assert_matches::assert_matches;
     use rand::Rng;
     use reth_db::{
+        mdbx::DatabaseArguments,
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
@@ -657,7 +664,7 @@ mod tests {
         let factory = ProviderFactory::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
-            Default::default(),
+            DatabaseArguments::new(Default::default()),
             create_test_static_files_dir(),
         )
         .unwrap();

@@ -87,7 +87,7 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
             StaticFileProducerState::Idle(static_file_producer) => {
                 let Some(mut static_file_producer) = static_file_producer.take() else {
                     trace!(target: "consensus::engine::hooks::static_file", "StaticFileProducer is already running but the state is idle");
-                    return Ok(None);
+                    return Ok(None)
                 };
 
                 let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
@@ -131,7 +131,7 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
     ) -> Poll<RethResult<EngineHookEvent>> {
         let Some(finalized_block_number) = ctx.finalized_block_number else {
             trace!(target: "consensus::engine::hooks::static_file", ?ctx, "Finalized block number is not available");
-            return Poll::Pending;
+            return Poll::Pending
         };
 
         // Try to spawn a static_file_producer

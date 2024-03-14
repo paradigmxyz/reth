@@ -1271,10 +1271,9 @@ where
     ) -> EthResult<OptimismTxMeta> {
         let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
 
-        let mut envelope_buf = bytes::BytesMut::new();
-        tx.encode_enveloped(&mut envelope_buf);
-
         let (l1_fee, l1_data_gas) = if !tx.is_deposit() {
+            let envelope_buf = tx.envelope_encoded();
+
             let inner_l1_fee = l1_block_info
                 .l1_tx_data_fee(
                     &self.inner.provider.chain_spec(),
@@ -1341,7 +1340,7 @@ where
         from: &Address,
         request: TypedTransactionRequest,
     ) -> EthResult<TransactionSigned> {
-        for signer in self.inner.signers.iter() {
+        for signer in self.inner.signers.read().iter() {
             if signer.is_signer_for(from) {
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
@@ -1508,6 +1507,11 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
             .unwrap_or_default()
     };
 
+    let blob_gas_used = transaction.transaction.blob_gas_used().map(U128::from);
+    // Blob gas price should only be present if the transaction is a blob transaction
+    let blob_gas_price =
+        blob_gas_used.and_then(|_| meta.excess_blob_gas.map(calc_blob_gasprice).map(U128::from));
+
     #[allow(clippy::needless_update)]
     let mut res_receipt = TransactionReceipt {
         transaction_hash: Some(meta.tx_hash),
@@ -1527,8 +1531,8 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         logs_bloom: receipt.bloom_slow(),
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
         // EIP-4844 fields
-        blob_gas_price: meta.excess_blob_gas.map(calc_blob_gasprice).map(U128::from),
-        blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
+        blob_gas_price,
+        blob_gas_used,
         ..Default::default()
     };
 

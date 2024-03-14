@@ -14,8 +14,8 @@ use crate::{
 };
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
-use reth_config::Config;
-use reth_db::{init_db, mdbx::DatabaseArguments};
+use reth_config::{config::EtlConfig, Config};
+use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::ChainSpec;
@@ -82,6 +82,14 @@ pub struct Command {
     #[arg(long)]
     batch_size: Option<u64>,
 
+    /// The maximum size in bytes of data held in memory before being flushed to disk as a file.
+    #[arg(long)]
+    etl_file_size: Option<usize>,
+
+    /// Directory where to collect ETL files
+    #[arg(long)]
+    etl_dir: Option<PathBuf>,
+
     /// Normally, running the stage requires unwinding for stages that already
     /// have been run, in order to not rewrite to the same database slots.
     ///
@@ -127,8 +135,7 @@ impl Command {
         let db_path = data_dir.db_path();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db =
-            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
+        let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
 
         let factory = ProviderFactory::new(
@@ -151,6 +158,13 @@ impl Command {
         }
 
         let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
+
+        let etl_config = EtlConfig::new(
+            Some(
+                self.etl_dir.unwrap_or_else(|| EtlConfig::from_datadir(&data_dir.data_dir_path())),
+            ),
+            self.etl_file_size.unwrap_or(EtlConfig::default_file_size()),
+        );
 
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
@@ -230,7 +244,7 @@ impl Command {
                     )
                 }
                 StageEnum::TxLookup => {
-                    (Box::new(TransactionLookupStage::new(batch_size, None)), None)
+                    (Box::new(TransactionLookupStage::new(batch_size, etl_config, None)), None)
                 }
                 StageEnum::AccountHashing => {
                     (Box::new(AccountHashingStage::new(1, batch_size)), None)

@@ -27,7 +27,7 @@
         "type": "grafana",
         "id": "grafana",
         "name": "Grafana",
-        "version": "10.1.1"
+        "version": "10.3.3"
       },
       {
         "type": "datasource",
@@ -1524,7 +1524,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "description": "Accumulated durations of nested function calls, in one call to poll `TransactionsManager` future (`TransactionsManager` future has a loop, hence accumulated).\n\nNetwork Events - stream peer session updates from `NetworkManager`\nTransaction Events - stream txns gossip fom `NetworkManager`\nImported Transactions - stream hashes of successfully inserted txns from `TransactionPool`\nPending pool imports - flush txns to pool from `TransactionsManager`\nFetch Events - stream fetch txn events (success case wraps a tx) from `TransactionFetcher`\nFetch Pending Hashes -  search for hashes announced by an idle peer in cache for hashes pending fetch\nCommands - stream commands from (?) to fetch/serve/propagate txns\n  ",
+        "description": "Durations of nested function calls, in one call to poll `TransactionsManager` future:\n\nNetwork Events - stream peer session updates from `NetworkManager`;\nTransaction Events - stream txns gossip from `NetworkManager`;\nPending Transactions - stream hashes of txns successfully inserted into pending set in `TransactionPool`;\nPending Pool Imports - flush txns to pool from `TransactionsManager`;\nFetch Events - stream fetch txn events (success case wraps a tx) from `TransactionFetcher`;\nFetch Pending Hashes - search for hashes announced by an idle peer in cache for hashes pending fetch;\n(Transactions Commands - stream commands from testnet to fetch/serve/propagate txns)\n",
         "fieldConfig": {
           "defaults": {
             "color": {
@@ -1646,7 +1646,7 @@
             "hide": false,
             "includeNullMetadata": true,
             "instant": false,
-            "legendFormat": "Imported Transactions",
+            "legendFormat": "Pending Transactions",
             "range": true,
             "refId": "D",
             "useBackend": false
@@ -1878,7 +1878,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "description": "Duration spent insdie one call to poll the `TransactionsManager` future",
+        "description": "Duration spent inside one call to poll the `TransactionsManager` future",
         "fieldConfig": {
           "defaults": {
             "color": {
@@ -2130,7 +2130,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "description": "Durations of nested function calls, in one call to poll `NetworkManager` future.\n\nNetwork Handle Message - stream network handle messages from `Transactions`\nSwarm Events - stream txns gossip fom `NetworkManager`",
+        "description": "Durations of nested function calls, in one call to poll `NetworkManager` future:\n\nNetwork Handle Message - stream network handle messages from `TransactionsManager`;\nSwarm Events - stream transaction gossip from `Swarm`",
         "fieldConfig": {
           "defaults": {
             "color": {

@@ -13,7 +13,7 @@ use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
-use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
+use reth_db::{database::Database, init_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -87,8 +87,7 @@ impl ImportCommand {
         let db_path = data_dir.db_path();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db =
-            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
+        let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
         let provider_factory =
             ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
@@ -179,6 +178,7 @@ impl ImportCommand {
             reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
 
         let max_block = file_client.max_block().unwrap_or(0);
+
         let mut pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty
@@ -191,6 +191,7 @@ impl ImportCommand {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
+                    config.stages.etl,
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,

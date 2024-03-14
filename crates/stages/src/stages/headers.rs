@@ -1,6 +1,7 @@
 use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use futures_util::StreamExt;
 use reth_codecs::Compact;
+use reth_config::config::EtlConfig;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -74,6 +75,7 @@ where
         downloader: Downloader,
         mode: HeaderSyncMode,
         consensus: Arc<dyn Consensus>,
+        etl_config: EtlConfig,
     ) -> Self {
         Self {
             provider: database,
@@ -81,8 +83,8 @@ where
             mode,
             consensus,
             sync_gap: None,
-            hash_collector: Collector::new(100 * (1024 * 1024)),
-            header_collector: Collector::new(100 * (1024 * 1024)),
+            hash_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
+            header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
             is_etl_ready: false,
         }
     }
@@ -419,6 +421,7 @@ mod tests {
                     (*self.downloader_factory)(),
                     HeaderSyncMode::Tip(self.channel.1.clone()),
                     self.consensus.clone(),
+                    EtlConfig::default(),
                 )
             }
         }

@@ -315,7 +315,7 @@ where
         Ok(result)
     }
 
-    /// Return the next account storage entry for the current accont key.
+    /// Return the next account storage entry for the current account key.
     ///
     /// # Panics
     ///

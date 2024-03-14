@@ -52,7 +52,10 @@ use reth_provider::{
     CanonStateSubscriptions, HeaderProvider, HeaderSyncMode, ProviderFactory,
     StageCheckpointReader,
 };
-use reth_revm::EvmProcessorFactory;
+use reth_revm::{
+    stack::{Hook, InspectorStackConfig},
+    EvmProcessorFactory,
+};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -68,7 +71,6 @@ use reth_transaction_pool::{
     blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
     EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
-use revm_inspectors::stack::Hook;
 use secp256k1::SecretKey;
 use std::{
     net::{SocketAddr, SocketAddrV4},
@@ -803,7 +805,6 @@ impl NodeConfig {
         }
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        use revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone(), evm_config);
 
         let stack_config = InspectorStackConfig {
@@ -836,6 +837,7 @@ impl NodeConfig {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
+                    stage_config.etl.clone(),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
@@ -869,6 +871,7 @@ impl NodeConfig {
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
                     stage_config.transaction_lookup.chunk_size,
+                    stage_config.etl.clone(),
                     prune_modes.transaction_lookup,
                 ))
                 .set(IndexAccountHistoryStage::new(
