@@ -497,15 +497,12 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                                 .collect::<Vec<_>>()
                         });
 
-                        let mut discv5_kbucket_keys = HashSet::new();
-
-                        // todo: just pass the 32 byte id to discv4
+                        let mut discv5_kbucket_keys = HashSet::with_capacity(keys.len());
 
                         for pk_bytes in keys {
                             let pk = PublicKey::from_slice(&pk_bytes)?;
-                            let pk_uncompressed_bytes =
-                                PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
-                            discv5_kbucket_keys.insert(pk_uncompressed_bytes);
+                            let peer_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+                            discv5_kbucket_keys.insert(peer_id);
                         }
 
                         Ok(discv5_kbucket_keys)
