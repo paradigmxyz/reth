@@ -222,9 +222,8 @@ impl StaticFileProviderRW {
         Ok(block)
     }
 
-    /// Each static file keeps track of its own block range. So when we want to add more data
-    /// from a new block, we should make sure that the block number that we are adding matches the
-    /// next expected one from the static file.
+    /// Verifies if the incoming block number matches the next expected block number
+    /// for a static file. This ensures data continuity when adding new blocks.
     fn check_next_block_number(
         &mut self,
         expected_block_number: u64,
