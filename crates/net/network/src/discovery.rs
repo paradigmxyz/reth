@@ -5,6 +5,7 @@ use crate::{
     manager::DiscoveredEvent,
 };
 use discv5::enr::Enr;
+use enr::CombinedPublicKey;
 use futures::StreamExt;
 use parking_lot::RwLock;
 use reth_discv4::{
@@ -463,26 +464,37 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                 // internally to apply pending nodes.
                 let discv5 = Arc::new(RwLock::new(discv5));
                 let discv5_ref = discv5.clone();
-                let kbuckets_callback = move || -> Result<HashSet<PeerId>, secp256k1::Error> {
-                    // waits for write lock on kbuckets
-                    // todo: use master branch in discv5 which has api for taking read lock only
-                    // to get keys
-                    let keys = discv5_ref.read().table_entries_id();
+                let read_kbuckets_callback =
+                    move || -> Result<HashSet<PeerId>, secp256k1::Error> {
+                        let keys = discv5_ref.read().with_kbuckets(|kbuckets| {
+                            kbuckets
+                                .read()
+                                .iter_ref()
+                                .map(|node| {
+                                    let enr = node.node.value;
+                                    let pk = enr.public_key();
+                                    debug_assert!(
+                                        matches!(pk, CombinedPublicKey::Secp256k1(_)),
+                                        "discv5 using different key type than discv4"
+                                    );
+                                    pk.encode()
+                                })
+                                .collect::<Vec<_>>()
+                        });
 
-                    let mut discv5_kbucket_keys = HashSet::new();
+                        let mut discv5_kbucket_keys = HashSet::new();
 
-                    // todo: just pass the 32 byte id to discv4
+                        // todo: just pass the 32 byte id to discv4
 
-                    for node_id in keys {
-                        let pk_compressed_bytes = node_id.raw();
-                        let pk = PublicKey::from_slice(&pk_compressed_bytes)?;
-                        let pk_uncompressed_bytes =
-                            PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
-                        discv5_kbucket_keys.insert(pk_uncompressed_bytes);
-                    }
+                        for pk_bytes in keys {
+                            let pk = PublicKey::from_slice(&pk_bytes)?;
+                            let pk_uncompressed_bytes =
+                                PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+                            discv5_kbucket_keys.insert(pk_uncompressed_bytes);
+                        }
 
-                    Ok(discv5_kbucket_keys)
-                };
+                        Ok(discv5_kbucket_keys)
+                    };
                 // channel which will tell discv4 that discv5 has updated its kbuckets
                 let (discv5_kbuckets_change_tx, discv5_kbuckets_change_rx) = watch::channel(());
 
@@ -495,7 +507,7 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                     sk,
                     discv4_config,
                     discv5_kbuckets_change_rx,
-                    kbuckets_callback,
+                    read_kbuckets_callback,
                 )
                 .await
                 .map_err(|err| {
@@ -652,7 +664,6 @@ mod discv5_test {
     use reth_discv4::Discv4ConfigBuilder;
     use reth_discv5::EnrCombinedKeyWrapper;
 
-    
     use rand::thread_rng;
 
     async fn start_discv5_with_discv4_downgrade_node(

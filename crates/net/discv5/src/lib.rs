@@ -243,10 +243,3 @@ pub fn uncompressed_to_compressed_id(
 
     Ok(pk.into())
 }
-
-#[cfg(test)]
-mod test {
-    fn node_id_conversion_discv4_to_discv5() {
-        
-    }
-}

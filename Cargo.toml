@@ -256,7 +256,7 @@ pin-project = "1.0.12"
 futures-util = "0.3.25"
 
 # p2p
-discv5 = "0.4"
+discv5 = { git = "https://github.com/sigp/discv5", rev = "04ac004" }
 igd-next = "0.14.3"
 
 # rpc
