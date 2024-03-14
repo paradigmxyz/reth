@@ -245,29 +245,22 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
             })
             .map(BlobExcessGasAndPrice::new);
 
-        let basefee = parent
-            .next_block_base_fee(chain_spec.base_fee_params(self.timestamp()))
-            .or_else(|| {
-                if chain_spec.fork(Hardfork::London).transitions_at_block(parent.number + 1) {
-                    // default base fee is zero
-                    Some(EIP1559_INITIAL_BASE_FEE)
-                } else {
-                    None
-                }
-            })
-            .map(U256::from);
+        let mut basefee = parent.next_block_base_fee(chain_spec.base_fee_params(self.timestamp()));
+
+        let mut gas_limit = U256::from(parent.gas_limit);
 
         // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
         // elasticity multiplier to get the new gas limit.
-        let gas_limit = if chain_spec.fork(Hardfork::London).transitions_at_block(parent.number + 1)
-        {
+        if chain_spec.fork(Hardfork::London).transitions_at_block(parent.number + 1) {
             let elasticity_multiplier =
                 chain_spec.base_fee_params(self.timestamp()).elasticity_multiplier;
-            let parent_gas_limit = U256::from(parent.gas_limit);
-            parent_gas_limit * U256::from(elasticity_multiplier)
-        } else {
-            U256::from(parent.gas_limit)
-        };
+
+            // multiply the gas limit by the elasticity multiplier
+            gas_limit *= U256::from(elasticity_multiplier);
+
+            // set the base fee to the initial base fee from the EIP-1559 spec
+            basefee = Some(EIP1559_INITIAL_BASE_FEE)
+        }
 
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),
@@ -277,7 +270,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
             prevrandao: Some(self.prev_randao()),
             gas_limit,
             // calculate basefee based on parent block's gas usage
-            basefee: basefee.unwrap_or_default(),
+            basefee: basefee.map(U256::from).unwrap_or_default(),
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };
