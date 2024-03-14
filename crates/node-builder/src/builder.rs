@@ -549,7 +549,7 @@ where
         let max_block = config.max_block(&network_client, provider_factory.clone()).await?;
         let mut hooks = EngineHooks::new();
 
-        let mut static_file_producer = Arc::new(Mutex::new(StaticFileProducer::new(
+        let static_file_producer = Arc::new(Mutex::new(StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.static_file_provider(),
             prune_config.clone().unwrap_or_default().segments,
