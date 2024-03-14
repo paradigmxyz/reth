@@ -591,11 +591,11 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
+                Arc::new(Mutex::new(StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ),
+                ))),
             );
         let events = pipeline.events();
 
@@ -658,11 +658,11 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
+                Arc::new(Mutex::new(StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ),
+                ))),
             );
         let events = pipeline.events();
 
@@ -772,11 +772,11 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
+                Arc::new(Mutex::new(StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ),
+                ))),
             );
         let events = pipeline.events();
 
@@ -876,11 +876,11 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
+                Arc::new(Mutex::new(StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ),
+                ))),
             );
         let events = pipeline.events();
 
@@ -963,11 +963,11 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
+                Arc::new(Mutex::new(StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ),
+                ))),
             );
         let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
@@ -980,11 +980,11 @@ mod tests {
             )))
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
+                Arc::new(Mutex::new(StaticFileProducer::new(
                     provider_factory.clone(),
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
-                ),
+                ))),
             );
         let result = pipeline.run().await;
         assert_matches!(

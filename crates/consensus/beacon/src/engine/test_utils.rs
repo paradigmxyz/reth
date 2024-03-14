@@ -3,6 +3,7 @@ use crate::{
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
     BeaconOnNewPayloadError, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
+use parking_lot::Mutex;
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -379,11 +380,11 @@ where
             )),
         };
 
-        let static_file_producer = StaticFileProducer::new(
+        let static_file_producer = Arc::new(Mutex::new(StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.static_file_provider(),
             PruneModes::default(),
-        );
+        )));
 
         // Setup pipeline
         let (tip_tx, tip_rx) = watch::channel(B256::default());
