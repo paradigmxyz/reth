@@ -204,8 +204,18 @@ impl Stream for MergedUpdateStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let update = ready!(self.inner.poll_next_unpin(cx));
-        if let Some(DiscoveryUpdateV5::V5(discv5::Event::NodeInserted { .. })) = update {
-            // notify discv4 that a node has been inserted,
+        if let Some(DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(..))) = update {
+            // Notify discv4 that a discv5 session has been established.
+            //
+            // A sessions established with a node that has a WAN reachable socket, means the node is
+            // likely to make it into discv5 kbuckets shortly after session establishment.
+            //
+            // Manually added nodes (e.g. from dns service) won't emit a
+            // `discv5::Event::NodeInserted` event.
+            //
+            // todo: check contactable address, with available discv5 method. send node ids of
+            // non-contactable nodes to discv4 for storing separately. check discv4s policy
+            // for peers with non-WAN-reachable node records.
             if let Err(err) = self.notify_discv4_of_kbuckets_update() {
                 error!(target: "net::discv5",
                     "failed to notify discv4 of discv5 kbuckets update, {err}",
