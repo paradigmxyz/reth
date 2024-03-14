@@ -803,6 +803,12 @@ mod tests {
             .unwrap()
             .commit()
             .unwrap();
+        {
+            let mut receipts_writer =
+                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+            receipts_writer.commit().unwrap();
+        }
         provider.commit().unwrap();
 
         // insert pre state
@@ -948,6 +954,12 @@ mod tests {
             .unwrap()
             .commit()
             .unwrap();
+        {
+            let mut receipts_writer =
+                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+            receipts_writer.commit().unwrap();
+        }
         provider.commit().unwrap();
 
         // variables
@@ -1061,6 +1073,12 @@ mod tests {
             .unwrap()
             .commit()
             .unwrap();
+        {
+            let mut receipts_writer =
+                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+            receipts_writer.commit().unwrap();
+        }
         provider.commit().unwrap();
 
         // variables

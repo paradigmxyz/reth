@@ -139,6 +139,16 @@ impl TestStageDB {
         td: U256,
     ) -> ProviderResult<()> {
         if let Some(writer) = writer {
+            // Some tests start at a forward block number, but static files require no gaps.
+            if writer.user_header().block_end().is_none() &&
+                writer.user_header().expected_block_start() == 0
+            {
+                for i in 0..header.number {
+                    let mut prev = header.clone().unseal();
+                    prev.number = i;
+                    writer.append_header(prev, U256::ZERO, B256::ZERO)?;
+                }
+            }
             writer.append_header(header.header().clone(), td, header.hash())?;
         } else {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
@@ -251,6 +261,17 @@ impl TestStageDB {
                 });
 
                 if let Some(txs_writer) = &mut txs_writer {
+                    // Some tests start at a forward block number, but static files require no gaps.
+                    if txs_writer.user_header().block_end().is_none() &&
+                        txs_writer.user_header().expected_block_start() == 0
+                    {
+                        for i in 0..block.number {
+                            txs_writer.increment_block(
+                                reth_primitives::StaticFileSegment::Transactions,
+                                i,
+                            )?;
+                        }
+                    }
                     txs_writer.increment_block(
                         reth_primitives::StaticFileSegment::Transactions,
                         block.number,

@@ -530,6 +530,12 @@ impl StaticFileProviderRW {
     pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
         self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
     }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Helper function to access [`SegmentHeader`].
+    pub fn user_header(&self) -> &SegmentHeader {
+        self.writer.user_header()
+    }
 }
 
 fn create_jar(

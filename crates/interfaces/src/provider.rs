@@ -126,7 +126,7 @@ pub enum ProviderError {
     #[error("unable to write block #{1} to finalized static file {0}")]
     FinalizedStaticFile(StaticFileSegment, BlockNumber),
     /// Trying to insert data from an unexpected block number.
-    #[error("trying to append data on {0} from block #{1} but last block is #{2}.")]
+    #[error("trying to append data on {0} from block #{1} but expected block #{2}.")]
     UnexpectedStaticFileBlock(StaticFileSegment, BlockNumber, BlockNumber),
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]
