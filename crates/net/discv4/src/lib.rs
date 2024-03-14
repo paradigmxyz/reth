@@ -1637,14 +1637,15 @@ where
 
             // trigger self lookup
             if self.config.enable_lookup {
-                let local_node_id = self.local_node_record.id;
-
-                trace!(target: "discv4",
-                    local_node_id=format!("{:#}", local_node_id),
-                    connected_peers=self.num_connected(),
-                    peers_in_kbuckets=self.kbuckets.iter().count()
-                );
                 while self.lookup_interval.poll_tick(cx).is_ready() {
+                    let local_node_id = self.local_node_record.id;
+
+                    trace!(target: "discv4",
+                        connected_peers=self.num_connected(),
+                        peers_in_kbuckets=self.kbuckets.iter().count(),
+                        local_node_id=format!("{:#}", local_node_id)
+                    );
+
                     let target = self.lookup_rotator.next(&local_node_id);
                     self.lookup_with(target, None);
                 }
