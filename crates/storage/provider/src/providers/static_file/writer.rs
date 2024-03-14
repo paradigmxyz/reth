@@ -230,6 +230,9 @@ impl StaticFileProviderRW {
         expected_block_number: u64,
         segment: StaticFileSegment,
     ) -> ProviderResult<()> {
+        // The next static file block number can be found by checking the one after block_end.
+        // However if it's a new file that hasn't been added any data, its block range will actually
+        // be None. In that case, the next block will be found on `expected_block_start`.
         let next_static_file_block = self
             .writer
             .user_header()
