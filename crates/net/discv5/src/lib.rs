@@ -10,7 +10,7 @@ use std::{
 };
 
 use derive_more::From;
-use enr::Enr;
+use enr::{Enr, EnrKey};
 use futures::{
     stream::{select, Select},
     Stream, StreamExt,
@@ -197,6 +197,10 @@ impl MergedUpdateStream {
     fn notify_discv4_of_kbuckets_update(&self) -> Result<(), watch::error::SendError<()>> {
         self.discv5_kbuckets_change_tx.send(())
     }
+
+    fn check_fork_id_set_for_discv5_peer<K: EnrKey>(enr: &Enr<K>) -> bool {
+        enr.get("eth").is_some()
+    }
 }
 
 impl Stream for MergedUpdateStream {
@@ -204,11 +208,18 @@ impl Stream for MergedUpdateStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let update = ready!(self.inner.poll_next_unpin(cx));
-        if let Some(DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(..))) = update {
+        if let Some(DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(ref enr, _))) = update {
+            // done for discv4 on lower level
+            if !Self::check_fork_id_set_for_discv5_peer(enr) {
+                cx.waker().wake_by_ref();
+                return Poll::Pending
+            }
+
             // Notify discv4 that a discv5 session has been established.
             //
-            // A sessions established with a node that has a WAN reachable socket, means the node is
-            // likely to make it into discv5 kbuckets shortly after session establishment.
+            // A sessions established with a node that has a WAN reachable socket, means the
+            // node is likely to make it into discv5 kbuckets shortly after
+            // session establishment.
             //
             // Manually added nodes (e.g. from dns service) won't emit a
             // `discv5::Event::NodeInserted` event.

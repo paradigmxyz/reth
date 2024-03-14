@@ -23,7 +23,7 @@ pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
 use futures::StreamExt;
-use reth_primitives::{ForkId, NodeRecord, NodeRecordParseError};
+use reth_primitives::{NodeRecord, NodeRecordWithForkId, NodeRecordWithForkIdParseError};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
@@ -35,7 +35,6 @@ use std::{
     time::{Duration, Instant},
 };
 use sync::SyncTree;
-use thiserror::Error;
 use tokio::{
     sync::{
         mpsc,
@@ -81,7 +80,7 @@ impl<N> DnsDiscoveryHandle<N> {
     /// Returns the receiver half of new listener channel that streams discovered [`NodeRecord`]s.
     pub async fn node_record_stream(
         &self,
-    ) -> Result<ReceiverStream<DnsNodeRecordUpdate<N>>, oneshot::error::RecvError> {
+    ) -> Result<ReceiverStream<NodeRecordWithForkId<N>>, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let cmd = DnsDiscoveryCommand::NodeRecordUpdates(tx);
         let _ = self.to_service.send(cmd);
@@ -98,7 +97,7 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver, N = NodeRecord> {
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<DnsDiscoveryCommand<N>>,
     /// All subscribers for resolved node records.
-    node_record_listeners: Vec<mpsc::Sender<DnsNodeRecordUpdate<N>>>,
+    node_record_listeners: Vec<mpsc::Sender<NodeRecordWithForkId<N>>>,
     /// All the trees that can be synced.
     trees: HashMap<LinkEntry, SyncTree>,
     /// All queries currently in progress
@@ -191,7 +190,7 @@ impl<R: Resolver, N> DnsDiscoveryService<R, N> {
     }
 
     /// Creates a new channel for [`NodeRecord`]s.
-    pub fn node_record_stream(&mut self) -> ReceiverStream<DnsNodeRecordUpdate<N>> {
+    pub fn node_record_stream(&mut self) -> ReceiverStream<NodeRecordWithForkId<N>> {
         let (tx, rx) = mpsc::channel(256);
         self.node_record_listeners.push(tx);
         ReceiverStream::new(rx)
@@ -200,7 +199,7 @@ impl<R: Resolver, N> DnsDiscoveryService<R, N> {
     /// Sends  the event to all listeners.
     ///
     /// Remove channels that got closed.
-    fn notify(&mut self, record: DnsNodeRecordUpdate<N>)
+    fn notify(&mut self, record: NodeRecordWithForkId<N>)
     where
         N: Clone,
     {
@@ -230,7 +229,7 @@ impl<R: Resolver, N> DnsDiscoveryService<R, N> {
         link: LinkEntry<SecretKey>,
         hash: String,
         kind: ResolveKind,
-    ) -> Result<(), DnsUpdateParseError>
+    ) -> Result<(), NodeRecordWithForkIdParseError>
     where
         Self: Update,
     {
@@ -265,7 +264,7 @@ impl<R: Resolver, N> DnsDiscoveryService<R, N> {
     fn on_resolved_entry(
         &mut self,
         resp: ResolveEntryResult<SecretKey>,
-    ) -> Result<(), DnsUpdateParseError>
+    ) -> Result<(), NodeRecordWithForkIdParseError>
     where
         Self: Update,
     {
@@ -405,11 +404,17 @@ where
 pub trait Update {
     /// Tries to convert a resolved [`Enr`] into a [`DnsNodeRecordUpdate`]. Notifies all listeners
     /// of update upon successful conversion.
-    fn on_resolved_enr(&mut self, enr: Enr<SecretKey>) -> Result<(), DnsUpdateParseError>;
+    fn on_resolved_enr(
+        &mut self,
+        enr: Enr<SecretKey>,
+    ) -> Result<(), NodeRecordWithForkIdParseError>;
 }
 
 impl<R: Resolver> Update for DnsDiscoveryService<R> {
-    fn on_resolved_enr(&mut self, enr: Enr<SecretKey>) -> Result<(), DnsUpdateParseError> {
+    fn on_resolved_enr(
+        &mut self,
+        enr: Enr<SecretKey>,
+    ) -> Result<(), NodeRecordWithForkIdParseError> {
         let update = enr.clone().try_into()?;
         self.notify(update);
 
@@ -420,7 +425,10 @@ impl<R: Resolver> Update for DnsDiscoveryService<R> {
 }
 
 impl<R: Resolver> Update for DnsDiscoveryService<R, Enr<SecretKey>> {
-    fn on_resolved_enr(&mut self, enr: Enr<SecretKey>) -> Result<(), DnsUpdateParseError> {
+    fn on_resolved_enr(
+        &mut self,
+        enr: Enr<SecretKey>,
+    ) -> Result<(), NodeRecordWithForkIdParseError> {
         let update = enr.clone().try_into()?;
         self.notify(update);
 
@@ -430,72 +438,11 @@ impl<R: Resolver> Update for DnsDiscoveryService<R, Enr<SecretKey>> {
     }
 }
 
-/// The converted discovered [Enr] object
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct DnsNodeRecordUpdate<N = NodeRecord> {
-    /// Discovered node and it's addresses
-    pub node_record: N,
-    /// The forkid of the node, if present in the ENR
-    pub fork_id: Option<ForkId>,
-}
-
-impl TryFrom<Enr<SecretKey>> for DnsNodeRecordUpdate {
-    type Error = DnsUpdateParseError;
-
-    fn try_from(enr: Enr<SecretKey>) -> Result<Self, Self::Error> {
-        // fork id is how we know this is an EL node, this isn't spec´d out but by precedent
-        let fork_id = get_fork_id(&enr)?;
-
-        let node_record = NodeRecord::try_from(enr)?;
-
-        Ok(DnsNodeRecordUpdate { node_record, fork_id: Some(fork_id) })
-    }
-}
-
-impl TryFrom<Enr<SecretKey>> for DnsNodeRecordUpdate<Enr<SecretKey>> {
-    type Error = DnsUpdateParseError;
-
-    fn try_from(enr: Enr<SecretKey>) -> Result<Self, Self::Error> {
-        // fork id is how we know this is an EL node, this isn't spec´d out but by precedent
-        let fork_id = get_fork_id(&enr)?;
-
-        Ok(DnsNodeRecordUpdate { node_record: enr, fork_id: Some(fork_id) })
-    }
-}
-
-fn get_fork_id(enr: &Enr<SecretKey>) -> Result<ForkId, DnsUpdateParseError> {
-    use alloy_rlp::Decodable;
-
-    let Some(mut maybe_fork_id) = enr.get(b"eth") else {
-        return Err(DnsUpdateParseError::ForkIdMissing)
-    };
-
-    let Ok(fork_id) = ForkId::decode(&mut maybe_fork_id) else {
-        return Err(DnsUpdateParseError::ForkIdDecodeError(maybe_fork_id.to_vec()))
-    };
-
-    Ok(fork_id)
-}
-
-/// Conversion from [`Enr`] to [`DnsNodeRecordUpdate`] failed.
-#[derive(Debug, Error)]
-pub enum DnsUpdateParseError {
-    /// Missing key used to identify an execution layer enr.
-    #[error("fork id missing on enr, 'eth' key missing")]
-    ForkIdMissing,
-    /// Failed to decode fork ID rlp value.
-    #[error("failed to decode fork id, 'eth': {0:?}")]
-    ForkIdDecodeError(Vec<u8>),
-    /// Conversion from [`Enr`] into [`NodeRecord`] failed.
-    #[error(transparent)]
-    NodeRecordParseError(#[from] NodeRecordParseError),
-}
-
 /// Commands sent from [DnsDiscoveryHandle] to [DnsDiscoveryService]
 enum DnsDiscoveryCommand<N = NodeRecord> {
     /// Sync a tree
     SyncTree(LinkEntry),
-    NodeRecordUpdates(oneshot::Sender<ReceiverStream<DnsNodeRecordUpdate<N>>>),
+    NodeRecordUpdates(oneshot::Sender<ReceiverStream<NodeRecordWithForkId<N>>>),
 }
 
 /// Represents dns discovery related update events.

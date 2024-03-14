@@ -14,10 +14,9 @@ use reth_discv4::{
 };
 use reth_discv5::{DiscoveryUpdateV5, Discv5WithDiscv4Downgrade, MergedUpdateStream};
 use reth_dns_discovery::{
-    DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
-    Update,
+    DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsResolver, Update,
 };
-use reth_primitives::{ForkId, NodeRecord, PeerId};
+use reth_primitives::{ForkId, NodeRecord, NodeRecordWithForkId, PeerId};
 use smallvec::{smallvec, SmallVec};
 use tokio::{
     sync::{mpsc, watch},
@@ -55,7 +54,7 @@ pub struct Discovery<D = Discv4, S = ReceiverStream<DiscoveryUpdate>, N = NodeRe
     /// Handler to interact with the DNS discovery service
     _dns_discovery: Option<DnsDiscoveryHandle<N>>,
     /// Updates from the DNS discovery service.
-    dns_discovery_updates: Option<ReceiverStream<DnsNodeRecordUpdate<N>>>,
+    dns_discovery_updates: Option<ReceiverStream<NodeRecordWithForkId<N>>>,
     /// The handle to the spawned DNS discovery service
     _dns_disc_service: Option<JoinHandle<()>>,
     /// Events buffered until polled.
@@ -577,7 +576,7 @@ pub(crate) fn new_dns<N>(
 ) -> Result<
     (
         Option<DnsDiscoveryHandle<N>>,
-        Option<ReceiverStream<DnsNodeRecordUpdate<N>>>,
+        Option<ReceiverStream<NodeRecordWithForkId<N>>>,
         Option<JoinHandle<()>>,
     ),
     NetworkError,
