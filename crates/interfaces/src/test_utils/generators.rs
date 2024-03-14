@@ -433,11 +433,9 @@ mod tests {
         });
 
         // TODO resolve dependency issue
-        // let mut encoded = BytesMut::new();
-        // transaction.encode(&mut encoded);
         // let expected =
         // hex!("ec098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a764000080018080");
-        // assert_eq!(expected, encoded.as_ref());
+        // assert_eq!(expected, &alloy_rlp::encode(transaction));
 
         let hash = transaction.signature_hash();
         let expected =
