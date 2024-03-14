@@ -407,6 +407,7 @@ mod tests {
             pub(crate) db: TestStageDB,
             commit_threshold: u64,
             clean_threshold: u64,
+            etl_config: EtlConfig,
         }
 
         impl AccountHashingTestRunner {
@@ -466,7 +467,7 @@ mod tests {
 
         impl Default for AccountHashingTestRunner {
             fn default() -> Self {
-                Self { db: TestStageDB::default(), commit_threshold: 1000, clean_threshold: 1000 }
+                Self { db: TestStageDB::default(), commit_threshold: 1000, clean_threshold: 1000, etl_config: EtlConfig::default() }
             }
         }
 
@@ -481,6 +482,7 @@ mod tests {
                 Self::S {
                     commit_threshold: self.commit_threshold,
                     clean_threshold: self.clean_threshold,
+                    etl_config: self.etl_config.clone()
                 }
             }
         }
