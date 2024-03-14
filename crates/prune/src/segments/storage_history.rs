@@ -327,6 +327,7 @@ mod tests {
         // Read new state of data
         let pruned_changesets = test_rig.pruned_changesets::<tables::StorageChangeSets>(run);
         let pruned_shards = test_rig.pruned_shards::<tables::StoragesHistory>(run);
+        let pruned = pruned_changesets + pruned_shards;
 
         trace!(target: "pruner::test",
             pruned_changesets,
@@ -336,25 +337,29 @@ mod tests {
         );
 
         // verify result
-        let progress = result.progress;
-        let pruned = result.pruned;
+        let reported_progress = result.progress;
+        let reported_pruned = result.pruned;
 
         // verify new state of data against result
-        let expected_pruned = pruned_changesets + pruned_shards;
         if expected_progress.is_done() {
             // todo: debug why `pruned`` + 1 sometimes?
-            // `pruned`` comes from limiter.deleted_entries_count(), if off by one would expect it
-            // to be one too many due to checkpoint saved at previous block if change set not
-            // completely pruned
-            assert!(expected_pruned == pruned + 1 || expected_pruned == pruned, "run {run}");
+            // `pruned` comes from limiter.deleted_entries_count(). how is one less entry counted
+            // related to checkpoint saved at previous block if change set not completely pruned...?
+            trace!(target: "pruner::test",
+                pruned,
+                reported_pruned,
+                run,
+                "total pruned entries in run"
+            );
+            assert!(pruned == reported_pruned + 1 || pruned == reported_pruned, "run {run}");
         } else {
-            assert_eq!(expected_pruned, pruned, "run {run}");
+            assert_eq!(pruned, reported_pruned, "run {run}");
         }
 
-        assert_eq!(expected_progress, progress, "run {run}");
+        assert_eq!(expected_progress, reported_progress, "run {run}");
 
         if expected_progress.is_entries_limit_reached() {
-            assert_eq!(limit, pruned, "run {run}")
+            assert_eq!(limit, reported_pruned, "run {run}")
         }
     }
 

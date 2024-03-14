@@ -866,13 +866,13 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             )? {
                 PruneStepResult::Finished => break true,
                 PruneStepResult::ReachedDeletedEntriesLimit => break false,
-                PruneStepResult::MaybeMoreData => {
-                    // check for time out must be done in this scope since it's not done in
-                    // `step_prune_range`
-                    if limiter.is_limit_reached() {
-                        break false
-                    }
-                }
+                PruneStepResult::MaybeMoreData => (),
+            }
+
+            // check for time out must be done in this scope since it's not done in
+            // `step_prune_range`
+            if limiter.is_limit_reached() {
+                break false
             }
         };
 
