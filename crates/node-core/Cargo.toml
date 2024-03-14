@@ -70,7 +70,6 @@ const-str = "0.5.6"
 rand.workspace = true
 pin-project.workspace = true
 derive_more.workspace = true
-parking_lot.workspace = true
 
 # io
 dirs-next = "2.0.0"

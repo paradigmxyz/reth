@@ -111,7 +111,6 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
                         "static_file_producer task",
                         Box::pin(async move {
                             let result = locked_static_file_producer.run(targets);
-                            drop(locked_static_file_producer);
                             let _ = tx.send((static_file_producer, result));
                         }),
                     );
@@ -119,7 +118,6 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
 
                     Some(EngineHookEvent::Started)
                 } else {
-                    drop(locked_static_file_producer);
                     self.state = StaticFileProducerState::Idle(Some(static_file_producer));
                     Some(EngineHookEvent::NotReady)
                 }
