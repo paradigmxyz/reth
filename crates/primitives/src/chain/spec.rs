@@ -1544,7 +1544,6 @@ impl DepositContract {
 mod tests {
     use super::*;
     use crate::{b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount};
-    use alloy_rlp::Encodable;
     use std::{collections::HashMap, str::FromStr};
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
@@ -2615,9 +2614,7 @@ Post-merge hard forks (timestamp based):
 
         for (key, expected_rlp) in key_rlp {
             let account = chainspec.genesis.alloc.get(&key).expect("account should exist");
-            let mut account_rlp = Vec::new();
-            TrieAccount::from(account.clone()).encode(&mut account_rlp);
-            assert_eq!(account_rlp, expected_rlp)
+            assert_eq!(&alloy_rlp::encode(TrieAccount::from(account.clone())), expected_rlp)
         }
 
         assert_eq!(chainspec.genesis_hash, None);
