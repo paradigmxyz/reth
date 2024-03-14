@@ -324,7 +324,7 @@ impl BundleStateWithReceipts {
 
             if let Some(static_file_producer) = &mut static_file_producer {
                 // Increment block on static file header.
-                static_file_producer.increment_block(StaticFileSegment::Receipts)?;
+                static_file_producer.increment_block(StaticFileSegment::Receipts, block_number)?;
 
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {
                     let receipt = receipt

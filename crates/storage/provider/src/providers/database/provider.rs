@@ -181,6 +181,17 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         };
 
         let mut writer = self.static_file_provider.latest_writer(StaticFileSegment::Headers)?;
+
+        // Backfill: some tests start at a forward block number, but static files require no gaps.
+        let segment_header = writer.user_header();
+        if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
+            for block_number in 0..block.number {
+                let mut prev = block.header.clone().unseal();
+                prev.number = block_number;
+                writer.append_header(prev, U256::ZERO, B256::ZERO)?;
+            }
+        }
+
         writer.append_header(block.header.as_ref().clone(), ttd, block.hash())?;
 
         self.insert_block(block, prune_modes)

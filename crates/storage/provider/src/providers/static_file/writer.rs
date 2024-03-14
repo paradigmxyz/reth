@@ -185,7 +185,13 @@ impl StaticFileProviderRW {
     /// and create the next one if we are past the end range.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
-    pub fn increment_block(&mut self, segment: StaticFileSegment) -> ProviderResult<BlockNumber> {
+    pub fn increment_block(
+        &mut self,
+        segment: StaticFileSegment,
+        expected_block_number: BlockNumber,
+    ) -> ProviderResult<BlockNumber> {
+        self.check_next_block_number(expected_block_number, segment)?;
+
         let start = Instant::now();
         if let Some(last_block) = self.writer.user_header().block_end() {
             // We have finished the previous static file and must freeze it
@@ -214,6 +220,33 @@ impl StaticFileProviderRW {
         }
 
         Ok(block)
+    }
+
+    /// Verifies if the incoming block number matches the next expected block number
+    /// for a static file. This ensures data continuity when adding new blocks.
+    fn check_next_block_number(
+        &mut self,
+        expected_block_number: u64,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<()> {
+        // The next static file block number can be found by checking the one after block_end.
+        // However if it's a new file that hasn't been added any data, its block range will actually
+        // be None. In that case, the next block will be found on `expected_block_start`.
+        let next_static_file_block = self
+            .writer
+            .user_header()
+            .block_end()
+            .map(|b| b + 1)
+            .unwrap_or(self.writer.user_header().expected_block_start());
+
+        if expected_block_number != next_static_file_block {
+            return Err(ProviderError::UnexpectedStaticFileBlockNumber(
+                segment,
+                expected_block_number,
+                next_static_file_block,
+            ))
+        }
+        Ok(())
     }
 
     /// Truncates a number of rows from disk. It deletes and loads an older static file if block
@@ -342,7 +375,7 @@ impl StaticFileProviderRW {
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        let block_number = self.increment_block(StaticFileSegment::Headers)?;
+        let block_number = self.increment_block(StaticFileSegment::Headers, header.number)?;
 
         self.append_column(header)?;
         self.append_column(CompactU256::from(terminal_difficulty))?;
@@ -510,6 +543,12 @@ impl StaticFileProviderRW {
     /// Helper function to override block range for testing.
     pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
         self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Helper function to access [`SegmentHeader`].
+    pub fn user_header(&self) -> &SegmentHeader {
+        self.writer.user_header()
     }
 }
 
