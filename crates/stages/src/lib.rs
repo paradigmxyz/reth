@@ -12,6 +12,7 @@
 //! # Examples
 //!
 //! ```
+//! # use parking_lot::Mutex;
 //! # use std::sync::Arc;
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
@@ -43,11 +44,11 @@
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
 //! # let executor_factory = EvmProcessorFactory::new(chain_spec.clone(), EthEvmConfig::default());
-//! # let static_file_producer = StaticFileProducer::new(
+//! # let static_file_producer = Arc::new(Mutex::new(StaticFileProducer::new(
 //! #    provider_factory.clone(),
 //! #    provider_factory.static_file_provider(),
 //! #    PruneModes::default()
-//! # );
+//! # )));
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
