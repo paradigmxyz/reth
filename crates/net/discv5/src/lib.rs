@@ -10,7 +10,8 @@ use std::{
 };
 
 use derive_more::From;
-use enr::{Enr, EnrKey};
+use discv5::enr::EnrPublicKey;
+use enr::Enr;
 use futures::{
     stream::{select, Select},
     Stream, StreamExt,
@@ -197,10 +198,6 @@ impl MergedUpdateStream {
     fn notify_discv4_of_kbuckets_update(&self) -> Result<(), watch::error::SendError<()>> {
         self.discv5_kbuckets_change_tx.send(())
     }
-
-    fn check_fork_id_set_for_discv5_peer<K: EnrKey>(enr: &Enr<K>) -> bool {
-        enr.get("eth").is_some()
-    }
 }
 
 impl Stream for MergedUpdateStream {
@@ -210,7 +207,7 @@ impl Stream for MergedUpdateStream {
         let update = ready!(self.inner.poll_next_unpin(cx));
         if let Some(DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(ref enr, _))) = update {
             // done for discv4 on lower level
-            if !Self::check_fork_id_set_for_discv5_peer(enr) {
+            if !is_fork_id_set_for_discv5_peer(enr) {
                 cx.waker().wake_by_ref();
                 return Poll::Pending
             }
@@ -238,29 +235,35 @@ impl Stream for MergedUpdateStream {
     }
 }
 
-/// Converts a [`discv5::enr::NodeId`] to a [`PeerId`]. [`discv5::enr::NodeId`] is essentially a
-/// compressed [`PeerId`].
+/// Converts a [`secp256k1::PublicKey`] on a [`discv5::Enr`] to a [`PeerId`] that can be used in
+/// [`Discv4`].
 ///
-/// Trait `discv5::enr::EnrPublicKey` is implemented for reth_discv4 re-exported key
-/// type`secp256k1::PublicKey` from secp256k1-0.27.0.
-pub fn compressed_to_uncompressed_id(
-    node_id: discv5::enr::NodeId,
-) -> Result<PeerId, secp256k1::Error> {
-    let pk_compressed_bytes = node_id.raw();
-    let pk = PublicKey::from_slice(&pk_compressed_bytes)?;
+/// Trait [`discv5::enr::EnrPublicKey`] is implemented for [`reth_discv4::PublicKey`] re-exported
+/// key type [`secp256k1::PublicKey`] from secp256k1-0.27.0.
+pub fn pk_to_uncompressed_id(enr: &discv5::Enr) -> Result<PeerId, secp256k1::Error> {
+    let pk = enr.public_key();
+    debug_assert!(
+        matches!(pk, discv5::enr::CombinedPublicKey::Secp256k1(_)),
+        "discv5 using different key type than discv4"
+    );
+    let pk_bytes = pk.encode();
 
-    Ok(PeerId::from_slice(&pk.serialize_uncompressed()[1..]))
+    let pk = PublicKey::from_slice(&pk_bytes)?;
+    let peer_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+
+    Ok(peer_id)
 }
 
-/// Converts a [`PeerId`] to a [`discv5::enr::NodeId`]. [`PeerId`] is essentially an uncompressed
-/// [`discv5::enr::NodeId`].
-///
-/// Trait `discv5::enr::EnrPublicKey` is implemented for reth_discv4 re-exported key
-/// type`secp256k1::PublicKey` from secp256k1-0.27.0.
+/// Converts a [`PeerId`] to a [`discv5::enr::NodeId`].
 pub fn uncompressed_to_compressed_id(
     peer_id: PeerId,
 ) -> Result<discv5::enr::NodeId, secp256k1::Error> {
     let pk = PublicKey::from_slice(peer_id.as_ref())?;
 
     Ok(pk.into())
+}
+
+/// Checks if the fork id of an [`Enr`] received over [`discv5::Discv5`] is set.
+pub fn is_fork_id_set_for_discv5_peer<K: discv5::enr::EnrKey>(enr: &Enr<K>) -> bool {
+    enr.get("eth").is_some()
 }

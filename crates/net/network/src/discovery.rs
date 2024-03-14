@@ -12,7 +12,9 @@ use reth_discv4::{
     DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscovery, NodeFromExternalSource,
     PublicKey, SecretKey,
 };
-use reth_discv5::{DiscoveryUpdateV5, Discv5WithDiscv4Downgrade, MergedUpdateStream};
+use reth_discv5::{
+    pk_to_uncompressed_id, DiscoveryUpdateV5, Discv5WithDiscv4Downgrade, MergedUpdateStream,
+};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsResolver, Update,
 };
@@ -263,15 +265,27 @@ impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
             NodeInserted { replaced, .. } => {
                 // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::Removed(_)
 
-                if let Some(node_id) = replaced {
-                    let id = reth_discv5::compressed_to_uncompressed_id(node_id).map_err(|_| {
-                        NetworkError::custom_discovery(
-                            "conversion from discv5 node id to pk failed",
-                        )
-                    })?;
-
-                    self.discovered_nodes.remove(&id);
-                };
+                // todo: store the smaller discv5 node ids and convert peer id on discv4
+                // update instead
+                if let Some(ref disc) = self.disc {
+                    if let Some(ref node_id) = replaced {
+                        if let Some(peer_id) = disc
+                            .with_discv5(|discv5| {
+                                discv5.with_kbuckets(|kbuckets| {
+                                    kbuckets
+                                        .read()
+                                        .iter_ref()
+                                        .find(|entry| entry.node.key.preimage() == node_id)
+                                        .map(|entry| pk_to_uncompressed_id(entry.node.value))
+                                })
+                            })
+                            .transpose()
+                            .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?
+                        {
+                            self.discovered_nodes.remove(&peer_id);
+                        }
+                    }
+                }
             }
             SessionEstablished(enr, _remote_socket) => {
                 // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::DiscoveredAtCapacity(_)
@@ -299,8 +313,8 @@ impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
         // todo: get port v6 with respect to ip mode of this node
         let Some(tcp_port_ipv4) = enr.tcp4() else { return Ok(()) };
 
-        let id = reth_discv5::compressed_to_uncompressed_id(enr.node_id()).map_err(|_| {
-            NetworkError::custom_discovery("conversion from discv5 node id to pk failed")
+        let id = pk_to_uncompressed_id(&enr).map_err(|_| {
+            NetworkError::custom_discovery("failed to extract peer id from discv5 enr")
         })?;
 
         let record = NodeRecord {
