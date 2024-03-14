@@ -1840,7 +1840,7 @@ where
 
     /// Filters kbuckets against primary kbuckets. If this node is running as downgrade from
     /// discv5, then discv5 kbuckets are the primary kbuckets.
-    #[must_use]
+    #[must_use = "must handle mirror update error"]
     fn filter_kbuckets_against_primary_kbuckets(&mut self) -> Result<(), Discv4Error> {
         if self.primary_kbuckets.is_none() {
             return Ok(())
@@ -2386,7 +2386,7 @@ impl From<ForkId> for EnrForkIdEntry {
 /// Mirrors another favoured node's kbuckets.
 pub trait MirrorPrimaryKBuckets {
     /// Updates mirror of the primary kbuckets.
-    #[must_use]
+    #[must_use = "must handle error"]
     fn update_mirror(&mut self) -> Result<(), Discv4Error>;
     /// Filters neighbour nodes passed as parameter against the mirror of the primary kbuckets.
     fn filter_neighbours(

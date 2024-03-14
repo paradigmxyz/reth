@@ -257,7 +257,6 @@ pub fn get_fork_id(enr: &Enr<SecretKey>) -> Result<ForkId, NodeRecordWithForkIdP
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rlp::Decodable;
     use rand::{thread_rng, Rng, RngCore};
 
     #[test]

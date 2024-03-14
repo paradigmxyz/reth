@@ -736,18 +736,8 @@ mod discv5_tests {
         // verify node_2 is in KBuckets of node_1:discv4 and vv
         let event_1_v4 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
         let event_2_v4 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
-        assert!(match event_1_v4 {
-            DiscoveryUpdateV5::V4(DiscoveryUpdate::Added(node))
-                if node == node_2_enr_without_sig =>
-                true,
-            _ => false,
-        });
-        assert!(match event_2_v4 {
-            DiscoveryUpdateV5::V4(DiscoveryUpdate::Added(node))
-                if node == node_1_enr_without_sig =>
-                true,
-            _ => false,
-        });
+        matches!(event_1_v4, DiscoveryUpdateV5::V4(DiscoveryUpdate::Added(node)) if node == node_2_enr_without_sig);
+        matches!(event_2_v4, DiscoveryUpdateV5::V4(DiscoveryUpdate::Added(node)) if node == node_1_enr_without_sig);
 
         // add node_2 to discovery handle of node_1 (should add node to discv5 kbuckets)
         let node_2_enr_reth_compatible_ty: Enr<SecretKey> =
@@ -777,41 +767,16 @@ mod discv5_tests {
         // verify node_1:discv5 is connected to node_2:discv5 and vv
         let event_2_v5 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
         let event_1_v5 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
-        assert!(match event_1_v5 {
-            DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(node, socket))
-                if node == node_2_enr && socket == node_2_enr.udp4_socket().unwrap().into() =>
-                true,
-            _ => false,
-        });
-        assert!(match event_2_v5 {
-            DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(node, socket))
-                if node == node_1_enr && socket == node_1_enr.udp4_socket().unwrap().into() =>
-                true,
-            _ => false,
-        });
+        matches!(event_1_v5, DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(node, socket)) if node == node_2_enr && socket == node_2_enr.udp4_socket().unwrap().into());
+        matches!(event_2_v5, DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(node, socket)) if node == node_1_enr && socket == node_1_enr.udp4_socket().unwrap().into());
 
         // verify node_1 is in KBuckets of node_2:discv5
         let event_2_v5 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
-        assert!(match event_2_v5 {
-            DiscoveryUpdateV5::V5(discv5::Event::NodeInserted { node_id, replaced })
-                if node_id == node_1_enr.node_id() && replaced.is_none() =>
-                true,
-            _ => false,
-        });
+        matches!(event_2_v5, DiscoveryUpdateV5::V5(discv5::Event::NodeInserted { node_id, replaced }) if node_id == node_1_enr.node_id() && replaced.is_none());
 
         let event_2_v4 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
         let event_1_v4 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
-        assert!(match event_1_v4 {
-            DiscoveryUpdateV5::V4(DiscoveryUpdate::Removed(node_id))
-                if node_id == node_2_enr_without_sig.id =>
-                true,
-            _ => false,
-        });
-        assert!(match event_2_v4 {
-            DiscoveryUpdateV5::V4(DiscoveryUpdate::Removed(node_id))
-                if node_id == node_1_enr_without_sig.id =>
-                true,
-            _ => false,
-        });
+        matches!(event_1_v4, DiscoveryUpdateV5::V4(DiscoveryUpdate::Removed(node_id)) if node_id == node_2_enr_without_sig.id);
+        matches!(event_2_v4, DiscoveryUpdateV5::V4(DiscoveryUpdate::Removed(node_id)) if node_id == node_1_enr_without_sig.id);
     }
 }
