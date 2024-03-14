@@ -28,7 +28,7 @@ pub struct StorageHashingStage {
     /// The threshold (in number of blocks) for switching between incremental
     /// hashing and full storage hashing.
     pub clean_threshold: u64,
-    /// The maximum number of slots to process before committing.
+    /// The maximum number of slots to process before committing during unwind.
     pub commit_threshold: u64,
     /// ETL configuration
     pub etl_config: EtlConfig,
@@ -191,10 +191,7 @@ mod tests {
         generators,
         generators::{random_block_range, random_contract_account_range},
     };
-    use reth_primitives::{
-        stage::{CheckpointBlockRange, StageUnitCheckpoint},
-        Address, SealedBlock, U256,
-    };
+    use reth_primitives::{Address, SealedBlock, U256};
     use reth_provider::providers::StaticFileWriter;
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
@@ -266,147 +263,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn execute_clean_storage_hashing_with_commit_threshold() {
-        let (previous_stage, stage_progress) = (500, 100);
-        // Set up the runner
-        let mut runner = StorageHashingTestRunner::default();
-        runner.set_clean_threshold(1);
-        runner.set_commit_threshold(500);
-
-        let mut input = ExecInput {
-            target: Some(previous_stage),
-            checkpoint: Some(StageCheckpoint::new(stage_progress)),
-        };
-
-        runner.seed_execution(input).expect("failed to seed execution");
-
-        // first run, hash first half of storages.
-        let rx = runner.execute(input);
-        let result = rx.await.unwrap();
-
-        let (progress_address, progress_key) = runner
-            .db
-            .query(|tx| {
-                let (address, entry) = tx
-                    .cursor_read::<tables::PlainStorageState>()?
-                    .walk(None)?
-                    .nth(500)
-                    .unwrap()
-                    .unwrap();
-                Ok((address, entry.key))
-            })
-            .unwrap();
-
-        assert_matches!(
-            result,
-            Ok(ExecOutput {
-                checkpoint: StageCheckpoint {
-                    block_number: 100,
-                    stage_checkpoint: Some(StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
-                        address: Some(address),
-                        storage: Some(storage),
-                        block_range: CheckpointBlockRange {
-                            from: 101,
-                            to: 500,
-                        },
-                        progress: EntitiesCheckpoint {
-                            processed: 500,
-                            total
-                        }
-                    }))
-                },
-                done: false
-            }) if address == progress_address && storage == progress_key &&
-                total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64
-        );
-        assert_eq!(runner.db.table::<tables::HashedStorages>().unwrap().len(), 500);
-
-        // second run with commit threshold of 2 to check if subkey is set.
-        runner.set_commit_threshold(2);
-        let result = result.unwrap();
-        input.checkpoint = Some(result.checkpoint);
-        let rx = runner.execute(input);
-        let result = rx.await.unwrap();
-
-        let (progress_address, progress_key) = runner
-            .db
-            .query(|tx| {
-                let (address, entry) = tx
-                    .cursor_read::<tables::PlainStorageState>()?
-                    .walk(None)?
-                    .nth(502)
-                    .unwrap()
-                    .unwrap();
-                Ok((address, entry.key))
-            })
-            .unwrap();
-
-        assert_matches!(
-            result,
-            Ok(ExecOutput {
-                checkpoint: StageCheckpoint {
-                    block_number: 100,
-                    stage_checkpoint: Some(StageUnitCheckpoint::Storage(
-                        StorageHashingCheckpoint {
-                            address: Some(address),
-                            storage: Some(storage),
-                            block_range: CheckpointBlockRange {
-                                from: 101,
-                                to: 500,
-                            },
-                            progress: EntitiesCheckpoint {
-                                processed: 502,
-                                total
-                            }
-                        }
-                    ))
-                },
-                done: false
-            }) if address == progress_address && storage == progress_key &&
-                total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64
-        );
-        assert_eq!(runner.db.table::<tables::HashedStorages>().unwrap().len(), 502);
-
-        // third last run, hash rest of storages.
-        runner.set_commit_threshold(1000);
-        input.checkpoint = Some(result.unwrap().checkpoint);
-        let rx = runner.execute(input);
-        let result = rx.await.unwrap();
-
-        assert_matches!(
-            result,
-            Ok(ExecOutput {
-                checkpoint: StageCheckpoint {
-                    block_number: 500,
-                    stage_checkpoint: Some(StageUnitCheckpoint::Storage(
-                        StorageHashingCheckpoint {
-                            address: None,
-                            storage: None,
-                            block_range: CheckpointBlockRange {
-                                from: 0,
-                                to: 0,
-                            },
-                            progress: EntitiesCheckpoint {
-                                processed,
-                                total
-                            }
-                        }
-                    ))
-                },
-                done: true
-            }) if processed == total &&
-                total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64
-        );
-        assert_eq!(
-            runner.db.table::<tables::HashedStorages>().unwrap().len(),
-            runner.db.table::<tables::PlainStorageState>().unwrap().len()
-        );
-
-        // Validate the stage execution
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
-    }
-
     struct StorageHashingTestRunner {
         db: TestStageDB,
         commit_threshold: u64,
@@ -416,7 +272,12 @@ mod tests {
 
     impl Default for StorageHashingTestRunner {
         fn default() -> Self {
-            Self { db: TestStageDB::default(), commit_threshold: 1000, clean_threshold: 1000, etl_config: EtlConfig::default() }
+            Self {
+                db: TestStageDB::default(),
+                commit_threshold: 1000,
+                clean_threshold: 1000,
+                etl_config: EtlConfig::default(),
+            }
         }
     }
 
@@ -431,7 +292,7 @@ mod tests {
             Self::S {
                 commit_threshold: self.commit_threshold,
                 clean_threshold: self.clean_threshold,
-                etl_config: self.etl_config.clone()
+                etl_config: self.etl_config.clone(),
             }
         }
     }

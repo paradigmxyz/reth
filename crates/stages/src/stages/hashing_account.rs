@@ -30,7 +30,7 @@ pub struct AccountHashingStage {
     /// The threshold (in number of blocks) for switching between incremental
     /// hashing and full storage hashing.
     pub clean_threshold: u64,
-    /// The maximum number of accounts to process before committing.
+    /// The maximum number of accounts to process before committing during unwind.
     pub commit_threshold: u64,
     /// ETL configuration
     pub etl_config: EtlConfig,
@@ -264,10 +264,7 @@ mod tests {
         UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{
-        stage::{CheckpointBlockRange, StageUnitCheckpoint},
-        Account, U256,
-    };
+    use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
     use reth_provider::providers::StaticFileWriter;
     use test_utils::*;
 
@@ -308,91 +305,6 @@ mod tests {
                 processed == total &&
                 total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
         );
-
-        // Validate the stage execution
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
-    }
-
-    #[tokio::test]
-    async fn execute_clean_account_hashing_with_commit_threshold() {
-        let (previous_stage, stage_progress) = (20, 10);
-        // Set up the runner
-        let mut runner = AccountHashingTestRunner::default();
-        runner.set_clean_threshold(1);
-        runner.set_commit_threshold(5);
-
-        let mut input = ExecInput {
-            target: Some(previous_stage),
-            checkpoint: Some(StageCheckpoint::new(stage_progress)),
-        };
-
-        runner.seed_execution(input).expect("failed to seed execution");
-
-        // first run, hash first five accounts.
-        let rx = runner.execute(input);
-        let result = rx.await.unwrap();
-
-        let fifth_address = runner
-            .db
-            .query(|tx| {
-                let (address, _) = tx
-                    .cursor_read::<tables::PlainAccountState>()?
-                    .walk(None)?
-                    .nth(5)
-                    .unwrap()
-                    .unwrap();
-                Ok(address)
-            })
-            .unwrap();
-
-        assert_matches!(
-            result,
-            Ok(ExecOutput {
-                checkpoint: StageCheckpoint {
-                    block_number: 10,
-                    stage_checkpoint: Some(StageUnitCheckpoint::Account(
-                        AccountHashingCheckpoint {
-                            address: Some(address),
-                            block_range: CheckpointBlockRange {
-                                from: 11,
-                                to: 20,
-                            },
-                            progress: EntitiesCheckpoint { processed: 5, total }
-                        }
-                    ))
-                },
-                done: false
-            }) if address == fifth_address &&
-                total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
-        );
-        assert_eq!(runner.db.table::<tables::HashedAccounts>().unwrap().len(), 5);
-
-        // second run, hash next five accounts.
-        input.checkpoint = Some(result.unwrap().checkpoint);
-        let rx = runner.execute(input);
-        let result = rx.await.unwrap();
-
-        assert_matches!(
-            result,
-            Ok(ExecOutput {
-                checkpoint: StageCheckpoint {
-                    block_number: 20,
-                    stage_checkpoint: Some(StageUnitCheckpoint::Account(
-                        AccountHashingCheckpoint {
-                            address: None,
-                            block_range: CheckpointBlockRange {
-                                from: 0,
-                                to: 0,
-                            },
-                            progress: EntitiesCheckpoint { processed, total }
-                        }
-                    ))
-                },
-                done: true
-            }) if processed == total &&
-                total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
-        );
-        assert_eq!(runner.db.table::<tables::HashedAccounts>().unwrap().len(), 10);
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
@@ -467,7 +379,12 @@ mod tests {
 
         impl Default for AccountHashingTestRunner {
             fn default() -> Self {
-                Self { db: TestStageDB::default(), commit_threshold: 1000, clean_threshold: 1000, etl_config: EtlConfig::default() }
+                Self {
+                    db: TestStageDB::default(),
+                    commit_threshold: 1000,
+                    clean_threshold: 1000,
+                    etl_config: EtlConfig::default(),
+                }
             }
         }
 
@@ -482,7 +399,7 @@ mod tests {
                 Self::S {
                     commit_threshold: self.commit_threshold,
                     clean_threshold: self.clean_threshold,
-                    etl_config: self.etl_config.clone()
+                    etl_config: self.etl_config.clone(),
                 }
             }
         }
