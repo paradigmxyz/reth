@@ -586,7 +586,7 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_connect_incoming_when_exceeded_incoming_connections_reset() {
+async fn test_always_accept_incoming_connections_from_trusted_peers() {
     reth_tracing::init_test_tracing();
     let other_peer1 = new_random_peer(10, HashSet::new()).await;
     let other_peer2 = new_random_peer(10, HashSet::new()).await;
@@ -640,6 +640,7 @@ async fn test_connect_incoming_when_exceeded_incoming_connections_reset() {
     let peer_id = events.next_session_established().await.unwrap();
     assert_eq!(peer_id, *other_peer_handle3.peer_id());
 
+    // sleep is needed because the disconnect event happened after session_established event
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_eq!(handle.num_connected_peers(), 2);
 }
