@@ -133,6 +133,7 @@ where
             // If there will be no more shards in the block after pruning blocks below target
             // block, we need to remove it, as empty shards are not allowed.
             if higher_blocks.is_empty() {
+                // This shard is the last shard for this sharded key.
                 if key.as_ref().highest_block_number == u64::MAX {
                     let prev_row = cursor.prev()?;
                     match prev_row {
