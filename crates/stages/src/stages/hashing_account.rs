@@ -175,7 +175,11 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
-                    debug!(target: "sync::stages::hashing_account",  "Hashing from {:?} to {:?}", chunk.first().map(|(address, _)| address), chunk.last().map(|(address, _)| address));
+                    if let (Some((start_address, _)), Some((end_address, _))) =
+                        (chunk.first(), chunk.last())
+                    {
+                        debug!(target: "sync::stages::hashing_account",  "Hashing from {:#} to {:#}", start_address.key().unwrap(), end_address.key().unwrap());
+                    }
                     for (address, account) in chunk.into_iter() {
                         let address = address.key().unwrap();
                         let _ = tx.send((RawKey::new(keccak256(address)), account));
