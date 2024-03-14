@@ -617,7 +617,7 @@ impl NetworkEventStream {
         while let Some(ev) = self.inner.next().await {
             match ev {
                 NetworkEvent::SessionEstablished { peer_id, .. } => return Some(peer_id),
-                e => continue,
+                _ => continue,
             }
         }
         None
