@@ -35,7 +35,9 @@ use tracing::trace;
 
 // Gas per transaction not creating a contract.
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
-// Allowed error ratio for gas estimation
+/// Allowed error ratio for gas estimation
+/// Taken from Geth's implementation in order to pass the hive tests
+/// <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/internal/ethapi/api.go#L56
 const ESTIMATE_GAS_ERROR_RATIO: f64 = 0.015;
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
@@ -263,7 +265,7 @@ where
             }
         }
 
-        let (res, env) = ethres?;
+        let (mut res, mut env) = ethres?;
         match res.result {
             ExecutionResult::Success { .. } => {
                 // succeeded
@@ -292,7 +294,7 @@ where
         let gas_used = res.result.gas_used();
         let mut highest_gas_limit: u64 = highest_gas_limit.try_into().unwrap_or(u64::MAX);
         // the lowest value is capped by the gas used by the unconstrained transaction
-        let mut lowest_gas_limit = gas_used - 1;
+        let mut lowest_gas_limit = gas_used.saturating_sub(1);
 
         let gas_refund = match res.result {
             ExecutionResult::Success { gas_refunded, .. } => gas_refunded,
@@ -303,10 +305,9 @@ where
         // <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/eth/gasestimator/gasestimator.go#L135
         let optimistic_gas_limit = (gas_used + gas_refund) * 64 / 63;
         if optimistic_gas_limit < highest_gas_limit {
-            let mut env = env.clone();
             env.tx.gas_limit = optimistic_gas_limit;
-            let (res, _) = transact(&mut db, env)?;
-            update_gas_limits(
+            (res, env) = transact(&mut db, env)?;
+            update_estimated_gas_range(
                 res.result,
                 optimistic_gas_limit,
                 &mut highest_gas_limit,
@@ -327,14 +328,12 @@ where
             // An estimation error is allowed once the current gas limit range used in the binary
             // search is small enough (less than 1.5% of the highest gas limit)
             // <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/eth/gasestimator/gasestimator.go#L152
-            // <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/internal/ethapi/api.go#L56
             if (highest_gas_limit - lowest_gas_limit) as f64 / (highest_gas_limit as f64) <
                 ESTIMATE_GAS_ERROR_RATIO
             {
                 break
             };
 
-            let mut env = env.clone();
             env.tx.gas_limit = mid_gas_limit;
             let ethres = transact(&mut db, env);
 
@@ -348,11 +347,12 @@ where
 
                 // new midpoint
                 mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
+                (_, env) = ethres?;
                 continue
             }
 
-            let (res, _) = ethres?;
-            update_gas_limits(
+            (res, env) = ethres?;
+            update_estimated_gas_range(
                 res.result,
                 mid_gas_limit,
                 &mut highest_gas_limit,
@@ -477,7 +477,9 @@ where
 }
 
 #[inline]
-fn update_gas_limits(
+/// Updates the highest and lowest gas limits for binary search
+///  based on the result of the execution
+fn update_estimated_gas_range(
     result: ExecutionResult,
     tx_gas_limit: u64,
     highest_gas_limit: &mut u64,
