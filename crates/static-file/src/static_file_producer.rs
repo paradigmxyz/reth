@@ -21,7 +21,7 @@ pub type StaticFileProducerResult = RethResult<StaticFileTargets>;
 pub type StaticFileProducerWithResult<DB> = (StaticFileProducer<DB>, StaticFileProducerResult);
 
 /// Static File producer routine. See [StaticFileProducer::run] for more detailed description.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct StaticFileProducer<DB> {
     /// Provider factory
     provider_factory: ProviderFactory<DB>,

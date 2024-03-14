@@ -12,6 +12,7 @@ use crate::{
 };
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
+use parking_lot::Mutex;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{database::Database, init_db, DatabaseEnv};
@@ -95,7 +96,7 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         provider_factory: ProviderFactory<DB>,
         task_executor: &TaskExecutor,
-        static_file_producer: StaticFileProducer<DB>,
+        static_file_producer: Arc<Mutex<StaticFileProducer<DB>>>,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
@@ -231,11 +232,11 @@ impl Command {
             )
             .await?;
 
-        let static_file_producer = StaticFileProducer::new(
+        let static_file_producer = Arc::new(Mutex::new(StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.static_file_provider(),
             PruneModes::default(),
-        );
+        )));
 
         // Configure the pipeline
         let fetch_client = network.fetch_client().await?;

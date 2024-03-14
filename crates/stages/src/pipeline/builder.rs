@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageSet};
+use parking_lot::Mutex;
 use reth_db::database::Database;
 use reth_primitives::{stage::StageId, BlockNumber, B256};
 use reth_provider::ProviderFactory;
@@ -71,7 +74,7 @@ where
     pub fn build(
         self,
         provider_factory: ProviderFactory<DB>,
-        static_file_producer: StaticFileProducer<DB>,
+        static_file_producer: Arc<Mutex<StaticFileProducer<DB>>>,
     ) -> Pipeline<DB> {
         let Self { stages, max_block, tip_tx, metrics_tx } = self;
         Pipeline {

@@ -2,6 +2,7 @@ use crate::{
     error::*, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageExt, UnwindInput,
 };
 use futures_util::Future;
+use parking_lot::Mutex;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{
@@ -15,7 +16,7 @@ use reth_provider::{
 };
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::EventListeners;
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -71,7 +72,7 @@ pub struct Pipeline<DB: Database> {
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    static_file_producer: StaticFileProducer<DB>,
+    static_file_producer: Arc<Mutex<StaticFileProducer<DB>>>,
     /// All listeners for events the pipeline emits.
     listeners: EventListeners<PipelineEvent>,
     /// Keeps track of the progress of the pipeline.
@@ -231,7 +232,8 @@ where
     ///   -> [StageId::Bodies]
     fn produce_static_files(&mut self) -> RethResult<()> {
         let provider = self.provider_factory.provider()?;
-        let targets = self.static_file_producer.get_static_file_targets(HighestStaticFiles {
+        let mut static_file_producer = self.static_file_producer.lock();
+        let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
             headers: provider
                 .get_stage_checkpoint(StageId::Headers)?
                 .map(|checkpoint| checkpoint.block_number),
@@ -242,7 +244,7 @@ where
                 .get_stage_checkpoint(StageId::Bodies)?
                 .map(|checkpoint| checkpoint.block_number),
         })?;
-        self.static_file_producer.run(targets)?;
+        static_file_producer.run(targets)?;
 
         Ok(())
     }

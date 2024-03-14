@@ -11,6 +11,7 @@ use crate::{
 use clap::Parser;
 use eyre::Context;
 use futures::{Stream, StreamExt};
+use parking_lot::Mutex;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{database::Database, init_db};
@@ -107,19 +108,17 @@ impl ImportCommand {
         let tip = file_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            PruneModes::default(),
-        );
-
         let (mut pipeline, events) = self
             .build_import_pipeline(
                 config,
                 provider_factory.clone(),
                 &consensus,
                 file_client,
-                static_file_producer,
+                Arc::new(Mutex::new(StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ))),
             )
             .await?;
 
@@ -155,7 +154,7 @@ impl ImportCommand {
         provider_factory: ProviderFactory<DB>,
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
-        static_file_producer: StaticFileProducer<DB>,
+        static_file_producer: Arc<Mutex<StaticFileProducer<DB>>>,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,

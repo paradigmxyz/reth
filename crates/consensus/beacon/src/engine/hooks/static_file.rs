@@ -5,12 +5,18 @@ use crate::{
     hooks::EngineHookDBAccessLevel,
 };
 use futures::FutureExt;
+use parking_lot::Mutex;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
-use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
+use reth_static_file::{
+    StaticFileProducer, StaticFileProducerResult, StaticFileProducerWithResult,
+};
 use reth_tasks::TaskSpawner;
-use std::task::{ready, Context, Poll};
+use std::{
+    sync::Arc,
+    task::{ready, Context, Poll},
+};
 use tokio::sync::oneshot;
 use tracing::trace;
 
@@ -28,7 +34,7 @@ pub struct StaticFileHook<DB> {
 impl<DB: Database + 'static> StaticFileHook<DB> {
     /// Create a new instance
     pub fn new(
-        static_file_producer: StaticFileProducer<DB>,
+        static_file_producer: Arc<Mutex<StaticFileProducer<DB>>>,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         Self { state: StaticFileProducerState::Idle(Some(static_file_producer)), task_spawner }
@@ -85,16 +91,22 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
     ) -> RethResult<Option<EngineHookEvent>> {
         Ok(match &mut self.state {
             StaticFileProducerState::Idle(static_file_producer) => {
-                let Some(mut static_file_producer) = static_file_producer.take() else {
+                let Some(static_file_producer) = static_file_producer.take() else {
                     trace!(target: "consensus::engine::hooks::static_file", "StaticFileProducer is already running but the state is idle");
                     return Ok(None)
                 };
 
-                let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
-                    headers: Some(finalized_block_number),
-                    receipts: Some(finalized_block_number),
-                    transactions: Some(finalized_block_number),
-                })?;
+                let Some(mut locked_static_file_producer) = static_file_producer.try_lock_arc() else {
+                    trace!(target: "consensus::engine::hooks::static_file", "StaticFileProducer lock is already taken");
+                    return Ok(None)
+                };
+
+                let targets =
+                    locked_static_file_producer.get_static_file_targets(HighestStaticFiles {
+                        headers: Some(finalized_block_number),
+                        receipts: Some(finalized_block_number),
+                        transactions: Some(finalized_block_number),
+                    })?;
 
                 // Check if the moving data to static files has been requested.
                 if targets.any() {
@@ -102,7 +114,8 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
                     self.task_spawner.spawn_critical_blocking(
                         "static_file_producer task",
                         Box::pin(async move {
-                            let result = static_file_producer.run(targets);
+                            let result = locked_static_file_producer.run(targets);
+                            drop(locked_static_file_producer);
                             let _ = tx.send((static_file_producer, result));
                         }),
                     );
@@ -110,6 +123,7 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
 
                     Some(EngineHookEvent::Started)
                 } else {
+                    drop(locked_static_file_producer);
                     self.state = StaticFileProducerState::Idle(Some(static_file_producer));
                     Some(EngineHookEvent::NotReady)
                 }
@@ -157,7 +171,7 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
 #[derive(Debug)]
 enum StaticFileProducerState<DB> {
     /// [StaticFileProducer] is idle.
-    Idle(Option<StaticFileProducer<DB>>),
+    Idle(Option<Arc<Mutex<StaticFileProducer<DB>>>>),
     /// [StaticFileProducer] is running and waiting for a response
-    Running(oneshot::Receiver<StaticFileProducerWithResult<DB>>),
+    Running(oneshot::Receiver<(Arc<Mutex<StaticFileProducer<DB>>>, StaticFileProducerResult)>),
 }
