@@ -190,20 +190,7 @@ impl StaticFileProviderRW {
         segment: StaticFileSegment,
         expected_block_number: BlockNumber,
     ) -> ProviderResult<BlockNumber> {
-        let next_static_file_block = self
-            .writer
-            .user_header()
-            .block_end()
-            .map(|b| b + 1)
-            .unwrap_or(self.writer.user_header().expected_block_start());
-
-        if expected_block_number != next_static_file_block {
-            return Err(ProviderError::UnexpectedStaticFileBlock(
-                segment,
-                expected_block_number,
-                next_static_file_block,
-            ))
-        }
+        self.check_next_block_number(expected_block_number, segment)?;
 
         let start = Instant::now();
         if let Some(last_block) = self.writer.user_header().block_end() {
@@ -233,6 +220,31 @@ impl StaticFileProviderRW {
         }
 
         Ok(block)
+    }
+
+    /// Each static file keeps track of its own block range. So when we want to add more data
+    /// from a new block, we should make sure that the block number that we are adding matches the
+    /// next expected one from the static file.
+    fn check_next_block_number(
+        &mut self,
+        expected_block_number: u64,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<()> {
+        let next_static_file_block = self
+            .writer
+            .user_header()
+            .block_end()
+            .map(|b| b + 1)
+            .unwrap_or(self.writer.user_header().expected_block_start());
+
+        if expected_block_number != next_static_file_block {
+            return Err(ProviderError::UnexpectedStaticFileBlockNumber(
+                segment,
+                expected_block_number,
+                next_static_file_block,
+            ))
+        }
+        Ok(())
     }
 
     /// Truncates a number of rows from disk. It deletes and loads an older static file if block
