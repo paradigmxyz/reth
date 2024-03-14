@@ -9,9 +9,7 @@ use parking_lot::Mutex;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
-use reth_static_file::{
-    StaticFileProducer, StaticFileProducerResult, StaticFileProducerWithResult,
-};
+use reth_static_file::{StaticFileProducer, StaticFileProducerResult};
 use reth_tasks::TaskSpawner;
 use std::{
     sync::Arc,
