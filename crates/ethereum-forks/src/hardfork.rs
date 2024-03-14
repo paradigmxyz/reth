@@ -133,9 +133,7 @@ impl Hardfork {
             Hardfork::GrayGlacier => Some(15050000),
             Hardfork::Paris => Some(15537394),
             Hardfork::Shanghai => Some(17034870),
-
-            // upcoming hardforks
-            Hardfork::Cancun => None,
+            Hardfork::Cancun => Some(19426587),
 
             _ => None,
         }
