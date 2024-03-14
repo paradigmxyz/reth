@@ -476,9 +476,9 @@ where
     }
 }
 
-#[inline]
 /// Updates the highest and lowest gas limits for binary search
 ///  based on the result of the execution
+#[inline]
 fn update_estimated_gas_range(
     result: ExecutionResult,
     tx_gas_limit: u64,
