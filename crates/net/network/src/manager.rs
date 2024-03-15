@@ -547,6 +547,9 @@ where
                 .swarm
                 .sessions_mut()
                 .send_message(&peer_id, PeerMessage::PooledTransactions(msg)),
+            NetworkHandleMessage::AddTrustedPeerId(peer_id) => {
+                self.swarm.state_mut().add_trusted_peer_id(peer_id);
+            }
             NetworkHandleMessage::AddPeerAddress(peer, kind, addr) => {
                 // only add peer if we are not shutting down
                 if !self.swarm.is_shutting_down() {
