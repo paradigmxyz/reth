@@ -1,6 +1,6 @@
 # reth
 
-[![CI status](https://github.com/paradigmxyz/reth/workflows/ci/badge.svg)][gh-ci]
+[![CI status](https://github.com/paradigmxyz/reth/workflows/unit/badge.svg)][gh-ci]
 [![cargo-deny status](https://github.com/paradigmxyz/reth/workflows/deny/badge.svg)][gh-deny]
 [![Telegram Chat][tg-badge]][tg-url]
 
@@ -15,7 +15,7 @@
 
 _The project is still work in progress, see the [disclaimer below](#status)._
 
-[gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/ci.yml
+[gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/unit.yml
 [gh-deny]: https://github.com/paradigmxyz/reth/actions/workflows/deny.yml
 [tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth
 
