@@ -30,7 +30,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, info, trace};
+use tracing::{info, trace};
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -475,7 +475,6 @@ impl PeersManager {
 
     /// Called when a _pending_ outbound connection is successful.
     pub(crate) fn on_active_outgoing_established(&mut self, peer_id: PeerId) {
-        debug!("on active outgoing established {:?}", self.connection_info);
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             self.connection_info.decr_state(peer.state);
             self.connection_info.inc_out();
@@ -911,42 +910,34 @@ impl ConnectionInfo {
 
     fn decr_out(&mut self) {
         self.num_outbound -= 1;
-        debug!("decr_out, {:?}", self);
     }
 
     fn inc_out(&mut self) {
         self.num_outbound += 1;
-        debug!("inc_out, {:?}", self);
     }
 
     fn inc_pending_out(&mut self) {
         self.num_pending_out += 1;
-        debug!("inc_pending_out, {:?}", self);
     }
 
     fn inc_in(&mut self) {
         self.num_inbound += 1;
-        debug!("inc_in, {:?}", self);
     }
 
     fn inc_pending_in(&mut self) {
         self.num_pending_in += 1;
-        debug!("inc_pending_in, {:?}", self);
     }
 
     fn decr_in(&mut self) {
         self.num_inbound -= 1;
-        debug!("decr_in, {:?}", self);
     }
 
     fn decr_pending_out(&mut self) {
         self.num_pending_out -= 1;
-        debug!("decr_pending_out, {:?}", self);
     }
 
     fn decr_pending_in(&mut self) {
         self.num_pending_in -= 1;
-        debug!("decr_pending_in, {:?}", self);
     }
 }
 
