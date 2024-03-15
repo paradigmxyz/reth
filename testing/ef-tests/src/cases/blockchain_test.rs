@@ -106,6 +106,16 @@ impl Case for BlockchainTestCase {
                     .map_err(|err| Error::RethError(err.into()))?;
                 case.pre.write_to_db(provider.tx_ref())?;
 
+                // Initialize receipts static file with genesis
+                {
+                    let mut receipts_writer = provider
+                        .static_file_provider()
+                        .latest_writer(StaticFileSegment::Receipts)
+                        .unwrap();
+                    receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+                    receipts_writer.commit_without_sync_all().unwrap();
+                }
+
                 // Decode and insert blocks, creating a chain of blocks for the test case.
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
                     let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;

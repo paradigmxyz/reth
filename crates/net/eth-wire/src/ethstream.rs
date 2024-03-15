@@ -215,11 +215,9 @@ where
         &mut self,
         item: EthBroadcastMessage,
     ) -> Result<(), EthStreamError> {
-        let mut bytes = BytesMut::new();
-        ProtocolBroadcastMessage::from(item).encode(&mut bytes);
-        let bytes = bytes.freeze();
-
-        self.inner.start_send_unpin(bytes)?;
+        self.inner.start_send_unpin(Bytes::from(alloy_rlp::encode(
+            ProtocolBroadcastMessage::from(item),
+        )))?;
 
         Ok(())
     }
@@ -297,11 +295,9 @@ where
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
         }
 
-        let mut bytes = BytesMut::new();
-        ProtocolMessage::from(item).encode(&mut bytes);
-        let bytes = bytes.freeze();
-
-        self.project().inner.start_send(bytes)?;
+        self.project()
+            .inner
+            .start_send(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(item))))?;
 
         Ok(())
     }

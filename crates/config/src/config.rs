@@ -5,7 +5,10 @@ use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
 use reth_primitives::PruneModes;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
@@ -70,6 +73,8 @@ pub struct StageConfig {
     pub index_account_history: IndexHistoryConfig,
     /// Index Storage History stage configuration.
     pub index_storage_history: IndexHistoryConfig,
+    /// Common ETL related configuration.
+    pub etl: EtlConfig,
 }
 
 /// Header stage configuration.
@@ -235,7 +240,41 @@ impl Default for TransactionLookupConfig {
     }
 }
 
-/// History History stage configuration.
+/// Common ETL related configuration.
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct EtlConfig {
+    /// Data directory where temporary files are created.
+    pub dir: Option<PathBuf>,
+    /// The maximum size in bytes of data held in memory before being flushed to disk as a file.
+    pub file_size: usize,
+}
+
+impl Default for EtlConfig {
+    fn default() -> Self {
+        Self { dir: None, file_size: Self::default_file_size() }
+    }
+}
+
+impl EtlConfig {
+    /// Creates an ETL configuration
+    pub fn new(dir: Option<PathBuf>, file_size: usize) -> Self {
+        Self { dir, file_size }
+    }
+
+    /// Return default ETL directory from datadir path.
+    pub fn from_datadir(path: &Path) -> PathBuf {
+        path.join("etl-tmp")
+    }
+
+    /// Default size in bytes of data held in memory before being flushed to disk as a file.
+    pub const fn default_file_size() -> usize {
+        // 500 MB
+        500 * (1024 * 1024)
+    }
+}
+
+/// History stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct IndexHistoryConfig {

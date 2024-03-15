@@ -5,7 +5,7 @@ use crate::{
     RawKey, RawTable,
 };
 
-use reth_interfaces::provider::ProviderResult;
+use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{ColumnResult, NippyJar, NippyJarHeader, PHFKey};
 use reth_tracing::tracing::*;
 use std::{error::Error as StdError, ops::RangeInclusive};
@@ -55,15 +55,28 @@ macro_rules! generate_static_file_func {
                     // Create PHF and Filter if required
                     if let Some(keys) = keys {
                         debug!(target: "reth::static_file", "Calculating Filter, PHF and offset index list");
-                        nippy_jar.prepare_index(keys, row_count)?;
-                        debug!(target: "reth::static_file", "Filter, PHF and offset index list calculated.");
+                        match nippy_jar.prepare_index(keys, row_count) {
+                            Ok(_) => {
+                                debug!(target: "reth::static_file", "Filter, PHF and offset index list calculated.");
+                            },
+                            Err(e) => {
+                                return Err(ProviderError::NippyJar(e.to_string()));
+                            }
+                        }
                     }
 
                     // Create compression dictionaries if required
                     if let Some(data_sets) = dict_compression_set {
                         debug!(target: "reth::static_file", "Creating compression dictionaries.");
-                        nippy_jar.prepare_compression(data_sets)?;
-                        debug!(target: "reth::static_file", "Compression dictionaries created.");
+                        match nippy_jar.prepare_compression(data_sets){
+                            Ok(_) => {
+                                debug!(target: "reth::static_file", "Compression dictionaries created.");
+                            },
+                            Err(e) => {
+                                return Err(ProviderError::NippyJar(e.to_string()));
+                            }
+                        }
+
                     }
 
                     // Creates the cursors for the columns
@@ -88,7 +101,7 @@ macro_rules! generate_static_file_func {
 
                     debug!(target: "reth::static_file", jar=?nippy_jar, "Generating static file.");
 
-                    let nippy_jar = nippy_jar.freeze(col_iterators.into_iter().chain(additional).collect(), row_count as u64)?;
+                    let nippy_jar = nippy_jar.freeze(col_iterators.into_iter().chain(additional).collect(), row_count as u64).map_err(|e| ProviderError::NippyJar(e.to_string()));
 
                     debug!(target: "reth::static_file", jar=?nippy_jar, "Static file generated.");
 

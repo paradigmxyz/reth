@@ -8,10 +8,7 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::{Parser, Subcommand};
-use reth_db::{
-    cursor::DbCursorRO, database::Database, mdbx::DatabaseArguments, open_db, tables,
-    transaction::DbTx,
-};
+use reth_db::{cursor::DbCursorRO, database::Database, open_db, tables, transaction::DbTx};
 use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes};
 use reth_provider::ProviderFactory;
 use reth_stages::Pipeline;
@@ -61,10 +58,7 @@ impl Command {
             eyre::bail!("Database {db_path:?} does not exist.")
         }
 
-        let db = Arc::new(open_db(
-            db_path.as_ref(),
-            DatabaseArguments::default().log_level(self.db.log_level),
-        )?);
+        let db = Arc::new(open_db(db_path.as_ref(), self.db.database_args())?);
 
         let range = self.command.unwind_range(&db)?;
 

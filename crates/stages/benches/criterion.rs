@@ -4,6 +4,7 @@ use criterion::{
     BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
+use reth_config::config::EtlConfig;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 
 use reth_primitives::{stage::StageCheckpoint, BlockNumber};
@@ -57,7 +58,7 @@ fn transaction_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
     // don't need to run each stage for that many times
     group.sample_size(10);
-    let stage = TransactionLookupStage::new(DEFAULT_NUM_BLOCKS, None);
+    let stage = TransactionLookupStage::new(DEFAULT_NUM_BLOCKS, EtlConfig::default(), None);
 
     let db = setup::txs_testdata(DEFAULT_NUM_BLOCKS);
 

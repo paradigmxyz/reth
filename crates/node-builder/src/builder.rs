@@ -19,6 +19,7 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
+use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -512,7 +513,7 @@ where
             executor,
             data_dir,
             mut config,
-            reth_config,
+            mut reth_config,
             ..
         } = ctx;
 
@@ -547,18 +548,24 @@ where
         let max_block = config.max_block(&network_client, provider_factory.clone()).await?;
         let mut hooks = EngineHooks::new();
 
-        let mut static_file_producer = StaticFileProducer::new(
+        let static_file_producer = StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.static_file_provider(),
             prune_config.clone().unwrap_or_default().segments,
         );
-        let static_file_producer_events = static_file_producer.events();
+        let static_file_producer_events = static_file_producer.lock().events();
         hooks.add(StaticFileHook::new(static_file_producer.clone(), Box::new(executor.clone())));
         info!(target: "reth::cli", "StaticFileProducer initialized");
+
+        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
+        if reth_config.stages.etl.dir.is_none() {
+            reth_config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+        }
 
         // Configure the pipeline
         let (mut pipeline, client) = if config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
+
             for (idx, (address, alloc)) in config.chain.genesis.alloc.iter().enumerate() {
                 info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
             }
@@ -691,7 +698,7 @@ where
 
         // Start RPC servers
 
-        let (rpc_server_handles, rpc_registry) = crate::rpc::launch_rpc_servers(
+        let (rpc_server_handles, mut rpc_registry) = crate::rpc::launch_rpc_servers(
             node_components.clone(),
             engine_api,
             &config,
@@ -699,6 +706,11 @@ where
             rpc,
         )
         .await?;
+
+        // in dev mode we generate 20 random dev-signer accounts
+        if config.dev.dev {
+            rpc_registry.eth_api().with_dev_accounts();
+        }
 
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();

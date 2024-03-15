@@ -193,7 +193,6 @@ mod tests {
         Address, Bytes, Transaction, TransactionSigned, U256,
     };
     use alloy_rlp::{Decodable, Encodable};
-    use bytes::BytesMut;
 
     #[test]
     fn test_decode_create() {
@@ -211,7 +210,7 @@ mod tests {
         let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
         let tx = TransactionSigned::from_transaction_and_signature(request, signature);
 
-        let mut encoded = BytesMut::new();
+        let mut encoded = Vec::new();
         tx.encode(&mut encoded);
         assert_eq!(encoded.len(), tx.length());
 
@@ -236,7 +235,7 @@ mod tests {
 
         let tx = TransactionSigned::from_transaction_and_signature(request, signature);
 
-        let mut encoded = BytesMut::new();
+        let mut encoded = Vec::new();
         tx.encode(&mut encoded);
         assert_eq!(encoded.len(), tx.length());
 

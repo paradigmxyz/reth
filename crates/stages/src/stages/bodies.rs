@@ -179,8 +179,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
             // Increment block on static file header.
             if block_number > 0 {
-                let appended_block_number =
-                    static_file_producer.increment_block(StaticFileSegment::Transactions)?;
+                let appended_block_number = static_file_producer
+                    .increment_block(StaticFileSegment::Transactions, block_number)?;
 
                 if appended_block_number != block_number {
                     // This scenario indicates a critical error in the logic of adding new
@@ -587,13 +587,10 @@ mod tests {
         use reth_interfaces::{
             p2p::{
                 bodies::{
-                    client::{BodiesClient, BodiesFut},
                     downloader::{BodyDownloader, BodyDownloaderResult},
                     response::BlockResponse,
                 },
-                download::DownloadClient,
                 error::DownloadResult,
-                priority::Priority,
             },
             test_utils::{
                 generators,
@@ -841,32 +838,6 @@ mod tests {
                     Ok(())
                 })?;
                 Ok(())
-            }
-        }
-
-        /// A [BodiesClient] that should not be called.
-        #[derive(Debug)]
-        pub(crate) struct NoopClient;
-
-        impl DownloadClient for NoopClient {
-            fn report_bad_message(&self, _: reth_primitives::PeerId) {
-                panic!("Noop client should not be called")
-            }
-
-            fn num_connected_peers(&self) -> usize {
-                panic!("Noop client should not be called")
-            }
-        }
-
-        impl BodiesClient for NoopClient {
-            type Output = BodiesFut;
-
-            fn get_block_bodies_with_priority(
-                &self,
-                _hashes: Vec<B256>,
-                _priority: Priority,
-            ) -> Self::Output {
-                panic!("Noop client should not be called")
             }
         }
 

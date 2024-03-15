@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   prepare:
+    timeout-minutes: 45
     runs-on:
       group: Reth
     steps:
@@ -60,6 +61,7 @@ jobs:
           path: ./artifacts
 
   test:
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

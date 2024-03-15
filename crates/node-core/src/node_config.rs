@@ -52,7 +52,10 @@ use reth_provider::{
     CanonStateSubscriptions, HeaderProvider, HeaderSyncMode, ProviderFactory,
     StageCheckpointReader,
 };
-use reth_revm::EvmProcessorFactory;
+use reth_revm::{
+    stack::{Hook, InspectorStackConfig},
+    EvmProcessorFactory,
+};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -68,7 +71,6 @@ use reth_transaction_pool::{
     blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
     EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
-use revm_inspectors::stack::Hook;
 use secp256k1::SecretKey;
 use std::{
     net::{SocketAddr, SocketAddrV4},
@@ -202,25 +204,9 @@ pub struct NodeConfig {
 impl NodeConfig {
     /// Creates a testing [NodeConfig], causing the database to be launched ephemerally.
     pub fn test() -> Self {
-        let mut test = Self {
-            config: None,
-            chain: MAINNET.clone(),
-            metrics: None,
-            instance: 1,
-            trusted_setup_file: None,
-            network: NetworkArgs::default(),
-            rpc: RpcServerArgs::default(),
-            txpool: TxPoolArgs::default(),
-            builder: PayloadBuilderArgs::default(),
-            debug: DebugArgs::default(),
-            db: DatabaseArgs::default(),
-            dev: DevArgs::default(),
-            pruning: PruningArgs::default(),
-        };
-
-        // set all ports to zero by default for test instances
-        test = test.with_unused_ports();
-        test
+        Self::default()
+            // set all ports to zero by default for test instances
+            .with_unused_ports()
     }
 
     /// Sets --dev mode for the node
@@ -803,7 +789,6 @@ impl NodeConfig {
         }
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        use revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone(), evm_config);
 
         let stack_config = InspectorStackConfig {
@@ -836,6 +821,7 @@ impl NodeConfig {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
+                    stage_config.etl.clone(),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
@@ -869,6 +855,7 @@ impl NodeConfig {
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
                     stage_config.transaction_lookup.chunk_size,
+                    stage_config.etl.clone(),
                     prune_modes.transaction_lookup,
                 ))
                 .set(IndexAccountHistoryStage::new(

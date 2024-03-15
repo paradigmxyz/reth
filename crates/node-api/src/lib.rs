@@ -14,8 +14,9 @@
 pub mod engine;
 pub use engine::{
     validate_payload_timestamp, validate_version_specific_fields, validate_withdrawals_presence,
-    AttributesValidationError, BuiltPayload, EngineApiMessageVersion, EngineTypes,
-    PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
+    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, EngineTypes,
+    MessageValidationKind, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
+    VersionSpecificValidationError,
 };
 
 /// Traits and helper types used to abstract over EVM methods and types.

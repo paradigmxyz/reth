@@ -392,8 +392,8 @@ impl DbTxMut for Tx<RW> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        database::Database, mdbx::DatabaseArguments, tables, transaction::DbTx, DatabaseEnv,
-        DatabaseEnvKind,
+        database::Database, mdbx::DatabaseArguments, models::client_version::ClientVersion, tables,
+        transaction::DbTx, DatabaseEnv, DatabaseEnvKind,
     };
     use reth_interfaces::db::DatabaseError;
     use reth_libmdbx::MaxReadTransactionDuration;
@@ -405,8 +405,10 @@ mod tests {
         const MAX_DURATION: Duration = Duration::from_secs(1);
 
         let dir = tempdir().unwrap();
-        let args = DatabaseArguments::default()
-            .max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(MAX_DURATION)));
+        let args = DatabaseArguments::new(ClientVersion::default())
+            .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
+                MAX_DURATION,
+            )));
         let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
 
         let mut tx = db.tx().unwrap();
@@ -429,8 +431,10 @@ mod tests {
         const MAX_DURATION: Duration = Duration::from_secs(1);
 
         let dir = tempdir().unwrap();
-        let args = DatabaseArguments::default()
-            .max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(MAX_DURATION)));
+        let args = DatabaseArguments::new(ClientVersion::default())
+            .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
+                MAX_DURATION,
+            )));
         let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
 
         let mut tx = db.tx().unwrap();

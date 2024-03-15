@@ -1,5 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use num_traits::Zero;
+use reth_config::config::EtlConfig;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -32,19 +33,20 @@ pub struct TransactionLookupStage {
     /// The maximum number of lookup entries to hold in memory before pushing them to
     /// [`reth_etl::Collector`].
     chunk_size: u64,
+    etl_config: EtlConfig,
     prune_mode: Option<PruneMode>,
 }
 
 impl Default for TransactionLookupStage {
     fn default() -> Self {
-        Self { chunk_size: 5_000_000, prune_mode: None }
+        Self { chunk_size: 5_000_000, etl_config: EtlConfig::default(), prune_mode: None }
     }
 }
 
 impl TransactionLookupStage {
     /// Create new instance of [TransactionLookupStage].
-    pub fn new(chunk_size: u64, prune_mode: Option<PruneMode>) -> Self {
-        Self { chunk_size, prune_mode }
+    pub fn new(chunk_size: u64, etl_config: EtlConfig, prune_mode: Option<PruneMode>) -> Self {
+        Self { chunk_size, etl_config, prune_mode }
     }
 }
 
@@ -99,7 +101,8 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         }
 
         // 500MB temporary files
-        let mut hash_collector: Collector<TxHash, TxNumber> = Collector::new(500 * (1024 * 1024));
+        let mut hash_collector: Collector<TxHash, TxNumber> =
+            Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
 
         debug!(
             target: "sync::stages::transaction_lookup",
@@ -397,12 +400,18 @@ mod tests {
     struct TransactionLookupTestRunner {
         db: TestStageDB,
         chunk_size: u64,
+        etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
     }
 
     impl Default for TransactionLookupTestRunner {
         fn default() -> Self {
-            Self { db: TestStageDB::default(), chunk_size: 1000, prune_mode: None }
+            Self {
+                db: TestStageDB::default(),
+                chunk_size: 1000,
+                etl_config: EtlConfig::default(),
+                prune_mode: None,
+            }
         }
     }
 
@@ -449,7 +458,11 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            TransactionLookupStage { chunk_size: self.chunk_size, prune_mode: self.prune_mode }
+            TransactionLookupStage {
+                chunk_size: self.chunk_size,
+                etl_config: self.etl_config.clone(),
+                prune_mode: self.prune_mode,
+            }
         }
     }
 
