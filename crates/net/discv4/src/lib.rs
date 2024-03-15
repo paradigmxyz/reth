@@ -80,8 +80,8 @@ mod table;
 
 // reexport NodeRecord primitive
 pub use reth_primitives::NodeRecord;
-// re-export key type used
-pub use secp256k1::{PublicKey, SecretKey};
+// re-export key type used to help with using reth discv4 as dep outside of workspace
+pub use secp256k1::{self, PublicKey, SecretKey};
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

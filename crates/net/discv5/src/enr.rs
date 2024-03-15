@@ -2,8 +2,10 @@
 //! [`discv5::enr::NodeId`] and [`PeerId`].
 
 use discv5::enr::{CombinedPublicKey, Enr, EnrKey, EnrPublicKey, NodeId};
-use reth_discv4::{PublicKey, SecretKey};
 use reth_primitives::PeerId;
+use secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
+
+const SECP256K1_SERIALIZED_UNCOMPRESSED_FLAG: u8 = 4;
 
 /// Extracts a [`CombinedPublicKey::Secp256k1`] from a [`discv5::Enr`] and converts it to a
 /// [`PeerId`] that can be used in [`Discv4`](reth_discv4::Discv4).
@@ -34,8 +36,8 @@ pub fn pk_to_uncompressed_id(
 
 /// Converts a [`PeerId`] to a [`discv5::enr::NodeId`].
 pub fn uncompressed_to_compressed_id(peer_id: PeerId) -> Result<NodeId, secp256k1::Error> {
-    let mut buf = [0u8; 65];
-    buf[0] = 4;
+    let mut buf = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
+    buf[0] = SECP256K1_SERIALIZED_UNCOMPRESSED_FLAG;
     buf[1..].copy_from_slice(peer_id.as_ref());
     let pk = PublicKey::from_slice(&buf)?;
 
