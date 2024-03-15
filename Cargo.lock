@@ -6505,6 +6505,7 @@ dependencies = [
  "candid",
  "did",
  "ethereum-json-rpc-client",
+ "eyre",
  "futures",
  "futures-util",
  "hex",

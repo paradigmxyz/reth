@@ -16,6 +16,8 @@ use crate::{
 use clap::{value_parser, Parser};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::BeaconConsensus;
+use reth_blockchain_tree::chain;
+use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
 use reth_interfaces::consensus::Consensus;
 use reth_node_core::args::BitfinityArgs;
 use reth_primitives::ChainSpec;
@@ -38,19 +40,19 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     pub config: Option<PathBuf>,
 
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        default_value_if("dev", "true", "dev"),
-        value_parser = genesis_value_parser,
-        required = false,
-    )]
-    pub chain: Arc<ChainSpec>,
+    // /// The chain this node is running.
+    // ///
+    // /// Possible values are either a built-in chain or the path to a chain specification file.
+    // #[arg(
+    //     long,
+    //     value_name = "CHAIN_OR_PATH",
+    //     long_help = chain_help(),
+    //     default_value = SUPPORTED_CHAINS[0],
+    //     default_value_if("dev", "true", "dev"),
+    //     value_parser = genesis_value_parser,
+    //     required = false,
+    // )]
+    // pub chain: Arc<ChainSpec>,
 
     /// Enable Prometheus metrics.
     ///
@@ -134,57 +136,57 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
 
 impl<Ext: RethCliExt> NodeCommand<Ext> {
     /// Replaces the extension of the node command
-    pub fn with_ext<E: RethCliExt>(self, ext: E::Node) -> NodeCommand<E> {
-        let Self {
-            datadir,
-            config,
-            chain,
-            metrics,
-            trusted_setup_file,
-            instance,
-            with_unused_ports,
-            network,
-            rpc,
-            txpool,
-            builder,
-            debug,
-            db,
-            dev,
-            pruning,
-            #[cfg(feature = "optimism")]
-            rollup,
-            bitfinity,
-            ..
-        } = self;
-        NodeCommand {
-            datadir,
-            config,
-            chain,
-            metrics,
-            instance,
-            with_unused_ports,
-            trusted_setup_file,
-            network,
-            rpc,
-            txpool,
-            builder,
-            debug,
-            db,
-            dev,
-            pruning,
-            #[cfg(feature = "optimism")]
-            rollup,
-            ext,
-            bitfinity,
-        }
-    }
+    // pub fn with_ext<E: RethCliExt>(self, ext: E::Node) -> NodeCommand<E> {
+    //     let Self {
+    //         datadir,
+    //         config,
+    //         chain,
+    //         metrics,
+    //         trusted_setup_file,
+    //         instance,
+    //         with_unused_ports,
+    //         network,
+    //         rpc,
+    //         txpool,
+    //         builder,
+    //         debug,
+    //         db,
+    //         dev,
+    //         pruning,
+    //         #[cfg(feature = "optimism")]
+    //         rollup,
+    //         bitfinity,
+    //         ..
+    //     } = self;
+    //     NodeCommand {
+    //         datadir,
+    //         config,
+    //         chain,
+    //         metrics,
+    //         instance,
+    //         with_unused_ports,
+    //         trusted_setup_file,
+    //         network,
+    //         rpc,
+    //         txpool,
+    //         builder,
+    //         debug,
+    //         db,
+    //         dev,
+    //         pruning,
+    //         #[cfg(feature = "optimism")]
+    //         rollup,
+    //         ext,
+    //         bitfinity,
+    //     }
+    // }
 
     /// Execute `node` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         let Self {
             datadir,
             config,
-            chain,
+            // chain,
             metrics,
             trusted_setup_file,
             instance,
@@ -205,6 +207,8 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
 
         // set up real database
         let database = DatabaseBuilder::Real(datadir);
+
+        let chain = Arc::new(BitfinityEvmClient::fetch_chain_spec(bitfinity.rpc_url.to_owned()).await?);
 
         // set up node config
         let mut node_config = NodeConfig {
@@ -244,17 +248,17 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         Ok(())
     }
 
-    /// Returns the [Consensus] instance to use.
-    ///
-    /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
-    /// will be an [AutoSealConsensus] instance.
-    pub fn consensus(&self) -> Arc<dyn Consensus> {
-        if self.dev.dev {
-            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
-        } else {
-            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
-        }
-    }
+    // /// Returns the [Consensus] instance to use.
+    // ///
+    // /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
+    // /// will be an [AutoSealConsensus] instance.
+    // pub fn consensus(&self) -> Arc<dyn Consensus> {
+    //     if self.dev.dev {
+    //         Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
+    //     } else {
+    //         Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
+    //     }
+    // }
 }
 
 #[cfg(test)]
@@ -272,13 +276,13 @@ mod tests {
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
     }
 
-    #[test]
-    fn parse_common_node_command_chain_args() {
-        for chain in SUPPORTED_CHAINS {
-            let args: NodeCommand = NodeCommand::<()>::parse_from(["reth", "--chain", chain]);
-            assert_eq!(args.chain.chain, chain.parse::<reth_primitives::Chain>().unwrap());
-        }
-    }
+    // #[test]
+    // fn parse_common_node_command_chain_args() {
+    //     for chain in SUPPORTED_CHAINS {
+    //         let args: NodeCommand = NodeCommand::<()>::parse_from(["reth", "--chain", chain]);
+    //         assert_eq!(args.chain.chain, chain.parse::<reth_primitives::Chain>().unwrap());
+    //     }
+    // }
 
     #[test]
     fn parse_discovery_addr() {
@@ -329,38 +333,38 @@ mod tests {
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
     }
 
-    #[test]
-    fn parse_config_path() {
-        let cmd = NodeCommand::<()>::try_parse_from(["reth", "--config", "my/path/to/reth.toml"])
-            .unwrap();
-        // always store reth.toml in the data dir, not the chain specific data dir
-        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let config_path = cmd.config.unwrap_or(data_dir.config_path());
-        assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
+    // #[test]
+    // fn parse_config_path() {
+    //     let cmd = NodeCommand::<()>::try_parse_from(["reth", "--config", "my/path/to/reth.toml"])
+    //         .unwrap();
+    //     // always store reth.toml in the data dir, not the chain specific data dir
+    //     let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+    //     let config_path = cmd.config.unwrap_or(data_dir.config_path());
+    //     assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
-        let cmd = NodeCommand::<()>::try_parse_from(["reth"]).unwrap();
+    //     let cmd = NodeCommand::<()>::try_parse_from(["reth"]).unwrap();
 
-        // always store reth.toml in the data dir, not the chain specific data dir
-        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let config_path = cmd.config.clone().unwrap_or(data_dir.config_path());
-        let end = format!("reth/{}/reth.toml", SUPPORTED_CHAINS[0]);
-        assert!(config_path.ends_with(end), "{:?}", cmd.config);
-    }
+    //     // always store reth.toml in the data dir, not the chain specific data dir
+    //     let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+    //     let config_path = cmd.config.clone().unwrap_or(data_dir.config_path());
+    //     let end = format!("reth/{}/reth.toml", SUPPORTED_CHAINS[0]);
+    //     assert!(config_path.ends_with(end), "{:?}", cmd.config);
+    // }
 
-    #[test]
-    fn parse_db_path() {
-        let cmd = NodeCommand::<()>::try_parse_from(["reth"]).unwrap();
-        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let db_path = data_dir.db_path();
-        let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
-        assert!(db_path.ends_with(end), "{:?}", cmd.config);
+    // #[test]
+    // fn parse_db_path() {
+    //     let cmd = NodeCommand::<()>::try_parse_from(["reth"]).unwrap();
+    //     let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+    //     let db_path = data_dir.db_path();
+    //     let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
+    //     assert!(db_path.ends_with(end), "{:?}", cmd.config);
 
-        let cmd =
-            NodeCommand::<()>::try_parse_from(["reth", "--datadir", "my/custom/path"]).unwrap();
-        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let db_path = data_dir.db_path();
-        assert_eq!(db_path, Path::new("my/custom/path/db"));
-    }
+    //     let cmd =
+    //         NodeCommand::<()>::try_parse_from(["reth", "--datadir", "my/custom/path"]).unwrap();
+    //     let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+    //     let db_path = data_dir.db_path();
+    //     assert_eq!(db_path, Path::new("my/custom/path/db"));
+    // }
 
     #[test]
     #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth

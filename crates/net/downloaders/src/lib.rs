@@ -38,4 +38,4 @@ pub mod test_utils;
 ///
 /// Contains [RemoteClient](remote_client::RemoteClient) to read block data from remote sources,
 /// efficiently buffering headers and bodies for retrieval.
-pub mod remote_client;
+pub mod bitfinity_evm_client;

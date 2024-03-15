@@ -37,7 +37,6 @@ WORKDIR /app
 # Copy reth over from the build stage
 COPY --from=builder /app/reth /usr/local/bin
 COPY config.toml /app/config.toml
-COPY bitfinity.spec.json /app/bitfinity.spec.json
 
 # Copy licenses
 COPY LICENSE-* ./

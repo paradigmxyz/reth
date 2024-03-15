@@ -18,7 +18,7 @@ use reth_db::database_metrics::DatabaseMetadata;
 use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder, remote_client::{CertificateCheckSettings, RemoteClient},
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder, bitfinity_evm_client::{CertificateCheckSettings, BitfinityEvmClient},
 };
 use reth_interfaces::consensus::Consensus;
 use reth_node_core::{args::BitfinityArgs, events::node::NodeEvent, init::init_genesis};
@@ -132,7 +132,7 @@ impl ImportCommand {
         debug!(target: "reth::cli", "Starting block: {}", start_block);
 
         let remote_client = Arc::new(
-            RemoteClient::from_rpc_url(
+            BitfinityEvmClient::from_rpc_url(
                 &self.bitfinity.rpc_url,
                 start_block,
                 self.bitfinity.end_block,
@@ -190,7 +190,7 @@ impl ImportCommand {
         config: Config,
         provider_factory: ProviderFactory<DB>,
         consensus: &Arc<C>,
-        remote_client: Arc<RemoteClient>,
+        remote_client: Arc<BitfinityEvmClient>,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,
