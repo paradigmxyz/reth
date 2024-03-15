@@ -69,14 +69,15 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
 
     /// This will try to spawn the static_file_producer if it is idle:
     /// 1. Check if producing static files is needed through
-    ///    [StaticFileProducer::get_static_file_targets] and then
-    ///    [StaticFileTargets::any](reth_static_file::StaticFileTargets::any).
+    ///    [StaticFileProducer::get_static_file_targets](reth_static_file::StaticFileProducerInner::get_static_file_targets)
+    ///    and then [StaticFileTargets::any](reth_static_file::StaticFileTargets::any).
     /// 2.
     ///     1. If producing static files is needed, pass static file request to the
-    ///        [StaticFileProducer::run] and spawn it in a separate task. Set static file producer
-    ///        state to [StaticFileProducerState::Running].
+    ///     [StaticFileProducer::run](reth_static_file::StaticFileProducerInner::run) and spawn
+    ///     it in a separate task. Set static file producer state to
+    ///     [StaticFileProducerState::Running].
     ///     2. If producing static files is not needed, set static file producer state back to
-    ///        [StaticFileProducerState::Idle].
+    ///     [StaticFileProducerState::Idle].
     ///
     /// If static_file_producer is already running, do nothing.
     fn try_spawn_static_file_producer(
@@ -85,16 +86,23 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
     ) -> RethResult<Option<EngineHookEvent>> {
         Ok(match &mut self.state {
             StaticFileProducerState::Idle(static_file_producer) => {
-                let Some(mut static_file_producer) = static_file_producer.take() else {
+                let Some(static_file_producer) = static_file_producer.take() else {
                     trace!(target: "consensus::engine::hooks::static_file", "StaticFileProducer is already running but the state is idle");
                     return Ok(None)
                 };
 
-                let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
-                    headers: Some(finalized_block_number),
-                    receipts: Some(finalized_block_number),
-                    transactions: Some(finalized_block_number),
-                })?;
+                let Some(mut locked_static_file_producer) = static_file_producer.try_lock_arc()
+                else {
+                    trace!(target: "consensus::engine::hooks::static_file", "StaticFileProducer lock is already taken");
+                    return Ok(None)
+                };
+
+                let targets =
+                    locked_static_file_producer.get_static_file_targets(HighestStaticFiles {
+                        headers: Some(finalized_block_number),
+                        receipts: Some(finalized_block_number),
+                        transactions: Some(finalized_block_number),
+                    })?;
 
                 // Check if the moving data to static files has been requested.
                 if targets.any() {
@@ -102,7 +110,7 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
                     self.task_spawner.spawn_critical_blocking(
                         "static_file_producer task",
                         Box::pin(async move {
-                            let result = static_file_producer.run(targets);
+                            let result = locked_static_file_producer.run(targets);
                             let _ = tx.send((static_file_producer, result));
                         }),
                     );

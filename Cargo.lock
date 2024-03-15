@@ -6684,6 +6684,7 @@ version = "0.2.0-beta.2"
 dependencies = [
  "assert_matches",
  "clap",
+ "parking_lot 0.12.1",
  "rayon",
  "reth-db",
  "reth-interfaces",
