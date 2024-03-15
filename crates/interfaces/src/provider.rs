@@ -131,8 +131,9 @@ pub enum ProviderError {
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]
     BlockNumberOverflow(U256),
+    /// Consistent view error.
     #[error("failed to initialize consistent view: {0}")]
-    ConsistentView(#[from] ConsistentViewError),
+    ConsistentView(Box<ConsistentViewError>),
 }
 
 impl From<reth_primitives::fs::FsPathError> for ProviderError {
@@ -165,4 +166,10 @@ pub enum ConsistentViewError {
         /// The tip diff.
         tip: GotExpected<Option<B256>>,
     },
+}
+
+impl From<ConsistentViewError> for ProviderError {
+    fn from(value: ConsistentViewError) -> Self {
+        Self::ConsistentView(Box::new(value))
+    }
 }
