@@ -232,9 +232,11 @@ impl<DB: Database> StaticFileProducerInner<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::static_file_producer::{StaticFileProducerInner, StaticFileTargets};
+    use crate::static_file_producer::{
+        StaticFileProducer, StaticFileProducerInner, StaticFileTargets,
+    };
     use assert_matches::assert_matches;
-    use reth_db::{database::Database, transaction::DbTx};
+    use reth_db::{database::Database, test_utils::TempDatabase, transaction::DbTx, DatabaseEnv};
     use reth_interfaces::{
         provider::ProviderError,
         test_utils::{
@@ -246,13 +248,18 @@ mod tests {
     use reth_primitives::{
         static_file::HighestStaticFiles, PruneModes, StaticFileSegment, B256, U256,
     };
-    use reth_provider::providers::StaticFileWriter;
+    use reth_provider::{
+        providers::{StaticFileProvider, StaticFileWriter},
+        ProviderFactory,
+    };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use std::{
+        sync::{mpsc::channel, Arc},
+        time::Duration,
+    };
 
-    #[test]
-    fn run() {
+    fn setup() -> (ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>, StaticFileProvider) {
         let mut rng = generators::rng();
-
         let db = TestStageDB::default();
 
         let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
@@ -283,6 +290,12 @@ mod tests {
 
         let provider_factory = db.factory;
         let static_file_provider = provider_factory.static_file_provider();
+        (provider_factory, static_file_provider)
+    }
+
+    #[test]
+    fn run() {
+        let (provider_factory, static_file_provider) = setup();
 
         let mut static_file_producer = StaticFileProducerInner::new(
             provider_factory,
@@ -355,5 +368,49 @@ mod tests {
             static_file_provider.get_highest_static_files(),
             HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
         );
+    }
+
+    /// Tests that a cloneable [`StaticFileProducer`] type is not susceptible to any race condition.
+    #[test]
+    fn only_one() {
+        let (provider_factory, static_file_provider) = setup();
+
+        let static_file_producer = StaticFileProducer::new(
+            provider_factory,
+            static_file_provider.clone(),
+            PruneModes::default(),
+        );
+
+        let (tx, rx) = channel();
+
+        for i in 0..5 {
+            let producer = static_file_producer.clone();
+            let tx = tx.clone();
+
+            std::thread::spawn(move || {
+                let mut locked_producer = producer.lock();
+                if i == 0 {
+                    // Let other threads spawn as well.
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                let targets = locked_producer
+                    .get_static_file_targets(HighestStaticFiles {
+                        headers: Some(1),
+                        receipts: Some(1),
+                        transactions: Some(1),
+                    })
+                    .expect("get static file targets");
+                assert_matches!(locked_producer.run(targets.clone()), Ok(_));
+                tx.send(targets).unwrap();
+            });
+        }
+
+        drop(tx);
+
+        let mut only_one = Some(());
+        for target in rx {
+            // Only the first spawn should have any meaningful target.
+            assert!(only_one.take().is_some_and(|_| target.any()) || !target.any())
+        }
     }
 }
