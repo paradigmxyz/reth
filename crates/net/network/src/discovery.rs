@@ -672,7 +672,7 @@ mod discv5_tests {
     use super::*;
 
     use reth_discv4::Discv4ConfigBuilder;
-    use reth_discv5::EnrCombinedKeyWrapper;
+    use reth_discv5::enr::EnrCombinedKeyWrapper;
     use tracing::trace;
 
     use rand::thread_rng;
