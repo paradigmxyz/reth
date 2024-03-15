@@ -5,7 +5,7 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
     fmt,
     fmt::Write,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     num::ParseIntError,
     str::FromStr,
 };
@@ -170,6 +170,7 @@ mod tests {
     use super::*;
     use alloy_rlp::Decodable;
     use rand::{thread_rng, Rng, RngCore};
+    use std::net::Ipv6Addr;
 
     #[test]
     fn test_mapped_ipv6() {
