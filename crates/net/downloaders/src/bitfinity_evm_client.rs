@@ -17,7 +17,7 @@ use reth_interfaces::p2p::{
 
 use alloy_rlp::Decodable;
 use reth_primitives::{
-    ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Chain, ChainConfig, ChainSpec, ForkCondition, Genesis, GenesisAccount, Hardfork, Header, HeadersDirection, PeerId, B256
+    ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Chain, ChainConfig, ChainSpec, ForkCondition, Genesis, GenesisAccount, Hardfork, Header, HeadersDirection, PeerId, B256, U256
 };
 use rlp::Encodable;
 use serde_json::json;
@@ -227,17 +227,6 @@ impl BitfinityEvmClient {
             eip155_block: Some(0),
             eip158_block: Some(0),
             terminal_total_difficulty: Some(Uint::ZERO),
-            // byzantium_block: Some(0),
-            // constantinople_block: Some(0),
-            // petersburg_block: Some(0),
-            // istanbul_block: Some(0),
-            // muir_glacier_block: Some(0),
-            // berlin_block: Some(0),
-            // london_block: Some(0),
-            // arrow_glacier_block: Some(0),
-            // gray_glacier_block: Some(0),
-            // merge_netsplit_block: Some(0),
-            // terminal_total_difficulty_passed: true,
             ..Default::default()
         };
 
@@ -249,21 +238,21 @@ impl BitfinityEvmClient {
             genesis: genesis.clone(),
             paris_block_and_final_difficulty: Some((0, Uint::ZERO)),
             hardforks: BTreeMap::from([
-                // (Hardfork::Frontier, ForkCondition::Block(0)),
-                // (Hardfork::Homestead, ForkCondition::Block(0)),
-                // (Hardfork::Dao, ForkCondition::Block(0)),
-                // (Hardfork::Tangerine, ForkCondition::Block(0)),
-                // (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-                // (Hardfork::Byzantium, ForkCondition::Block(0)),
-                // (Hardfork::Constantinople, ForkCondition::Block(0)),
-                // (Hardfork::Petersburg, ForkCondition::Block(0)),
-                // (Hardfork::Istanbul, ForkCondition::Block(0)),
-                // (Hardfork::Berlin, ForkCondition::Block(0)),
+                (Hardfork::Frontier, ForkCondition::Block(0)),
+                (Hardfork::Homestead, ForkCondition::Block(0)),
+                (Hardfork::Dao, ForkCondition::Block(0)),
+                (Hardfork::Tangerine, ForkCondition::Block(0)),
+                (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+                (Hardfork::Byzantium, ForkCondition::Block(0)),
+                (Hardfork::Constantinople, ForkCondition::Block(0)),
+                (Hardfork::Petersburg, ForkCondition::Block(0)),
+                (Hardfork::Istanbul, ForkCondition::Block(0)),
+                (Hardfork::Berlin, ForkCondition::Block(0)),
                 (Hardfork::London, ForkCondition::Block(0)),
-                // (
-                //     Hardfork::Paris,
-                //     ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
-                // ),
+                (
+                    Hardfork::Paris,
+                    ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+                ),
             ]),
             ..Default::default()
         };
