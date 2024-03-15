@@ -45,7 +45,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 jsonrpsee.workspace = true
 http = "0.2.8"
 http-body = "0.4.5"
-hyper = "0.14.24"
+hyper.workspace = true
 jsonwebtoken = "8"
 
 ## required for optimism sequencer delegation
@@ -56,7 +56,7 @@ reqwest = { version = "0.11", default-features = false, features = [
 # async
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-tower = "0.4"
+tower.workspace = true
 tokio-stream = { workspace = true, features = ["sync"] }
 pin-project.workspace = true
 parking_lot.workspace = true
