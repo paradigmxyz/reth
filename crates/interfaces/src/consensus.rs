@@ -222,6 +222,17 @@ pub enum ConsensusError {
         blob_gas_per_blob: u64,
     },
 
+    /// Error when excess blob gas is not a multiple of blob gas per blob.
+    #[error(
+    "excess blob gas {excess_blob_gas} is not a multiple of blob gas per blob {blob_gas_per_blob}"
+    )]
+    ExcessBlobGasNotMultipleOfBlobGasPerBlob {
+        /// The actual excess blob gas.
+        excess_blob_gas: u64,
+        /// The blob gas per blob.
+        blob_gas_per_blob: u64,
+    },
+
     /// Error when the blob gas used in the header does not match the expected blob gas used.
     #[error("blob gas used mismatch: {0}")]
     BlobGasUsedDiff(GotExpected<u64>),
