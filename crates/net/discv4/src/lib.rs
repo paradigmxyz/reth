@@ -842,7 +842,6 @@ where
     /// CAUTION: This expects there's a valid Endpoint proof to the given `node`.
     fn find_node(&mut self, node: &NodeRecord, ctx: LookupContext) {
         trace!(target: "discv4", ?node, lookup=?ctx.target(), "Sending FindNode");
-        _ = self.primary_kbuckets.as_mut().unwrap().update_mirror();
         ctx.mark_queried(node.id);
         let id = ctx.target();
         let msg = Message::FindNode(FindNode { id, expire: self.find_node_expiration() });
