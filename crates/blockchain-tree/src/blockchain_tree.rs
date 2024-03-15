@@ -1013,7 +1013,6 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
             self.commit_canonical_to_database(new_canon_chain, &mut durations_recorder)?;
         } else {
             // it forks to canonical block that is not the tip.
-
             let canon_fork: BlockNumHash = new_canon_chain.fork_block();
             // sanity check
             if self.block_indices().canonical_hash(&canon_fork.number) != Some(canon_fork.hash) {
