@@ -7,10 +7,7 @@ use reth_primitives::{
     trie::{HashBuilder, Nibbles, TrieAccount},
     B256,
 };
-use reth_provider::{
-    providers::{ConsistentDbView, ConsistentViewError},
-    DatabaseProviderFactory, ProviderError,
-};
+use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{AccountNode, AccountNodeIter},
@@ -195,15 +192,23 @@ where
 /// Error during parallel state root calculation.
 #[derive(Error, Debug)]
 pub enum ParallelStateRootError {
-    /// Consistency error on attempt to create new database provider.
-    #[error(transparent)]
-    ConsistentView(#[from] ConsistentViewError),
     /// Error while calculating storage root.
     #[error(transparent)]
     StorageRoot(#[from] StorageRootError),
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+}
+
+impl From<ParallelStateRootError> for ProviderError {
+    fn from(error: ParallelStateRootError) -> Self {
+        match error {
+            ParallelStateRootError::Provider(error) => error,
+            ParallelStateRootError::StorageRoot(StorageRootError::DB(error)) => {
+                ProviderError::Database(error)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -217,7 +222,7 @@ mod tests {
     #[tokio::test]
     async fn random_parallel_root() {
         let factory = create_test_provider_factory();
-        let consistent_view = ConsistentDbView::new(factory.clone());
+        let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
         let mut rng = rand::thread_rng();
         let mut state = (0..100)

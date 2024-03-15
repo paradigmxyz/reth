@@ -18,6 +18,7 @@ reth-db.workspace = true
 reth-provider.workspace = true
 reth-stages.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
+reth-trie-parallel = { workspace = true, features = ["parallel"] }
 
 # common
 parking_lot.workspace = true
