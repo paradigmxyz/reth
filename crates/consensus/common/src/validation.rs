@@ -305,6 +305,8 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
         })
     }
 
+    // `excess_blob_gas` must also be a multiple of `DATA_GAS_PER_BLOB`. This will be checked later
+    // (in `calculate_excess_blob_gas`), but it doesn't hurt to catch the problem sooner.
     if excess_blob_gas % DATA_GAS_PER_BLOB != 0 {
         return Err(ConsensusError::ExcessBlobGasNotMultipleOfBlobGasPerBlob {
             excess_blob_gas,
