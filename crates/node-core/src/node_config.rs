@@ -403,7 +403,48 @@ impl NodeConfig {
         Ok(builder)
     }
 
-    /// Build the blockchain tree
+    /// Builds the blockchain tree for the node.
+    ///
+    /// This method configures the blockchain tree, which is a critical component of the node,
+    /// responsible for managing the blockchain state, including blocks, transactions, and receipts.
+    /// It integrates with the consensus mechanism and the EVM for executing transactions.
+    ///
+    /// # Parameters
+    /// - `provider_factory`: A factory for creating various blockchain-related providers, such as
+    ///   for accessing the database or static files.
+    /// - `consensus`: The consensus configuration, which defines how the node reaches agreement on
+    ///   the blockchain state with other nodes.
+    /// - `prune_config`: Configuration for pruning old blockchain data. This helps in managing the
+    ///   storage space efficiently. It's important to validate this configuration to ensure it does
+    ///   not lead to unintended data loss.
+    /// - `sync_metrics_tx`: A transmitter for sending synchronization metrics. This is used for
+    ///   monitoring the node's synchronization process with the blockchain network.
+    /// - `tree_config`: Configuration for the blockchain tree, including any parameters that affect
+    ///   its structure or performance.
+    /// - `evm_config`: The EVM (Ethereum Virtual Machine) configuration, which affects how smart
+    ///   contracts and transactions are executed. Proper validation of this configuration is
+    ///   crucial for the correct execution of transactions.
+    ///
+    /// # Returns
+    /// A `ShareableBlockchainTree` instance, which provides access to the blockchain state and
+    /// supports operations like block insertion, state reversion, and transaction execution.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let tree = config.build_blockchain_tree(
+    ///     provider_factory,
+    ///     consensus,
+    ///     prune_config,
+    ///     sync_metrics_tx,
+    ///     BlockchainTreeConfig::default(),
+    ///     evm_config,
+    /// )?;
+    /// ```
+    ///
+    /// # Note
+    /// Ensure that all configurations passed to this method are validated beforehand to prevent
+    /// runtime errors. Specifically, `prune_config` and `evm_config` should be checked to ensure
+    /// they meet the node's operational requirements.
     pub fn build_blockchain_tree<DB, EvmConfig>(
         &self,
         provider_factory: ProviderFactory<DB>,
