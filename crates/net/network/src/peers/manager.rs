@@ -584,7 +584,10 @@ impl PeersManager {
     /// to us at the same time and this connection is already established.
     pub(crate) fn on_already_connected(&mut self, direction: Direction) {
         match direction {
-            Direction::Incoming => {}
+            Direction::Incoming => {
+                // need to decrement the ingoing counter
+                self.connection_info.decr_in();
+            }
             Direction::Outgoing(_) => {
                 // need to decrement the outgoing counter
                 self.connection_info.decr_out();
@@ -1252,6 +1255,18 @@ impl PeersConfig {
         self
     }
 
+    /// Maximum occupied slots for outbound connections.
+    pub fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
+        self.connection_info.num_outbound = num_outbound;
+        self
+    }
+
+    /// Maximum occupied slots for inbound connections.
+    pub fn with_max_pending_inbound(mut self, num_inbound: usize) -> Self {
+        self.connection_info.num_inbound = num_inbound;
+        self
+    }
+
     /// Maximum allowed outbound connections.
     pub fn with_max_outbound(mut self, max_outbound: usize) -> Self {
         self.connection_info.max_outbound = max_outbound;
@@ -1447,7 +1462,7 @@ mod tests {
         DisconnectReason,
     };
     use reth_net_common::ban_list::BanList;
-    use reth_network_api::ReputationChangeKind;
+    use reth_network_api::{Direction, ReputationChangeKind};
     use reth_primitives::{PeerId, B512};
     use std::{
         collections::HashSet,
@@ -1985,6 +2000,28 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_already_connected() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+        peers.on_incoming_session_established(peer, socket_addr);
+
+        // peer should have been added and num_inbound should have been increased
+        let p = peers.peers.get_mut(&peer).expect("peer not found");
+        assert_eq!(p.addr, socket_addr);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+
+        assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+        peers.on_already_connected(Direction::Incoming);
+
+        // peer should not be connected and num_inbound should not have been increased
+        let p = peers.peers.get_mut(&peer).expect("peer not found");
+        assert_eq!(p.addr, socket_addr);
+        assert_eq!(peers.connection_info.num_inbound, 1);
     }
 
     #[tokio::test]

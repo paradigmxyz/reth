@@ -645,6 +645,46 @@ async fn test_always_accept_incoming_connections_from_trusted_peers() {
     assert_eq!(handle.num_connected_peers(), 2);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_rejected_by_already_connect() {
+    reth_tracing::init_test_tracing();
+    let other_peer1 = new_random_peer(10, HashSet::new()).await;
+    let other_peer2 = new_random_peer(10, HashSet::new()).await;
+
+    //  setup the peer with max_inbound = 2
+    let peer = new_random_peer(2, HashSet::new()).await;
+
+    let handle = peer.handle().clone();
+    let other_peer_handle1 = other_peer1.handle().clone();
+    let other_peer_handle2 = other_peer2.handle().clone();
+
+    tokio::task::spawn(peer);
+    tokio::task::spawn(other_peer1);
+    tokio::task::spawn(other_peer2);
+
+    let mut events = NetworkEventStream::new(handle.event_listener());
+
+    // incoming connection should succeed
+    other_peer_handle1.add_peer(*handle.peer_id(), handle.local_addr());
+    let peer_id = events.next_session_established().await.unwrap();
+    assert_eq!(peer_id, *other_peer_handle1.peer_id());
+    assert_eq!(handle.num_connected_peers(), 1);
+
+    // incoming connection from the same peer should be rejected by already connected
+    // and num_inbount should still be 1
+    other_peer_handle1.add_peer(*handle.peer_id(), handle.local_addr());
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // incoming connection from other_peer2 should succeed
+    other_peer_handle2.add_peer(*handle.peer_id(), handle.local_addr());
+    let peer_id = events.next_session_established().await.unwrap();
+    assert_eq!(peer_id, *other_peer_handle2.peer_id());
+
+    // wait 2 seconds and check that other_peer2 is not rejected by TooManyPeers
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(handle.num_connected_peers(), 2);
+}
+
 async fn new_random_peer(
     max_in_bound: usize,
     trusted_nodes: HashSet<NodeRecord>,
