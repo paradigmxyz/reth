@@ -4,8 +4,7 @@ use crate::{
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
 };
-use discv5::enr::Enr;
-use enr::{CombinedPublicKey, EnrPublicKey};
+use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey};
 use futures::StreamExt;
 use parking_lot::RwLock;
 use reth_discv4::{
@@ -13,7 +12,8 @@ use reth_discv4::{
     PublicKey, SecretKey,
 };
 use reth_discv5::{
-    pk_to_uncompressed_id, DiscoveryUpdateV5, Discv5WithDiscv4Downgrade, MergedUpdateStream,
+    enr::uncompressed_id_from_enr_pk, DiscoveryUpdateV5, Discv5WithDiscv4Downgrade,
+    MergedUpdateStream,
 };
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsResolver, Update,
@@ -276,7 +276,7 @@ impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
                                         .read()
                                         .iter_ref()
                                         .find(|entry| entry.node.key.preimage() == node_id)
-                                        .map(|entry| pk_to_uncompressed_id(entry.node.value))
+                                        .map(|entry| uncompressed_id_from_enr_pk(entry.node.value))
                                 })
                             })
                             .transpose()
@@ -313,7 +313,7 @@ impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
         // todo: get port v6 with respect to ip mode of this node
         let Some(tcp_port_ipv4) = enr.tcp4() else { return Ok(()) };
 
-        let id = pk_to_uncompressed_id(&enr).map_err(|_| {
+        let id = uncompressed_id_from_enr_pk(&enr).map_err(|_| {
             NetworkError::custom_discovery("failed to extract peer id from discv5 enr")
         })?;
 

@@ -10,22 +10,24 @@ use std::{
 };
 
 use derive_more::From;
-use discv5::enr::EnrPublicKey;
-use enr::Enr;
+use enr::{is_fork_id_set_for_discv5_peer, uncompressed_to_compressed_id};
 use futures::{
     stream::{select, Select},
     Stream, StreamExt,
 };
 use parking_lot::RwLock;
-use reth_discv4::{DiscoveryUpdate, Discv4, HandleDiscovery, NodeFromExternalSource, PublicKey};
+use reth_discv4::{DiscoveryUpdate, Discv4, HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     PeerId,
 };
-use secp256k1::SecretKey;
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
+
+use crate::enr::EnrCombinedKeyWrapper;
+
+pub mod enr;
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
 pub struct Discv5WithDiscv4Downgrade {
@@ -92,12 +94,12 @@ impl HandleDiscovery for Discv5WithDiscv4Downgrade {
         self.set_eip868_in_local_enr(key, buf.freeze())
     }
 
-    fn ban_peer_by_ip_and_node_id(&self, node_id: PeerId, ip: IpAddr) {
-        if let Ok(node_id_discv5) = uncompressed_to_compressed_id(node_id) {
+    fn ban_peer_by_ip_and_node_id(&self, peer_id: PeerId, ip: IpAddr) {
+        if let Ok(node_id_discv5) = uncompressed_to_compressed_id(peer_id) {
             self.discv5.read().ban_node(&node_id_discv5, None); // todo handle error
         }
         self.discv5.read().ban_ip(ip, None);
-        self.discv4.ban_peer_by_ip_and_node_id(node_id, ip)
+        self.discv4.ban_peer_by_ip_and_node_id(peer_id, ip)
     }
 
     fn ban_peer_by_ip(&self, ip: IpAddr) {
@@ -114,31 +116,6 @@ impl fmt::Debug for Discv5WithDiscv4Downgrade {
         debug_struct.field("discv4", &self.discv4);
 
         debug_struct.finish()
-    }
-}
-
-/// Wrapper around enr type used in [`discv5::Discv5`].
-#[derive(Debug, Clone)]
-pub struct EnrCombinedKeyWrapper(pub Enr<discv5::enr::CombinedKey>);
-
-impl TryFrom<Enr<SecretKey>> for EnrCombinedKeyWrapper {
-    type Error = rlp::DecoderError;
-    fn try_from(value: Enr<SecretKey>) -> Result<Self, Self::Error> {
-        let encoded_enr = rlp::encode(&value);
-        let enr = rlp::decode::<discv5::Enr>(&encoded_enr)?;
-
-        Ok(EnrCombinedKeyWrapper(enr))
-    }
-}
-
-impl TryInto<Enr<SecretKey>> for EnrCombinedKeyWrapper {
-    type Error = rlp::DecoderError;
-    fn try_into(self) -> Result<Enr<SecretKey>, Self::Error> {
-        let Self(enr) = self;
-        let encoded_enr = rlp::encode(&enr);
-        let enr = rlp::decode::<Enr<SecretKey>>(&encoded_enr)?;
-
-        Ok(enr)
     }
 }
 
@@ -233,37 +210,4 @@ impl Stream for MergedUpdateStream {
 
         Poll::Ready(update)
     }
-}
-
-/// Converts a [`secp256k1::PublicKey`] on a [`discv5::Enr`] to a [`PeerId`] that can be used in
-/// [`Discv4`].
-///
-/// Trait [`discv5::enr::EnrPublicKey`] is implemented for [`reth_discv4::PublicKey`] re-exported
-/// key type [`secp256k1::PublicKey`] from secp256k1-0.27.0.
-pub fn pk_to_uncompressed_id(enr: &discv5::Enr) -> Result<PeerId, secp256k1::Error> {
-    let pk = enr.public_key();
-    debug_assert!(
-        matches!(pk, discv5::enr::CombinedPublicKey::Secp256k1(_)),
-        "discv5 using different key type than discv4"
-    );
-    let pk_bytes = pk.encode();
-
-    let pk = PublicKey::from_slice(&pk_bytes)?;
-    let peer_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
-
-    Ok(peer_id)
-}
-
-/// Converts a [`PeerId`] to a [`discv5::enr::NodeId`].
-pub fn uncompressed_to_compressed_id(
-    peer_id: PeerId,
-) -> Result<discv5::enr::NodeId, secp256k1::Error> {
-    let pk = PublicKey::from_slice(peer_id.as_ref())?;
-
-    Ok(pk.into())
-}
-
-/// Checks if the fork id of an [`Enr`] received over [`discv5::Discv5`] is set.
-pub fn is_fork_id_set_for_discv5_peer<K: discv5::enr::EnrKey>(enr: &Enr<K>) -> bool {
-    enr.get("eth").is_some()
 }
