@@ -650,8 +650,6 @@ mod discv4_tests {
     use super::*;
     use rand::thread_rng;
 
-    use reth_primitives::{Hardfork, MAINNET};
-
     use secp256k1::SECP256K1;
     use std::net::{Ipv4Addr, SocketAddrV4};
 

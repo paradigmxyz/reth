@@ -1,5 +1,5 @@
 //! Interface between node identification on protocol version 5 and 4. Specifically, between types
-//! [`discv5::enr::NodeId`] and [`reth_discv4::PeerId`].
+//! [`discv5::enr::NodeId`] and [`PeerId`].
 
 use discv5::enr::{CombinedPublicKey, Enr, EnrKey, EnrPublicKey, NodeId};
 use reth_discv4::{PublicKey, SecretKey};

@@ -194,7 +194,7 @@ impl TryFrom<Enr<SecretKey>> for NodeRecord {
     }
 }
 
-/// Conversion from [`Enr`] to [`ELNodeRecord`] failed.
+/// Conversion from [`Enr`] to [`NodeRecordWithForkId`] failed.
 #[derive(Debug, Error)]
 pub enum NodeRecordWithForkIdParseError {
     /// Missing key used to identify an execution layer enr.

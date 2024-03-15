@@ -402,7 +402,7 @@ where
 /// Trait for converting an [`Enr`] into an update and sending the update. Trait is implemented
 /// for all supported update types.
 pub trait Update {
-    /// Tries to convert a resolved [`Enr`] into a [`DnsNodeRecordUpdate`]. Notifies all listeners
+    /// Tries to convert a resolved [`Enr`] into a [`NodeRecordWithForkId`]. Notifies all listeners
     /// of update upon successful conversion.
     fn on_resolved_enr(
         &mut self,
