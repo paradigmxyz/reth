@@ -28,7 +28,7 @@ use std::{
     time::Instant,
 };
 
-/// A chain in the blockchain tree, that has functionality to execute blocks and append them to
+/// A chain in the blockchain tree that has functionality to execute blocks and append them to
 /// itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AppendableChain {
