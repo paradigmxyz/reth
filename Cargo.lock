@@ -65,14 +65,14 @@ dependencies = [
 
 [[package]]
 name = "aes-gcm"
-version = "0.9.2"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc3be92e19a7ef47457b8e6f90707e12b6ac5d20c6f3866584fa3be0787d839f"
+checksum = "df5f85a83a7d8b0442b6aa7b504b8212c1733da07b98aae43d4bc21b2cb3cdf6"
 dependencies = [
  "aead",
  "aes 0.7.5",
  "cipher 0.3.0",
- "ctr 0.7.0",
+ "ctr 0.8.0",
  "ghash",
  "subtle",
 ]
@@ -1646,15 +1646,6 @@ dependencies = [
 
 [[package]]
 name = "ctr"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a232f92a03f37dd7d7dd2adc67166c77e9cd88de5b019b9a9eecfaeaf7bfd481"
-dependencies = [
- "cipher 0.3.0",
-]
-
-[[package]]
-name = "ctr"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "049bb91fb4aaf0e3c7efa6cd5ef877dbbbd15b39dad06d9948de4ec8a75761ea"
@@ -2104,8 +2095,7 @@ dependencies = [
 [[package]]
 name = "discv5"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bac33cb3f99889a57e56a8c6ccb77aaf0cfc7787602b7af09783f736d77314e1"
+source = "git+https://github.com/sigp/discv5?rev=04ac004#04ac0042a345a9edf93b090007e5d31c008261ed"
 dependencies = [
  "aes 0.7.5",
  "aes-gcm",
@@ -5752,9 +5742,11 @@ name = "reth-discv4"
 version = "0.2.0-beta.2"
 dependencies = [
  "alloy-rlp",
+ "derive_more",
  "discv5",
  "enr",
  "generic-array",
+ "itertools 0.12.1",
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "reth-net-common",
@@ -5764,7 +5756,28 @@ dependencies = [
  "rlp",
  "secp256k1 0.27.0",
  "serde",
+ "smallvec",
  "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
+name = "reth-discv5"
+version = "0.2.0-beta.1"
+dependencies = [
+ "alloy-rlp",
+ "derive_more",
+ "discv5",
+ "enr",
+ "futures",
+ "parking_lot 0.12.1",
+ "pin-project",
+ "reth-discv4",
+ "reth-primitives",
+ "rlp",
+ "secp256k1 0.27.0",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -5778,6 +5791,7 @@ dependencies = [
  "alloy-rlp",
  "data-encoding",
  "enr",
+ "futures",
  "linked_hash_set",
  "parking_lot 0.12.1",
  "reth-net-common",
@@ -6053,6 +6067,7 @@ dependencies = [
  "auto_impl",
  "criterion",
  "derive_more",
+ "discv5",
  "enr",
  "ethers-core",
  "ethers-providers",
@@ -6068,6 +6083,7 @@ dependencies = [
  "pprof",
  "rand 0.8.5",
  "reth-discv4",
+ "reth-discv5",
  "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",
@@ -6083,6 +6099,7 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
+ "rlp",
  "schnellru",
  "secp256k1 0.27.0",
  "serde",
@@ -6356,6 +6373,7 @@ dependencies = [
  "clap",
  "criterion",
  "derive_more",
+ "enr",
  "hash-db",
  "itertools 0.12.1",
  "modular-bitfield",
@@ -6610,12 +6628,14 @@ dependencies = [
  "alloy-rpc-types",
  "arbitrary",
  "bytes",
+ "enr",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "jsonrpsee-types",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
+ "reth-ethereum-forks",
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
@@ -7853,9 +7873,9 @@ dependencies = [
 
 [[package]]
 name = "subtle"
-version = "2.5.0"
+version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
+checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "sucds"

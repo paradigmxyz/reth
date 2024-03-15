@@ -1,16 +1,11 @@
-use reth_discv4::Discv4Config;
 use reth_network::{
     error::{NetworkError, ServiceKind},
-    Discovery, NetworkConfigBuilder, NetworkManager,
+    NetworkConfigBuilder, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
 use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
-use std::{
-    io,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-};
-use tokio::net::TcpListener;
+use std::io;
 
 fn is_addr_in_use_kind(err: &NetworkError, kind: ServiceKind) -> bool {
     match err {
@@ -52,7 +47,14 @@ async fn test_listener_addr_in_use() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(feature = "discv5"))]
 async fn test_discovery_addr_in_use() {
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
+    use reth_discv4::Discv4Config;
+    use reth_network::Discovery;
+    use tokio::net::TcpListener;
+
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let disc_config = Discv4Config::default();
     let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
