@@ -869,7 +869,7 @@ where
 
     /// Adds the peer to the ban list indefinitely.
     pub fn ban_node(&mut self, node_id: PeerId) {
-        self.remove_node(node_id);
+        self.remove_node_from_kbuckets(node_id);
         self.config.ban_list.ban_peer(node_id);
     }
 
@@ -880,7 +880,7 @@ where
 
     /// Adds the peer to the ban list and bans it until the given timestamp
     pub fn ban_node_until(&mut self, node_id: PeerId, until: Instant) {
-        self.remove_node(node_id);
+        self.remove_node_from_kbuckets(node_id);
         self.config.ban_list.ban_peer_until(node_id, until);
     }
 
@@ -888,7 +888,7 @@ where
     ///
     /// This allows applications, for whatever reason, to remove nodes from the local routing
     /// table. Returns `true` if the node was in the table and `false` otherwise.
-    pub fn remove_node(&mut self, node_id: PeerId) -> bool {
+    pub fn remove_node_from_kbuckets(&mut self, node_id: PeerId) -> bool {
         let key = kad_key(node_id);
         let removed = self.kbuckets.remove(&key);
         if removed {
@@ -896,6 +896,17 @@ where
             self.notify(DiscoveryUpdate::Removed(node_id));
         }
         removed
+    }
+
+    /// Removes a peer from discv4.
+    pub fn remove_node(&mut self, peer_id: PeerId) {
+        self.inner.pending_find_nodes.remove(&peer_id);
+        self.pending_pings.remove(&peer_id);
+        self.pending_lookup.remove(&peer_id);
+        self.pending_find_nodes.remove(&peer_id);
+        self.pending_enr_requests.remove(&peer_id);
+        self.queued_pings.retain(|(n, _)| n.id != peer_id);
+        _ = self.remove_node_from_kbuckets(peer_id);
     }
 
     /// Gets the number of entries that are considered connected.
@@ -1481,7 +1492,7 @@ where
 
         // remove nodes that failed to pong
         for node_id in failed_pings {
-            self.remove_node(node_id);
+            self.remove_node_from_kbuckets(node_id);
         }
 
         let mut failed_lookups = Vec::new();
@@ -1496,7 +1507,7 @@ where
 
         // remove nodes that failed the e2e lookup process, so we can restart it
         for node_id in failed_lookups {
-            self.remove_node(node_id);
+            self.remove_node_from_kbuckets(node_id);
         }
 
         self.evict_failed_neighbours(now);
@@ -1543,7 +1554,7 @@ where
                         continue
                     }
                 }
-                self.remove_node(node_id);
+                self.remove_node_from_kbuckets(node_id);
             }
         }
     }
@@ -1681,7 +1692,7 @@ where
                     }
                     Discv4Command::BanPeer(node_id) => self.ban_node(node_id),
                     Discv4Command::Remove(node_id) => {
-                        self.remove_node(node_id);
+                        self.remove_node_from_kbuckets(node_id);
                     }
                     Discv4Command::Ban(node_id, ip) => {
                         self.ban_node(node_id);
@@ -1733,7 +1744,7 @@ where
 
                     IngressEvent::Packet(remote_addr, Packet { msg, node_id: src_id, hash }) => {
                         if let Some(ref mut filter) = self.primary_kbuckets {
-                            match filter.filter_incoming(&src_id) {
+                            match filter.filter_traffic(&src_id) {
                                 Err(err) => debug!(target: "discv4",
                                     src_id=format!("{:#}", src_id),
                                     err=?err,
@@ -1866,7 +1877,6 @@ where
 
         // disconnect nodes that are already connected over discv5
         for peer_id in connected_over_discv5 {
-            self.inner.pending_find_nodes.remove(&peer_id);
             self.remove_node(peer_id);
         }
 
@@ -2392,9 +2402,9 @@ pub trait MirrorPrimaryKBuckets {
         &mut self,
         nodes: &mut Vec<NodeRecord>,
     ) -> Result<SmallVec<[PeerId; 8]>, Discv4Error>;
-    /// Filters incoming packets against mirror of primary kbuckets. Returns `Ok(true)` if the
-    /// message from given peer should be processed further.
-    fn filter_incoming(&mut self, peer_id: &PeerId) -> Result<bool, Discv4Error>;
+    /// Filters incoming/outgoing packets against mirror of primary kbuckets. Returns `Ok(true)`
+    /// if the message from given peer should be processed further.
+    fn filter_traffic(&mut self, peer_id: &PeerId) -> Result<bool, Discv4Error>;
     /// Finds intersection between given kbuckets and mirror. Note: doesn't update mirror.
     fn find_intersection(
         &self,
@@ -2480,7 +2490,7 @@ where
         Ok(filtered_out)
     }
 
-    fn filter_incoming(&mut self, peer_id: &PeerId) -> Result<bool, Discv4Error> {
+    fn filter_traffic(&mut self, peer_id: &PeerId) -> Result<bool, Discv4Error> {
         self.update_mirror()?;
 
         Ok(!self.mirror.contains(peer_id))
@@ -2586,7 +2596,7 @@ impl MirrorPrimaryKBuckets for Noop {
     ) -> Result<SmallVec<[PeerId; 8]>, Discv4Error> {
         Ok(smallvec!())
     }
-    fn filter_incoming(&mut self, _peer_id: &PeerId) -> Result<bool, Discv4Error> {
+    fn filter_traffic(&mut self, _peer_id: &PeerId) -> Result<bool, Discv4Error> {
         Ok(false)
     }
     fn find_intersection(
