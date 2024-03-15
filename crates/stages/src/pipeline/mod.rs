@@ -371,6 +371,16 @@ where
 
             let exec_input = ExecInput { target, checkpoint: prev_checkpoint };
 
+            self.listeners.notify(PipelineEvent::Prepare {
+                pipeline_stages_progress: event::PipelineStagesProgress {
+                    current: stage_index + 1,
+                    total: total_stages,
+                },
+                stage_id,
+                checkpoint: prev_checkpoint,
+                target,
+            });
+
             if let Err(err) = stage.execute_ready(exec_input).await {
                 self.listeners.notify(PipelineEvent::Error { stage_id });
                 match on_stage_error(&self.provider_factory, stage_id, prev_checkpoint, err)? {
