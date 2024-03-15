@@ -185,6 +185,13 @@ impl AppendableChain {
         // get the state provider.
         let canonical_fork = bundle_state_data_provider.canonical_fork();
 
+        // SAFETY: For block execution and parallel state root computation below we open multiple
+        // independent database transactions. Upon opening the database transaction the consistent
+        // view will check a current tip in the database and throw an error if it doesn't match
+        // the one recorded during initialization.
+        // It is safe to use consistent view without any special error handling as long as
+        // we guarantee that plain state cannot change during processing of new payload.
+        // The usage has to be re-evaluated if that was ever to change.
         let consistent_view =
             ConsistentDbView::new_with_latest_tip(externals.provider_factory.clone())?;
         let state_provider =
