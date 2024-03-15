@@ -10,7 +10,7 @@ use std::{
 };
 
 use derive_more::From;
-use enr::{is_fork_id_set_for_discv5_peer, uncompressed_to_compressed_id};
+use enr::uncompressed_to_compressed_id;
 use futures::{
     stream::{select, Select},
     Stream, StreamExt,
@@ -183,12 +183,8 @@ impl Stream for MergedUpdateStream {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let update = ready!(self.inner.poll_next_unpin(cx));
         if let Some(DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(ref enr, _))) = update {
-            // done for discv4 on lower level
-            if !is_fork_id_set_for_discv5_peer(enr) {
-                cx.waker().wake_by_ref();
-                return Poll::Pending
-            }
-
+            // todo: clarify rules on fork id in discv4
+            
             // Notify discv4 that a discv5 session has been established.
             //
             // A sessions established with a node that has a WAN reachable socket, means the
