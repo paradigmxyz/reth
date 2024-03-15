@@ -104,12 +104,12 @@ impl BitfinityEvmClient {
             end_block = min(end_block, block_checker.get_block_number());
         }
 
-        info!(target: "downloaders::remote", start_block, end_block, "Fetching blocks");
+        info!(target: "downloaders::bitfinity_evm_client", start_block, end_block, "Fetching blocks");
 
         for begin_block in (start_block..=end_block).step_by(batch_size) {
             let count = std::cmp::min(batch_size as u64, end_block - begin_block);
 
-            debug!(target: "downloaders::remote", begin_block, count, "Fetching blocks");
+            debug!(target: "downloaders::bitfinity_evm_client", begin_block, count, "Fetching blocks");
 
             let blocks_to_fetch =
                 (begin_block..(begin_block + count)).map(Into::into).collect::<Vec<_>>();
@@ -118,9 +118,9 @@ impl BitfinityEvmClient {
                 .get_full_blocks_by_number(blocks_to_fetch, batch_size)
                 .await
                 .map_err(|e| {
-                    error!(target: "downloaders::remote", begin_block, "Error fetching block: {}", e);
+                    error!(target: "downloaders::bitfinity_evm_client", begin_block, "Error fetching block: {:?}", e);
                     RemoteClientError::ProviderError(format!(
-                        "Error fetching block {}: {}",
+                        "Error fetching block {}: {:?}",
                         begin_block, e
                     ))
                 })?
@@ -129,7 +129,7 @@ impl BitfinityEvmClient {
                 .map(did::Block::<did::Transaction>::from)
                 .collect::<Vec<_>>();
 
-            trace!(target: "downloaders::remote", blocks = full_blocks.len(), "Fetched blocks");
+            trace!(target: "downloaders::bitfinity_evm_client", blocks = full_blocks.len(), "Fetched blocks");
 
             for block in full_blocks {
                 if let Some(block_checker) = &block_checker {
@@ -196,7 +196,7 @@ impl BitfinityEvmClient {
 
         let chain_id = client.get_chain_id().await.map_err(|e| eyre::eyre!(e))?;
 
-        tracing::info!("Bitfinity chain id: {}", chain_id);
+        tracing::info!("downloaders::bitfinity_evm_client - Bitfinity chain id: {}", chain_id);
 
         let genesis_block = client
             .get_block_by_number(0.into())
@@ -209,7 +209,7 @@ impl BitfinityEvmClient {
             .map_err(|e| eyre::eyre!(e))?
             .into_iter()
             .map(|(k, v)| {
-                tracing::info!("Bitfinity genesis account: {:?} {:?}", k, v);
+                tracing::info!("downloaders::bitfinity_evm_client - Bitfinity genesis account: {:?} {:?}", k, v);
                 (k.0.into(), GenesisAccount { balance: Uint::from_limbs(v.0), ..Default::default() })
             });
 
@@ -218,7 +218,7 @@ impl BitfinityEvmClient {
         let mut genesis: Genesis = serde_json::from_value(json!(genesis_block))
             .map_err(|e| eyre::eyre!("error parsing genesis block: {}", e))?;
 
-        tracing::info!("Bitfinity genesis: {:?}", genesis);
+        tracing::info!("downloaders::bitfinity_evm_client - Bitfinity genesis: {:?}", genesis);
 
         genesis.config = ChainConfig {
             chain_id,
@@ -268,7 +268,7 @@ impl BitfinityEvmClient {
             ..Default::default()
         };
 
-        tracing::debug!("Bitfinity genesis: {:?}", spec);
+        tracing::info!("downloaders::bitfinity_evm_client - Bitfinity chain_spec: {:#?}", spec);
 
         Ok(spec)
     }
@@ -370,7 +370,7 @@ impl HeadersClient for BitfinityEvmClient {
     ) -> Self::Output {
         // this just searches the buffer, and fails if it can't find the header
         let mut headers = Vec::new();
-        trace!(target: "downloaders::remote", request=?request, "Getting headers");
+        trace!(target: "downloaders::bitfinity_evm_client", request=?request, "Getting headers");
 
         let start_num = match request.start {
             BlockHashOrNumber::Hash(hash) => match self.hash_to_number.get(&hash) {
@@ -394,7 +394,7 @@ impl HeadersClient for BitfinityEvmClient {
             }
         };
 
-        trace!(target: "downloaders::remote", range=?range, "Getting headers with range");
+        trace!(target: "downloaders::bitfinity_evm_client", range=?range, "Getting headers with range");
 
         for block_number in range {
             match self.headers.get(&block_number).cloned() {
