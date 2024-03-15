@@ -796,7 +796,7 @@ where
                 );
 
                 if let Some(ref err) = error {
-                    self.swarm.state_mut().peers_mut().on_pending_session_dropped(
+                    self.swarm.state_mut().peers_mut().on_outgoing_pending_session_dropped(
                         &remote_addr,
                         &peer_id,
                         err,
@@ -809,7 +809,7 @@ where
                     self.swarm
                         .state_mut()
                         .peers_mut()
-                        .on_pending_session_gracefully_closed(&peer_id);
+                        .on_outgoing_pending_session_gracefully_closed(&peer_id);
                 }
                 self.metrics.closed_sessions.increment(1);
                 self.metrics
