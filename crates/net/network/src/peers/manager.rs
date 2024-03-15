@@ -213,8 +213,7 @@ impl PeersManager {
 
     /// Invoked when a new _incoming_ tcp connection is accepted.
     ///
-    /// returns an error if the inbound ip address is on the ban list or
-    /// we have reached our limit for max inbound connections
+    /// returns an error if the inbound ip address is on the ban list
     pub(crate) fn on_incoming_pending_session(
         &mut self,
         addr: IpAddr,
@@ -222,10 +221,6 @@ impl PeersManager {
         if self.ban_list.is_banned_ip(&addr) {
             return Err(InboundConnectionError::IpBanned)
         }
-        if !self.connection_info.has_in_capacity() {
-            return Err(InboundConnectionError::ExceedsLimit(self.connection_info.max_inbound))
-        }
-        // keep track of new connection
         self.connection_info.inc_in();
         Ok(())
     }
@@ -284,6 +279,14 @@ impl PeersManager {
                     return
                 }
                 value.state = PeerConnectionState::In;
+                // if a peer is not trusted and we don't have capacity for more inbound connections,
+                // disconnecting the peer
+                if !value.is_trusted() && !self.connection_info.has_in_capacity() {
+                    self.queued_actions.push_back(PeerAction::Disconnect {
+                        peer_id,
+                        reason: Some(DisconnectReason::TooManyPeers),
+                    });
+                }
             }
             Entry::Vacant(entry) => {
                 // peer is missing in the table, we add it but mark it as to be removed after
@@ -292,6 +295,14 @@ impl PeersManager {
                 peer.remove_after_disconnect = true;
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
+
+                // disconnect the peer if we don't have capacity for more inbound connections
+                if !self.connection_info.has_in_capacity() {
+                    self.queued_actions.push_back(PeerAction::Disconnect {
+                        peer_id,
+                        reason: Some(DisconnectReason::TooManyPeers),
+                    });
+                }
             }
         }
     }
@@ -573,7 +584,10 @@ impl PeersManager {
     /// to us at the same time and this connection is already established.
     pub(crate) fn on_already_connected(&mut self, direction: Direction) {
         match direction {
-            Direction::Incoming => {}
+            Direction::Incoming => {
+                // need to decrement the ingoing counter
+                self.connection_info.decr_in();
+            }
             Direction::Outgoing(_) => {
                 // need to decrement the outgoing counter
                 self.connection_info.decr_out();
@@ -875,7 +889,7 @@ impl ConnectionInfo {
 
     ///  Returns `true` if there's still capacity for a new incoming connection.
     fn has_in_capacity(&self) -> bool {
-        self.num_inbound < self.max_inbound
+        self.num_inbound <= self.max_inbound
     }
 
     fn decr_state(&mut self, state: PeerConnectionState) {
@@ -1420,7 +1434,6 @@ impl Default for PeerBackoffDurations {
 
 #[derive(Debug, Error)]
 pub enum InboundConnectionError {
-    ExceedsLimit(usize),
     IpBanned,
 }
 
@@ -1449,7 +1462,7 @@ mod tests {
         DisconnectReason,
     };
     use reth_net_common::ban_list::BanList;
-    use reth_network_api::ReputationChangeKind;
+    use reth_network_api::{Direction, ReputationChangeKind};
     use reth_primitives::{PeerId, B512};
     use std::{
         collections::HashSet,
@@ -1990,6 +2003,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_already_connected() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+        peers.on_incoming_session_established(peer, socket_addr);
+
+        // peer should have been added and num_inbound should have been increased
+        let p = peers.peers.get_mut(&peer).expect("peer not found");
+        assert_eq!(p.addr, socket_addr);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+
+        assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+        peers.on_already_connected(Direction::Incoming);
+
+        // peer should not be connected and num_inbound should not have been increased
+        let p = peers.peers.get_mut(&peer).expect("peer not found");
+        assert_eq!(p.addr, socket_addr);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+    }
+
+    #[tokio::test]
     async fn test_reputation_change_trusted_peer() {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
@@ -2166,9 +2201,6 @@ mod tests {
             Ok(_) => panic!(),
             Err(err) => match err {
                 super::InboundConnectionError::IpBanned {} => {}
-                super::InboundConnectionError::ExceedsLimit { .. } => {
-                    panic!()
-                }
             },
         }
     }
