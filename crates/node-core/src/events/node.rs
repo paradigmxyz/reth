@@ -71,6 +71,30 @@ impl<DB> NodeState<DB> {
     /// Processes an event emitted by the pipeline
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
+            PipelineEvent::Prepare { pipeline_stages_progress, stage_id, checkpoint, target } => {
+                let checkpoint = checkpoint.unwrap_or_default();
+                let current_stage = CurrentStage {
+                    stage_id,
+                    eta: match &self.current_stage {
+                        Some(current_stage) if current_stage.stage_id == stage_id => {
+                            current_stage.eta
+                        }
+                        _ => Eta::default(),
+                    },
+                    checkpoint,
+                    target,
+                };
+
+                info!(
+                    pipeline_stages = %pipeline_stages_progress,
+                    stage = %stage_id,
+                    checkpoint = %checkpoint.block_number,
+                    target = %OptionalField(target),
+                    "Preparing stage",
+                );
+
+                self.current_stage = Some(current_stage);
+            }
             PipelineEvent::Run { pipeline_stages_progress, stage_id, checkpoint, target } => {
                 let checkpoint = checkpoint.unwrap_or_default();
                 let current_stage = CurrentStage {
