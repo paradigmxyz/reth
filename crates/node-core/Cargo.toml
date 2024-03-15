@@ -78,7 +78,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 # http/rpc
-hyper = "0.14.25"
+hyper.workspace = true
 
 # tracing
 tracing.workspace = true
