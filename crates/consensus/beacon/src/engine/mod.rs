@@ -1570,6 +1570,7 @@ where
                         if let Some(target_hash) = ForkchoiceStateHash::find(&target, inserted.hash)
                             .filter(|h| !h.is_head())
                         {
+                            // TODO: do not ignore this
                             let _ = self.blockchain.make_canonical(target_hash.as_ref());
                         }
                     }
