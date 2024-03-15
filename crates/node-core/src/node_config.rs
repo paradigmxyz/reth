@@ -204,25 +204,9 @@ pub struct NodeConfig {
 impl NodeConfig {
     /// Creates a testing [NodeConfig], causing the database to be launched ephemerally.
     pub fn test() -> Self {
-        let mut test = Self {
-            config: None,
-            chain: MAINNET.clone(),
-            metrics: None,
-            instance: 1,
-            trusted_setup_file: None,
-            network: NetworkArgs::default(),
-            rpc: RpcServerArgs::default(),
-            txpool: TxPoolArgs::default(),
-            builder: PayloadBuilderArgs::default(),
-            debug: DebugArgs::default(),
-            db: DatabaseArgs::default(),
-            dev: DevArgs::default(),
-            pruning: PruningArgs::default(),
-        };
-
-        // set all ports to zero by default for test instances
-        test = test.with_unused_ports();
-        test
+        Self::default()
+            // set all ports to zero by default for test instances
+            .with_unused_ports()
     }
 
     /// Sets --dev mode for the node
