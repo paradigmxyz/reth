@@ -204,7 +204,9 @@ impl AppendableChain {
             // calculate and check state root
             let start = Instant::now();
             let (state_root, trie_updates) = if block_attachment.is_canonical() {
-                let hashed_state = bundle_state.hash_state_slow();
+                let mut state = provider.bundle_state_data_provider.state().clone();
+                state.extend(bundle_state.clone());
+                let hashed_state = state.hash_state_slow();
                 ParallelStateRoot::new(consistent_view, hashed_state)
                     .incremental_root_with_updates()
                     .map(|(root, updates)| (root, Some(updates)))
