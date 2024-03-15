@@ -1080,7 +1080,7 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
-    #[instrument(level = "trace", skip(self, payload, cancun_fields), fields(block_hash = ?payload.block_hash(), block_number = %payload.block_number(), is_pipeline_idle = %self.sync.is_pipeline_idle()))]
+    #[instrument(level = "trace", skip(self, payload, cancun_fields), fields(block_hash = ?payload.block_hash(), block_number = %payload.block_number(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
     fn on_new_payload(
         &mut self,
         payload: ExecutionPayload,
