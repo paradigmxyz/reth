@@ -204,6 +204,24 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
             dns_discovery_updates,
         })
     }
+
+    #[cfg(feature = "discv5_downgrade_v4")]
+    pub async fn start(
+        discv4_addr: SocketAddr,
+        sk: SecretKey,
+        discv4_config: Option<reth_discv4::Discv4Config>,
+        discv5_config: Option<discv5::Config>,
+        dns_discovery_config: Option<DnsDiscoveryConfig>,
+    ) -> Result<Self, NetworkError> {
+        Discovery::start_discv5_with_v4_downgrade(
+            discv4_addr,
+            sk,
+            discv4_config,
+            discv5_config,
+            dns_discovery_config,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]

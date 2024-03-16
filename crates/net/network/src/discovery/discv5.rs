@@ -185,6 +185,19 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
             dns_discovery_updates,
         })
     }
+
+    #[cfg(feature = "discv5")]
+    pub async fn start(
+        _discv4_addr: SocketAddr,
+        sk: SecretKey,
+        _discv4_config: Option<reth_discv4::Discv4Config>,
+        discv5_config: Option<discv5::Config>,
+        dns_discovery_config: Option<DnsDiscoveryConfig>,
+    ) -> Result<Self, NetworkError> {
+        let discv5_config = discv5_config.expect("discv5 config required, contains listen socket");
+
+        Discovery::start_discv5(sk, discv5_config, dns_discovery_config).await
+    }
 }
 
 /// Spawns [`discv5::Discv5`].
