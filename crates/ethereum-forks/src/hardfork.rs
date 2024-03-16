@@ -232,10 +232,8 @@ impl Hardfork {
             Hardfork::Paris => Some(0),
             Hardfork::Shanghai => Some(184097479),
             Hardfork::ArbOS11 => Some(184097479),
-
-            // upcoming hardforks
-            Hardfork::Cancun => None,
-            Hardfork::ArbOS20Atlas => None,
+            Hardfork::Cancun => Some(190301729),
+            Hardfork::ArbOS20Atlas => Some(190301729),
             _ => None,
         }
     }
@@ -484,10 +482,8 @@ impl Hardfork {
             Hardfork::Paris => Some(1622240000),
             Hardfork::Shanghai => Some(1708804873),
             Hardfork::ArbOS11 => Some(1708804873),
-
-            // upcoming hardforks
-            Hardfork::Cancun => None,
-            Hardfork::ArbOS20Atlas => None,
+            Hardfork::Cancun => Some(1710424089),
+            Hardfork::ArbOS20Atlas => Some(1710424089),
             _ => None,
         }
     }
