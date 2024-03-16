@@ -1079,11 +1079,12 @@ where
                     self.on_good_import(hash);
                 }
                 Err(err) => {
-                    // if we're _currently_ syncing and the transaction is bad we
+                    // If we're _currently_ syncing and the transaction is bad we
                     // ignore it, otherwise we penalize the peer that sent the bad
                     // transaction with the assumption that the peer should have
-                    // known that this transaction is bad. (e.g. consensus
-                    // rules)
+                    // known that this transaction is bad. (e.g. consensus rules).
+                    // Note: nonce gaps are not considered bad transactions.
+                    //
                     if err.is_bad_transaction() && !self.network.is_syncing() {
                         debug!(target: "net::tx", %err, "bad pool transaction import");
                         self.on_bad_import(err.hash);
