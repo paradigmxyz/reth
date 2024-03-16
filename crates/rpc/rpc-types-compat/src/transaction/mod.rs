@@ -203,7 +203,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         value: Some(value),
         input: TransactionInput::new(input),
         nonce: Some(U64::from(nonce)),
-        chain_id: chain_id.map(U64::from),
+        chain_id,
         access_list,
         max_fee_per_blob_gas: max_fee_per_blob_gas.map(U256::from),
         blob_versioned_hashes,

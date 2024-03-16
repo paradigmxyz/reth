@@ -43,7 +43,6 @@ fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> B256 {
 ///
 /// # Panics
 /// * If the `dest` is empty
-/// * If `s1` is empty
 /// * If the `dest` len is greater than or equal to the hash output len * the max counter value. In
 /// this case, the hash output len is 32 bytes, and the max counter value is 2^32 - 1. So the dest
 /// cannot have a len greater than 32 * 2^32 - 1.

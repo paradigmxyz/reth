@@ -229,19 +229,19 @@ impl PeersManager {
         if self.ban_list.is_banned_ip(&addr) {
             return Err(InboundConnectionError::IpBanned)
         }
-        self.connection_info.inc_in();
+        self.connection_info.inc_pending_in();
         Ok(())
     }
 
     /// Invoked when a previous call to [Self::on_incoming_pending_session] succeeded but it was
     /// rejected.
     pub(crate) fn on_incoming_pending_session_rejected_internally(&mut self) {
-        self.connection_info.decr_in();
+        self.connection_info.decr_pending_in();
     }
 
     /// Invoked when a pending session was closed.
     pub(crate) fn on_incoming_pending_session_gracefully_closed(&mut self) {
-        self.connection_info.decr_in()
+        self.connection_info.decr_pending_in()
     }
 
     /// Invoked when a pending session was closed.
@@ -259,7 +259,7 @@ impl PeersManager {
             }
         }
 
-        self.connection_info.decr_in()
+        self.connection_info.decr_pending_in();
     }
 
     /// Called when a new _incoming_ active session was established to the given peer.
@@ -279,6 +279,10 @@ impl PeersManager {
         // start a new tick, so the peer is not immediately rewarded for the time since last tick
         self.tick();
 
+        let has_in_capacity = self.connection_info.has_in_capacity();
+        self.connection_info.decr_pending_in();
+        self.connection_info.inc_in();
+
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let value = entry.get_mut();
@@ -292,7 +296,7 @@ impl PeersManager {
 
                 // if a peer is not trusted and we don't have capacity for more inbound connections,
                 // disconnecting the peer
-                if !is_trusted && !self.connection_info.has_in_capacity() {
+                if !is_trusted && !has_in_capacity {
                     self.queued_actions.push_back(PeerAction::Disconnect {
                         peer_id,
                         reason: Some(DisconnectReason::TooManyPeers),
@@ -310,7 +314,7 @@ impl PeersManager {
                 let is_trusted = self.trusted_peer_ids.contains(&peer_id);
 
                 // disconnect the peer if we don't have capacity for more inbound connections
-                if !is_trusted && !self.connection_info.has_in_capacity() {
+                if !is_trusted && !has_in_capacity {
                     self.queued_actions.push_back(PeerAction::Disconnect {
                         peer_id,
                         reason: Some(DisconnectReason::TooManyPeers),
@@ -436,19 +440,16 @@ impl PeersManager {
     }
 
     /// Gracefully disconnected a pending _outgoing_ session
-    pub(crate) fn on_pending_session_gracefully_closed(&mut self, peer_id: &PeerId) {
+    pub(crate) fn on_outgoing_pending_session_gracefully_closed(&mut self, peer_id: &PeerId) {
         if let Some(peer) = self.peers.get_mut(peer_id) {
+            self.connection_info.decr_state(peer.state);
             peer.state = PeerConnectionState::Idle;
-        } else {
-            return
         }
-
-        self.connection_info.decr_out();
     }
 
     /// Invoked when an _outgoing_ pending session was closed during authentication or the
     /// handshake.
-    pub(crate) fn on_pending_session_dropped(
+    pub(crate) fn on_outgoing_pending_session_dropped(
         &mut self,
         remote_addr: &SocketAddr,
         peer_id: &PeerId,
@@ -599,7 +600,7 @@ impl PeersManager {
         match direction {
             Direction::Incoming => {
                 // need to decrement the ingoing counter
-                self.connection_info.decr_in();
+                self.connection_info.decr_pending_in();
             }
             Direction::Outgoing(_) => {
                 // need to decrement the outgoing counter
@@ -786,7 +787,7 @@ impl PeersManager {
                 PeerAction::Connect { peer_id, remote_addr: peer.addr }
             };
 
-            self.connection_info.inc_pendingout();
+            self.connection_info.inc_pending_out();
 
             self.queued_actions.push_back(action);
         }
@@ -888,10 +889,13 @@ pub struct ConnectionInfo {
     num_outbound: usize,
     /// Counter for pending outbound connections.
     #[cfg_attr(feature = "serde", serde(skip))]
-    num_pendingout: usize,
+    num_pending_out: usize,
     /// Counter for currently occupied slots for active inbound connections.
     #[cfg_attr(feature = "serde", serde(skip))]
     num_inbound: usize,
+    /// Counter for pending inbound connections.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    num_pending_in: usize,
     /// Maximum allowed outbound connections.
     max_outbound: usize,
     /// Maximum allowed inbound connections.
@@ -906,13 +910,13 @@ pub struct ConnectionInfo {
 impl ConnectionInfo {
     ///  Returns `true` if there's still capacity for a new outgoing connection.
     fn has_out_capacity(&self) -> bool {
-        self.num_pendingout < self.max_concurrent_outbound_dials &&
+        self.num_pending_out < self.max_concurrent_outbound_dials &&
             self.num_outbound < self.max_outbound
     }
 
     ///  Returns `true` if there's still capacity for a new incoming connection.
     fn has_in_capacity(&self) -> bool {
-        self.num_inbound <= self.max_inbound
+        self.num_inbound < self.max_inbound
     }
 
     fn decr_state(&mut self, state: PeerConnectionState) {
@@ -920,7 +924,7 @@ impl ConnectionInfo {
             PeerConnectionState::Idle => {}
             PeerConnectionState::DisconnectingIn | PeerConnectionState::In => self.decr_in(),
             PeerConnectionState::DisconnectingOut | PeerConnectionState::Out => self.decr_out(),
-            PeerConnectionState::PendingOut => self.decr_pendingout(),
+            PeerConnectionState::PendingOut => self.decr_pending_out(),
         }
     }
 
@@ -932,20 +936,28 @@ impl ConnectionInfo {
         self.num_outbound += 1;
     }
 
-    fn inc_pendingout(&mut self) {
-        self.num_pendingout += 1;
+    fn inc_pending_out(&mut self) {
+        self.num_pending_out += 1;
     }
 
     fn inc_in(&mut self) {
         self.num_inbound += 1;
     }
 
+    fn inc_pending_in(&mut self) {
+        self.num_pending_in += 1;
+    }
+
     fn decr_in(&mut self) {
         self.num_inbound -= 1;
     }
 
-    fn decr_pendingout(&mut self) {
-        self.num_pendingout -= 1;
+    fn decr_pending_out(&mut self) {
+        self.num_pending_out -= 1;
+    }
+
+    fn decr_pending_in(&mut self) {
+        self.num_pending_in -= 1;
     }
 }
 
@@ -957,7 +969,8 @@ impl Default for ConnectionInfo {
             max_outbound: DEFAULT_MAX_COUNT_PEERS_OUTBOUND as usize,
             max_inbound: DEFAULT_MAX_COUNT_PEERS_INBOUND as usize,
             max_concurrent_outbound_dials: DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS,
-            num_pendingout: 0,
+            num_pending_out: 0,
+            num_pending_in: 0,
         }
     }
 }
@@ -1682,7 +1695,7 @@ mod tests {
         })
         .await;
 
-        peers.on_pending_session_dropped(
+        peers.on_outgoing_pending_session_dropped(
             &socket_addr,
             &peer,
             &PendingSessionHandshakeError::Eth(EthStreamError::EthHandshakeError(
@@ -1845,7 +1858,7 @@ mod tests {
         })
         .await;
 
-        peers.on_pending_session_dropped(
+        peers.on_outgoing_pending_session_dropped(
             &socket_addr,
             &peer,
             &PendingSessionHandshakeError::Eth(
@@ -1895,7 +1908,7 @@ mod tests {
         })
         .await;
 
-        peers.on_pending_session_dropped(
+        peers.on_outgoing_pending_session_dropped(
             &socket_addr,
             &peer,
             &PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
@@ -1931,9 +1944,9 @@ mod tests {
         let mut peers = PeersManager::default();
 
         assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
-        assert_eq!(peers.connection_info.num_inbound, 1);
+        assert_eq!(peers.connection_info.num_pending_in, 1);
         peers.on_incoming_pending_session_rejected_internally();
-        assert_eq!(peers.connection_info.num_inbound, 0);
+        assert_eq!(peers.connection_info.num_pending_in, 0);
     }
 
     #[tokio::test]
@@ -1942,9 +1955,9 @@ mod tests {
         let mut peers = PeersManager::default();
 
         assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
-        assert_eq!(peers.connection_info.num_inbound, 1);
+        assert_eq!(peers.connection_info.num_pending_in, 1);
         peers.on_incoming_pending_session_gracefully_closed();
-        assert_eq!(peers.connection_info.num_inbound, 0);
+        assert_eq!(peers.connection_info.num_pending_in, 0);
     }
 
     #[tokio::test]
@@ -1955,7 +1968,7 @@ mod tests {
         let mut peers = PeersManager::new(config);
 
         assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
-        assert_eq!(peers.connection_info.num_inbound, 1);
+        assert_eq!(peers.connection_info.num_pending_in, 1);
         let err = PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
             P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
                 DisconnectReason::UselessPeer,
@@ -1963,7 +1976,7 @@ mod tests {
         ));
 
         peers.on_incoming_pending_session_dropped(socket_addr, &err);
-        assert_eq!(peers.connection_info.num_inbound, 0);
+        assert_eq!(peers.connection_info.num_pending_in, 0);
         assert!(peers.ban_list.is_banned_ip(&socket_addr.ip()));
 
         assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_err());
@@ -2096,20 +2109,32 @@ mod tests {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
-        assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
-        peers.on_incoming_session_established(peer, socket_addr);
 
-        // peer should have been added and num_inbound should have been increased
+        // Attempt to establish an incoming session, expecting `num_pending_in` to increase by 1
+        assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+        assert_eq!(peers.connection_info.num_pending_in, 1);
+
+        // Establish a session with the peer, expecting the peer to be added and the `num_inbound`
+        // to increase by 1
+        peers.on_incoming_session_established(peer, socket_addr);
         let p = peers.peers.get_mut(&peer).expect("peer not found");
         assert_eq!(p.addr, socket_addr);
+        assert_eq!(peers.connection_info.num_pending_in, 0);
         assert_eq!(peers.connection_info.num_inbound, 1);
 
+        // Attempt to establish another incoming session, expecting the `num_pending_in` to increase
+        // by 1
         assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+        assert_eq!(peers.connection_info.num_pending_in, 1);
+
+        // Simulate a rejection due to an already established connection, expecting the
+        // `num_pending_in` to decrease by 1. The peer should remain connected and the `num_inbound`
+        // should not be changed.
         peers.on_already_connected(Direction::Incoming);
 
-        // peer should not be connected and num_inbound should not have been increased
         let p = peers.peers.get_mut(&peer).expect("peer not found");
         assert_eq!(p.addr, socket_addr);
+        assert_eq!(peers.connection_info.num_pending_in, 0);
         assert_eq!(peers.connection_info.num_inbound, 1);
     }
 
@@ -2263,6 +2288,38 @@ mod tests {
         );
 
         assert_eq!(peers.num_outbound_connections(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_outgoing_connection_gracefully_closed() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_peer(peer, socket_addr, None);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { peer_id, remote_addr } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(remote_addr, socket_addr);
+            }
+            _ => unreachable!(),
+        }
+
+        let p = peers.peers.get(&peer).unwrap();
+        assert_eq!(p.state, PeerConnectionState::PendingOut);
+
+        assert_eq!(peers.num_outbound_connections(), 0);
+
+        peers.on_outgoing_pending_session_gracefully_closed(&peer);
+
+        assert_eq!(peers.num_outbound_connections(), 0);
+        assert_eq!(peers.connection_info.num_pending_out, 0);
     }
 
     #[tokio::test]
@@ -2547,7 +2604,7 @@ mod tests {
         peer_manager.fill_outbound_slots();
 
         // all dialed connections should be in 'PendingOut' state
-        let dials = peer_manager.connection_info.num_pendingout;
+        let dials = peer_manager.connection_info.num_pending_out;
         assert_eq!(dials, peer_manager.connection_info.max_concurrent_outbound_dials);
 
         let num_pendingout_states = peer_manager
@@ -2572,6 +2629,6 @@ mod tests {
         }
 
         // no more pending outbound connections
-        assert_eq!(peer_manager.connection_info.num_pendingout, 0);
+        assert_eq!(peer_manager.connection_info.num_pending_out, 0);
     }
 }
