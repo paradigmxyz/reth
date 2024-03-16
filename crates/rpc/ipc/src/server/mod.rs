@@ -72,7 +72,10 @@ impl IpcServer<Identity> {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn start(mut self, methods: impl Into<Methods>) -> Result<ServerHandle, String> {
+    pub async fn start(
+        mut self,
+        methods: impl Into<Methods>,
+    ) -> Result<ServerHandle, IpcServerStartError> {
         let methods = methods.into();
         let (stop_tx, stop_rx) = watch::channel(());
 
@@ -94,8 +97,8 @@ impl IpcServer<Identity> {
         self,
         methods: Methods,
         stop_handle: StopHandle,
-        on_ready: oneshot::Sender<Result<(), String>>,
-    ) -> io::Result<()> {
+        on_ready: oneshot::Sender<Result<(), IpcServerStartError>>,
+    ) {
         trace!(endpoint = ?self.endpoint.path(), "starting ipc server");
 
         if cfg!(unix) {
@@ -124,9 +127,10 @@ impl IpcServer<Identity> {
                 Incoming::new(connections)
             }
             Err(err) => {
-                let msg = format!("failed to listen on ipc endpoint `{endpoint_path}`: {err}");
-                on_ready.send(Err(msg)).ok();
-                return Err(err)
+                on_ready
+                    .send(Err(IpcServerStartError { endpoint: endpoint_path, source: err }))
+                    .ok();
+                return
             }
         };
         // signal that we're ready to accept connections
@@ -186,7 +190,6 @@ impl IpcServer<Identity> {
         }
 
         connections.await;
-        Ok(())
     }
 }
 
@@ -198,6 +201,15 @@ impl std::fmt::Debug for IpcServer {
             .field("id_provider", &self.id_provider)
             .finish()
     }
+}
+
+/// Error thrown when server couldn't be started.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to listen on ipc endpoint `{endpoint}`: {source}")]
+pub struct IpcServerStartError {
+    endpoint: String,
+    #[source]
+    source: io::Error,
 }
 
 /// Data required by the server to handle requests received via an IPC connection
