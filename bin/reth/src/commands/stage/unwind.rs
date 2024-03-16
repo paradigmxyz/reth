@@ -67,7 +67,7 @@ impl Command {
         }
 
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
+            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
         let pipeline_builder = Pipeline::builder();
 
@@ -80,7 +80,7 @@ impl Command {
             ),
         );
 
-        pipeline.unwind(*range.end(), None)?;
+        pipeline.unwind(*range.start(), None)?;
         pipeline.run().await.map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
         println!("Unwound {} blocks", range.count());
