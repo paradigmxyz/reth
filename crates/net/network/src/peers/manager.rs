@@ -2488,6 +2488,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_incoming_with_trusted_nodes_only() {
+        let trusted_peer = PeerId::random();
+        let config = PeersConfig::test()
+            .with_trusted_nodes(HashSet::from([NodeRecord {
+                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+                tcp_port: 8008,
+                udp_port: 8008,
+                id: trusted_peer,
+            }]))
+            .with_trusted_nodes_only(true);
+        let mut peers = PeersManager::new(config);
+
+        let basic_peer = PeerId::random();
+        let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        peers.on_incoming_pending_session(basic_sock.ip()).unwrap();
+        peers.on_incoming_session_established(basic_peer, basic_sock);
+        assert_eq!(peers.peers.get(&basic_peer).is_none(), true);
+    }
+
+    #[tokio::test]
+    async fn test_incoming_without_trusted_nodes_only() {
+        let trusted_peer = PeerId::random();
+        let config = PeersConfig::test()
+            .with_trusted_nodes(HashSet::from([NodeRecord {
+                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+                tcp_port: 8008,
+                udp_port: 8008,
+                id: trusted_peer,
+            }]))
+            .with_trusted_nodes_only(false);
+        let mut peers = PeersManager::new(config);
+
+        let basic_peer = PeerId::random();
+        let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        peers.on_incoming_pending_session(basic_sock.ip()).unwrap();
+        peers.on_incoming_session_established(basic_peer, basic_sock);
+        assert_eq!(peers.peers.get(&basic_peer).is_none(), false);
+    }
+
+    #[tokio::test]
     async fn test_tick() {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
