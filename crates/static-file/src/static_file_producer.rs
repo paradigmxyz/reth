@@ -257,8 +257,9 @@ mod tests {
         sync::{mpsc::channel, Arc},
         time::Duration,
     };
+    use tempfile::TempDir;
 
-    fn setup() -> (ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>, StaticFileProvider) {
+    fn setup() -> (ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>, StaticFileProvider, TempDir) {
         let mut rng = generators::rng();
         let db = TestStageDB::default();
 
@@ -290,12 +291,12 @@ mod tests {
 
         let provider_factory = db.factory;
         let static_file_provider = provider_factory.static_file_provider();
-        (provider_factory, static_file_provider)
+        (provider_factory, static_file_provider, db.temp_static_files_dir)
     }
 
     #[test]
     fn run() {
-        let (provider_factory, static_file_provider) = setup();
+        let (provider_factory, static_file_provider, _temp_static_files_dir) = setup();
 
         let mut static_file_producer = StaticFileProducerInner::new(
             provider_factory,
@@ -373,7 +374,7 @@ mod tests {
     /// Tests that a cloneable [`StaticFileProducer`] type is not susceptible to any race condition.
     #[test]
     fn only_one() {
-        let (provider_factory, static_file_provider) = setup();
+        let (provider_factory, static_file_provider, _temp_static_files_dir) = setup();
 
         let static_file_producer = StaticFileProducer::new(
             provider_factory,
