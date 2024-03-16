@@ -116,7 +116,7 @@ impl Command {
             eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
         }
 
-        config.peers.connect_trusted_nodes_only = self.trusted_only;
+        config.peers.trusted_nodes_only = self.trusted_only;
 
         let default_secret_key_path = data_dir.p2p_secret_path();
         let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);

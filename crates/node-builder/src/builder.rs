@@ -159,7 +159,7 @@ impl<DB, State> NodeBuilder<DB, State> {
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
         // Update the config with the command line arguments
-        config.peers.connect_trusted_nodes_only = self.config.network.trusted_only;
+        config.peers.trusted_nodes_only = self.config.network.trusted_only;
 
         if !self.config.network.trusted_peers.is_empty() {
             info!(target: "reth::cli", "Adding trusted nodes");

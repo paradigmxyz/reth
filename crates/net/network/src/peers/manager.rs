@@ -117,7 +117,7 @@ pub struct PeersManager {
     /// [`DisconnectReason::TooManyPeers`], are put in time out.
     backoff_durations: PeerBackoffDurations,
     /// If non-trusted peers should be connected to
-    connect_trusted_nodes_only: bool,
+    trusted_nodes_only: bool,
     /// Timestamp of the last time [Self::tick] was called.
     last_tick: Instant,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
@@ -137,7 +137,7 @@ impl PeersManager {
             ban_duration,
             backoff_durations,
             trusted_nodes,
-            connect_trusted_nodes_only,
+            trusted_nodes_only,
             basic_nodes,
             max_backoff_count,
         } = config;
@@ -173,7 +173,7 @@ impl PeersManager {
             backed_off_peers: Default::default(),
             ban_duration,
             backoff_durations,
-            connect_trusted_nodes_only,
+            trusted_nodes_only,
             last_tick: Instant::now(),
             max_backoff_count,
             net_connection_state: NetworkConnectionState::default(),
@@ -727,7 +727,7 @@ impl PeersManager {
     /// Peers that are `trusted`, see [PeerKind], are prioritized as long as they're not currently
     /// marked as banned or backed off.
     ///
-    /// If `connect_trusted_nodes_only` is enabled, see [PeersConfig], then this will only consider
+    /// If `trusted_nodes_only` is enabled, see [PeersConfig], then this will only consider
     /// `trusted` peers.
     ///
     /// Returns `None` if no peer is available.
@@ -736,7 +736,7 @@ impl PeersManager {
             !peer.is_backed_off() &&
                 !peer.is_banned() &&
                 peer.state.is_unconnected() &&
-                (!self.connect_trusted_nodes_only || peer.is_trusted())
+                (!self.trusted_nodes_only || peer.is_trusted())
         });
 
         // keep track of the best peer, if there's one
@@ -1229,7 +1229,7 @@ pub struct PeersConfig {
     /// Trusted nodes to connect to.
     pub trusted_nodes: HashSet<NodeRecord>,
     /// Connect to trusted nodes only?
-    pub connect_trusted_nodes_only: bool,
+    pub trusted_nodes_only: bool,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
     ///
     /// The max time spent of a peer before it's removed from the set is determined by the
@@ -1271,7 +1271,7 @@ impl Default for PeersConfig {
             ban_duration: Duration::from_secs(60 * 60 * 12),
             backoff_durations: Default::default(),
             trusted_nodes: Default::default(),
-            connect_trusted_nodes_only: false,
+            trusted_nodes_only: false,
             basic_nodes: Default::default(),
             max_backoff_count: 5,
         }
@@ -1344,8 +1344,8 @@ impl PeersConfig {
     }
 
     /// Connect only to trusted nodes.
-    pub fn with_connect_trusted_nodes_only(mut self, trusted_only: bool) -> Self {
-        self.connect_trusted_nodes_only = trusted_only;
+    pub fn with_trusted_nodes_only(mut self, trusted_only: bool) -> Self {
+        self.trusted_nodes_only = trusted_only;
         self
     }
 
@@ -2457,7 +2457,7 @@ mod tests {
                 udp_port: 8008,
                 id: trusted_peer,
             }]))
-            .with_connect_trusted_nodes_only(true);
+            .with_trusted_nodes_only(true);
         let mut peers = PeersManager::new(config);
 
         let basic_peer = PeerId::random();
