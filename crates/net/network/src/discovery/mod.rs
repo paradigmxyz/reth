@@ -21,6 +21,9 @@ pub mod discv4;
 pub mod discv5;
 pub mod discv5_downgrade_v4;
 
+pub use discv5::DiscoveryV5;
+pub use discv5_downgrade_v4::DiscoveryV5V4;
+
 /// An abstraction over the configured discovery protocol.
 ///
 /// Listens for new discovered nodes and emits events for discovered nodes and their
