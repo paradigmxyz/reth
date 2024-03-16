@@ -82,7 +82,7 @@ where
         {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::Eip4844BlobGasExceeded.to_string(),
-            ));
+            ))
         }
 
         let block_id: reth_rpc_types::BlockId = state_block_number.into();

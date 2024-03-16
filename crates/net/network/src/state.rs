@@ -267,6 +267,11 @@ where
         self.discovery.ban(peer_id, ip)
     }
 
+    /// Marks the given peer as trusted.
+    pub(crate) fn add_trusted_peer_id(&mut self, peer_id: PeerId) {
+        self.peers_manager.add_trusted_peer_id(peer_id)
+    }
+
     /// Adds a peer and its address with the given kind to the peerset.
     pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: SocketAddr) {
         self.peers_manager.add_peer_kind(peer_id, kind, addr, None)

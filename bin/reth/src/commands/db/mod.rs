@@ -89,6 +89,17 @@ pub enum Subcommands {
     Path,
 }
 
+/// db_ro_exec opens a database in read-only mode, and then execute with the provided command
+macro_rules! db_ro_exec {
+    ($chain:expr, $db_path:expr, $db_args:ident, $sfp:ident, $tool:ident, $command:block) => {
+        let db = open_db_read_only($db_path, $db_args)?;
+        let provider_factory = ProviderFactory::new(db, $chain.clone(), $sfp)?;
+
+        let $tool = DbTool::new(provider_factory, $chain.clone())?;
+        $command;
+    };
+}
+
 impl Command {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
@@ -101,36 +112,24 @@ impl Command {
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
-                let db = open_db_read_only(&db_path, db_args)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
-
-                let tool = DbTool::new(provider_factory, self.chain.clone())?;
-                command.execute(data_dir, &tool)?;
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(data_dir, &tool)?;
+                });
             }
             Subcommands::List(command) => {
-                let db = open_db_read_only(&db_path, db_args)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
-
-                let tool = DbTool::new(provider_factory, self.chain.clone())?;
-                command.execute(&tool)?;
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(&tool)?;
+                });
             }
             Subcommands::Diff(command) => {
-                let db = open_db_read_only(&db_path, db_args)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
-
-                let tool = DbTool::new(provider_factory, self.chain.clone())?;
-                command.execute(&tool)?;
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(&tool)?;
+                });
             }
             Subcommands::Get(command) => {
-                let db = open_db_read_only(&db_path, db_args)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
-
-                let tool = DbTool::new(provider_factory, self.chain.clone())?;
-                command.execute(&tool)?;
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(&tool)?;
+                });
             }
             Subcommands::Drop { force } => {
                 if !force {

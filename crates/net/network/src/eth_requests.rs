@@ -4,6 +4,7 @@ use crate::{
     budget::DEFAULT_BUDGET_TRY_DRAIN_STREAM, metrics::EthRequestHandlerMetrics, peers::PeersHandle,
     poll_nested_stream_with_budget,
 };
+use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
@@ -38,18 +39,8 @@ const MAX_HEADERS_SERVE: usize = 1024;
 /// SOFT_RESPONSE_LIMIT.
 const MAX_BODIES_SERVE: usize = 1024;
 
-/// Estimated size in bytes of an RLP encoded receipt.
-const APPROX_RECEIPT_SIZE: usize = 24 * 1024;
-
-/// Estimated size in bytes of an RLP encoded body.
-// TODO: check 24kb blocksize assumption
-const APPROX_BODY_SIZE: usize = 24 * 1024;
-
 /// Maximum size of replies to data retrievals.
 const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
-
-/// Estimated size in bytes of an RLP encoded header.
-const APPROX_HEADER_SIZE: usize = 500;
 
 /// Manages eth related requests on top of the p2p network.
 ///
@@ -128,12 +119,13 @@ where
                     }
                 }
 
+                total_bytes += header.length();
                 headers.push(header);
+
                 if headers.len() >= MAX_HEADERS_SERVE {
                     break
                 }
 
-                total_bytes += APPROX_HEADER_SIZE;
                 if total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
@@ -175,12 +167,13 @@ where
                     withdrawals: block.withdrawals,
                 };
 
+                total_bytes += body.length();
                 bodies.push(body);
+
                 if bodies.len() >= MAX_BODIES_SERVE {
                     break
                 }
 
-                total_bytes += APPROX_BODY_SIZE;
                 if total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
@@ -211,12 +204,13 @@ where
                     .map(|receipt| receipt.with_bloom())
                     .collect::<Vec<_>>();
 
+                total_bytes += receipt.length();
                 receipts.push(receipt);
+
                 if receipts.len() >= MAX_RECEIPTS_SERVE {
                     break
                 }
 
-                total_bytes += APPROX_RECEIPT_SIZE;
                 if total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }

@@ -236,6 +236,10 @@ impl PeersInfo for NetworkHandle {
 }
 
 impl Peers for NetworkHandle {
+    fn add_trusted_peer_id(&self, peer: PeerId) {
+        self.send_message(NetworkHandleMessage::AddTrustedPeerId(peer));
+    }
+
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
     /// set, with the given kind.
     fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr) {
@@ -404,6 +408,8 @@ pub trait NetworkProtocols: Send + Sync {
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 #[derive(Debug)]
 pub(crate) enum NetworkHandleMessage {
+    /// Marks a peer as trusted.
+    AddTrustedPeerId(PeerId),
     /// Adds an address for a peer, including its ID, kind, and socket address.
     AddPeerAddress(PeerId, PeerKind, SocketAddr),
     /// Removes a peer from the peerset corresponding to the given kind.

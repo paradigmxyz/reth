@@ -89,9 +89,9 @@ rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
 
 [workspace.package]
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.76"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -188,7 +188,7 @@ reth-trie-parallel = { path = "crates/trie-parallel" }
 # revm
 revm = { version = "7.1.0", features = ["std", "secp256k1"], default-features = false }
 revm-primitives = { version = "3.0.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "1f935e7" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "f96bc1f" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
@@ -197,12 +197,12 @@ alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
 alloy-trie = "0.3"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
-alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
 
 # TODO: Remove
 ethers-core = { version = "2.0.14", default-features = false }
@@ -253,6 +253,9 @@ async-trait = "0.1.68"
 futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"
+hyper = "0.14.25"
+tower = "0.4"
+tower-http = "0.4"
 
 # p2p
 discv5 = "0.4"
@@ -269,7 +272,7 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
     "rand-std",
     "recovery",
 ] }
-enr = { version = "0.10", default-features = false, features = ["k256"] }
+enr = { version = "=0.10.0", default-features = false, features = ["k256"] }
 
 # for eip-4844
 c-kzg = "0.4.2"

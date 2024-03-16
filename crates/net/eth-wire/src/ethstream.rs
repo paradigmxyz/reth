@@ -215,10 +215,9 @@ where
         &mut self,
         item: EthBroadcastMessage,
     ) -> Result<(), EthStreamError> {
-        let mut bytes = Vec::new();
-        ProtocolBroadcastMessage::from(item).encode(&mut bytes);
-
-        self.inner.start_send_unpin(bytes.into())?;
+        self.inner.start_send_unpin(Bytes::from(alloy_rlp::encode(
+            ProtocolBroadcastMessage::from(item),
+        )))?;
 
         Ok(())
     }
@@ -296,10 +295,9 @@ where
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
         }
 
-        let mut bytes = Vec::new();
-        ProtocolMessage::from(item).encode(&mut bytes);
-
-        self.project().inner.start_send(bytes.into())?;
+        self.project()
+            .inner
+            .start_send(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(item))))?;
 
         Ok(())
     }
