@@ -6,7 +6,6 @@ use crate::{
 };
 use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey};
 use futures::StreamExt;
-use parking_lot::RwLock;
 use reth_discv4::{
     DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscovery, NodeFromExternalSource,
     PublicKey, SecretKey,
@@ -475,13 +474,13 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                 // callback passed to discv4 will only takes read lock on discv5 handle! though
                 // discv5 will blocking wait for write lock on its kbuckets
                 // internally to apply pending nodes.
-                let discv5 = Arc::new(RwLock::new(discv5));
+                let discv5 = Arc::new(discv5);
                 let discv5_ref = discv5.clone();
                 // todo: pass mutual ref to mirror as param to filter out removed nodes and only
                 // get peer ids of additions.
                 let read_kbuckets_callback =
                     move || -> Result<HashSet<PeerId>, secp256k1::Error> {
-                        let keys = discv5_ref.read().with_kbuckets(|kbuckets| {
+                        let keys = discv5_ref.with_kbuckets(|kbuckets| {
                             kbuckets
                                 .read()
                                 .iter_ref()

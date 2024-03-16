@@ -15,7 +15,6 @@ use futures::{
     stream::{select, Select},
     Stream, StreamExt,
 };
-use parking_lot::RwLock;
 use reth_discv4::{DiscoveryUpdate, Discv4, HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
@@ -31,13 +30,13 @@ pub mod enr;
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
 pub struct Discv5WithDiscv4Downgrade {
-    discv5: Arc<RwLock<discv5::Discv5>>, // todo: remove not needed lock
+    discv5: Arc<discv5::Discv5>,
     discv4: Discv4,
 }
 
 impl Discv5WithDiscv4Downgrade {
     /// Returns a new [`Discv5WithDiscv4Downgrade`] handle.
-    pub fn new(discv5: Arc<RwLock<discv5::Discv5>>, discv4: Discv4) -> Self {
+    pub fn new(discv5: Arc<discv5::Discv5>, discv4: Discv4) -> Self {
         Self { discv5, discv4 }
     }
 
@@ -62,7 +61,7 @@ impl Discv5WithDiscv4Downgrade {
     where
         F: FnOnce(&discv5::Discv5) -> R,
     {
-        f(&self.discv5.read())
+        f(&self.discv5)
     }
 }
 
@@ -74,7 +73,7 @@ impl HandleDiscovery for Discv5WithDiscv4Downgrade {
         if let NodeFromExternalSource::Enr(enr) = node_record {
             let enr = enr.try_into()?;
             let EnrCombinedKeyWrapper(enr) = enr;
-            _ = self.discv5.read().add_enr(enr); // todo: handle error
+            _ = self.discv5.add_enr(enr); // todo: handle error
         } // todo: handle if not case
 
         Ok::<(), rlp::DecoderError>(())
@@ -83,7 +82,7 @@ impl HandleDiscovery for Discv5WithDiscv4Downgrade {
     fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
         if let Ok(key_str) = std::str::from_utf8(&key) {
             // todo: handle error
-            _ = self.discv5.read().enr_insert(key_str, &rlp); // todo: handle error
+            _ = self.discv5.enr_insert(key_str, &rlp); // todo: handle error
         }
         self.discv4.set_eip868_in_local_enr(key, rlp)
     }
@@ -96,14 +95,14 @@ impl HandleDiscovery for Discv5WithDiscv4Downgrade {
 
     fn ban_peer_by_ip_and_node_id(&self, peer_id: PeerId, ip: IpAddr) {
         if let Ok(node_id_discv5) = uncompressed_to_compressed_id(peer_id) {
-            self.discv5.read().ban_node(&node_id_discv5, None); // todo handle error
+            self.discv5.ban_node(&node_id_discv5, None); // todo handle error
         }
-        self.discv5.read().ban_ip(ip, None);
+        self.discv5.ban_ip(ip, None);
         self.discv4.ban_peer_by_ip_and_node_id(peer_id, ip)
     }
 
     fn ban_peer_by_ip(&self, ip: IpAddr) {
-        self.discv5.read().ban_ip(ip, None);
+        self.discv5.ban_ip(ip, None);
         self.discv4.ban_peer_by_ip(ip)
     }
 }
