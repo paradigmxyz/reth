@@ -1,7 +1,6 @@
 //! Wrapper for [`discv5::Discv5`] that supports downgrade to [`Discv4`].
 
 use std::{
-    error::Error,
     fmt,
     net::IpAddr,
     pin::Pin,
@@ -15,7 +14,8 @@ use futures::{
     stream::{select, Select},
     Stream, StreamExt,
 };
-use reth_discv4::{DiscoveryUpdate, Discv4, HandleDiscovery, NodeFromExternalSource};
+use reth_discv4::{DiscoveryUpdate, Discv4};
+use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     PeerId,
@@ -69,7 +69,7 @@ impl HandleDiscovery for Discv5WithDiscv4Downgrade {
     fn add_node_to_routing_table(
         &self,
         node_record: NodeFromExternalSource,
-    ) -> Result<(), impl Error> {
+    ) -> Result<(), impl std::error::Error> {
         if let NodeFromExternalSource::Enr(enr) = node_record {
             let enr = enr.try_into()?;
             let EnrCombinedKeyWrapper(enr) = enr;

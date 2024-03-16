@@ -5790,9 +5790,11 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project",
  "reth-discv4",
+ "reth-net-common",
  "reth-primitives",
  "rlp",
  "secp256k1 0.27.0",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -6053,8 +6055,12 @@ dependencies = [
 name = "reth-net-common"
 version = "0.2.0-beta.2"
 dependencies = [
+ "alloy-rlp",
+ "derive_more",
+ "enr",
  "pin-project",
  "reth-primitives",
+ "secp256k1 0.27.0",
  "tokio",
 ]
 

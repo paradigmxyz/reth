@@ -43,6 +43,7 @@ use error::MirrorUpdateError;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
+use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{bytes::Bytes, hex, ForkId, PeerId, B256};
 use smallvec::{smallvec, SmallVec};
 use std::{
@@ -454,7 +455,7 @@ pub struct Discv4Service<M = Noop> {
     #[deref_mut]
     inner: Discv4ServiceInner,
     /// Mirrors some primary kbuckets if configured, and filters nodes received in [`Neighbours`]
-    /// responses against them. Will be set if the node is ran alongside iscv5, to support
+    /// responses against them. Will be set if the node is ran alongside discv5, to support
     /// downgrading to discv4.
     primary_kbuckets: Option<M>,
 }
@@ -2511,46 +2512,6 @@ where
 
         connected_over_discv5
     }
-}
-
-#[derive(Debug)]
-/// A node that hasn't been discovered via a discv5 or discv4 query.
-pub enum NodeFromExternalSource {
-    /// Node compatible with discv4.
-    NodeRecord(NodeRecord),
-    /// Node compatible with discv5.
-    Enr(Enr<SecretKey>),
-}
-
-/// Essential interface for interacting with discovery.
-pub trait HandleDiscovery {
-    /// Adds the node to the table, if it is not already present.
-    fn add_node_to_routing_table(
-        &self,
-        node_record: NodeFromExternalSource,
-    ) -> Result<(), impl Error>;
-
-    /// Sets the pair in the EIP-868 [`Enr`] of the node.
-    ///
-    /// If the key already exists, this will update it.
-    ///
-    /// CAUTION: The value **must** be rlp encoded
-    fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes);
-
-    /// Sets the pair in the EIP-868 [`Enr`] of the node.
-    ///
-    /// If the key already exists, this will update it.
-    fn encode_and_set_eip868_in_local_enr(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable);
-
-    /// Adds the peer and id to the ban list.
-    ///
-    /// This will prevent any future inclusion in the table
-    fn ban_peer_by_ip_and_node_id(&self, node_id: PeerId, ip: IpAddr);
-
-    /// Adds the ip to the ban list.
-    ///
-    /// This will prevent any future inclusion in the table
-    fn ban_peer_by_ip(&self, ip: IpAddr);
 }
 
 impl HandleDiscovery for Discv4 {

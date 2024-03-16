@@ -6,10 +6,7 @@ use crate::{
 };
 use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey};
 use futures::StreamExt;
-use reth_discv4::{
-    DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, HandleDiscovery, NodeFromExternalSource,
-    PublicKey, SecretKey,
-};
+use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, PublicKey, SecretKey};
 use reth_discv5::{
     enr::uncompressed_id_from_enr_pk, DiscoveryUpdateV5, Discv5WithDiscv4Downgrade,
     MergedUpdateStream,
@@ -17,6 +14,7 @@ use reth_discv5::{
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsResolver, Update,
 };
+use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{ForkId, NodeRecord, NodeRecordWithForkId, PeerId};
 use smallvec::{smallvec, SmallVec};
 use tokio::{
