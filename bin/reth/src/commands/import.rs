@@ -107,19 +107,17 @@ impl ImportCommand {
         let tip = file_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            PruneModes::default(),
-        );
-
         let (mut pipeline, events) = self
             .build_import_pipeline(
                 config,
                 provider_factory.clone(),
                 &consensus,
                 file_client,
-                static_file_producer,
+                StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
             )
             .await?;
 

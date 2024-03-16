@@ -131,7 +131,7 @@ where
     ) -> Option<CallOutcome> {
         call_inspectors!([&mut self.custom_print_tracer], |inspector| {
             if let Some(outcome) = inspector.call(context, inputs) {
-                return Some(outcome);
+                return Some(outcome)
             }
         });
 
@@ -151,7 +151,7 @@ where
             // If the inspector returns a different ret or a revert with a non-empty message,
             // we assume it wants to tell us something
             if new_ret != outcome {
-                return new_ret;
+                return new_ret
             }
         });
 
@@ -166,7 +166,7 @@ where
     ) -> Option<CreateOutcome> {
         call_inspectors!([&mut self.custom_print_tracer], |inspector| {
             if let Some(out) = inspector.create(context, inputs) {
-                return Some(out);
+                return Some(out)
             }
         });
 
@@ -186,7 +186,7 @@ where
             // If the inspector returns a different ret or a revert with a non-empty message,
             // we assume it wants to tell us something
             if new_ret != outcome {
-                return new_ret;
+                return new_ret
             }
         });
 
