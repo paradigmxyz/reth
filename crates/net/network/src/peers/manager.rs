@@ -307,6 +307,9 @@ impl PeersManager {
                 // peer is missing in the table, we add it but mark it as to be removed after
                 // disconnect, because we only know the outgoing port
                 let mut peer = Peer::with_state(addr, PeerConnectionState::In);
+                if self.trusted_nodes_only && !peer.is_trusted() {
+                    return
+                }
                 peer.remove_after_disconnect = true;
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
