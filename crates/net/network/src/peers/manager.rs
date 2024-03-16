@@ -285,14 +285,14 @@ impl PeersManager {
 
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
-                let value = entry.get_mut();
-                if value.is_banned() {
+                let peer = entry.get_mut();
+                if peer.is_banned() {
                     self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
                     return
                 }
-                value.state = PeerConnectionState::In;
+                peer.state = PeerConnectionState::In;
 
-                let is_trusted = value.is_trusted() || self.trusted_peer_ids.contains(&peer_id);
+                let is_trusted = peer.is_trusted() || self.trusted_peer_ids.contains(&peer_id);
 
                 // if a peer is not trusted and we don't have capacity for more inbound connections,
                 // disconnecting the peer
