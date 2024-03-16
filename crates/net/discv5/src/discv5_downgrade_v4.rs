@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
-use crate::DiscV5;
+use crate::{DiscV5, HandleDiscv5};
 
 /// Errors interfacing between [`discv5::Discv5`] and [`Discv4`].
 #[derive(Debug, thiserror::Error)]
@@ -63,14 +63,6 @@ impl DiscV5WithV4Downgrade {
     {
         f(&mut self.discv4)
     }
-
-    /// Exposes API of [`discv5::Discv5`].
-    pub fn with_discv5<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&DiscV5) -> R,
-    {
-        f(&self.discv5)
-    }
 }
 
 impl HandleDiscovery for DiscV5WithV4Downgrade {
@@ -100,6 +92,15 @@ impl HandleDiscovery for DiscV5WithV4Downgrade {
     fn ban_peer_by_ip(&self, ip: IpAddr) {
         self.discv5.ban_peer_by_ip(ip);
         self.discv4.ban_peer_by_ip(ip)
+    }
+}
+
+impl HandleDiscv5 for DiscV5WithV4Downgrade {
+    fn with_discv5<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&DiscV5) -> R,
+    {
+        f(&self.discv5)
     }
 }
 
@@ -183,6 +184,7 @@ impl Stream for MergedUpdateStream {
             }
             // todo: get clarity on rules on fork id in discv4
             // todo: check discv4s policy for peers with non-WAN-reachable node records.
+            // todo: upstream discovered discv4 peers to ping from discv5?
 
             if let Err(err) = self.notify_discv4_of_kbuckets_update() {
                 error!(target: "net::discv5",

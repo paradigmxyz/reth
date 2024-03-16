@@ -24,6 +24,14 @@ pub enum Error {
     AddNodeToDiscv5Failed(&'static str),
 }
 
+/// Use API of [`discv5::Discv5`].
+pub trait HandleDiscv5 {
+    /// Exposes API of [`discv5::Discv5`].
+    fn with_discv5<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&DiscV5) -> R;
+}
+
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Deref, DerefMut)]
 pub struct DiscV5(pub discv5::Discv5);
@@ -81,5 +89,14 @@ impl HandleDiscovery for DiscV5 {
 
     fn ban_peer_by_ip(&self, ip: IpAddr) {
         self.ban_ip(ip, None);
+    }
+}
+
+impl HandleDiscv5 for DiscV5 {
+    fn with_discv5<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&DiscV5) -> R,
+    {
+        f(self)
     }
 }

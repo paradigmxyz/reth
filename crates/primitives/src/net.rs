@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn conversion_to_el_node_record() {
+    fn conversion_to_node_record_with_fork_id() {
         let mut rng = thread_rng();
         let key = SecretKey::new(&mut rng);
 

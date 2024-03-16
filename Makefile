@@ -265,7 +265,7 @@ maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus t
 fmt:
 	cargo +nightly fmt
 
-# will check discv4, i.e. not(feature = "discv5")
+# will check discv4, i.e. #[cfg(not(all(feature = "discv5_downgrade_v4", feature = "discv5")))]
 lint-reth:
 	cargo +nightly clippy \
 	--workspace \
@@ -316,7 +316,7 @@ rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc
 	cargo +nightly docs \
 	--document-private-items
 
-# will test discv4, i.e. not(feature = "discv5")
+# will test discv4, i.e. #[cfg(not(all(feature = "discv5_downgrade_v4", feature = "discv5")))]
 test-reth:
 	cargo test \
 	--workspace \

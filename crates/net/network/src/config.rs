@@ -44,7 +44,7 @@ pub struct NetworkConfig<C> {
     pub dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery.
     pub discovery_v4_config: Option<Discv4Config>,
-    #[cfg(feature = "discv5")]
+    #[cfg(any(feature = "discv5", feature = "discv5_downgrade_v4"))]
     /// How to set up discovery version 5.
     pub discovery_v5_config: Option<discv5::Config>,
     /// Address to use for discovery
@@ -114,14 +114,12 @@ impl<C> NetworkConfig<C> {
         self
     }
 
-    /// Sets the config to use for the discovery v4 protocol.
-    #[cfg(feature = "discv5")]
-    pub fn set_discovery_v5(
+    /// Sets the config to use for the discovery v5 protocol.
+    #[cfg(any(feature = "discv5", feature = "discv5_downgrade_v4"))]
+    pub fn set_discovery_v5_with_v4_downgrade_config(
         mut self,
         discovery_v5_config: discv5::Config,
-        discovery_v4_config: Discv4Config,
     ) -> Self {
-        self.discovery_v4_config = Some(discovery_v4_config);
         self.discovery_v5_config = Some(discovery_v5_config);
         self
     }
@@ -513,7 +511,7 @@ impl NetworkConfigBuilder {
             boot_nodes,
             dns_discovery_config,
             discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
-            #[cfg(feature = "discv5")]
+            #[cfg(any(feature = "discv5", feature = "discv5_downgrade_v4"))]
             discovery_v5_config: None,
             discovery_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
             listener_addr,

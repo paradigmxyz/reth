@@ -177,7 +177,7 @@ where
             client,
             secret_key,
             mut discovery_v4_config,
-            #[cfg(feature = "discv5")]
+            #[cfg(any(feature = "discv5", feature = "discv5_downgrade_v4"))]
             discovery_v5_config,
             discovery_addr,
             listener_addr,
@@ -214,19 +214,24 @@ where
             disc_config
         });
 
-        #[cfg(not(feature = "discv5"))]
+        #[cfg(not(all(feature = "discv5_downgrade_v4", feature = "discv5")))]
         let discovery =
             Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
                 .await?;
 
-        #[cfg(feature = "discv5")]
-        let discovery = Discovery::start_discv5_with_discv4_downgrade(
+        #[cfg(feature = "discv5_downgrade_v4")]
+        let discovery = Discovery::start_discv5_with_v4_downgrade(
             discovery_addr,
             secret_key,
-            (discovery_v4_config, discovery_v5_config),
+            discovery_v4_config,
+            discovery_v5_config,
             dns_discovery_config,
         )
         .await?;
+
+        #[cfg(feature = "discv5")]
+        let discovery =
+            Discovery::start_discv5(secret_key, discovery_v5_config, dns_discovery_config).await?;
 
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();

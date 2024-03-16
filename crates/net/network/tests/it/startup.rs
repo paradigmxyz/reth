@@ -47,7 +47,7 @@ async fn test_listener_addr_in_use() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(not(feature = "discv5"))]
+#[cfg(not(all(feature = "discv5_downgrade_v4", feature = "discv5")))]
 async fn test_discovery_addr_in_use() {
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
