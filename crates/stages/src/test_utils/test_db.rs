@@ -27,7 +27,7 @@ use tempfile::TempDir;
 #[derive(Debug)]
 pub struct TestStageDB {
     pub factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
-    pub temp_files_dir: TempDir,
+    pub temp_static_files_dir: TempDir,
 }
 
 impl Default for TestStageDB {
@@ -35,7 +35,7 @@ impl Default for TestStageDB {
     fn default() -> Self {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
         Self {
-            temp_files_dir: static_dir,
+            temp_static_files_dir: static_dir,
             factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone(), static_dir_path)
                 .unwrap(),
         }
@@ -47,7 +47,7 @@ impl TestStageDB {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
 
         Self {
-            temp_files_dir: static_dir,
+            temp_static_files_dir: static_dir,
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
