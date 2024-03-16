@@ -1079,7 +1079,6 @@ where
                     self.on_good_import(hash);
                 }
                 Err(err) => {
-                    //
                     // If we're _currently_ syncing and the transaction is bad we
                     // ignore it, otherwise we penalize the peer that sent the bad
                     // transaction with the assumption that the peer should have
