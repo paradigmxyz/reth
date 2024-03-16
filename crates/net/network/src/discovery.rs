@@ -8,8 +8,8 @@ use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey};
 use futures::StreamExt;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry, PublicKey, SecretKey};
 use reth_discv5::{
-    enr::uncompressed_id_from_enr_pk, DiscoveryUpdateV5, Discv5WithDiscv4Downgrade,
-    MergedUpdateStream,
+    discv5_downgrade_v4::DiscoveryUpdateV5, enr::uncompressed_id_from_enr_pk, DiscV5,
+    DiscV5WithV4Downgrade, MergedUpdateStream,
 };
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsResolver, Update,
@@ -244,7 +244,7 @@ impl fmt::Debug for Discovery {
     }
 }
 
-impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
+impl<S, N> Discovery<DiscV5WithV4Downgrade, S, N> {
     fn on_discv5_update(&mut self, update: discv5::Event) -> Result<(), NetworkError> {
         use discv5::Event::*;
         match update {
@@ -327,7 +327,7 @@ impl<S, N> Discovery<Discv5WithDiscv4Downgrade, S, N> {
     }
 }
 
-impl<S> Stream for Discovery<Discv5WithDiscv4Downgrade, S, Enr<SecretKey>>
+impl<S> Stream for Discovery<DiscV5WithV4Downgrade, S, Enr<SecretKey>>
 where
     S: Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static,
 {
@@ -367,7 +367,7 @@ where
     }
 }
 
-impl<S, N> fmt::Debug for Discovery<Discv5WithDiscv4Downgrade, S, N>
+impl<S, N> fmt::Debug for Discovery<DiscV5WithV4Downgrade, S, N>
 where
     N: fmt::Debug,
 {
@@ -385,7 +385,7 @@ where
     }
 }
 
-impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
+impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
     /// Spawns the discovery service.
     ///
     /// This will spawn [`discv5::Discv5`] and [`Discv4`] each onto their own new task and
@@ -472,7 +472,7 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                 // callback passed to discv4 will only takes read lock on discv5 handle! though
                 // discv5 will blocking wait for write lock on its kbuckets
                 // internally to apply pending nodes.
-                let discv5 = Arc::new(discv5);
+                let discv5 = Arc::new(DiscV5(discv5));
                 let discv5_ref = discv5.clone();
                 // todo: pass mutual ref to mirror as param to filter out removed nodes and only
                 // get peer ids of additions.
@@ -535,7 +535,7 @@ impl Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                 // 5. merge both discovery nodes
                 //
                 // combined handle
-                let disc = Discv5WithDiscv4Downgrade::new(discv5, discv4);
+                let disc = DiscV5WithV4Downgrade::new(discv5, discv4);
 
                 // combined update stream
                 let disc_updates = MergedUpdateStream::merge_discovery_streams(
@@ -677,8 +677,7 @@ mod discv5_tests {
     async fn start_discv5_with_discv4_downgrade_node(
         udp_port_discv4: u16,
         udp_port_discv5: u16,
-    ) -> Discovery<Discv5WithDiscv4Downgrade, MergedUpdateStream, enr::Enr<secp256k1::SecretKey>>
-    {
+    ) -> Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, enr::Enr<secp256k1::SecretKey>> {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv4_addr = format!("127.0.0.1:{udp_port_discv4}").parse().unwrap();

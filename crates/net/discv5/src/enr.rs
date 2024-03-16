@@ -35,13 +35,13 @@ pub fn pk_to_uncompressed_id(
 }
 
 /// Converts a [`PeerId`] to a [`discv5::enr::NodeId`].
-pub fn uncompressed_to_compressed_id(peer_id: PeerId) -> Result<NodeId, secp256k1::Error> {
+pub fn uncompressed_to_compressed_id(peer_id: PeerId) -> NodeId {
     let mut buf = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
     buf[0] = SECP256K1_SERIALIZED_UNCOMPRESSED_FLAG;
     buf[1..].copy_from_slice(peer_id.as_ref());
-    let pk = PublicKey::from_slice(&buf)?;
+    let pk = PublicKey::from_slice(&buf).unwrap();
 
-    Ok(pk.into())
+    pk.into()
 }
 
 /// Checks if the fork id is set for an [`Enr`] received over [`discv5::Discv5`].
@@ -53,24 +53,21 @@ pub fn is_fork_id_set_for_discv5_peer<K: EnrKey>(enr: &Enr<K>) -> bool {
 #[derive(Debug, Clone)]
 pub struct EnrCombinedKeyWrapper(pub discv5::Enr);
 
-impl TryFrom<Enr<SecretKey>> for EnrCombinedKeyWrapper {
-    type Error = rlp::DecoderError;
-    fn try_from(value: Enr<SecretKey>) -> Result<Self, Self::Error> {
+impl From<Enr<SecretKey>> for EnrCombinedKeyWrapper {
+    fn from(value: Enr<SecretKey>) -> Self {
         let encoded_enr = rlp::encode(&value);
-        let enr = rlp::decode::<discv5::Enr>(&encoded_enr)?;
+        let enr = rlp::decode::<discv5::Enr>(&encoded_enr).unwrap();
 
-        Ok(EnrCombinedKeyWrapper(enr))
+        Self(enr)
     }
 }
 
-impl TryInto<Enr<SecretKey>> for EnrCombinedKeyWrapper {
-    type Error = rlp::DecoderError;
-    fn try_into(self) -> Result<Enr<SecretKey>, Self::Error> {
-        let Self(enr) = self;
+impl From<EnrCombinedKeyWrapper> for Enr<SecretKey> {
+    fn from(val: EnrCombinedKeyWrapper) -> Self {
+        let EnrCombinedKeyWrapper(enr) = val;
         let encoded_enr = rlp::encode(&enr);
-        let enr = rlp::decode::<Enr<SecretKey>>(&encoded_enr)?;
 
-        Ok(enr)
+        rlp::decode::<Enr<SecretKey>>(&encoded_enr).unwrap()
     }
 }
 
@@ -88,8 +85,7 @@ mod tests {
         // convert to discv4 id
         let discv4_peer_id = pk_to_uncompressed_id(&discv5_pk).unwrap();
         // convert back to discv5 id
-        let discv5_peer_id_from_discv4_peer_id =
-            uncompressed_to_compressed_id(discv4_peer_id).unwrap();
+        let discv5_peer_id_from_discv4_peer_id = uncompressed_to_compressed_id(discv4_peer_id);
 
         assert_eq!(discv5_peer_id, discv5_peer_id_from_discv4_peer_id)
     }

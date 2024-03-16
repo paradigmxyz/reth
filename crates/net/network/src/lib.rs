@@ -145,7 +145,9 @@ pub use message::PeerRequest;
 pub use network::{NetworkEvents, NetworkHandle, NetworkProtocols};
 pub use peers::PeersConfig;
 pub use reth_discv4::Discv4;
-pub use reth_discv5::{DiscoveryUpdateV5, Discv5WithDiscv4Downgrade, MergedUpdateStream};
+pub use reth_discv5::{
+    discv5_downgrade_v4::DiscoveryUpdateV5, DiscV5WithV4Downgrade, MergedUpdateStream,
+};
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
 pub use session::{
     ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
