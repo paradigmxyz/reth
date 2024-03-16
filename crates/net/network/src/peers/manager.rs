@@ -286,7 +286,7 @@ impl PeersManager {
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let peer = entry.get_mut();
-                if peer.is_banned() {
+                if peer.is_banned() || (self.trusted_nodes_only && !peer.is_trusted()) {
                     self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
                     return
                 }
