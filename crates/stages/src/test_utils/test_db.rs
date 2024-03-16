@@ -21,34 +21,37 @@ use reth_provider::{
     HistoryWriter, ProviderError, ProviderFactory,
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc};
+use tempfile::TempDir;
 
 /// Test database that is used for testing stage implementations.
 #[derive(Debug)]
 pub struct TestStageDB {
     pub factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
+    pub temp_static_files_dir: TempDir,
 }
 
 impl Default for TestStageDB {
     /// Create a new instance of [TestStageDB]
     fn default() -> Self {
+        let (static_dir, static_dir_path) = create_test_static_files_dir();
         Self {
-            factory: ProviderFactory::new(
-                create_test_rw_db(),
-                MAINNET.clone(),
-                create_test_static_files_dir(),
-            )
-            .unwrap(),
+            temp_static_files_dir: static_dir,
+            factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone(), static_dir_path)
+                .unwrap(),
         }
     }
 }
 
 impl TestStageDB {
     pub fn new(path: &Path) -> Self {
+        let (static_dir, static_dir_path) = create_test_static_files_dir();
+
         Self {
+            temp_static_files_dir: static_dir,
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
-                create_test_static_files_dir(),
+                static_dir_path,
             )
             .unwrap(),
         }

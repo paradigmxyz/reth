@@ -2150,13 +2150,11 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
             env.db
@@ -2208,13 +2206,12 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2230,15 +2227,12 @@ mod tests {
             // if we `await` in the assert, the forkchoice will poll after we've inserted the block,
             // and it will return VALID instead of SYNCING
             let invalid_rx = env.send_forkchoice_updated(next_forkchoice_state).await;
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             // Insert next head immediately after sending forkchoice update
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&next_head].into_iter(),
             );
 
@@ -2274,13 +2268,12 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2329,13 +2322,10 @@ mod tests {
             let mut block3 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
             block3.header.set_difficulty(U256::from(1));
 
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1, &block2, &block3].into_iter(),
             );
 
@@ -2377,13 +2367,11 @@ mod tests {
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
 
+            let (_temp_dir, temp_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), temp_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2481,13 +2469,11 @@ mod tests {
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
             let block2 = random_block(&mut rng, 2, Some(block1.hash()), None, Some(0));
+
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1, &block2].into_iter(),
             );
 
@@ -2552,13 +2538,11 @@ mod tests {
             // TODO: add transactions that transfer from the alloc accounts, generating the new
             // block tx and state root
 
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2598,13 +2582,11 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
 
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis].into_iter(),
             );
 
@@ -2664,13 +2646,11 @@ mod tests {
                 .with_executor_results(Vec::from([exec_result2]))
                 .build();
 
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&data.genesis, &block1].into_iter(),
             );
 

@@ -26,7 +26,8 @@ pub fn create_test_provider_factory() -> ProviderFactory<Arc<TempDatabase<Databa
 pub fn create_test_provider_factory_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
 ) -> ProviderFactory<Arc<TempDatabase<DatabaseEnv>>> {
+    let (static_dir, _) = create_test_static_files_dir();
     let db = create_test_rw_db();
-    ProviderFactory::new(db, chain_spec, create_test_static_files_dir())
+    ProviderFactory::new(db, chain_spec, static_dir.into_path())
         .expect("create provider factory with static_files")
 }
