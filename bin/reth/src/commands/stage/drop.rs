@@ -9,15 +9,16 @@ use crate::{
     utils::DbTool,
 };
 use clap::Parser;
+use itertools::Itertools;
 use reth_db::{
-    database::Database, mdbx::DatabaseArguments, open_db, static_file::iter_static_files, tables,
-    transaction::DbTxMut, DatabaseEnv,
+    database::Database, open_db, static_file::iter_static_files, tables, transaction::DbTxMut,
+    DatabaseEnv,
 };
 use reth_node_core::init::{insert_genesis_header, insert_genesis_state};
 use reth_primitives::{
     fs, stage::StageId, static_file::find_fixed_range, ChainSpec, StaticFileSegment,
 };
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::StaticFileWriter, ProviderFactory};
 use std::sync::Arc;
 
 /// `reth drop-stage` command
@@ -59,8 +60,7 @@ impl Command {
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
 
-        let db =
-            open_db(db_path.as_ref(), DatabaseArguments::default().log_level(self.db.log_level))?;
+        let db = open_db(db_path.as_ref(), self.db.database_args())?;
         let provider_factory =
             ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
         let static_file_provider = provider_factory.static_file_provider();
@@ -79,7 +79,12 @@ impl Command {
             let static_file_provider = tool.provider_factory.static_file_provider();
             let static_files = iter_static_files(static_file_provider.directory())?;
             if let Some(segment_static_files) = static_files.get(&static_file_segment) {
-                for (block_range, _) in segment_static_files {
+                // Delete static files from the highest to the lowest block range
+                for (block_range, _) in segment_static_files
+                    .iter()
+                    .sorted_by_key(|(block_range, _)| block_range.start())
+                    .rev()
+                {
                     static_file_provider
                         .delete_jar(static_file_segment, find_fixed_range(block_range.start()))?;
                 }
@@ -97,7 +102,7 @@ impl Command {
                         StageId::Headers.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, static_file_provider, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.chain)?;
                 }
                 StageEnum::Bodies => {
                     tx.clear::<tables::BlockBodyIndices>()?;
@@ -109,7 +114,7 @@ impl Command {
                         StageId::Bodies.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, static_file_provider, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.chain)?;
                 }
                 StageEnum::Senders => {
                     tx.clear::<tables::TransactionSenders>()?;
@@ -194,11 +199,13 @@ impl Command {
                         StageId::TransactionLookup.to_string(),
                         Default::default(),
                     )?;
-                    insert_genesis_header::<DatabaseEnv>(tx, static_file_provider, self.chain)?;
+                    insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.chain)?;
                 }
             }
 
             tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;
+
+            static_file_provider.commit()?;
 
             Ok::<_, eyre::Error>(())
         })??;

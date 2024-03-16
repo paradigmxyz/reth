@@ -13,8 +13,8 @@ use reth_db::{
 };
 use reth_interfaces::{provider::ProviderResult, test_utils::generators::ChangeSet};
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
-    TxHash, TxNumber, B256, MAINNET, U256,
+    keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader,
+    StaticFileSegment, StorageEntry, TxHash, TxNumber, B256, MAINNET, U256,
 };
 use reth_provider::{
     providers::{StaticFileProviderRWRefMut, StaticFileWriter},
@@ -142,6 +142,17 @@ impl TestStageDB {
         td: U256,
     ) -> ProviderResult<()> {
         if let Some(writer) = writer {
+            // Backfill: some tests start at a forward block number, but static files require no
+            // gaps.
+            let segment_header = writer.user_header();
+            if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
+                for block_number in 0..header.number {
+                    let mut prev = header.clone().unseal();
+                    prev.number = block_number;
+                    writer.append_header(prev, U256::ZERO, B256::ZERO)?;
+                }
+            }
+
             writer.append_header(header.header().clone(), td, header.hash())?;
         } else {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
@@ -155,10 +166,10 @@ impl TestStageDB {
 
     fn insert_headers_inner<'a, I, const TD: bool>(&self, headers: I) -> ProviderResult<()>
     where
-        I: Iterator<Item = &'a SealedHeader>,
+        I: IntoIterator<Item = &'a SealedHeader>,
     {
         let provider = self.factory.static_file_provider();
-        let mut writer = provider.latest_writer(reth_primitives::StaticFileSegment::Headers)?;
+        let mut writer = provider.latest_writer(StaticFileSegment::Headers)?;
         let tx = self.factory.provider_rw()?.into_tx();
         let mut td = U256::ZERO;
 
@@ -179,7 +190,7 @@ impl TestStageDB {
     /// that are supposed to be populated by the headers stage.
     pub fn insert_headers<'a, I>(&self, headers: I) -> ProviderResult<()>
     where
-        I: Iterator<Item = &'a SealedHeader>,
+        I: IntoIterator<Item = &'a SealedHeader>,
     {
         self.insert_headers_inner::<I, false>(headers)
     }
@@ -189,7 +200,7 @@ impl TestStageDB {
     /// Superset functionality of [TestStageDB::insert_headers].
     pub fn insert_headers_with_td<'a, I>(&self, headers: I) -> ProviderResult<()>
     where
-        I: Iterator<Item = &'a SealedHeader>,
+        I: IntoIterator<Item = &'a SealedHeader>,
     {
         self.insert_headers_inner::<I, true>(headers)
     }
@@ -203,57 +214,79 @@ impl TestStageDB {
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
     pub fn insert_blocks<'a, I>(&self, blocks: I, storage_kind: StorageKind) -> ProviderResult<()>
     where
-        I: Iterator<Item = &'a SealedBlock>,
+        I: IntoIterator<Item = &'a SealedBlock>,
     {
         let provider = self.factory.static_file_provider();
 
-        let mut txs_writer = storage_kind.is_static().then(|| {
-            provider.latest_writer(reth_primitives::StaticFileSegment::Transactions).unwrap()
-        });
-
-        let mut headers_writer =
-            provider.latest_writer(reth_primitives::StaticFileSegment::Headers)?;
         let tx = self.factory.provider_rw().unwrap().into_tx();
-
         let mut next_tx_num = storage_kind.tx_offset();
-        blocks.into_iter().try_for_each(|block| {
-            Self::insert_header(Some(&mut headers_writer), &tx, &block.header, U256::ZERO)?;
 
-            // Insert into body tables.
-            let block_body_indices = StoredBlockBodyIndices {
-                first_tx_num: next_tx_num,
-                tx_count: block.body.len() as u64,
-            };
+        let blocks = blocks.into_iter().collect::<Vec<_>>();
 
-            if !block.body.is_empty() {
-                tx.put::<tables::TransactionBlocks>(
-                    block_body_indices.last_tx_num(),
-                    block.number,
-                )?;
-            }
-            tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
+        {
+            let mut headers_writer = provider.latest_writer(StaticFileSegment::Headers)?;
 
-            let res = block.body.iter().try_for_each(|body_tx| {
-                if let Some(txs_writer) = &mut txs_writer {
-                    txs_writer.append_transaction(next_tx_num, body_tx.clone().into())?;
-                } else {
-                    tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?
+            blocks.iter().try_for_each(|block| {
+                Self::insert_header(Some(&mut headers_writer), &tx, &block.header, U256::ZERO)
+            })?;
+
+            headers_writer.commit()?;
+        }
+
+        {
+            let mut txs_writer = storage_kind
+                .is_static()
+                .then(|| provider.latest_writer(StaticFileSegment::Transactions).unwrap());
+
+            blocks.into_iter().try_for_each(|block| {
+                // Insert into body tables.
+                let block_body_indices = StoredBlockBodyIndices {
+                    first_tx_num: next_tx_num,
+                    tx_count: block.body.len() as u64,
+                };
+
+                if !block.body.is_empty() {
+                    tx.put::<tables::TransactionBlocks>(
+                        block_body_indices.last_tx_num(),
+                        block.number,
+                    )?;
                 }
-                next_tx_num += 1;
-                Ok::<(), ProviderError>(())
-            });
+                tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
+
+                let res = block.body.iter().try_for_each(|body_tx| {
+                    if let Some(txs_writer) = &mut txs_writer {
+                        txs_writer.append_transaction(next_tx_num, body_tx.clone().into())?;
+                    } else {
+                        tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?
+                    }
+                    next_tx_num += 1;
+                    Ok::<(), ProviderError>(())
+                });
+
+                if let Some(txs_writer) = &mut txs_writer {
+                    // Backfill: some tests start at a forward block number, but static files
+                    // require no gaps.
+                    let segment_header = txs_writer.user_header();
+                    if segment_header.block_end().is_none() &&
+                        segment_header.expected_block_start() == 0
+                    {
+                        for block in 0..block.number {
+                            txs_writer.increment_block(StaticFileSegment::Transactions, block)?;
+                        }
+                    }
+                    txs_writer.increment_block(StaticFileSegment::Transactions, block.number)?;
+                }
+                res
+            })?;
 
             if let Some(txs_writer) = &mut txs_writer {
-                txs_writer.increment_block(reth_primitives::StaticFileSegment::Transactions)?;
+                txs_writer.commit()?;
             }
-            res
-        })?;
+        }
 
         tx.commit()?;
-        if let Some(txs_writer) = &mut txs_writer {
-            txs_writer.commit()?;
-        }
-        headers_writer.commit()
+
+        Ok(())
     }
 
     pub fn insert_tx_hash_numbers<I>(&self, tx_hash_numbers: I) -> ProviderResult<()>

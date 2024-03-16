@@ -4,8 +4,6 @@ Reth
 
 ```bash
 $ reth --help
-Reth
-
 Usage: reth [OPTIONS] <COMMAND>
 
 Commands:

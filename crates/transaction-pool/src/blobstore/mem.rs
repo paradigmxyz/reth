@@ -1,4 +1,6 @@
-use crate::blobstore::{BlobStore, BlobStoreError, BlobStoreSize, BlobTransactionSidecar};
+use crate::blobstore::{
+    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, BlobTransactionSidecar,
+};
 use parking_lot::RwLock;
 use reth_primitives::B256;
 use std::{collections::HashMap, sync::Arc};
@@ -67,7 +69,9 @@ impl BlobStore for InMemoryBlobStore {
         Ok(())
     }
 
-    fn cleanup(&self) {}
+    fn cleanup(&self) -> BlobStoreCleanupStat {
+        BlobStoreCleanupStat::default()
+    }
 
     // Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {

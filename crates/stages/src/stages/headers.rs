@@ -1,6 +1,7 @@
 use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use futures_util::StreamExt;
 use reth_codecs::Compact;
+use reth_config::config::EtlConfig;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -29,22 +30,19 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tempfile::TempDir;
 use tracing::*;
 
 /// The headers stage.
 ///
-/// The headers stage downloads all block headers from the highest block in the local database to
+/// The headers stage downloads all block headers from the highest block in storage to
 /// the perceived highest block on the network.
 ///
-/// The headers are processed and data is inserted into these tables:
+/// The headers are processed and data is inserted into static files, as well as into the
+/// [`HeaderNumbers`][reth_db::tables::HeaderNumbers] table.
 ///
-/// - [`HeaderNumbers`][reth_db::tables::HeaderNumbers]
-/// - [`Headers`][reth_db::tables::Headers]
-/// - [`CanonicalHeaders`][reth_db::tables::CanonicalHeaders]
-///
-/// NOTE: This stage downloads headers in reverse. Upon returning the control flow to the pipeline,
-/// the stage checkpoint is not updated until this stage is done.
+/// NOTE: This stage downloads headers in reverse and pushes them to the ETL [`Collector`]. It then
+/// proceeds to push them sequentially to static files. The stage checkpoint is not updated until
+/// this stage is done.
 #[derive(Debug)]
 pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     /// Database handle.
@@ -77,7 +75,7 @@ where
         downloader: Downloader,
         mode: HeaderSyncMode,
         consensus: Arc<dyn Consensus>,
-        tempdir: Arc<TempDir>,
+        etl_config: EtlConfig,
     ) -> Self {
         Self {
             provider: database,
@@ -85,17 +83,16 @@ where
             mode,
             consensus,
             sync_gap: None,
-            hash_collector: Collector::new(tempdir.clone(), 100 * (1024 * 1024)),
-            header_collector: Collector::new(tempdir, 100 * (1024 * 1024)),
+            hash_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
+            header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
             is_etl_ready: false,
         }
     }
 
-    /// Write downloaded headers to the given transaction from ETL.
+    /// Write downloaded headers to storage from ETL.
     ///
-    /// Writes to the following tables:
-    /// [`tables::Headers`], [`tables::CanonicalHeaders`], [`tables::HeaderTerminalDifficulties`]
-    /// and [`tables::HeaderNumbers`].
+    /// Writes to static files ( `Header | HeaderTD | HeaderHash` ) and [`tables::HeaderNumbers`]
+    /// database table.
     fn write_headers<DB: Database>(
         &mut self,
         tx: &<DB as Database>::TXMut,
@@ -158,7 +155,7 @@ where
         // add it to the collector and use tx.append on all hashes.
         if let Some((hash, block_number)) = cursor_header_numbers.last()? {
             if block_number.value()? == 0 {
-                self.hash_collector.insert(hash.key()?, 0);
+                self.hash_collector.insert(hash.key()?, 0)?;
                 cursor_header_numbers.delete_current()?;
                 first_sync = true;
             }
@@ -244,8 +241,8 @@ where
                     for header in headers {
                         let header_number = header.number;
 
-                        self.hash_collector.insert(header.hash(), header_number);
-                        self.header_collector.insert(header_number, header);
+                        self.hash_collector.insert(header.hash(), header_number)?;
+                        self.header_collector.insert(header_number, header)?;
 
                         // Headers are downloaded in reverse, so if we reach here, we know we have
                         // filled the gap.
@@ -290,6 +287,10 @@ where
         let to_be_processed = self.hash_collector.len() as u64;
         let last_header_number =
             self.write_headers::<DB>(provider.tx_ref(), provider.static_file_provider().clone())?;
+
+        // Clear ETL collectors
+        self.hash_collector.clear();
+        self.header_collector.clear();
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(last_header_number).with_headers_stage_checkpoint(
@@ -420,7 +421,7 @@ mod tests {
                     (*self.downloader_factory)(),
                     HeaderSyncMode::Tip(self.channel.1.clone()),
                     self.consensus.clone(),
-                    Arc::new(TempDir::new().unwrap()),
+                    EtlConfig::default(),
                 )
             }
         }
@@ -586,5 +587,7 @@ mod tests {
             processed == checkpoint + headers.len() as u64 - 1 && total == tip.number
         );
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+        assert!(runner.stage().hash_collector.is_empty());
+        assert!(runner.stage().header_collector.is_empty());
     }
 }

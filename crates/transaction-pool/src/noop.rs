@@ -260,14 +260,6 @@ impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        #[cfg(feature = "optimism")]
-        if transaction.is_deposit() {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                reth_primitives::InvalidTransactionError::TxTypeNotSupported.into(),
-            )
-        }
-
         // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
         // overdraft
         TransactionValidationOutcome::Valid {

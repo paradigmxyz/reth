@@ -24,9 +24,9 @@ reth-node-api.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }
-tower-http = { version = "0.4", features = ["full"] }
-tower = { version = "0.4", features = ["full"] }
-hyper = "0.14"
+tower-http = { workspace = true, features = ["full"] }
+tower = { workspace = true, features = ["full"] }
+hyper.workspace = true
 
 # metrics
 reth-metrics = { workspace = true, features = ["common"] }

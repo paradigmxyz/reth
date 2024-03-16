@@ -289,7 +289,7 @@ impl TxEip4844 {
 
     /// Get transaction type
     pub(crate) fn tx_type(&self) -> TxType {
-        TxType::EIP4844
+        TxType::Eip4844
     }
 
     /// Encodes the legacy transaction in RLP for signing.

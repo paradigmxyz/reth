@@ -11,16 +11,18 @@ services:
       - '8545:8545' # rpc
       - '8551:8551' # engine
     volumes:
-      - rethdata_mainnet:/root/.local/share/reth/mainnet/db
-      - rethdata_sepolia:/root/.local/share/reth/sepolia/db
-      - rethlogs:/root/rethlogs
+      - mainnet_data:/root/.local/share/reth/mainnet
+      - sepolia_data:/root/.local/share/reth/sepolia
+      - holesky_data:/root/.local/share/reth/holesky
+      - logs:/root/logs
       - ./jwttoken:/root/jwt:ro
     # For Sepolia, replace `--chain mainnet` with `--chain sepolia`
+    # For Holesky, replace `--chain mainnet` with `--chain holesky`
     command: >
       node
       --chain mainnet
       --metrics 0.0.0.0:9001
-      --log.file.directory /root/rethlogs
+      --log.file.directory /root/logs
       --authrpc.addr 0.0.0.0
       --authrpc.port 8551
       --authrpc.jwtsecret /root/jwt/jwt.hex
@@ -43,7 +45,7 @@ services:
 
   grafana:
     restart: unless-stopped
-    image: grafana/grafana:10.1.1
+    image: grafana/grafana:10.3.3
     depends_on:
       - reth
       - prometheus
@@ -64,11 +66,13 @@ services:
              /run.sh"
     
 volumes:
-  rethdata_mainnet:
+  mainnet_data:
     driver: local
-  rethdata_sepolia:
+  sepolia_data:
     driver: local
-  rethlogs:
+  holesky_data:
+    driver: local
+  logs:
     driver: local
   prometheusdata:
     driver: local

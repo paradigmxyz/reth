@@ -229,9 +229,14 @@ where
     ///   -> [StageId::Execution]
     /// - [StaticFileSegment::Transactions](reth_primitives::static_file::StaticFileSegment::Transactions)
     ///   -> [StageId::Bodies]
+    ///
+    /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
+    /// lock is occupied.
     fn produce_static_files(&mut self) -> RethResult<()> {
+        let mut static_file_producer = self.static_file_producer.lock();
+
         let provider = self.provider_factory.provider()?;
-        let targets = self.static_file_producer.get_static_file_targets(HighestStaticFiles {
+        let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
             headers: provider
                 .get_stage_checkpoint(StageId::Headers)?
                 .map(|checkpoint| checkpoint.block_number),
@@ -242,7 +247,7 @@ where
                 .get_stage_checkpoint(StageId::Bodies)?
                 .map(|checkpoint| checkpoint.block_number),
         })?;
-        self.static_file_producer.run(targets)?;
+        static_file_producer.run(targets)?;
 
         Ok(())
     }

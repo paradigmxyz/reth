@@ -12,7 +12,7 @@ use crate::{
     ChainSpec, GotExpected, GotExpectedBoxed, Hardfork, B256, B64, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
-use bytes::{BufMut, BytesMut};
+use bytes::BufMut;
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
@@ -206,9 +206,7 @@ impl Header {
     /// Heavy function that will calculate hash of data and will *not* save the change to metadata.
     /// Use [`Header::seal`], [`SealedHeader`] and unlock if you need hash to be persistent.
     pub fn hash_slow(&self) -> B256 {
-        let mut out = BytesMut::new();
-        self.encode(&mut out);
-        keccak256(&out)
+        keccak256(alloy_rlp::encode(self))
     }
 
     /// Checks if the header is empty - has no transactions and no ommers
@@ -775,7 +773,7 @@ impl SealedHeader {
         }
 
         // ensure that the blob gas fields for this block
-        if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(self.timestamp) {
+        if chain_spec.is_cancun_active_at_timestamp(self.timestamp) {
             self.validate_4844_header_against_parent(parent)?;
         }
 
@@ -984,49 +982,6 @@ impl From<HeadersDirection> for bool {
         match value {
             HeadersDirection::Rising => false,
             HeadersDirection::Falling => true,
-        }
-    }
-}
-
-#[cfg(feature = "test-utils")]
-mod ethers_compat {
-    use super::*;
-    use ethers_core::types::{Block, H256};
-
-    impl From<&Block<H256>> for Header {
-        fn from(block: &Block<H256>) -> Self {
-            Header {
-                parent_hash: block.parent_hash.0.into(),
-                number: block.number.unwrap().as_u64(),
-                gas_limit: block.gas_limit.as_u64(),
-                difficulty: U256::from_limbs(block.difficulty.0),
-                nonce: block.nonce.unwrap().to_low_u64_be(),
-                extra_data: block.extra_data.0.clone().into(),
-                state_root: block.state_root.0.into(),
-                transactions_root: block.transactions_root.0.into(),
-                receipts_root: block.receipts_root.0.into(),
-                timestamp: block.timestamp.as_u64(),
-                mix_hash: block.mix_hash.unwrap().0.into(),
-                beneficiary: block.author.unwrap().0.into(),
-                base_fee_per_gas: block.base_fee_per_gas.map(|fee| fee.as_u64()),
-                ommers_hash: block.uncles_hash.0.into(),
-                gas_used: block.gas_used.as_u64(),
-                withdrawals_root: None,
-                logs_bloom: block.logs_bloom.unwrap_or_default().0.into(),
-                blob_gas_used: None,
-                excess_blob_gas: None,
-                parent_beacon_block_root: None,
-            }
-        }
-    }
-
-    impl From<&Block<H256>> for SealedHeader {
-        fn from(block: &Block<H256>) -> Self {
-            let header = Header::from(block);
-            match block.hash {
-                Some(hash) => header.seal(hash.0.into()),
-                None => header.seal_slow(),
-            }
         }
     }
 }

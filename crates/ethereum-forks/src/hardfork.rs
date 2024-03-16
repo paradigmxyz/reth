@@ -91,22 +91,22 @@ impl Hardfork {
     /// Retrieves the activation block for the specified hardfork on the given chain.
     pub fn activation_block(&self, chain: Chain) -> Option<u64> {
         if chain == Chain::mainnet() {
-            return self.mainnet_activation_block();
+            return self.mainnet_activation_block()
         }
         if chain == Chain::sepolia() {
-            return self.sepolia_activation_block();
+            return self.sepolia_activation_block()
         }
         if chain == Chain::holesky() {
-            return self.holesky_activation_block();
+            return self.holesky_activation_block()
         }
 
         #[cfg(feature = "optimism")]
         {
             if chain == Chain::base_sepolia() {
-                return self.base_sepolia_activation_block();
+                return self.base_sepolia_activation_block()
             }
             if chain == Chain::base_mainnet() {
-                return self.base_mainnet_activation_block();
+                return self.base_mainnet_activation_block()
             }
         }
 
@@ -133,9 +133,7 @@ impl Hardfork {
             Hardfork::GrayGlacier => Some(15050000),
             Hardfork::Paris => Some(15537394),
             Hardfork::Shanghai => Some(17034870),
-
-            // upcoming hardforks
-            Hardfork::Cancun => None,
+            Hardfork::Cancun => Some(19426587),
 
             _ => None,
         }
@@ -252,21 +250,21 @@ impl Hardfork {
     /// Retrieves the activation timestamp for the specified hardfork on the given chain.
     pub fn activation_timestamp(&self, chain: Chain) -> Option<u64> {
         if chain == Chain::mainnet() {
-            return self.mainnet_activation_timestamp();
+            return self.mainnet_activation_timestamp()
         }
         if chain == Chain::sepolia() {
-            return self.sepolia_activation_timestamp();
+            return self.sepolia_activation_timestamp()
         }
         if chain == Chain::holesky() {
-            return self.holesky_activation_timestamp();
+            return self.holesky_activation_timestamp()
         }
         #[cfg(feature = "optimism")]
         {
             if chain == Chain::base_sepolia() {
-                return self.base_sepolia_activation_timestamp();
+                return self.base_sepolia_activation_timestamp()
             }
             if chain == Chain::base_mainnet() {
-                return self.base_mainnet_activation_timestamp();
+                return self.base_mainnet_activation_timestamp()
             }
         }
 
