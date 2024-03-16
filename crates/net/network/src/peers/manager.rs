@@ -270,7 +270,7 @@ impl PeersManager {
     /// be scheduled.
     pub(crate) fn on_incoming_session_established(&mut self, peer_id: PeerId, addr: SocketAddr) {
         // we only need to check the peer id here as the ip address will have been checked at
-        // on_inbound_pending_session. We also check if the peer is in the backoff list here.
+        // on_incoming_pending_session. We also check if the peer is in the backoff list here.
         if self.ban_list.is_banned_peer(&peer_id) {
             self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
             return
