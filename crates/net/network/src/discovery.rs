@@ -732,7 +732,7 @@ mod discv5_tests {
 
         // add node_2 to discovery handle of node_1 (should add node to discv5 kbuckets)
         let node_2_enr_reth_compatible_ty: Enr<SecretKey> =
-            EnrCombinedKeyWrapper(node_2_enr.clone()).try_into().unwrap();
+            EnrCombinedKeyWrapper(node_2_enr.clone()).into();
         node_1
             .disc
             .as_ref()

@@ -160,11 +160,11 @@ pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
 #[cfg(not(feature = "discv5"))]
 pub type Discovery = discovery::Discovery;
 
-/// Discovery using [`reth_discv5::Discv5WithDiscv4Downgrade`], which supports downgrading to
+/// Discovery using [`reth_discv5::DiscV5WithV4Downgrade`], which supports downgrading to
 /// [`Discv4`].
 #[cfg(feature = "discv5")]
 pub type Discovery = discovery::Discovery<
-    Discv5WithDiscv4Downgrade,
+    DiscV5WithV4Downgrade,
     MergedUpdateStream,
     enr::Enr<secp256k1::SecretKey>,
 >;
