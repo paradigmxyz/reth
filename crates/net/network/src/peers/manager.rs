@@ -88,6 +88,11 @@ impl PeersHandle {
 pub struct PeersManager {
     /// All peers known to the network
     peers: HashMap<PeerId, Peer>,
+    /// The set of trusted peer ids.
+    ///
+    /// This tracks peer ids that are considered trusted, but for which we don't necessarily have
+    /// an address: [Self::add_trusted_peer_id]
+    trusted_peer_ids: HashSet<PeerId>,
     /// Copy of the sender half, so new [`PeersHandle`] can be created on demand.
     manager_tx: mpsc::UnboundedSender<PeerCommand>,
     /// Receiver half of the command channel.
@@ -143,8 +148,10 @@ impl PeersManager {
         let unban_interval = ban_duration.min(backoff_durations.low) / 2;
 
         let mut peers = HashMap::with_capacity(trusted_nodes.len() + basic_nodes.len());
+        let mut trusted_peer_ids = HashSet::with_capacity(trusted_nodes.len());
 
         for NodeRecord { address, tcp_port, udp_port: _, id } in trusted_nodes {
+            trusted_peer_ids.insert(id);
             peers.entry(id).or_insert_with(|| Peer::trusted(SocketAddr::from((address, tcp_port))));
         }
 
@@ -154,6 +161,7 @@ impl PeersManager {
 
         Self {
             peers,
+            trusted_peer_ids,
             manager_tx,
             handle_rx: UnboundedReceiverStream::new(handle_rx),
             queued_actions: Default::default(),
@@ -283,9 +291,12 @@ impl PeersManager {
                     return
                 }
                 value.state = PeerConnectionState::In;
+
+                let is_trusted = value.is_trusted() || self.trusted_peer_ids.contains(&peer_id);
+
                 // if a peer is not trusted and we don't have capacity for more inbound connections,
                 // disconnecting the peer
-                if !value.is_trusted() && !has_in_capacity {
+                if !is_trusted && !has_in_capacity {
                     self.queued_actions.push_back(PeerAction::Disconnect {
                         peer_id,
                         reason: Some(DisconnectReason::TooManyPeers),
@@ -300,8 +311,10 @@ impl PeersManager {
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
 
+                let is_trusted = self.trusted_peer_ids.contains(&peer_id);
+
                 // disconnect the peer if we don't have capacity for more inbound connections
-                if !has_in_capacity {
+                if !is_trusted && !has_in_capacity {
                     self.queued_actions.push_back(PeerAction::Disconnect {
                         peer_id,
                         reason: Some(DisconnectReason::TooManyPeers),
@@ -614,6 +627,11 @@ impl PeersManager {
         self.add_peer_kind(peer_id, PeerKind::Basic, addr, fork_id)
     }
 
+    /// Marks the given peer as trusted.
+    pub(crate) fn add_trusted_peer_id(&mut self, peer_id: PeerId) {
+        self.trusted_peer_ids.insert(peer_id);
+    }
+
     /// Called for a newly discovered trusted peer.
     ///
     /// If the peer already exists, then the address and kind will be updated.
@@ -658,6 +676,10 @@ impl PeersManager {
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
         }
+
+        if kind.is_trusted() {
+            self.trusted_peer_ids.insert(peer_id);
+        }
     }
 
     /// Removes the tracked node from the set.
@@ -695,8 +717,9 @@ impl PeersManager {
         }
 
         let peer = entry.get_mut();
-
         peer.kind = PeerKind::Basic;
+
+        self.trusted_peer_ids.remove(&peer_id);
     }
 
     /// Returns the idle peer with the highest reputation.
@@ -2013,6 +2036,72 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn accept_incoming_trusted_unknown_peer_address() {
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 99)), 8008);
+        let mut peers = PeersManager::new(PeersConfig::test().with_max_inbound(2));
+
+        // saturate the inbound slots
+        for i in 0..peers.connection_info.max_inbound {
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, i as u8)), 8008);
+            assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+            let peer_id = PeerId::random();
+            peers.on_incoming_session_established(peer_id, addr);
+
+            match event!(peers) {
+                PeerAction::PeerAdded(id) => {
+                    assert_eq!(id, peer_id);
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        // try to connect untrusted peer
+        let untrusted = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 99)), 8008);
+        assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+        peers.on_incoming_session_established(untrusted, socket_addr);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(id) => {
+                assert_eq!(id, untrusted);
+            }
+            _ => unreachable!(),
+        }
+
+        match event!(peers) {
+            PeerAction::Disconnect { peer_id, reason } => {
+                assert_eq!(peer_id, untrusted);
+                assert_eq!(reason, Some(DisconnectReason::TooManyPeers));
+            }
+            _ => unreachable!(),
+        }
+
+        // try to connect trusted peer
+        let trusted = PeerId::random();
+        peers.add_trusted_peer_id(trusted);
+
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 100)), 8008);
+        assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+        peers.on_incoming_session_established(trusted, socket_addr);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(id) => {
+                assert_eq!(id, trusted);
+            }
+            _ => unreachable!(),
+        }
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        let peer = peers.peers.get(&trusted).unwrap();
+        assert_eq!(peer.state, PeerConnectionState::In);
     }
 
     #[tokio::test]
