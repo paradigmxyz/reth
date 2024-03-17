@@ -20,51 +20,51 @@ pub enum ConsensusType {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Hardfork {
-    /// Frontier.
+    /// Frontier: <https://blog.ethereum.org/2015/03/03/ethereum-launch-process>.
     Frontier,
-    /// Homestead: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/homestead.md.
+    /// Homestead: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/homestead.md>.
     Homestead,
-    /// The DAO fork: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/dao-fork.md.
+    /// The DAO fork: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/dao-fork.md>.
     Dao,
-    /// Tangerine: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/tangerine-whistle.md.
+    /// Tangerine: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/tangerine-whistle.md>.
     Tangerine,
-    /// Spurious Dragon: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/spurious-dragon.md.
+    /// Spurious Dragon: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/spurious-dragon.md>.
     SpuriousDragon,
-    /// Byzantium: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/byzantium.md.
+    /// Byzantium: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/byzantium.md>.
     Byzantium,
-    /// Constantinople: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/constantinople.md.
+    /// Constantinople: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/constantinople.md>.
     Constantinople,
-    /// Petersburg: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/petersburg.md.
+    /// Petersburg: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/petersburg.md>.
     Petersburg,
-    /// Istanbul: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/istanbul.md.
+    /// Istanbul: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/istanbul.md>.
     Istanbul,
-    /// Muir Glacier: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/muir-glacier.md.
+    /// Muir Glacier: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/muir-glacier.md>.
     MuirGlacier,
-    /// Berlin: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/berlin.md.
+    /// Berlin: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/berlin.md>.
     Berlin,
-    /// London: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/london.md.
+    /// London: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/london.md>.
     London,
-    /// Arrow Glacier: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/arrow-glacier.md.
+    /// Arrow Glacier: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/arrow-glacier.md>.
     ArrowGlacier,
-    /// Gray Glacier: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/gray-glacier.md.
+    /// Gray Glacier: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/gray-glacier.md>.
     GrayGlacier,
-    /// Paris: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/paris.md.
+    /// Paris: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/paris.md>.
     Paris,
-    /// Bedrock: https://blog.oplabs.co/introducing-optimism-bedrock.
+    /// Bedrock: <https://blog.oplabs.co/introducing-optimism-bedrock>.
     #[cfg(feature = "optimism")]
     Bedrock,
-    /// Regolith: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#regolith.
+    /// Regolith: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#regolith>.
     #[cfg(feature = "optimism")]
     Regolith,
-    /// Shanghai: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/shanghai.md.
+    /// Shanghai: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/shanghai.md>.
     Shanghai,
     /// Canyon:
-    /// https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#canyon.
+    /// https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#canyon>.
     #[cfg(feature = "optimism")]
     Canyon,
-    /// Cancun: https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/cancun.md.
+    /// Cancun: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/cancun.md>.
     Cancun,
-    /// Ecotone: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#ecotone.
+    /// Ecotone: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#ecotone>.
     #[cfg(feature = "optimism")]
     Ecotone,
 }
