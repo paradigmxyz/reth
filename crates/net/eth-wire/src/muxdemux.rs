@@ -533,7 +533,7 @@ mod tests {
         let mxdmx_stream =
             MuxDemuxStream::try_new((), Capability::eth(EthVersion::Eth66), shared_caps_eth68())
                 .unwrap();
-        let egress_bytes = mxdmx_stream.mask_msg_id(Bytes::from(msg));
+        let egress_bytes = mxdmx_stream.mask_msg_id(msg.into());
 
         assert_eq!(egress_bytes.as_ref(), &[0x10, 0x20]);
     }

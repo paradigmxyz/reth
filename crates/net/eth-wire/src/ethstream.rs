@@ -63,7 +63,7 @@ where
         // we need to encode and decode here on our own because we don't have an `EthStream` yet
         // The max length for a status with TTD is: <msg id = 1 byte> + <rlp(status) = 88 byte>
         self.inner
-            .send(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(EthMessage::Status(status)))))
+            .send(alloy_rlp::encode(ProtocolMessage::from(EthMessage::Status(status))).into())
             .await?;
 
         let their_msg_res = self.inner.next().await;

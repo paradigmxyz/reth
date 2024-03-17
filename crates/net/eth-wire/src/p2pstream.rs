@@ -357,7 +357,7 @@ impl<S> DisconnectP2P for P2PStream<S> {
         // message
         compressed[0] = buf[0];
 
-        self.outgoing_messages.push_back(Bytes::from(compressed));
+        self.outgoing_messages.push_back(compressed.into());
         self.disconnecting = true;
         Ok(())
     }
