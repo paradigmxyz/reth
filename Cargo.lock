@@ -5933,6 +5933,7 @@ dependencies = [
  "tokio-util",
  "tower",
  "tracing",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

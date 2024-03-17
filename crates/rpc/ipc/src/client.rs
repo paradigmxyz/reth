@@ -9,9 +9,26 @@ use jsonrpsee::{
 use std::{
     io,
     path::{Path, PathBuf},
+    sync::Arc,
 };
-use tokio::{io::AsyncWriteExt, net::UnixStream};
+use time::Duration;
+use tokio::io::AsyncWriteExt;
 use tokio_util::codec::FramedRead;
+
+#[cfg(unix)]
+use tokio::net::{
+    unix::{ReadHalf, WriteHalf},
+    UnixStream,
+};
+
+#[cfg(windows)]
+use {
+    tokio::{
+        net::windows::named_pipe::{ClientOptions, NamedPipeClient},
+        time,
+    },
+    windows_sys::Win32::Foundation::ERROR_PIPE_BUSY,
+};
 
 /// Builder type for [`Client`]
 #[derive(Clone, Default, Debug)]
@@ -38,7 +55,10 @@ impl IpcClientBuilder {
 /// Sending end of IPC transport.
 #[derive(Debug)]
 pub struct Sender {
+    #[cfg(unix)]
     inner: tokio::net::unix::OwnedWriteHalf,
+    #[cfg(windows)]
+    inner: Arc<NamedPipeClient>,
 }
 
 #[async_trait::async_trait]
@@ -65,7 +85,10 @@ impl TransportSenderT for Sender {
 /// Receiving end of IPC transport.
 #[derive(Debug)]
 pub struct Receiver {
-    inner: FramedRead<tokio::net::unix::OwnedReadHalf, StreamCodec>,
+    #[cfg(unix)]
+    inner: FramedRead<tokio::net::unix::OwnedReadHalf, crate::stream_codec::StreamCodec>,
+    #[cfg(windows)]
+    inner: FramedRead<Arc<NamedPipeClient>, crate::stream_codec::StreamCodec>,
 }
 
 #[async_trait::async_trait]
@@ -96,18 +119,38 @@ impl IpcTransportClientBuilder {
     /// # }
     /// ```
     pub async fn build(self, path: impl AsRef<Path>) -> Result<(Sender, Receiver), IpcError> {
-        let path = path.as_ref();
+        #[cfg(unix)]
+        {
+            let path = path.as_ref();
 
-        let stream = UnixStream::connect(path)
-            .await
-            .map_err(|err| IpcError::FailedToConnect { path: path.to_path_buf(), err })?;
+            let stream = UnixStream::connect(path)
+                .await
+                .map_err(|err| IpcError::FailedToConnect { path: path.to_path_buf(), err })?;
 
-        let (rhlf, whlf) = stream.into_split();
+            let (rhlf, whlf) = stream.into_split();
 
-        Ok((
-            Sender { inner: whlf },
-            Receiver { inner: FramedRead::new(rhlf, StreamCodec::stream_incoming()) },
-        ))
+            Ok((
+                Sender { inner: whlf },
+                Receiver { inner: FramedRead::new(rhlf, StreamCodec::stream_incoming()) },
+            ))
+        }
+        #[cfg(windows)]
+        {
+            let addr = path.as_ref().as_os_str();
+            let client = loop {
+                match ClientOptions::new().open(addr) {
+                    Ok(client) => break client,
+                    Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) => (),
+                    Err(e) => return IpcError::FailedToConnect { path: path.to_path_buf(), err: e },
+                }
+                time::sleep(Duration::from_mills(50)).await;
+            };
+            let client = Arc::new(client);
+            Ok((
+                Sender { inner: client.clone() },
+                Receiver { inner: FramedRead::new(client, StreamCodec::stream_incoming()) },
+            ))
+        }
     }
 }
 
