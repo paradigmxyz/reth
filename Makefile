@@ -293,10 +293,12 @@ lint-op-reth:
 lint-other-targets:
 	cargo +nightly clippy \
 	--workspace \
+	--exclude reth-network \
 	--lib \
 	--examples \
 	--tests \
 	--benches \
+	--all-features \
 	-- -D warnings
 
 lint:

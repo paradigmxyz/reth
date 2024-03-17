@@ -10,14 +10,14 @@ use reth_discv5::{
 };
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
-use reth_primitives::NodeRecord;
+use reth_primitives::{NodeRecord, PeerId};
 use smallvec::{smallvec, SmallVec};
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tracing::{error, info};
 
 use std::{
-    net::SocketAddr,
+    net::{Ipv4Addr, SocketAddr},
     pin::Pin,
     task::{Context, Poll},
 };
@@ -153,10 +153,26 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
     /// Note: if dns discovery is configured, any nodes found by this service will be
     pub async fn start_discv5(
         sk: SecretKey,
-        discv5_config: discv5::Config,
+        discv5_config: Option<discv5::Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
-        let (disc, disc_updates, bc_local_enr) = start_discv5(&sk, discv5_config).await?;
+        let (disc, disc_updates, bc_local_enr) = match discv5_config {
+            Some(config) => {
+                let (disc, disc_updates, bc_local_enr) = start_discv5(&sk, config).await?;
+
+                (Some(disc), Some(disc_updates.into()), bc_local_enr)
+            }
+            None => (
+                None,
+                None,
+                NodeRecord {
+                    address: Ipv4Addr::LOCALHOST.into(),
+                    id: PeerId::ZERO,
+                    udp_port: 0,
+                    tcp_port: 0,
+                },
+            ),
+        };
 
         // setup DNS discovery.
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
@@ -169,8 +185,8 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
         Ok(Discovery {
             discovery_listeners: Default::default(),
             local_enr: bc_local_enr,
-            disc: Some(disc),
-            disc_updates: Some(disc_updates.into()),
+            disc,
+            disc_updates,
             _disc_service: None,
             discovered_nodes: Default::default(),
             queued_events: Default::default(),
@@ -188,12 +204,6 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
         discv5_config: Option<discv5::Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
-        let Some(discv5_config) = discv5_config else {
-            return Err(NetworkError::custom_discovery(
-                "discv5 config required, contains listen socket",
-            ))
-        };
-
         Discovery::start_discv5(sk, discv5_config, dns_discovery_config).await
     }
 }
@@ -266,7 +276,7 @@ pub(super) async fn start_discv5(
     let discv5_updates =
         discv5.event_stream().await.map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
 
-    Ok((DiscV5(discv5), discv5_updates, bc_enr))
+    Ok((DiscV5(discv5), discv5_updates.into(), bc_enr))
 }
 
 #[cfg(test)]
@@ -287,7 +297,9 @@ mod tests {
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
         let discv5_config = discv5::ConfigBuilder::new(discv5_listen_config).build();
 
-        Discovery::start_discv5(secret_key, discv5_config, None).await.expect("should build discv5")
+        Discovery::start_discv5(secret_key, Some(discv5_config), None)
+            .await
+            .expect("should build discv5")
     }
 
     #[tokio::test(flavor = "multi_thread")]
