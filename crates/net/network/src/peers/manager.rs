@@ -276,7 +276,8 @@ impl PeersManager {
             return
         }
 
-        if self.trusted_nodes_only && !self.trusted_peer_ids.contains(&peer_id) {
+        let mut is_trusted = self.trusted_peer_ids.contains(&peer_id);
+        if self.trusted_nodes_only && !is_trusted {
             self.queued_actions.push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
             return
         }
@@ -297,13 +298,7 @@ impl PeersManager {
                 }
                 peer.state = PeerConnectionState::In;
 
-                let is_trusted = peer.is_trusted() || self.trusted_peer_ids.contains(&peer_id);
-
-                if self.trusted_nodes_only && !is_trusted {
-                    self.queued_actions
-                        .push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
-                    return
-                }
+                is_trusted = peer.is_trusted() || is_trusted;
 
                 // if a peer is not trusted and we don't have capacity for more inbound connections,
                 // disconnecting the peer
@@ -322,21 +317,12 @@ impl PeersManager {
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
 
-                let is_trusted = self.trusted_peer_ids.contains(&peer_id);
-
-                if !is_trusted {
-                    if self.trusted_nodes_only {
-                        // disconnect the peer if trusted nodes only
-                        self.queued_actions
-                            .push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
-                    } else if !has_in_capacity {
-                        // disconnect the peer if we don't have capacity for more inbound
-                        // connections
-                        self.queued_actions.push_back(PeerAction::Disconnect {
-                            peer_id,
-                            reason: Some(DisconnectReason::TooManyPeers),
-                        });
-                    }
+                // disconnect the peer if we don't have capacity for more inbound connections
+                if !is_trusted && !has_in_capacity {
+                    self.queued_actions.push_back(PeerAction::Disconnect {
+                        peer_id,
+                        reason: Some(DisconnectReason::TooManyPeers),
+                    });
                 }
             }
         }
