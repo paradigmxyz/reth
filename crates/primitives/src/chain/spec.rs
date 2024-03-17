@@ -1517,23 +1517,36 @@ pub struct DisplayHardforks {
 
 impl Display for DisplayHardforks {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Pre-merge hard forks (block based):")?;
-        for fork in self.pre_merge.iter() {
-            writeln!(f, "- {fork}")?;
+        fn format(
+            header: &str,
+            forks: &Vec<DisplayFork>,
+            next_is_empty: bool,
+            f: &mut Formatter<'_>,
+        ) -> std::fmt::Result {
+            writeln!(f, "{}:", header)?;
+            for (index, fork) in forks.iter().enumerate() {
+                if next_is_empty && index == forks.len() - 1 {
+                    write!(f, "- {}", fork)?;
+                } else {
+                    writeln!(f, "- {}", fork)?;
+                }
+            }
+            Ok(())
         }
 
+        format(
+            "Pre-merge hard forks (block based)",
+            &self.pre_merge,
+            self.with_merge.is_empty(),
+            f,
+        )?;
+
         if !self.with_merge.is_empty() {
-            writeln!(f, "Merge hard forks:")?;
-            for fork in self.with_merge.iter() {
-                writeln!(f, "- {fork}")?;
-            }
+            format("Merge hard forks", &self.with_merge, self.post_merge.is_empty(), f)?;
         }
 
         if !self.post_merge.is_empty() {
-            writeln!(f, "Post-merge hard forks (timestamp based):")?;
-            for fork in self.post_merge.iter() {
-                writeln!(f, "- {fork}")?;
-            }
+            format("Post-merge hard forks (timestamp based)", &self.post_merge, true, f)?;
         }
 
         Ok(())
