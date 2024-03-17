@@ -221,6 +221,19 @@ The storage history indexing stage builds an index of what blocks a particular s
 commit_threshold = 100000
 ```
 
+### `etl`
+
+An ETL (extract, transform, load) data collector. Used mainly to insert data into `MDBX` in a sorted manner.
+
+```toml
+[stages.etl]
+# The maximum size in bytes of data held in memory before being flushed to disk as a file.
+#
+# Lower threshold corresponds to more frequent flushes,
+# but lowers temporary storage usage
+file_size = 524_288_000 # 500 * 1024 * 1024
+```
+
 ## The `[peers]` section
 
 The peers section is used to configure how the networking component of reth establishes and maintains connections to peers.

@@ -4,7 +4,7 @@ use crate::{
     config::{LocalTransactionConfig, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER},
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind},
     identifier::{SenderId, TransactionId},
-    metrics::TxPoolMetrics,
+    metrics::{AllTransactionsMetrics, TxPoolMetrics},
     pool::{
         best::BestTransactions,
         blob::BlobTransactions,
@@ -950,6 +950,8 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     price_bumps: PriceBumpConfig,
     /// How to handle [TransactionOrigin::Local](crate::TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
+    /// All Transactions metrics
+    metrics: AllTransactionsMetrics,
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
@@ -990,6 +992,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn tx_inc(&mut self, sender: SenderId) {
         let count = self.tx_counter.entry(sender).or_default();
         *count += 1;
+        self.metrics.all_transactions_by_all_senders.increment(1.0);
     }
 
     /// Decrements the transaction counter for the sender
@@ -998,9 +1001,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let count = entry.get_mut();
             if *count == 1 {
                 entry.remove();
+                self.metrics.all_transactions_by_all_senders.decrement(1.0);
                 return
             }
             *count -= 1;
+            self.metrics.all_transactions_by_all_senders.decrement(1.0);
         }
     }
 
@@ -1018,6 +1023,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
         if let Some(pending_blob_fee) = pending_blob_fee {
             self.pending_fees.blob_fee = pending_blob_fee;
         }
+    }
+
+    /// Updates the size metrics
+    pub(crate) fn update_size_metrics(&mut self) {
+        self.metrics.all_transactions_by_hash.set(self.by_hash.len() as f64);
+        self.metrics.all_transactions_by_id.set(self.txs.len() as f64);
     }
 
     /// Rechecks all transactions in the pool against the changes.
@@ -1268,6 +1279,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let internal = self.txs.remove(&tx.transaction_id)?;
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
+        self.update_size_metrics();
         Some((tx, internal.subpool))
     }
 
@@ -1285,7 +1297,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // decrement the counter for the sender.
         self.tx_decr(internal.transaction.sender_id());
 
-        self.by_hash.remove(internal.transaction.hash()).map(|tx| (tx, internal.subpool))
+        let result =
+            self.by_hash.remove(internal.transaction.hash()).map(|tx| (tx, internal.subpool));
+
+        self.update_size_metrics();
+
+        result
     }
 
     /// Checks if the given transaction's type conflicts with an existing transaction.
@@ -1661,6 +1678,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
             self.tx_inc(inserted_tx_id.sender);
         }
 
+        self.update_size_metrics();
+
         Ok(InsertOk { transaction, move_to: state.into(), state, replaced_tx, updates })
     }
 
@@ -1705,6 +1724,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             pending_fees: Default::default(),
             price_bumps: Default::default(),
             local_transactions_config: Default::default(),
+            metrics: Default::default(),
         }
     }
 }

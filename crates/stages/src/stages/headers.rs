@@ -1,6 +1,7 @@
 use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use futures_util::StreamExt;
 use reth_codecs::Compact;
+use reth_config::config::EtlConfig;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -74,6 +75,7 @@ where
         downloader: Downloader,
         mode: HeaderSyncMode,
         consensus: Arc<dyn Consensus>,
+        etl_config: EtlConfig,
     ) -> Self {
         Self {
             provider: database,
@@ -81,8 +83,8 @@ where
             mode,
             consensus,
             sync_gap: None,
-            hash_collector: Collector::new(100 * (1024 * 1024)),
-            header_collector: Collector::new(100 * (1024 * 1024)),
+            hash_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
+            header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
             is_etl_ready: false,
         }
     }
@@ -118,7 +120,7 @@ where
         for (index, header) in self.header_collector.iter()?.enumerate() {
             let (_, header_buf) = header?;
 
-            if index > 0 && index % interval == 0 {
+            if index > 0 && index % interval == 0 && total_headers > 100 {
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
             }
 
@@ -144,7 +146,7 @@ where
             writer.append_header(header, td, header_hash)?;
         }
 
-        info!(target: "sync::stages::headers", total = total_headers, "Writing header hash index");
+        info!(target: "sync::stages::headers", total = total_headers, "Writing headers hash index");
 
         let mut cursor_header_numbers = tx.cursor_write::<RawTable<tables::HeaderNumbers>>()?;
         let mut first_sync = false;
@@ -164,7 +166,7 @@ where
         for (index, hash_to_number) in self.hash_collector.iter()?.enumerate() {
             let (hash, number) = hash_to_number?;
 
-            if index > 0 && index % interval == 0 {
+            if index > 0 && index % interval == 0 && total_headers > 100 {
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
             }
 
@@ -419,6 +421,7 @@ mod tests {
                     (*self.downloader_factory)(),
                     HeaderSyncMode::Tip(self.channel.1.clone()),
                     self.consensus.clone(),
+                    EtlConfig::default(),
                 )
             }
         }

@@ -83,11 +83,11 @@ impl Case for BlockchainTestCase {
             .try_for_each(|case| {
                 // Create a new test database and initialize a provider for the test case.
                 let db = create_test_rw_db();
-                let static_files_dir = create_test_static_files_dir();
+                let (_static_files_dir, static_files_dir_path) = create_test_static_files_dir();
                 let provider = ProviderFactory::new(
                     db.as_ref(),
                     Arc::new(case.network.clone().into()),
-                    static_files_dir.clone(),
+                    static_files_dir_path,
                 )?
                 .provider_rw()
                 .unwrap();
@@ -105,6 +105,16 @@ impl Case for BlockchainTestCase {
                     )
                     .map_err(|err| Error::RethError(err.into()))?;
                 case.pre.write_to_db(provider.tx_ref())?;
+
+                // Initialize receipts static file with genesis
+                {
+                    let mut receipts_writer = provider
+                        .static_file_provider()
+                        .latest_writer(StaticFileSegment::Receipts)
+                        .unwrap();
+                    receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+                    receipts_writer.commit_without_sync_all().unwrap();
+                }
 
                 // Decode and insert blocks, creating a chain of blocks for the test case.
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
@@ -159,11 +169,6 @@ impl Case for BlockchainTestCase {
 
                 // Drop the provider without committing to the database.
                 drop(provider);
-                // TODO: replace with `tempdir` usage, so the temp directory is removed
-                // automatically when the variable goes out of scope
-                reth_primitives::fs::remove_dir_all(static_files_dir)
-                    .expect("Failed to remove static files directory");
-
                 Ok(())
             })?;
 

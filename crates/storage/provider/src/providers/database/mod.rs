@@ -613,6 +613,7 @@ mod tests {
     use assert_matches::assert_matches;
     use rand::Rng;
     use reth_db::{
+        mdbx::DatabaseArguments,
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
@@ -660,11 +661,12 @@ mod tests {
     #[test]
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let factory = ProviderFactory::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
-            Default::default(),
-            create_test_static_files_dir(),
+            DatabaseArguments::new(Default::default()),
+            static_dir_path,
         )
         .unwrap();
 

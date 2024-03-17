@@ -52,7 +52,10 @@ use reth_provider::{
     CanonStateSubscriptions, HeaderProvider, HeaderSyncMode, ProviderFactory,
     StageCheckpointReader,
 };
-use reth_revm::EvmProcessorFactory;
+use reth_revm::{
+    stack::{Hook, InspectorStackConfig},
+    EvmProcessorFactory,
+};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -68,7 +71,6 @@ use reth_transaction_pool::{
     blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
     EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
-use revm_inspectors::stack::Hook;
 use secp256k1::SecretKey;
 use std::{
     net::{SocketAddr, SocketAddrV4},
@@ -202,25 +204,9 @@ pub struct NodeConfig {
 impl NodeConfig {
     /// Creates a testing [NodeConfig], causing the database to be launched ephemerally.
     pub fn test() -> Self {
-        let mut test = Self {
-            config: None,
-            chain: MAINNET.clone(),
-            metrics: None,
-            instance: 1,
-            trusted_setup_file: None,
-            network: NetworkArgs::default(),
-            rpc: RpcServerArgs::default(),
-            txpool: TxPoolArgs::default(),
-            builder: PayloadBuilderArgs::default(),
-            debug: DebugArgs::default(),
-            db: DatabaseArgs::default(),
-            dev: DevArgs::default(),
-            pruning: PruningArgs::default(),
-        };
-
-        // set all ports to zero by default for test instances
-        test = test.with_unused_ports();
-        test
+        Self::default()
+            // set all ports to zero by default for test instances
+            .with_unused_ports()
     }
 
     /// Sets --dev mode for the node
@@ -417,7 +403,48 @@ impl NodeConfig {
         Ok(builder)
     }
 
-    /// Build the blockchain tree
+    /// Builds the blockchain tree for the node.
+    ///
+    /// This method configures the blockchain tree, which is a critical component of the node,
+    /// responsible for managing the blockchain state, including blocks, transactions, and receipts.
+    /// It integrates with the consensus mechanism and the EVM for executing transactions.
+    ///
+    /// # Parameters
+    /// - `provider_factory`: A factory for creating various blockchain-related providers, such as
+    ///   for accessing the database or static files.
+    /// - `consensus`: The consensus configuration, which defines how the node reaches agreement on
+    ///   the blockchain state with other nodes.
+    /// - `prune_config`: Configuration for pruning old blockchain data. This helps in managing the
+    ///   storage space efficiently. It's important to validate this configuration to ensure it does
+    ///   not lead to unintended data loss.
+    /// - `sync_metrics_tx`: A transmitter for sending synchronization metrics. This is used for
+    ///   monitoring the node's synchronization process with the blockchain network.
+    /// - `tree_config`: Configuration for the blockchain tree, including any parameters that affect
+    ///   its structure or performance.
+    /// - `evm_config`: The EVM (Ethereum Virtual Machine) configuration, which affects how smart
+    ///   contracts and transactions are executed. Proper validation of this configuration is
+    ///   crucial for the correct execution of transactions.
+    ///
+    /// # Returns
+    /// A `ShareableBlockchainTree` instance, which provides access to the blockchain state and
+    /// supports operations like block insertion, state reversion, and transaction execution.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let tree = config.build_blockchain_tree(
+    ///     provider_factory,
+    ///     consensus,
+    ///     prune_config,
+    ///     sync_metrics_tx,
+    ///     BlockchainTreeConfig::default(),
+    ///     evm_config,
+    /// )?;
+    /// ```
+    ///
+    /// # Note
+    /// Ensure that all configurations passed to this method are validated beforehand to prevent
+    /// runtime errors. Specifically, `prune_config` and `evm_config` should be checked to ensure
+    /// they meet the node's operational requirements.
     pub fn build_blockchain_tree<DB, EvmConfig>(
         &self,
         provider_factory: ProviderFactory<DB>,
@@ -803,7 +830,6 @@ impl NodeConfig {
         }
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        use revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone(), evm_config);
 
         let stack_config = InspectorStackConfig {
@@ -836,6 +862,7 @@ impl NodeConfig {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
+                    stage_config.etl.clone(),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
@@ -869,6 +896,7 @@ impl NodeConfig {
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
                     stage_config.transaction_lookup.chunk_size,
+                    stage_config.etl.clone(),
                     prune_modes.transaction_lookup,
                 ))
                 .set(IndexAccountHistoryStage::new(

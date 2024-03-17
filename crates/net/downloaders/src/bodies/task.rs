@@ -205,11 +205,12 @@ mod tests {
     #[allow(clippy::reversed_empty_ranges)]
     async fn set_download_range_error_returned() {
         reth_tracing::init_test_tracing();
+        let factory = create_test_provider_factory();
 
         let downloader = BodiesDownloaderBuilder::default().build(
             Arc::new(TestBodiesClient::default()),
             Arc::new(TestConsensus::default()),
-            create_test_provider_factory(),
+            factory,
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 

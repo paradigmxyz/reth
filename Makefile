@@ -183,20 +183,28 @@ ef-tests: $(EF_TESTS_DIR) ## Runs Ethereum Foundation tests.
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --driver docker-container --name cross-builder`
-.PHONY: docker-build-latest
-docker-build-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
-	$(call build_docker_image,$(GIT_TAG),latest)
+.PHONY: docker-build-push
+docker-build-push: ## Build and push a cross-arch Docker image tagged with the latest git tag.
+	$(call docker_build_push,$(GIT_TAG),$(GIT_TAG))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: docker-build-push-latest
+docker-build-push-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
+	$(call docker_build_push,$(GIT_TAG),latest)
 
 # Note: This requires a buildx builder with emulation support. For example:
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --name cross-builder`
-.PHONY: docker-build-nightly
-docker-build-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
-	$(call build_docker_image,$(GIT_TAG)-nightly,latest-nightly)
+.PHONY: docker-build-push-nightly
+docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
+	$(call docker_build_push,$(GIT_TAG)-nightly,latest-nightly)
 
 # Create a cross-arch Docker image with the given tags and push it
-define build_docker_image
+define docker_build_push
 	$(MAKE) build-x86_64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/amd64
 	cp $(BUILD_PATH)/x86_64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/amd64/reth
@@ -295,7 +303,8 @@ lint:
 	make lint-op-reth && \
 	make lint-other-targets
 
-rustdocs:
+.PHONY: rustdocs
+rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
 	RUSTDOCFLAGS="\
 	--cfg docsrs \
 	--show-type-layout \
@@ -332,9 +341,14 @@ test-other-targets:
 	--benches \
 	--all-features
 
+test-doc:
+	cargo test --doc --workspace --features "ethereum"
+	cargo test --doc --workspace --features "optimism"
+
 test:
 	make test-reth && \
 	make test-op-reth && \
+	make test-doc && \
 	make test-other-targets
 
 pr:

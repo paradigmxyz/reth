@@ -81,19 +81,17 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
 
-    /// Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions)
-    /// response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
-    /// request. Spec'd at 2 MiB.
+    /// Soft limit for the byte size of a `PooledTransactions` response on assembling a
+    /// `GetPooledTransactions` request. Spec'd at 2 MiB.
     ///
     /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
     #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, help = "Sets the soft limit for the byte size of pooled transactions response. Specified at 2 MiB by default. This is a spec'd value that should only be set for experimental purposes on a testnet.")]
     pub soft_limit_byte_size_pooled_transactions_response: usize,
 
-    /// Default soft limit for the byte size of a
-    /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a
-    /// [`GetPooledTransactions`](reth_eth_wire::PooledTransactions) request. This defaults to less
+    /// Default soft limit for the byte size of a `PooledTransactions` response on assembling a
+    /// `GetPooledTransactions` request. This defaults to less
     /// than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when
-    /// assembling a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response. Default
+    /// assembling a `PooledTransactions` response. Default
     /// is 128 KiB.
     #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
