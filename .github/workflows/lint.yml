@@ -32,7 +32,7 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
 
-  clippy:
+  clippy-workspace:
     name: clippy
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -42,7 +42,49 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
+      - run: cargo clippy --workspace --lib --examples --tests --benches --locked
+        env:
+          RUSTFLAGS: -D warnings
+
+  clippy-discv5:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo clippy -p reth-network --lib --examples --tests --benches --features discv5 --locked
+        env:
+          RUSTFLAGS: -D warnings
+
+  clippy-discv5-downgrade-v4:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo clippy -p reth-network --lib --examples --tests --benches --features discv5-downgrade-v4 --locked
+        env:
+          RUSTFLAGS: -D warnings
+
+  clippy-other-targets:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo clippy --lib --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings
 
@@ -124,7 +166,7 @@ jobs:
     name: lint success
     runs-on: ubuntu-latest
     if: always()
-    needs: [clippy-binaries, clippy, crate-checks, docs, fmt, grafana]
+    needs: [clippy-binaries, clippy-workspace, clippy-discv5, clippy-discv5-downgrade-v4, clippy-other-targets, crate-checks, docs, fmt, grafana]
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
