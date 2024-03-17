@@ -1454,7 +1454,7 @@ impl Display for DisplayFork {
                 write!(f, "{:32} @{}", name_with_eip, at)?;
             }
             ForkCondition::TTD { fork_block, total_difficulty } => {
-                writeln!(
+                write!(
                     f,
                     "{:32} @{} ({})",
                     name_with_eip,
@@ -1502,7 +1502,6 @@ impl Display for DisplayFork {
 // - GrayGlacier                      @15050000
 // Merge hard forks:
 // - Paris                            @58750000000000000000000 (network is known to be merged)
-//
 // Post-merge hard forks (timestamp based):
 // - Shanghai                         @1681338455
 /// ```
@@ -1655,7 +1654,6 @@ mod tests {
 - GrayGlacier                      @15050000
 Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
-
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
 - Cancun                           @1710338135
