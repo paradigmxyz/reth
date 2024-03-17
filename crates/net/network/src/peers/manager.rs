@@ -276,6 +276,11 @@ impl PeersManager {
             return
         }
 
+        if self.trusted_nodes_only && !self.trusted_peer_ids.contains(&peer_id) {
+            self.queued_actions.push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
+            return
+        }
+
         // start a new tick, so the peer is not immediately rewarded for the time since last tick
         self.tick();
 
@@ -286,13 +291,19 @@ impl PeersManager {
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let peer = entry.get_mut();
-                if peer.is_banned() || (self.trusted_nodes_only && !peer.is_trusted()) {
+                if peer.is_banned() {
                     self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
                     return
                 }
                 peer.state = PeerConnectionState::In;
 
                 let is_trusted = peer.is_trusted() || self.trusted_peer_ids.contains(&peer_id);
+
+                if self.trusted_nodes_only && !is_trusted {
+                    self.queued_actions
+                        .push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
+                    return
+                }
 
                 // if a peer is not trusted and we don't have capacity for more inbound connections,
                 // disconnecting the peer
@@ -307,21 +318,25 @@ impl PeersManager {
                 // peer is missing in the table, we add it but mark it as to be removed after
                 // disconnect, because we only know the outgoing port
                 let mut peer = Peer::with_state(addr, PeerConnectionState::In);
-                if self.trusted_nodes_only && !peer.is_trusted() {
-                    return
-                }
                 peer.remove_after_disconnect = true;
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
 
                 let is_trusted = self.trusted_peer_ids.contains(&peer_id);
 
-                // disconnect the peer if we don't have capacity for more inbound connections
-                if !is_trusted && !has_in_capacity {
-                    self.queued_actions.push_back(PeerAction::Disconnect {
-                        peer_id,
-                        reason: Some(DisconnectReason::TooManyPeers),
-                    });
+                if !is_trusted {
+                    if self.trusted_nodes_only {
+                        // disconnect the peer if trusted nodes only
+                        self.queued_actions
+                            .push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
+                    } else if !has_in_capacity {
+                        // disconnect the peer if we don't have capacity for more inbound
+                        // connections
+                        self.queued_actions.push_back(PeerAction::Disconnect {
+                            peer_id,
+                            reason: Some(DisconnectReason::TooManyPeers),
+                        });
+                    }
                 }
             }
         }
@@ -1191,6 +1206,11 @@ pub enum PeerAction {
     /// banned threshold or is on the [`BanList`]
     DisconnectBannedIncoming {
         /// The peer ID of the established connection.
+        peer_id: PeerId,
+    },
+    /// Disconnect an untrusted incoming connection when trust-node-only is enabled.
+    DisconnectUntrustedIncoming {
+        /// The peer ID.
         peer_id: PeerId,
     },
     /// Ban the peer in discovery.
