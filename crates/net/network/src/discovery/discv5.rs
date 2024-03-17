@@ -189,7 +189,9 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         let Some(discv5_config) = discv5_config else {
-            return NetworkError::custom_discovery("discv5 config required, contains listen socket")
+            return Err(NetworkError::custom_discovery(
+                "discv5 config required, contains listen socket",
+            ))
         };
 
         Discovery::start_discv5(sk, discv5_config, dns_discovery_config).await
