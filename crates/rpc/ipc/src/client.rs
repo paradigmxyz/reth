@@ -9,23 +9,23 @@ use jsonrpsee::{
 use std::{
     io,
     path::{Path, PathBuf},
-    sync::Arc,
 };
-use time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio_util::codec::FramedRead;
 
 #[cfg(unix)]
 use tokio::net::{
-    unix::{ReadHalf, WriteHalf},
+    unix::{OwnedReadHalf, OwnedWriteHalf},
     UnixStream,
 };
 
 #[cfg(windows)]
 use {
+    std::sync::Arc,
     tokio::{
         net::windows::named_pipe::{ClientOptions, NamedPipeClient},
         time,
+        time::Duration,
     },
     windows_sys::Win32::Foundation::ERROR_PIPE_BUSY,
 };
@@ -56,7 +56,7 @@ impl IpcClientBuilder {
 #[derive(Debug)]
 pub struct Sender {
     #[cfg(unix)]
-    inner: tokio::net::unix::OwnedWriteHalf,
+    inner: OwnedWriteHalf,
     #[cfg(windows)]
     inner: Arc<NamedPipeClient>,
 }
@@ -86,9 +86,9 @@ impl TransportSenderT for Sender {
 #[derive(Debug)]
 pub struct Receiver {
     #[cfg(unix)]
-    inner: FramedRead<tokio::net::unix::OwnedReadHalf, crate::stream_codec::StreamCodec>,
+    inner: FramedRead<OwnedReadHalf, StreamCodec>,
     #[cfg(windows)]
-    inner: FramedRead<Arc<NamedPipeClient>, crate::stream_codec::StreamCodec>,
+    inner: FramedRead<Arc<NamedPipeClient>, StreamCodec>,
 }
 
 #[async_trait::async_trait]

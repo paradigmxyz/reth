@@ -29,6 +29,8 @@ serde_json.workspace = true
 tracing.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
 windows-sys = {version = "0.52.0", features = ["Win32_Foundation"]}
 
 [dev-dependencies]
