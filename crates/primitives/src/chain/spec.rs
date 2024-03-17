@@ -1669,8 +1669,7 @@ Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-- Cancun                           @1710338135
-"
+- Cancun                           @1710338135"
         );
     }
 
@@ -1685,8 +1684,7 @@ Post-merge hard forks (timestamp based):
         assert_eq!(
             spec.display_hardforks().to_string(),
             "Pre-merge hard forks (block based):
-- Frontier                         @0
-"
+- Frontier                         @0"
         );
     }
 
