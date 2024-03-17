@@ -116,7 +116,8 @@ pub struct PeersManager {
     /// How long peers to which we could not connect for non-fatal reasons, e.g.
     /// [`DisconnectReason::TooManyPeers`], are put in time out.
     backoff_durations: PeerBackoffDurations,
-    /// If non-trusted peers should be connected to
+    /// If non-trusted peers should be connected to, or the connection from non-trusted
+    /// incoming peers should be accepted.
     trusted_nodes_only: bool,
     /// Timestamp of the last time [Self::tick] was called.
     last_tick: Instant,
@@ -283,7 +284,7 @@ impl PeersManager {
         self.connection_info.decr_pending_in();
         self.connection_info.inc_in();
 
-        // check weather if the peer is trustable or not
+        // check if the peer is trustable or not
         let mut is_trusted = self.trusted_peer_ids.contains(&peer_id);
         if self.trusted_nodes_only && !is_trusted {
             self.queued_actions.push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
@@ -299,7 +300,7 @@ impl PeersManager {
                 }
                 peer.state = PeerConnectionState::In;
 
-                is_trusted = peer.is_trusted() || is_trusted;
+                is_trusted = is_trusted || peer.is_trusted();
 
                 // if a peer is not trusted and we don't have capacity for more inbound connections,
                 // disconnecting the peer
