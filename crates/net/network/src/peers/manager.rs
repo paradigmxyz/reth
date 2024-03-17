@@ -2511,7 +2511,7 @@ mod tests {
         let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
         peers.on_incoming_pending_session(basic_sock.ip()).unwrap();
         peers.on_incoming_session_established(basic_peer, basic_sock);
-        assert_eq!(peers.peers.get(&basic_peer).is_none(), true);
+        assert!(!peers.peers.contains_key(&basic_peer));
     }
 
     #[tokio::test]
@@ -2531,7 +2531,7 @@ mod tests {
         let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
         peers.on_incoming_pending_session(basic_sock.ip()).unwrap();
         peers.on_incoming_session_established(basic_peer, basic_sock);
-        assert_eq!(peers.peers.get(&basic_peer).is_none(), false);
+        assert!(peers.peers.contains_key(&basic_peer));
     }
 
     #[tokio::test]
