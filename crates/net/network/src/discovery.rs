@@ -138,6 +138,11 @@ impl Discovery {
         }
     }
 
+    /// Returns a shared reference to the discv4.
+    pub fn discv4(&self) -> Option<Discv4> {
+        self.discv4.clone()
+    }
+
     /// Returns the id with which the local identifies itself in the network
     pub(crate) fn local_id(&self) -> PeerId {
         self.local_enr.id
