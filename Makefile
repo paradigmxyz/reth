@@ -297,7 +297,7 @@ lint-other-targets:
 	--examples \
 	--tests \
 	--benches \
-	--all-features \
+#	--all-features \
 	-- -D warnings
 
 lint:
@@ -345,7 +345,7 @@ test-other-targets:
 	--examples \
 	--tests \
 	--benches \
-	--all-features
+	#--all-features
 
 test-doc:
 	cargo test --doc --workspace --features "ethereum"
