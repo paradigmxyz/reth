@@ -214,7 +214,7 @@ where
             disc_config
         });
 
-        #[cfg(not(all(feature = "discv5-downgrade-v4", feature = "discv5")))]
+        #[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
         let discovery =
             Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
                 .await?;
