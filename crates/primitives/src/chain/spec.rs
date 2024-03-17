@@ -1519,7 +1519,7 @@ impl Display for DisplayHardforks {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         fn format(
             header: &str,
-            forks: &Vec<DisplayFork>,
+            forks: &[DisplayFork],
             next_is_empty: bool,
             f: &mut Formatter<'_>,
         ) -> std::fmt::Result {
