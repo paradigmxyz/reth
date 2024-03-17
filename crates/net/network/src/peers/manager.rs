@@ -2372,6 +2372,7 @@ mod tests {
         let ban_list = BanList::new(vec![given_peer_id], HashSet::new());
         let config = PeersConfig::test().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
+        assert!(peer_manager.on_incoming_pending_session(socket_addr.ip()).is_ok());
         peer_manager.on_incoming_session_established(given_peer_id, socket_addr);
 
         let Some(PeerAction::DisconnectBannedIncoming { peer_id }) =
