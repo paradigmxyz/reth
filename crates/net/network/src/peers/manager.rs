@@ -2513,8 +2513,14 @@ mod tests {
 
         let basic_peer = PeerId::random();
         let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
-        peers.on_incoming_pending_session(basic_sock.ip()).unwrap();
+        assert!(peers.on_incoming_pending_session(basic_sock.ip()).is_ok());
         peers.on_incoming_session_established(basic_peer, basic_sock);
+
+        let Some(PeerAction::DisconnectUntrustedIncoming { peer_id }) =
+            peers.queued_actions.pop_front()
+        else {
+            panic!()
+        };
         assert!(!peers.peers.contains_key(&basic_peer));
     }
 
@@ -2533,7 +2539,7 @@ mod tests {
 
         let basic_peer = PeerId::random();
         let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
-        peers.on_incoming_pending_session(basic_sock.ip()).unwrap();
+        assert!(peers.on_incoming_pending_session(basic_sock.ip()).is_ok());
         peers.on_incoming_session_established(basic_peer, basic_sock);
         assert!(peers.peers.contains_key(&basic_peer));
     }
