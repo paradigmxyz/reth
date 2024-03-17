@@ -20,8 +20,8 @@ impl TestSuite {
         Self { account, chain_spec }
     }
     /// Returns the raw transfer transaction
-    pub fn raw_transfer_tx(&self) -> Bytes {
-        self.account.transfer_tx().envelope_encoded()
+    pub fn transfer_tx(&self) -> TransactionSigned {
+        self.account.transfer_tx()
     }
     /// Creates a custom chain spec and allocates the initial balance to the given account
     fn chain_spec(account: &Account) -> Arc<ChainSpec> {
@@ -58,7 +58,7 @@ impl TestSuite {
     fn chain_config() -> ChainConfig {
         let chain_config = r#"
 {
-		"chainId": 32382,
+		"chainId": 1,
 		"homesteadBlock": 0,
 		"daoForkSupport": true,
 		"eip150Block": 0,
@@ -108,13 +108,13 @@ impl Account {
     /// Creates a new transfer transaction
     pub fn transfer_tx(&self) -> TransactionSigned {
         let tx = Transaction::Eip1559(TxEip1559 {
-            chain_id: 32382,
-            nonce: 1,
+            chain_id: 1,
+            nonce: 0,
             gas_limit: 21000,
             to: TransactionKind::Call(Address::random()),
             value: U256::from(1000),
             input: Bytes::default(),
-            max_fee_per_gas: 0x339863A8,
+            max_fee_per_gas: 875000000,
             max_priority_fee_per_gas: 0,
             access_list: AccessList::default(),
         });

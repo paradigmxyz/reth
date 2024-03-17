@@ -19,32 +19,28 @@ use std::time::{SystemTime, UNIX_EPOCH};
 async fn can_run_eth_node() -> eyre::Result<()> {
     let tasks = TaskManager::current();
     let test_suite = TestSuite::new();
-    let raw_tx = test_suite.raw_transfer_tx();
+    let transfer_tx = test_suite.transfer_tx();
 
-    // node setup
     let node_config = NodeConfig::test()
         .with_chain(test_suite.chain_spec)
         .with_rpc(RpcServerArgs::default().with_http());
+
     let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
         .node(EthereumNode::default())
         .launch()
         .await?;
 
-    // send raw transfer via rpc
     let eth_api = node.rpc_registry.eth_api();
-    eth_api.send_raw_transaction(raw_tx).await.unwrap();
+    eth_api.send_raw_transaction(transfer_tx.envelope_encoded()).await?;
 
-    // trigger new payload build
     let eth_attr = eth_payload_attributes();
-    let payload_id = node.payload_builder.new_payload(eth_attr).await.unwrap();
+    let payload_id = node.payload_builder.new_payload(eth_attr).await?;
 
-    // get payload and submit it through engine api
     let client = node.auth_server_handle().http_client();
-
     let payload = EngineApiClient::<EthEngineTypes>::get_payload_v2(&client, payload_id).await?;
+
     let exec_payload = convert_payload_field_v2_to_payload(payload.execution_payload);
-    println!("payload: {:?}", exec_payload);
     let payload_input = ExecutionPayloadInputV2 {
         execution_payload: exec_payload.as_v1().clone(),
         withdrawals: Some(vec![]),
@@ -52,7 +48,8 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 
     let submission =
         EngineApiClient::<EthEngineTypes>::new_payload_v2(&client, payload_input).await?;
-    println!("submission: {:?}", submission);
+
+    assert!(submission.is_valid());
 
     Ok(())
 }
