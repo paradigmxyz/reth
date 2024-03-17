@@ -157,11 +157,11 @@ pub use session::{
 pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
 
 /// Discovery using [`Discv4`].
-#[cfg(not(all(feature = "discv5_downgrade_v4", feature = "discv5")))]
+#[cfg(not(all(feature = "discv5-downgrade-v4", feature = "discv5")))]
 pub type Discovery = discovery::Discovery;
 
 /// Discovery version 5 with support for downgrading connections to version 4.
-#[cfg(feature = "discv5_downgrade_v4")]
+#[cfg(feature = "discv5-downgrade-v4")]
 pub type Discovery = discovery::DiscoveryV5V4;
 
 /// Discovery version 5.

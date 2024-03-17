@@ -23,7 +23,7 @@ pub mod discv5_downgrade_v4;
 
 #[cfg(feature = "discv5")]
 pub use discv5::DiscoveryV5;
-#[cfg(feature = "discv5_downgrade_v4")]
+#[cfg(feature = "discv5-downgrade-v4")]
 pub use discv5_downgrade_v4::DiscoveryV5V4;
 
 /// An abstraction over the configured discovery protocol.
@@ -228,7 +228,7 @@ impl<D, S, N> Discovery<D, S, N> {
 }
 
 #[cfg(test)]
-#[cfg(not(all(feature = "discv5_downgrade_v4", feature = "discv5")))]
+#[cfg(not(all(feature = "discv5-downgrade-v4", feature = "discv5")))]
 mod discv4_tests {
     use super::*;
     use rand::thread_rng;
@@ -237,7 +237,7 @@ mod discv4_tests {
     use std::net::{Ipv4Addr, SocketAddrV4};
 
     #[tokio::test(flavor = "multi_thread")]
-    #[cfg(not(all(feature = "discv5_downgrade_v4", feature = "discv5")))]
+    #[cfg(not(all(feature = "discv5-downgrade-v4", feature = "discv5")))]
     async fn test_discovery_setup() {
         let mut rng = thread_rng();
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);

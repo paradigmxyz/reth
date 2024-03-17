@@ -177,7 +177,7 @@ where
             client,
             secret_key,
             mut discovery_v4_config,
-            #[cfg(any(feature = "discv5", feature = "discv5_downgrade_v4"))]
+            #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
             discovery_v5_config,
             discovery_addr,
             listener_addr,
@@ -214,12 +214,12 @@ where
             disc_config
         });
 
-        #[cfg(not(all(feature = "discv5_downgrade_v4", feature = "discv5")))]
+        #[cfg(not(all(feature = "discv5-downgrade-v4", feature = "discv5")))]
         let discovery =
             Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
                 .await?;
 
-        #[cfg(any(feature = "discv5_downgrade_v4", feature = "discv5"))]
+        #[cfg(any(feature = "discv5-downgrade-v4", feature = "discv5"))]
         let discovery = Discovery::start(
             discovery_addr,
             secret_key,

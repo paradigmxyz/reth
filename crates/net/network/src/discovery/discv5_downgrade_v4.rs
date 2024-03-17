@@ -26,7 +26,7 @@ use super::{discv5::start_discv5, new_dns, Discovery, DiscoveryEvent};
 
 /// [`Discovery`] type that uses [`discv5::Discv5`], with support for downgraded [`Discv4`]
 /// connections.
-#[cfg(feature = "discv5_downgrade_v4")]
+#[cfg(feature = "discv5-downgrade-v4")]
 pub type DiscoveryV5V4 = Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>>;
 
 impl<S> Stream for Discovery<DiscV5WithV4Downgrade, S, Enr<SecretKey>>
@@ -205,7 +205,7 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
         })
     }
 
-    #[cfg(feature = "discv5_downgrade_v4")]
+    #[cfg(feature = "discv5-downgrade-v4")]
     pub async fn start(
         discv4_addr: SocketAddr,
         sk: SecretKey,
