@@ -1,10 +1,10 @@
 use crate::{
-    bundle_state::BundleStateWithReceipts, AccountReader, BlockHashReader, BundleStateDataProvider,
-    StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, BundleStateDataProvider, StateProvider, StateRootProvider,
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{trie::AccountProof, Account, Address, BlockNumber, Bytecode, B256};
 use reth_trie::updates::TrieUpdates;
+use revm::db::BundleState;
 
 /// A state provider that either resolves to data in a wrapped [`crate::BundleStateWithReceipts`],
 /// or an underlying state provider.
@@ -60,17 +60,17 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> AccountReader
 impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateRootProvider
     for BundleStateProvider<SP, BSDP>
 {
-    fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
-        let mut state = self.bundle_state_data_provider.state().clone();
+    fn state_root(&self, bundle_state: &BundleState) -> ProviderResult<B256> {
+        let mut state = self.bundle_state_data_provider.state().state().clone();
         state.extend(bundle_state.clone());
         self.state_provider.state_root(&state)
     }
 
     fn state_root_with_updates(
         &self,
-        bundle_state: &BundleStateWithReceipts,
+        bundle_state: &BundleState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let mut state = self.bundle_state_data_provider.state().clone();
+        let mut state = self.bundle_state_data_provider.state().state().clone();
         state.extend(bundle_state.clone());
         self.state_provider.state_root_with_updates(&state)
     }
