@@ -39,9 +39,9 @@ impl TestSuite {
         let genesis = Genesis {
             nonce: 0,
             timestamp: 0,
-            extra_data: fixed_bytes!("0000").into(),
+            extra_data: fixed_bytes!("00").into(),
             gas_limit: 30_000_000,
-            difficulty: U256::from(1),
+            difficulty: U256::from(0),
             mix_hash: B256::ZERO,
             coinbase: Address::ZERO,
             alloc,
@@ -115,7 +115,7 @@ impl Account {
             value: U256::from(1000),
             input: Bytes::default(),
             max_fee_per_gas: 0x339863A8,
-            max_priority_fee_per_gas: 0x339863A8,
+            max_priority_fee_per_gas: 0,
             access_list: AccessList::default(),
         });
         Account::sign_transaction(&self.secret_key, tx)

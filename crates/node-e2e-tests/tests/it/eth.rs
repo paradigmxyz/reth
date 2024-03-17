@@ -63,8 +63,8 @@ fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
         timestamp,
         prev_randao: B256::ZERO,
         suggested_fee_recipient: Address::ZERO,
-        withdrawals: None,
-        parent_beacon_block_root: Some(B256::ZERO),
+        withdrawals: Some(vec![]),
+        parent_beacon_block_root: None,
     };
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
