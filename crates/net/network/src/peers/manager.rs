@@ -1240,7 +1240,8 @@ pub struct PeersConfig {
     pub refill_slots_interval: Duration,
     /// Trusted nodes to connect to.
     pub trusted_nodes: HashSet<NodeRecord>,
-    /// Connect to trusted nodes only?
+    /// Connect to or accept from trusted nodes only?
+    #[cfg_attr(feature = "serde", serde(alias = "connect_trusted_nodes_only"))]
     pub trusted_nodes_only: bool,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
     ///
