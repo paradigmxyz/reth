@@ -2359,7 +2359,9 @@ mod tests {
         match a {
             Ok(_) => panic!(),
             Err(err) => match err {
-                super::InboundConnectionError::IpBanned {} => {}
+                super::InboundConnectionError::IpBanned {} => {
+                    assert_eq!(peer_manager.connection_info.num_pending_in, 0)
+                }
             },
         }
     }
@@ -2373,7 +2375,13 @@ mod tests {
         let config = PeersConfig::test().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
         assert!(peer_manager.on_incoming_pending_session(socket_addr.ip()).is_ok());
+        // non-trusted nodes should also increase pending_in
+        assert_eq!(peer_manager.connection_info.num_pending_in, 1);
         peer_manager.on_incoming_session_established(given_peer_id, socket_addr);
+        // after the connection is established, the peer should be removed, the num_pending_in
+        // should be decreased, and the num_inbound should not be increased
+        assert_eq!(peer_manager.connection_info.num_pending_in, 0);
+        assert_eq!(peer_manager.connection_info.num_inbound, 0);
 
         let Some(PeerAction::DisconnectBannedIncoming { peer_id }) =
             peer_manager.queued_actions.pop_front()
@@ -2514,13 +2522,20 @@ mod tests {
         let basic_peer = PeerId::random();
         let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
         assert!(peers.on_incoming_pending_session(basic_sock.ip()).is_ok());
+        // non-trusted nodes should also increase pending_in
+        assert_eq!(peers.connection_info.num_pending_in, 1);
         peers.on_incoming_session_established(basic_peer, basic_sock);
+        // after the connection is established, the peer should be removed, the num_pending_in
+        // should be decreased, and the num_inbound mut not be increased
+        assert_eq!(peers.connection_info.num_pending_in, 0);
+        assert_eq!(peers.connection_info.num_inbound, 0);
 
         let Some(PeerAction::DisconnectUntrustedIncoming { peer_id }) =
             peers.queued_actions.pop_front()
         else {
             panic!()
         };
+        assert_eq!(basic_peer, peer_id);
         assert!(!peers.peers.contains_key(&basic_peer));
     }
 
@@ -2540,7 +2555,14 @@ mod tests {
         let basic_peer = PeerId::random();
         let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
         assert!(peers.on_incoming_pending_session(basic_sock.ip()).is_ok());
+
+        // non-trusted nodes should also increase pending_in
+        assert_eq!(peers.connection_info.num_pending_in, 1);
         peers.on_incoming_session_established(basic_peer, basic_sock);
+        // after the connection is established, the peer should be removed, the num_pending_in
+        // should be decreased, and the num_inbound must be increased
+        assert_eq!(peers.connection_info.num_pending_in, 0);
+        assert_eq!(peers.connection_info.num_inbound, 1);
         assert!(peers.peers.contains_key(&basic_peer));
     }
 
