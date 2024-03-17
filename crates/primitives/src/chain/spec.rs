@@ -1524,11 +1524,11 @@ impl Display for DisplayHardforks {
             f: &mut Formatter<'_>,
         ) -> std::fmt::Result {
             writeln!(f, "{}:", header)?;
-            for (index, fork) in forks.iter().enumerate() {
-                if next_is_empty && index == forks.len() - 1 {
-                    write!(f, "- {}", fork)?;
-                } else {
-                    writeln!(f, "- {}", fork)?;
+            let mut iter = forks.iter().peekable();
+            while let Some(fork) = iter.next() {
+                write!(f, "- {}", fork)?;
+                if !next_is_empty || iter.peek().is_some() {
+                    writeln!(f)?;
                 }
             }
             Ok(())
