@@ -21,7 +21,9 @@ pub mod discv4;
 pub mod discv5;
 pub mod discv5_downgrade_v4;
 
+#[cfg(feature = "discv5")]
 pub use discv5::DiscoveryV5;
+#[cfg(feature = "discv5_downgrade_v4")]
 pub use discv5_downgrade_v4::DiscoveryV5V4;
 
 /// An abstraction over the configured discovery protocol.
