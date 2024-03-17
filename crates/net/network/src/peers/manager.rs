@@ -270,6 +270,8 @@ impl PeersManager {
     /// If the reputation of the peer is below the `BANNED_REPUTATION` threshold, a disconnect will
     /// be scheduled.
     pub(crate) fn on_incoming_session_established(&mut self, peer_id: PeerId, addr: SocketAddr) {
+        self.connection_info.decr_pending_in();
+
         // we only need to check the peer id here as the ip address will have been checked at
         // on_incoming_pending_session. We also check if the peer is in the backoff list here.
         if self.ban_list.is_banned_peer(&peer_id) {
@@ -277,19 +279,18 @@ impl PeersManager {
             return
         }
 
-        // start a new tick, so the peer is not immediately rewarded for the time since last tick
-        self.tick();
-
-        let has_in_capacity = self.connection_info.has_in_capacity();
-        self.connection_info.decr_pending_in();
-        self.connection_info.inc_in();
-
         // check if the peer is trustable or not
         let mut is_trusted = self.trusted_peer_ids.contains(&peer_id);
         if self.trusted_nodes_only && !is_trusted {
             self.queued_actions.push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
             return
         }
+
+        // start a new tick, so the peer is not immediately rewarded for the time since last tick
+        self.tick();
+
+        let has_in_capacity = self.connection_info.has_in_capacity();
+        self.connection_info.inc_in();
 
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
