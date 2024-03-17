@@ -21,7 +21,7 @@ use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "Networking")]
 pub struct NetworkArgs {
-    /// Disable the discovery service.
+    /// Arguments to setup discovery service.
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
