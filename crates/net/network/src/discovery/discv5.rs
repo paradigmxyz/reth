@@ -276,7 +276,7 @@ pub(super) async fn start_discv5(
     let discv5_updates =
         discv5.event_stream().await.map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
 
-    Ok((DiscV5(discv5), discv5_updates.into(), bc_enr))
+    Ok((DiscV5(discv5), discv5_updates, bc_enr))
 }
 
 #[cfg(test)]
