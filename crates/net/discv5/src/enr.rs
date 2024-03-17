@@ -9,9 +9,7 @@ const SECP256K1_SERIALIZED_UNCOMPRESSED_FLAG: u8 = 4;
 
 /// Extracts a [`CombinedPublicKey::Secp256k1`] from a [`discv5::Enr`] and converts it to a
 /// [`PeerId`] that can be used in [`Discv4`](reth_discv4::Discv4).
-pub fn uncompressed_id_from_enr_pk(
-    enr: &discv5::Enr,
-) -> Result<PeerId, discv5::enr::secp256k1::Error> {
+pub fn uncompressed_id_from_enr_pk(enr: &discv5::Enr) -> PeerId {
     let pk = enr.public_key();
     debug_assert!(
         matches!(pk, CombinedPublicKey::Secp256k1(_)),
@@ -23,15 +21,11 @@ pub fn uncompressed_id_from_enr_pk(
 
 /// Converts a [`CombinedPublicKey`] to a [`PeerId`] that can be used in
 /// [`Discv4`](reth_discv4::Discv4).
-pub fn pk_to_uncompressed_id(
-    pk: &CombinedPublicKey,
-) -> Result<PeerId, discv5::enr::secp256k1::Error> {
+pub fn pk_to_uncompressed_id(pk: &CombinedPublicKey) -> PeerId {
     let pk_bytes = pk.encode();
+    let pk = discv5::enr::secp256k1::PublicKey::from_slice(&pk_bytes).unwrap();
 
-    let pk = discv5::enr::secp256k1::PublicKey::from_slice(&pk_bytes)?;
-    let peer_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
-
-    Ok(peer_id)
+    PeerId::from_slice(&pk.serialize_uncompressed()[1..])
 }
 
 /// Converts a [`PeerId`] to a [`discv5::enr::NodeId`].
@@ -83,7 +77,7 @@ mod tests {
         let discv5_peer_id = NodeId::from(discv5_pk.clone());
 
         // convert to discv4 id
-        let discv4_peer_id = pk_to_uncompressed_id(&discv5_pk).unwrap();
+        let discv4_peer_id = pk_to_uncompressed_id(&discv5_pk);
         // convert back to discv5 id
         let discv5_peer_id_from_discv4_peer_id = uncompressed_to_compressed_id(discv4_peer_id);
 

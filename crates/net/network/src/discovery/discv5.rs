@@ -50,19 +50,15 @@ where
 
                 if let Some(ref disc) = self.disc {
                     if let Some(ref node_id) = replaced {
-                        if let Some(peer_id) = disc
-                            .with_discv5(|discv5| {
-                                discv5.with_kbuckets(|kbuckets| {
-                                    kbuckets
-                                        .read()
-                                        .iter_ref()
-                                        .find(|entry| entry.node.key.preimage() == node_id)
-                                        .map(|entry| uncompressed_id_from_enr_pk(entry.node.value))
-                                })
+                        if let Some(peer_id) = disc.with_discv5(|discv5| {
+                            discv5.with_kbuckets(|kbuckets| {
+                                kbuckets
+                                    .read()
+                                    .iter_ref()
+                                    .find(|entry| entry.node.key.preimage() == node_id)
+                                    .map(|entry| uncompressed_id_from_enr_pk(entry.node.value))
                             })
-                            .transpose()
-                            .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?
-                        {
+                        }) {
                             self.discovered_nodes.remove(&peer_id);
                         }
                     }
@@ -94,9 +90,7 @@ where
         // todo: get port v6 with respect to ip mode of this node
         let Some(tcp_port_ipv4) = enr.tcp4() else { return Ok(()) };
 
-        let id = uncompressed_id_from_enr_pk(&enr).map_err(|_| {
-            NetworkError::custom_discovery("failed to extract peer id from discv5 enr")
-        })?;
+        let id = uncompressed_id_from_enr_pk(&enr);
 
         let record = NodeRecord {
             address: udp_socket_ipv4.ip(),
@@ -194,7 +188,9 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
         discv5_config: Option<discv5::Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
-        let discv5_config = discv5_config.expect("discv5 config required, contains listen socket");
+        let Some(discv5_config) = discv5_config else {
+            return NetworkError::custom_discovery("discv5 config required, contains listen socket")
+        };
 
         Discovery::start_discv5(sk, discv5_config, dns_discovery_config).await
     }

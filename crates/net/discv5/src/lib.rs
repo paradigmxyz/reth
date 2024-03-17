@@ -47,7 +47,10 @@ impl DiscV5 {
     }
 
     fn enr_insert_fork_id(&self, key: &[u8], rlp: &Bytes) {
-        let key_str = std::str::from_utf8(key).expect("fork id should be utf-8");
+        let Ok(key_str) = std::str::from_utf8(key) else {
+            error!(target: "discv5", "fork id should be utf-8");
+            return
+        };
         if let Err(err) = self.enr_insert(key_str, rlp) {
             error!(target: "discv5",
                 %err,
