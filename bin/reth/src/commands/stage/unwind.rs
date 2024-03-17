@@ -81,7 +81,6 @@ impl Command {
         );
 
         pipeline.unwind(*range.start(), None)?;
-        pipeline.run().await.map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
         println!("Unwound {} blocks", range.count());
 
