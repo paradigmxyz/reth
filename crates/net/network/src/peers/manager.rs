@@ -276,18 +276,19 @@ impl PeersManager {
             return
         }
 
-        let mut is_trusted = self.trusted_peer_ids.contains(&peer_id);
-        if self.trusted_nodes_only && !is_trusted {
-            self.queued_actions.push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
-            return
-        }
-
         // start a new tick, so the peer is not immediately rewarded for the time since last tick
         self.tick();
 
         let has_in_capacity = self.connection_info.has_in_capacity();
         self.connection_info.decr_pending_in();
         self.connection_info.inc_in();
+
+        // check weather if the peer is trustable or not
+        let mut is_trusted = self.trusted_peer_ids.contains(&peer_id);
+        if self.trusted_nodes_only && !is_trusted {
+            self.queued_actions.push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
+            return
+        }
 
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
