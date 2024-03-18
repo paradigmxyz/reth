@@ -3396,7 +3396,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Number of dials that resulted in a peer being added to the peerset",
+      "description": "Number of successful outgoing dial attempts.",
       "fieldConfig": {
         "defaults": {
           "color": {

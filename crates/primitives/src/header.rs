@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 
 /// Errors that can occur during header sanity checks.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum HeaderError {
     /// Represents an error when the block difficulty is too large.
     LargeDifficulty,

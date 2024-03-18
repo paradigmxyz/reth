@@ -610,8 +610,8 @@ impl PeersManager {
                 self.connection_info.decr_pending_in();
             }
             Direction::Outgoing(_) => {
-                // need to decrement the outgoing counter
-                self.connection_info.decr_out();
+                // need to decrement the outgoing pending counter
+                self.connection_info.decr_pending_out();
             }
         }
     }
@@ -888,7 +888,7 @@ impl Default for PeersManager {
 }
 
 /// Tracks stats about connected nodes
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(default))]
 pub struct ConnectionInfo {
     /// Counter for currently occupied slots for active outbound connections.
@@ -1231,7 +1231,7 @@ pub enum PeerAction {
 }
 
 /// Config type for initiating a [`PeersManager`] instance.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct PeersConfig {
@@ -1386,6 +1386,11 @@ impl PeersConfig {
         self
     }
 
+    /// Returns the maximum number of peers, inbound and outbound.
+    pub const fn max_peers(&self) -> usize {
+        self.connection_info.max_outbound + self.connection_info.max_inbound
+    }
+
     /// Read from file nodes available at launch. Ignored if None.
     pub fn with_basic_nodes_from_file(
         self,
@@ -1416,7 +1421,7 @@ impl PeersConfig {
 /// The durations to use when a backoff should be applied to a peer.
 ///
 /// See also [`BackoffKind`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerBackoffDurations {
     /// Applies to connection problems where there is a chance that they will be resolved after the
@@ -2635,6 +2640,34 @@ mod tests {
         let peer = peers.peers.get(&peer_id).unwrap();
         assert_eq!(peer.state, PeerConnectionState::Idle);
         assert!(!peer.remove_after_disconnect);
+    }
+
+    #[tokio::test]
+    async fn test_incoming_outgoing_already_connected() {
+        let peer_id = PeerId::random();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        let mut peers = PeersManager::default();
+
+        peers.on_incoming_pending_session(addr.ip()).unwrap();
+        peers.add_peer(peer_id, addr, None);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(_) => {}
+            _ => unreachable!(),
+        }
+
+        match event!(peers) {
+            PeerAction::Connect { .. } => {}
+            _ => unreachable!(),
+        }
+
+        peers.on_incoming_session_established(peer_id, addr);
+        peers.on_already_connected(Direction::Outgoing(peer_id));
+        assert_eq!(peers.peers.get(&peer_id).unwrap().state, PeerConnectionState::In);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+        assert_eq!(peers.connection_info.num_pending_out, 0);
+        assert_eq!(peers.connection_info.num_pending_in, 0);
+        assert_eq!(peers.connection_info.num_outbound, 0);
     }
 
     #[tokio::test]

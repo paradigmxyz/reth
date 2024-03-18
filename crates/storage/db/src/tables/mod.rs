@@ -46,7 +46,7 @@ use reth_primitives::{
 use std::fmt;
 
 /// Enum for the types of tables present in libmdbx.
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum TableType {
     /// key value table
     Table,

@@ -4,6 +4,7 @@ use crate::{
     transactions::TransactionsHandle, FetchClient,
 };
 use parking_lot::Mutex;
+use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_net_common::bandwidth_meter::BandwidthMeter;
@@ -50,6 +51,7 @@ impl NetworkHandle {
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
         #[cfg(feature = "optimism")] sequencer_endpoint: Option<String>,
+        discv4: Option<Discv4>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -66,6 +68,7 @@ impl NetworkHandle {
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
+            discv4,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -219,19 +222,23 @@ impl PeersInfo for NetworkHandle {
     }
 
     fn local_node_record(&self) -> NodeRecord {
-        let id = *self.peer_id();
-        let mut socket_addr = *self.inner.listener_address.lock();
+        if let Some(discv4) = &self.inner.discv4 {
+            discv4.node_record()
+        } else {
+            let id = *self.peer_id();
+            let mut socket_addr = *self.inner.listener_address.lock();
 
-        if socket_addr.ip().is_unspecified() {
-            // zero address is invalid
-            if socket_addr.ip().is_ipv4() {
-                socket_addr.set_ip(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
-            } else {
-                socket_addr.set_ip(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
+            if socket_addr.ip().is_unspecified() {
+                // zero address is invalid
+                if socket_addr.ip().is_ipv4() {
+                    socket_addr.set_ip(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+                } else {
+                    socket_addr.set_ip(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
+                }
             }
-        }
 
-        NodeRecord::new(socket_addr, id)
+            NodeRecord::new(socket_addr, id)
+        }
     }
 }
 
@@ -387,6 +394,8 @@ struct NetworkInner {
     /// The sequencer HTTP Endpoint
     #[cfg(feature = "optimism")]
     sequencer_endpoint: Option<String>,
+    /// The instance of the discv4 service
+    discv4: Option<Discv4>,
 }
 
 /// Provides event subscription for the network.

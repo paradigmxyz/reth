@@ -102,7 +102,7 @@ pub trait XdgPath {
 ///
 /// assert_ne!(default.as_ref(), custom.as_ref());
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PlatformPath<D>(PathBuf, std::marker::PhantomData<D>);
 
 impl<D> Display for PlatformPath<D> {
@@ -174,7 +174,7 @@ impl<D> PlatformPath<D> {
 /// An Optional wrapper type around [PlatformPath].
 ///
 /// This is useful for when a path is optional, such as the `--data-dir` flag.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MaybePlatformPath<D>(Option<PlatformPath<D>>);
 
 // === impl MaybePlatformPath ===
@@ -259,7 +259,7 @@ impl<D> From<PathBuf> for MaybePlatformPath<D> {
 ///  * sepolia: `<DIR>/sepolia`
 /// Otherwise, the path will be dependent on the chain ID:
 ///  * `<DIR>/<CHAIN_ID>`
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChainPath<D>(PlatformPath<D>, Chain);
 
 impl<D> ChainPath<D> {
