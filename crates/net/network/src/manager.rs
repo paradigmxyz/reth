@@ -218,6 +218,7 @@ where
                 .await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
+        let discv4 = discovery.discv4();
 
         let num_active_peers = Arc::new(AtomicUsize::new(0));
         let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
@@ -253,6 +254,7 @@ where
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
+            discv4,
         );
 
         Ok(Self {

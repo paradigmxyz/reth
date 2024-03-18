@@ -104,7 +104,6 @@ test-utils = [
 geth-tests = []
 optimism = [
     "reth-primitives/optimism",
-    "reth-transaction-pool/optimism",
     "reth-provider/optimism",
     "reth-network-api/optimism",
     "reth-rpc-types/optimism",
