@@ -10,14 +10,14 @@ use reth_discv5::{
 };
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
-use reth_primitives::{NodeRecord, PeerId};
+use reth_primitives::NodeRecord;
 use smallvec::{smallvec, SmallVec};
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tracing::{error, info};
 
 use std::{
-    net::{Ipv4Addr, SocketAddr},
+    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -162,16 +162,7 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
 
                 (Some(disc), Some(disc_updates.into()), bc_local_enr)
             }
-            None => (
-                None,
-                None,
-                NodeRecord {
-                    address: Ipv4Addr::LOCALHOST.into(),
-                    id: PeerId::ZERO,
-                    udp_port: 0,
-                    tcp_port: 0,
-                },
-            ),
+            None => (None, None, NodeRecord::from_secret_key("0.0.0.0:0".parse().unwrap(), &sk)),
         };
 
         // setup DNS discovery.
