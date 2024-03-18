@@ -10,6 +10,7 @@ use reth_node_ethereum::EthereumNode;
 use reth_primitives::{b256, hex, ChainSpec, Genesis};
 use std::sync::Arc;
 
+#[cfg(not(feature = "optimism"))]
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
     let tasks = TaskManager::current();
