@@ -7,7 +7,7 @@ use reth_discv4::{Discv4, Discv4Config, PublicKey, SecretKey};
 use reth_discv5::{
     discv5_downgrade_v4::DiscoveryUpdateV5, DiscV5WithV4Downgrade, MergedUpdateStream,
 };
-use reth_dns_discovery::DnsDiscoveryConfig;
+use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::NodeFromExternalSource;
 use reth_primitives::{NodeRecord, PeerId};
 use tokio::sync::watch;
@@ -22,7 +22,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use super::{discv5::start_discv5, new_dns, Discovery, DiscoveryEvent};
+use super::{discv5::start_discv5, Discovery, DiscoveryEvent};
 
 /// [`Discovery`] type that uses [`discv5::Discv5`], with support for downgraded [`Discv4`]
 /// connections.
@@ -186,7 +186,7 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
         // setup DNS discovery.
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
             if let Some(dns_config) = dns_discovery_config {
-                new_dns::<Enr<SecretKey>>(dns_config)?
+                new_with_dns_resolver::<Enr<SecretKey>>(dns_config)?
             } else {
                 (None, None, None)
             };

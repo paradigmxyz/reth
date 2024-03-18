@@ -13,7 +13,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
+pub use crate::resolver::{DnsResolver, MapResolver, ResolveError, Resolver};
 use crate::{
     query::{QueryOutcome, QueryPool, ResolveEntryResult, ResolveRootResult},
     sync::{ResolveKind, SyncAction},
@@ -55,6 +55,34 @@ mod query;
 pub mod resolver;
 mod sync;
 pub mod tree;
+
+/// Starts DNS discovery using resolver type [`DnsResolver`]. On success, returns a
+/// [`DnsDiscoveryHandle`] to interact with [`DnsDiscoveryService`], a stream for discovered nodes
+/// [`ReceiverStream<NodeRecordWithForkId`], and the join handle for [`DnsDiscoveryService`].
+#[allow(clippy::type_complexity)]
+pub fn new_with_dns_resolver<N>(
+    dns_config: DnsDiscoveryConfig,
+) -> Result<
+    (
+        Option<DnsDiscoveryHandle<N>>,
+        Option<ReceiverStream<NodeRecordWithForkId<N>>>,
+        Option<JoinHandle<()>>,
+    ),
+    ResolveError,
+>
+where
+    N: Clone + Send + 'static,
+    DnsDiscoveryService<DnsResolver, N>: Update,
+    DnsDiscoveryService<DnsResolver, N>: Stream,
+    <DnsDiscoveryService<DnsResolver, N> as Stream>::Item: fmt::Debug,
+{
+    let (mut service, dns_disc) =
+        DnsDiscoveryService::new_pair(Arc::new(DnsResolver::from_system_conf()?), dns_config);
+    let dns_discovery_updates = service.node_record_stream();
+    let dns_disc_service = service.spawn();
+
+    Ok((Some(dns_disc), Some(dns_discovery_updates), Some(dns_disc_service)))
+}
 
 /// [DnsDiscoveryService] front-end.
 #[derive(Clone, Debug)]

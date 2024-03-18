@@ -1,20 +1,17 @@
 //! Discovery support for the network.
 
-use crate::{error::NetworkError, manager::DiscoveredEvent};
+use crate::manager::DiscoveredEvent;
 use reth_discv4::{DiscoveryUpdate, Discv4, EnrForkIdEntry};
-use reth_dns_discovery::{
-    DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsResolver, Update,
-};
+use reth_dns_discovery::DnsDiscoveryHandle;
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{ForkId, NodeRecord, NodeRecordWithForkId, PeerId};
 use tokio::{sync::mpsc, task::JoinHandle};
-use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tokio_stream::wrappers::ReceiverStream;
 
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     fmt,
     net::{IpAddr, SocketAddr},
-    sync::Arc,
 };
 
 pub mod discv4;
@@ -162,31 +159,6 @@ where
 
         debug_struct.finish()
     }
-}
-
-#[allow(clippy::type_complexity)]
-pub(crate) fn new_dns<N>(
-    dns_config: DnsDiscoveryConfig,
-) -> Result<
-    (
-        Option<DnsDiscoveryHandle<N>>,
-        Option<ReceiverStream<NodeRecordWithForkId<N>>>,
-        Option<JoinHandle<()>>,
-    ),
-    NetworkError,
->
-where
-    N: Clone + Send + 'static,
-    DnsDiscoveryService<DnsResolver, N>: Update,
-    DnsDiscoveryService<DnsResolver, N>: Stream,
-    <DnsDiscoveryService<DnsResolver, N> as Stream>::Item: fmt::Debug,
-{
-    let (mut service, dns_disc) =
-        DnsDiscoveryService::new_pair(Arc::new(DnsResolver::from_system_conf()?), dns_config);
-    let dns_discovery_updates = service.node_record_stream();
-    let dns_disc_service = service.spawn();
-
-    Ok((Some(dns_disc), Some(dns_discovery_updates), Some(dns_disc_service)))
 }
 
 /// Events produced by the [`crate::Discovery`] manager.

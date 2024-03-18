@@ -3,7 +3,7 @@
 use crate::error::{NetworkError, ServiceKind};
 use futures::StreamExt;
 use reth_discv4::{Discv4, Discv4Config, SecretKey};
-use reth_dns_discovery::DnsDiscoveryConfig;
+use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::NodeFromExternalSource;
 use reth_primitives::NodeRecord;
 
@@ -15,7 +15,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use super::{new_dns, Discovery, DiscoveryEvent};
+use super::{Discovery, DiscoveryEvent};
 
 impl Discovery {
     /// Spawns the discovery service.
@@ -46,7 +46,7 @@ impl Discovery {
         // setup DNS discovery
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
             if let Some(dns_config) = dns_discovery_config {
-                new_dns::<NodeRecord>(dns_config)?
+                new_with_dns_resolver::<NodeRecord>(dns_config)?
             } else {
                 (None, None, None)
             };

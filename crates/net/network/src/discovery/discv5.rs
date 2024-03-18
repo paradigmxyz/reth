@@ -8,7 +8,7 @@ use reth_discv5::{
     enr::{uncompressed_id_from_enr_pk, EnrCombinedKeyWrapper},
     DiscV5, HandleDiscv5,
 };
-use reth_dns_discovery::DnsDiscoveryConfig;
+use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::NodeRecord;
 use smallvec::{smallvec, SmallVec};
@@ -22,7 +22,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use super::{new_dns, Discovery, DiscoveryEvent};
+use super::{Discovery, DiscoveryEvent};
 
 /// [`Discovery`] type that uses [`discv5::Discv5`].
 #[cfg(feature = "discv5")]
@@ -168,7 +168,7 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
         // setup DNS discovery.
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
             if let Some(dns_config) = dns_discovery_config {
-                new_dns::<Enr<SecretKey>>(dns_config)?
+                new_with_dns_resolver::<Enr<SecretKey>>(dns_config)?
             } else {
                 (None, None, None)
             };
