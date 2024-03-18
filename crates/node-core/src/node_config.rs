@@ -792,9 +792,9 @@ impl NodeConfig {
                 self.network.port + self.instance - 1,
             )))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                self.network.addr,
+                self.network.discovery.addr,
                 // set discovery port based on instance number
-                self.network.port + self.instance - 1,
+                self.network.discovery.port + self.instance - 1,
             )));
 
         cfg_builder.build(client)
