@@ -610,8 +610,8 @@ impl PeersManager {
                 self.connection_info.decr_pending_in();
             }
             Direction::Outgoing(_) => {
-                // need to decrement the outgoing counter
-                self.connection_info.decr_out();
+                // need to decrement the outgoing pending counter
+                self.connection_info.decr_pending_out();
             }
         }
     }
@@ -2635,6 +2635,34 @@ mod tests {
         let peer = peers.peers.get(&peer_id).unwrap();
         assert_eq!(peer.state, PeerConnectionState::Idle);
         assert!(!peer.remove_after_disconnect);
+    }
+
+    #[tokio::test]
+    async fn test_incoming_outgoing_already_connected() {
+        let peer_id = PeerId::random();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        let mut peers = PeersManager::default();
+
+        peers.on_incoming_pending_session(addr.ip()).unwrap();
+        peers.add_peer(peer_id, addr, None);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(_) => {}
+            _ => unreachable!(),
+        }
+
+        match event!(peers) {
+            PeerAction::Connect { .. } => {}
+            _ => unreachable!(),
+        }
+
+        peers.on_incoming_session_established(peer_id, addr);
+        peers.on_already_connected(Direction::Outgoing(peer_id));
+        assert_eq!(peers.peers.get(&peer_id).unwrap().state, PeerConnectionState::In);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+        assert_eq!(peers.connection_info.num_pending_out, 0);
+        assert_eq!(peers.connection_info.num_pending_in, 0);
+        assert_eq!(peers.connection_info.num_outbound, 0);
     }
 
     #[tokio::test]
