@@ -83,21 +83,15 @@ where
         &mut self,
         enr: discv5::Enr,
     ) -> Result<(), NetworkError> {
-        // todo: get correct ip mode for this node
-        let Some(udp_socket_ipv4) = IpMode::DualStack.get_contactable_addr(&enr) else {
-            return Ok(())
-        };
-        // todo: get port v6 with respect to ip mode of this node
-        let Some(tcp_port_ipv4) = enr.tcp4() else { return Ok(()) };
+        // todo: configure `IpMode` as field on `Discovery`
+        let Some(udp_socket) = IpMode::DualStack.get_contactable_addr(&enr) else { return Ok(()) };
+        // todo: get tcp port v6 with respect to ip mode of local node
+        let tcp_port = enr.tcp4().unwrap_or(enr.tcp6().unwrap_or(0));
 
         let id = uncompressed_id_from_enr_pk(&enr);
 
-        let record = NodeRecord {
-            address: udp_socket_ipv4.ip(),
-            tcp_port: tcp_port_ipv4,
-            udp_port: udp_socket_ipv4.port(),
-            id,
-        };
+        let record =
+            NodeRecord { address: udp_socket.ip(), tcp_port, udp_port: udp_socket.port(), id };
 
         self.on_node_record_update(record, None);
 
