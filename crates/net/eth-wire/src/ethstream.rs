@@ -247,7 +247,7 @@ where
                 let msg = if bytes.len() > 50 {
                     format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
                 } else {
-                    format!("{:02x?}", bytes)
+                    format!("{bytes:02x?}")
                 };
                 debug!(
                     version=?this.version,

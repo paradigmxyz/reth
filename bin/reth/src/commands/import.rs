@@ -221,7 +221,7 @@ impl ImportCommand {
     /// Loads the reth config
     fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
         confy::load_path::<Config>(config_path.clone())
-            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
+            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))
     }
 }
 

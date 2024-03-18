@@ -154,7 +154,7 @@ impl<DB, State> NodeBuilder<DB, State> {
         let config_path = self.config.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let mut config = confy::load_path::<reth_config::Config>(&config_path)
-            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))?;
+            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
