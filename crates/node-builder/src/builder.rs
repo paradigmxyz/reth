@@ -461,7 +461,7 @@ where
 
         let genesis_hash = init_genesis(provider_factory.clone())?;
 
-        info!(target: "reth::cli", "{}",config.chain.display_hardforks());
+        info!(target: "reth::cli", "\n{}", config.chain.display_hardforks());
 
         let consensus = config.consensus();
 
