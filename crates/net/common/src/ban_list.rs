@@ -32,18 +32,10 @@ impl BanList {
         banned_ids: impl IntoIterator<Item = PeerId>,
         banned_ips: impl IntoIterator<Item = IpAddr>,
     ) -> Self {
-        Self::new_with_timeout(
-            banned_ids.into_iter().map(|id| (id, None)).collect(),
-            banned_ips.into_iter().map(|ip| (ip, None)).collect(),
-        )
-    }
-
-    /// Creates a new ban list that bans the given peer ids and ips with an optional timeout.
-    pub fn new_with_timeout(
-        banned_ids: HashMap<PeerId, Option<Instant>>,
-        banned_ips: HashMap<IpAddr, Option<Instant>>,
-    ) -> Self {
-        Self { banned_ips, banned_ids }
+        Self {
+            banned_ids: banned_ids.into_iter().map(|id| (id, None)).collect(),
+            banned_ips: banned_ips.into_iter().map(|ip| (ip, None)).collect(),
+        }
     }
 
     /// Removes all peer ids that are no longer banned.
