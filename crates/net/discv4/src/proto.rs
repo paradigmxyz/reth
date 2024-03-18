@@ -665,9 +665,10 @@ mod tests {
         let msg = rng_message(&mut rng);
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
         let (buf, _) = msg.encode(&secret_key);
-        let mut buf = BytesMut::from(buf.as_ref());
-        buf.put_u8(0);
-        match Message::decode(buf.as_ref()).unwrap_err() {
+
+        let mut buf_vec = buf.to_vec();
+        buf_vec.push(0);
+        match Message::decode(buf_vec.as_slice()).unwrap_err() {
             DecodePacketError::HashMismatch => {}
             err => {
                 unreachable!("unexpected err {}", err)

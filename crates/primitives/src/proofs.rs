@@ -8,7 +8,7 @@ use crate::{
     B256, U256,
 };
 use alloy_rlp::Encodable;
-use bytes::{BufMut, BytesMut};
+use bytes::BufMut;
 use itertools::Itertools;
 
 /// Adjust the index of an item for rlp encoding.
@@ -32,8 +32,8 @@ pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> B256
 where
     F: FnMut(&T, &mut dyn BufMut),
 {
-    let mut index_buffer = BytesMut::new();
-    let mut value_buffer = BytesMut::new();
+    let mut index_buffer = Vec::new();
+    let mut value_buffer = Vec::new();
 
     let mut hb = HashBuilder::default();
     let items_len = items.len();

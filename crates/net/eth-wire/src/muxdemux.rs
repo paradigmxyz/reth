@@ -511,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_unmask_msg_id() {
-        let mut msg = BytesMut::with_capacity(1);
+        let mut msg = Vec::with_capacity(1);
         msg.put_u8(0x07); // eth msg id
 
         let mxdmx_stream =
@@ -519,19 +519,19 @@ mod tests {
                 .unwrap();
         _ = mxdmx_stream.unmask_msg_id(&mut msg[0]).unwrap();
 
-        assert_eq!(msg.as_ref(), &[0x07]);
+        assert_eq!(msg.as_slice(), &[0x07]);
     }
 
     #[test]
     fn test_mask_msg_id() {
-        let mut msg = BytesMut::with_capacity(2);
+        let mut msg = Vec::with_capacity(2);
         msg.put_u8(0x10); // eth msg id
         msg.put_u8(0x20); // some msg data
 
         let mxdmx_stream =
             MuxDemuxStream::try_new((), Capability::eth(EthVersion::Eth66), shared_caps_eth68())
                 .unwrap();
-        let egress_bytes = mxdmx_stream.mask_msg_id(msg.freeze());
+        let egress_bytes = mxdmx_stream.mask_msg_id(msg.into());
 
         assert_eq!(egress_bytes.as_ref(), &[0x10, 0x20]);
     }
