@@ -17,6 +17,7 @@ use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use reth_primitives::{Address, BlockNumberOrTag, B256};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[cfg(not(feature = "optimism"))]
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {
     let tasks = TaskManager::current();
