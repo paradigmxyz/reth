@@ -344,8 +344,7 @@ impl TxTypesCounter {
             TxType::Eip4844 => {
                 self.eip4844 += 1;
             }
-            #[cfg(feature = "optimism")]
-            TxType::Deposit => {}
+            _ => {}
         }
     }
 }
