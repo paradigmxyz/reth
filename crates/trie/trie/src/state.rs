@@ -4,6 +4,7 @@ use crate::{
     updates::TrieUpdates,
     StateRoot,
 };
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_db::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
@@ -39,17 +40,27 @@ impl HashedPostState {
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
         let mut this = Self::default();
-        for (address, account) in state {
-            let hashed_address = keccak256(address);
-            this.accounts.insert(hashed_address, account.info.clone().map(into_reth_acc));
 
-            let hashed_storage = HashedStorage::from_iter(
-                account.status.was_destroyed(),
-                account.storage.iter().map(|(key, value)| {
-                    (keccak256(B256::new(key.to_be_bytes())), value.present_value)
-                }),
-            );
-            this.storages.insert(hashed_address, hashed_storage);
+        let changes = state
+            .into_iter()
+            .collect::<Vec<(&'a Address, &'a BundleAccount)>>()
+            .into_par_iter()
+            .map(|(address, account)| {
+                let hashed_address = keccak256(address);
+                let hashed_account = account.info.clone().map(into_reth_acc);
+                let hashed_storage = HashedStorage::from_iter(
+                    account.status.was_destroyed(),
+                    account.storage.iter().map(|(key, value)| {
+                        (keccak256(B256::new(key.to_be_bytes())), value.present_value)
+                    }),
+                );
+                (hashed_address, (hashed_account, hashed_storage))
+            })
+            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
+
+        for (address, (account, storage)) in changes {
+            this.accounts.insert(address, account);
+            this.storages.insert(address, storage);
         }
         this
     }
