@@ -1386,6 +1386,11 @@ impl PeersConfig {
         self
     }
 
+    /// Returns the maximum number of peers, inbound and outbound.
+    pub const fn max_peers(&self) -> usize {
+        self.connection_info.max_outbound + self.connection_info.max_inbound
+    }
+
     /// Read from file nodes available at launch. Ignored if None.
     pub fn with_basic_nodes_from_file(
         self,
