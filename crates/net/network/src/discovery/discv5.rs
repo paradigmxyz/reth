@@ -33,8 +33,6 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
     ///
     /// This will spawn [`discv5::Discv5`] and establish a listener channel to receive all /
     /// discovered nodes.
-    ///
-    /// Note: if dns discovery is configured, any nodes found by this service will be
     pub async fn start_discv5(
         sk: SecretKey,
         discv5_config: Option<discv5::Config>,

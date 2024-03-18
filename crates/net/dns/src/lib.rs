@@ -58,7 +58,7 @@ pub mod tree;
 
 /// Starts DNS discovery using resolver type [`DnsResolver`]. On success, returns a
 /// [`DnsDiscoveryHandle`] to interact with [`DnsDiscoveryService`], a stream for discovered nodes
-/// [`ReceiverStream<NodeRecordWithForkId`], and the join handle for [`DnsDiscoveryService`].
+/// [`ReceiverStream<NodeRecordWithForkId>`], and the join handle for [`DnsDiscoveryService`].
 #[allow(clippy::type_complexity)]
 pub fn new_with_dns_resolver<N>(
     dns_config: DnsDiscoveryConfig,

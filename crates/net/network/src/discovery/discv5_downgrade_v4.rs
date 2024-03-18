@@ -34,8 +34,6 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
     ///
     /// This will spawn [`discv5::Discv5`] and [`Discv4`] each onto their own new task and
     /// establish a merged listener channel to receive all discovered nodes.
-    ///
-    /// Note: if dns discovery is configured, any nodes found by this service will be
     pub async fn start_discv5_with_v4_downgrade(
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
