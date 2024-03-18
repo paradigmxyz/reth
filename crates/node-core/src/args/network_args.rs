@@ -11,7 +11,7 @@ use reth_network::{
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
-    HelloMessageWithProtocols, NetworkConfigBuilder,
+    HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
@@ -114,7 +114,7 @@ impl NetworkArgs {
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
-        let peer_config = config
+        let peers_config = config
             .peers
             .clone()
             .with_max_inbound_opt(self.max_inbound_peers)
@@ -131,7 +131,10 @@ impl NetworkArgs {
         // Configure basic network stack
         let mut network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
-            .peer_config(peer_config)
+            .sessions_config(
+                SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
+            )
+            .peer_config(peers_config)
             .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
             .chain_spec(chain_spec)
             .transactions_manager_config(transactions_manager_config);
