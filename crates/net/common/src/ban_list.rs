@@ -23,33 +23,33 @@ pub struct BanList {
     /// A set of IPs whose packets get dropped instantly.
     banned_ips: HashMap<IpAddr, Option<Instant>>,
     /// A set of [`PeerId`] whose packets get dropped instantly.
-    banned_peers: HashMap<PeerId, Option<Instant>>,
+    banned_ids: HashMap<PeerId, Option<Instant>>,
 }
 
 impl BanList {
     /// Creates a new ban list that bans the given peers and ips indefinitely.
     pub fn new(
-        banned_peers: impl IntoIterator<Item = PeerId>,
+        banned_ids: impl IntoIterator<Item = PeerId>,
         banned_ips: impl IntoIterator<Item = IpAddr>,
     ) -> Self {
         Self::new_with_timeout(
-            banned_peers.into_iter().map(|peer| (peer, None)).collect(),
+            banned_ids.into_iter().map(|id| (id, None)).collect(),
             banned_ips.into_iter().map(|ip| (ip, None)).collect(),
         )
     }
 
-    /// Creates a new ban list that bans the given peers and ips with an optional timeout.
+    /// Creates a new ban list that bans the given peer ids and ips with an optional timeout.
     pub fn new_with_timeout(
-        banned_peers: HashMap<PeerId, Option<Instant>>,
+        banned_ids: HashMap<PeerId, Option<Instant>>,
         banned_ips: HashMap<IpAddr, Option<Instant>>,
     ) -> Self {
-        Self { banned_ips, banned_peers }
+        Self { banned_ips, banned_ids }
     }
 
-    /// Removes all peers that are no longer banned.
-    pub fn evict_peers(&mut self, now: Instant) -> Vec<PeerId> {
+    /// Removes all peer ids that are no longer banned.
+    pub fn evict_ids(&mut self, now: Instant) -> Vec<PeerId> {
         let mut evicted = Vec::new();
-        self.banned_peers.retain(|peer, until| {
+        self.banned_ids.retain(|peer, until| {
             if let Some(until) = until {
                 if now > *until {
                     evicted.push(*peer);
@@ -61,7 +61,7 @@ impl BanList {
         evicted
     }
 
-    /// Removes all ip addresses that are no longer banned.
+    /// Removes all peer ips that are no longer banned.
     pub fn evict_ips(&mut self, now: Instant) -> Vec<IpAddr> {
         let mut evicted = Vec::new();
         self.banned_ips.retain(|peer, until| {
@@ -81,14 +81,14 @@ impl BanList {
     /// Returns the evicted entries.
     pub fn evict(&mut self, now: Instant) -> (Vec<IpAddr>, Vec<PeerId>) {
         let ips = self.evict_ips(now);
-        let peers = self.evict_peers(now);
-        (ips, peers)
+        let ids = self.evict_ids(now);
+        (ips, ids)
     }
 
     /// Returns true if either the given peer id _or_ ip address is banned.
     #[inline]
-    pub fn is_banned(&self, peer_id: &PeerId, ip: &IpAddr) -> bool {
-        self.is_banned_peer(peer_id) || self.is_banned_ip(ip)
+    pub fn is_banned(&self, id: &PeerId, ip: &IpAddr) -> bool {
+        self.is_banned_id(id) || self.is_banned_ip(ip)
     }
 
     /// checks the ban list to see if it contains the given ip
@@ -97,20 +97,20 @@ impl BanList {
         self.banned_ips.contains_key(ip)
     }
 
-    /// checks the ban list to see if it contains the given ip
+    /// checks the ban list to see if it contains the given id
     #[inline]
-    pub fn is_banned_peer(&self, peer_id: &PeerId) -> bool {
-        self.banned_peers.contains_key(peer_id)
+    pub fn is_banned_id(&self, id: &PeerId) -> bool {
+        self.banned_ids.contains_key(id)
     }
 
-    /// Unbans the ip address
+    /// Unbans the peer ip address
     pub fn unban_ip(&mut self, ip: &IpAddr) {
         self.banned_ips.remove(ip);
     }
 
-    /// Unbans the ip address
-    pub fn unban_peer(&mut self, peer_id: &PeerId) {
-        self.banned_peers.remove(peer_id);
+    /// Unbans the peer id
+    pub fn unban_id(&mut self, id: &PeerId) {
+        self.banned_ids.remove(id);
     }
 
     /// Bans the IP until the timestamp.
@@ -121,8 +121,8 @@ impl BanList {
     }
 
     /// Bans the peer until the timestamp
-    pub fn ban_peer_until(&mut self, node_id: PeerId, until: Instant) {
-        self.ban_peer_with(node_id, Some(until));
+    pub fn ban_id_until(&mut self, id: PeerId, until: Instant) {
+        self.ban_id_with(id, Some(until));
     }
 
     /// Bans the IP indefinitely.
@@ -133,13 +133,13 @@ impl BanList {
     }
 
     /// Bans the peer indefinitely,
-    pub fn ban_peer(&mut self, node_id: PeerId) {
-        self.ban_peer_with(node_id, None);
+    pub fn ban_id(&mut self, id: PeerId) {
+        self.ban_id_with(id, None);
     }
 
     /// Bans the peer indefinitely or until the given timeout.
-    pub fn ban_peer_with(&mut self, node_id: PeerId, until: Option<Instant>) {
-        self.banned_peers.insert(node_id, until);
+    pub fn ban_id_with(&mut self, id: PeerId, until: Option<Instant>) {
+        self.banned_ids.insert(id, until);
     }
 
     /// Bans the ip indefinitely or until the given timeout.
@@ -157,13 +157,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn can_ban_unban_peer() {
-        let peer = PeerId::random();
+    fn can_ban_unban_id() {
+        let id = PeerId::random();
         let mut banlist = BanList::default();
-        banlist.ban_peer(peer);
-        assert!(banlist.is_banned_peer(&peer));
-        banlist.unban_peer(&peer);
-        assert!(!banlist.is_banned_peer(&peer));
+        banlist.ban_id(id);
+        assert!(banlist.is_banned_id(&id));
+        banlist.unban_id(&id);
+        assert!(!banlist.is_banned_id(&id));
     }
 
     #[test]

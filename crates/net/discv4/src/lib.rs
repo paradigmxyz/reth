@@ -794,7 +794,7 @@ impl Discv4Service {
     /// Adds the peer to the ban list indefinitely.
     pub fn ban_node(&mut self, node_id: PeerId) {
         self.remove_node(node_id);
-        self.config.ban_list.ban_peer(node_id);
+        self.config.ban_list.ban_id(node_id);
     }
 
     /// Adds the ip to the ban list until the given timestamp.
@@ -805,7 +805,7 @@ impl Discv4Service {
     /// Adds the peer to the ban list and bans it until the given timestamp
     pub fn ban_node_until(&mut self, node_id: PeerId, until: Instant) {
         self.remove_node(node_id);
-        self.config.ban_list.ban_peer_until(node_id, until);
+        self.config.ban_list.ban_id_until(node_id, until);
     }
 
     /// Removes a `node_id` from the routing table.

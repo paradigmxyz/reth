@@ -271,10 +271,9 @@ impl PeersManager {
     /// be scheduled.
     pub(crate) fn on_incoming_session_established(&mut self, peer_id: PeerId, addr: SocketAddr) {
         self.connection_info.decr_pending_in();
-
         // we only need to check the peer id here as the ip address will have been checked at
         // on_incoming_pending_session. We also check if the peer is in the backoff list here.
-        if self.ban_list.is_banned_peer(&peer_id) {
+        if self.ban_list.is_banned_id(&peer_id) {
             self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
             return
         }
@@ -341,7 +340,7 @@ impl PeersManager {
             }
         }
 
-        self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + ban_duration);
+        self.ban_list.ban_id_until(peer_id, std::time::Instant::now() + ban_duration);
         self.queued_actions.push_back(PeerAction::BanPeer { peer_id });
     }
 
@@ -362,7 +361,7 @@ impl PeersManager {
 
     /// Unbans the peer
     fn unban_peer(&mut self, peer_id: PeerId) {
-        self.ban_list.unban_peer(&peer_id);
+        self.ban_list.unban_id(&peer_id);
         self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
     }
 
