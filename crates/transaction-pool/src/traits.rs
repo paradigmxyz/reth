@@ -1033,7 +1033,7 @@ impl PoolTransaction for EthPooledTransaction {
             Transaction::Legacy(_) | Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
-             _ => None,
+            _ => None,
         }
     }
 
