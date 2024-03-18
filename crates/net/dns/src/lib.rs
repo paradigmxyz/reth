@@ -443,10 +443,9 @@ impl<R: Resolver> Update for DnsDiscoveryService<R> {
         &mut self,
         enr: Enr<SecretKey>,
     ) -> Result<(), NodeRecordWithForkIdParseError> {
-        let update = enr.clone().try_into()?;
+        self.queued_events.push_back(DnsDiscoveryEvent::Enr(enr.clone()));
+        let update = enr.try_into()?;
         self.notify(update);
-
-        self.queued_events.push_back(DnsDiscoveryEvent::Enr(enr));
 
         Ok(())
     }
@@ -457,10 +456,9 @@ impl<R: Resolver> Update for DnsDiscoveryService<R, Enr<SecretKey>> {
         &mut self,
         enr: Enr<SecretKey>,
     ) -> Result<(), NodeRecordWithForkIdParseError> {
-        let update = enr.clone().try_into()?;
+        self.queued_events.push_back(DnsDiscoveryEvent::Enr(enr.clone()));
+        let update = enr.try_into()?;
         self.notify(update);
-
-        self.queued_events.push_back(DnsDiscoveryEvent::Enr(enr));
 
         Ok(())
     }
