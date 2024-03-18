@@ -1451,7 +1451,7 @@ impl Display for DisplayFork {
 
         match self.activated_at {
             ForkCondition::Block(at) | ForkCondition::Timestamp(at) => {
-                write!(f, "{:32} @{}", name_with_eip, at)?;
+                write!(f, "{name_with_eip:32} @{at}")?;
             }
             ForkCondition::TTD { fork_block, total_difficulty } => {
                 write!(
@@ -1523,10 +1523,10 @@ impl Display for DisplayHardforks {
             next_is_empty: bool,
             f: &mut Formatter<'_>,
         ) -> std::fmt::Result {
-            writeln!(f, "{}:", header)?;
+            writeln!(f, "{header}:")?;
             let mut iter = forks.iter().peekable();
             while let Some(fork) = iter.next() {
-                write!(f, "- {}", fork)?;
+                write!(f, "- {fork}")?;
                 if !next_is_empty || iter.peek().is_some() {
                     writeln!(f)?;
                 }

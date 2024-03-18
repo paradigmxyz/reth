@@ -124,8 +124,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         assert!(
             self.last_sender_submission
                 .remove(&SubmissionSenderId::new(sender_id, removed_sender.last_submission_id)),
-            "last sender transaction not found {:?}",
-            sender_id
+            "last sender transaction not found {sender_id:?}"
         );
     }
 

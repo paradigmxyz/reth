@@ -142,10 +142,10 @@ impl Compact for TxType {
                         EIP4844_TX_TYPE_ID => TxType::Eip4844,
                         #[cfg(feature = "optimism")]
                         DEPOSIT_TX_TYPE_ID => TxType::Deposit,
-                        _ => panic!("Unsupported TxType identifier: {}", extended_identifier),
+                        _ => panic!("Unsupported TxType identifier: {extended_identifier}"),
                     }
                 }
-                _ => panic!("Unknown identifier for TxType: {}", identifier),
+                _ => panic!("Unknown identifier for TxType: {identifier}"),
             },
             buf,
         )
