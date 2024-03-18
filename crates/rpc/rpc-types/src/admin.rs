@@ -1,4 +1,5 @@
 use crate::{NodeRecord, PeerId};
+use alloy_genesis::ChainConfig;
 use alloy_primitives::{B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -28,11 +29,13 @@ pub struct NodeInfo {
     pub name: String,
     /// Networking protocols being run by the local node.
     pub protocols: Protocols,
+    /// Configuration of the chain.
+    pub chain_config: ChainConfig,
 }
 
 impl NodeInfo {
     /// Creates a new instance of `NodeInfo`.
-    pub fn new(enr: NodeRecord, status: NetworkStatus) -> NodeInfo {
+    pub fn new(enr: NodeRecord, status: NetworkStatus, chain_config: ChainConfig) -> NodeInfo {
         NodeInfo {
             enode: enr,
             id: enr.id,
@@ -41,6 +44,7 @@ impl NodeInfo {
             ports: Ports { discovery: enr.udp_port, listener: enr.tcp_port },
             name: status.client_version,
             protocols: Protocols { eth: status.eth_protocol_info, other: Default::default() },
+            chain_config,
         }
     }
 }

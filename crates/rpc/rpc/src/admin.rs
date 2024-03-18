@@ -2,7 +2,7 @@ use crate::result::ToRpcResult;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
-use reth_primitives::NodeRecord;
+use reth_primitives::{ChainSpec, NodeRecord};
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_types::{NodeInfo, PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo};
 
@@ -12,12 +12,14 @@ use reth_rpc_types::{NodeInfo, PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, P
 pub struct AdminApi<N> {
     /// An interface to interact with the network
     network: N,
+    /// The specification of the blockchain's configuration.
+    chain_spec: ChainSpec,
 }
 
 impl<N> AdminApi<N> {
     /// Creates a new instance of `AdminApi`.
-    pub fn new(network: N) -> Self {
-        AdminApi { network }
+    pub fn new(network: N, chain_spec: ChainSpec) -> Self {
+        AdminApi { network, chain_spec }
     }
 }
 
@@ -83,8 +85,9 @@ where
     async fn node_info(&self) -> RpcResult<NodeInfo> {
         let enr = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
+        let config = self.chain_spec.genesis().config.clone();
 
-        Ok(NodeInfo::new(enr, status))
+        Ok(NodeInfo::new(enr, status, config))
     }
 
     /// Handler for `admin_peerEvents`
