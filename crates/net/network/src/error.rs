@@ -57,7 +57,7 @@ pub enum NetworkError {
     /// Error interfacing between dns discovery and discv4 or discv5.
     #[error(transparent)]
     DiscoveryInterface(#[from] DiscoveryInterfaceError),
-    // todo: upstream error impl for discv5
+    // todo: upstream: error impl for `discv5::Error``
     /*
     /// Error propagated from [`discv5::Discv5`].
     #[error(transparent)]

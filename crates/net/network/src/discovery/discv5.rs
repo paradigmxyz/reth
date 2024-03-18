@@ -230,11 +230,8 @@ pub(super) async fn start_discv5(
         } else {
             builder.udp6(port);
         }
-        // todo: add additional fields from config
-
         // enr v4 not to get confused with discv4, independent versioning enr and
         // discovery
-
         let enr = builder.build(sk).expect("should build enr v4");
         // backwards compatible enr
         let bc_enr = NodeRecord::from_secret_key(primary_socket, sk);

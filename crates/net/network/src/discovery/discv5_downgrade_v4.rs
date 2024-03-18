@@ -100,8 +100,8 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
                 //
                 let discv5 = Arc::new(discv5);
                 let discv5_ref = discv5.clone();
-                // todo: pass mutual ref to mirror as param to filter out removed nodes and only
-                // get peer ids of additions.
+                // todo: store peer ids as node ids also in discv4 + pass mutual ref to mirror as
+                // param to filter out removed nodes and only get peer ids of additions.
                 let read_kbuckets_callback =
                     move || -> Result<HashSet<PeerId>, secp256k1::Error> {
                         let keys = discv5_ref.with_kbuckets(|kbuckets| {
