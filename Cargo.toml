@@ -87,6 +87,7 @@ rust.unreachable_pub = "warn"
 rustdoc.all = "warn"
 rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
+clippy.empty_line_after_outer_attr = "deny"
 
 [workspace.package]
 version = "0.2.0-beta.3"
