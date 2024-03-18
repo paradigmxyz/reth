@@ -1454,7 +1454,7 @@ impl Display for DisplayFork {
                 write!(f, "{:32} @{}", name_with_eip, at)?;
             }
             ForkCondition::TTD { fork_block, total_difficulty } => {
-                writeln!(
+                write!(
                     f,
                     "{:32} @{} ({})",
                     name_with_eip,
@@ -1502,7 +1502,6 @@ impl Display for DisplayFork {
 // - GrayGlacier                      @15050000
 // Merge hard forks:
 // - Paris                            @58750000000000000000000 (network is known to be merged)
-//
 // Post-merge hard forks (timestamp based):
 // - Shanghai                         @1681338455
 /// ```
@@ -1518,23 +1517,36 @@ pub struct DisplayHardforks {
 
 impl Display for DisplayHardforks {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Pre-merge hard forks (block based):")?;
-        for fork in self.pre_merge.iter() {
-            writeln!(f, "- {fork}")?;
+        fn format(
+            header: &str,
+            forks: &[DisplayFork],
+            next_is_empty: bool,
+            f: &mut Formatter<'_>,
+        ) -> std::fmt::Result {
+            writeln!(f, "{}:", header)?;
+            let mut iter = forks.iter().peekable();
+            while let Some(fork) = iter.next() {
+                write!(f, "- {}", fork)?;
+                if !next_is_empty || iter.peek().is_some() {
+                    writeln!(f)?;
+                }
+            }
+            Ok(())
         }
 
+        format(
+            "Pre-merge hard forks (block based)",
+            &self.pre_merge,
+            self.with_merge.is_empty(),
+            f,
+        )?;
+
         if !self.with_merge.is_empty() {
-            writeln!(f, "Merge hard forks:")?;
-            for fork in self.with_merge.iter() {
-                writeln!(f, "- {fork}")?;
-            }
+            format("Merge hard forks", &self.with_merge, self.post_merge.is_empty(), f)?;
         }
 
         if !self.post_merge.is_empty() {
-            writeln!(f, "Post-merge hard forks (timestamp based):")?;
-            for fork in self.post_merge.iter() {
-                writeln!(f, "- {fork}")?;
-            }
+            format("Post-merge hard forks (timestamp based)", &self.post_merge, true, f)?;
         }
 
         Ok(())
@@ -1655,11 +1667,9 @@ mod tests {
 - GrayGlacier                      @15050000
 Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
-
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-- Cancun                           @1710338135
-"
+- Cancun                           @1710338135"
         );
     }
 
@@ -1674,8 +1684,7 @@ Post-merge hard forks (timestamp based):
         assert_eq!(
             spec.display_hardforks().to_string(),
             "Pre-merge hard forks (block based):
-- Frontier                         @0
-"
+- Frontier                         @0"
         );
     }
 
