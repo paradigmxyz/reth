@@ -265,7 +265,6 @@ maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus t
 fmt:
 	cargo +nightly fmt
 
-# will check discv4, i.e. #[cfg(not(all(feature = "discv5-downgrade-v4", feature = "discv5")))]
 lint-reth:
 	cargo +nightly clippy \
 	--workspace \
@@ -277,7 +276,7 @@ lint-reth:
 	--features "ethereum $(BIN_OTHER_FEATURES)" \
 	-- -D warnings
 
-# ...same here
+# will check discv5 feature
 lint-op-reth:
 	cargo +nightly clippy \
 	--workspace \
@@ -289,7 +288,6 @@ lint-op-reth:
 	--features "optimism $(BIN_OTHER_FEATURES)" \
 	-- -D warnings
 
-# will check discv5 
 lint-other-targets:
 	cargo +nightly clippy \
 	--workspace \
@@ -301,14 +299,34 @@ lint-other-targets:
 	--all-features \
 	-- -D warnings
 
+lint-network:
+	cargo +nightly clippy \
+	-p reth-network \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	-- -D warnings
+
+lint-discv5-downgrade-v4:
+	cargo +nightly clippy \
+	-p reth-network \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features discv5-downgrade-v4 \
+	-- -D warnings
+
 lint:
 	make fmt && \
 	make lint-reth && \
 	make lint-op-reth && \
-	make lint-other-targets
+	make lint-other-targets && \
+	make lint-network && \
+	make lint-discv5-downgrade-v4
 
-.PHONY: rustdocs
-rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
+rustdocs-other-targets:
 	RUSTDOCFLAGS="\
 	--cfg docsrs \
 	--show-type-layout \
@@ -317,7 +335,36 @@ rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc
 	cargo +nightly docs \
 	--document-private-items
 
-# will test discv4, i.e. #[cfg(not(all(feature = "discv5-downgrade-v4", feature = "discv5")))]
+rustdocs-network: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
+	RUSTDOCFLAGS="\
+	--cfg docsrs \
+	--show-type-layout \
+	--generate-link-to-definition \
+	--enable-index-page -Zunstable-options -D warnings" \
+	cargo +nightly doc \
+	-p reth-network \
+	--features discv5-downgrade-v4 \
+	--no-deps \
+	--document-private-items
+
+rustdocs-discv5-downgrade-v4: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
+	RUSTDOCFLAGS="\
+	--cfg docsrs \
+	--show-type-layout \
+	--generate-link-to-definition \
+	--enable-index-page -Zunstable-options -D warnings" \
+	cargo +nightly doc \
+	-p reth-network \
+	--features discv5-downgrade-v4 \
+	--no-deps \
+	--document-private-items
+
+.PHONY: rustdocs
+rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
+	make rustdocs-other-targets && \
+	make rustdocs-network && \
+	make rustdocs-discv5-downgrade-v4
+	
 test-reth:
 	cargo test \
 	--workspace \
@@ -328,7 +375,6 @@ test-reth:
 	--benches \
 	--features "ethereum $(BIN_OTHER_FEATURES)"
 
-# ...same here
 test-op-reth:
 	cargo test \
 	--workspace \
@@ -338,7 +384,6 @@ test-op-reth:
 	--benches \
 	--features "optimism $(BIN_OTHER_FEATURES)"
 
-# will test discv5
 test-other-targets:
 	cargo test \
 	--workspace \
