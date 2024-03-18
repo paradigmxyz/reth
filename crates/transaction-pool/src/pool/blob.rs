@@ -690,8 +690,7 @@ mod tests {
             let actual = fee_delta(tx_fee, base_fee);
             assert_eq!(
                 actual, expected,
-                "fee_delta({}, {}) = {}, expected: {}",
-                tx_fee, base_fee, actual, expected
+                "fee_delta({tx_fee}, {base_fee}) = {actual}, expected: {expected}"
             );
         }
     }

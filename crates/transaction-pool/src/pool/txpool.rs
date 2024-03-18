@@ -2445,7 +2445,7 @@ mod tests {
             MockTransaction::eip4844().set_sender(tx.get_sender()).inc_price_by(100).inc_limit();
         let blob = f.validated(tx);
         let err = pool.insert_tx(blob, on_chain_balance, on_chain_nonce).unwrap_err();
-        assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{:?}", err);
+        assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{err:?}");
     }
 
     #[test]
@@ -2461,7 +2461,7 @@ mod tests {
             MockTransaction::eip1559().set_sender(tx.get_sender()).inc_price_by(100).inc_limit();
         let tx = f.validated(tx);
         let err = pool.insert_tx(tx, on_chain_balance, on_chain_nonce).unwrap_err();
-        assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{:?}", err);
+        assert!(matches!(err, InsertErr::TxTypeConflict { .. }), "{err:?}");
     }
 
     // insert nonce then nonce - 1
