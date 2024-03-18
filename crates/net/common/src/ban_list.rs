@@ -27,7 +27,7 @@ pub struct BanList {
 }
 
 impl BanList {
-    /// Creates a new ban list that bans the given peers and ips indefinitely.
+    /// Creates a new ban list that bans the given peers ids and ips indefinitely.
     pub fn new(
         banned_ids: impl IntoIterator<Item = PeerId>,
         banned_ips: impl IntoIterator<Item = IpAddr>,
@@ -91,13 +91,13 @@ impl BanList {
         self.is_banned_id(id) || self.is_banned_ip(ip)
     }
 
-    /// checks the ban list to see if it contains the given ip
+    /// Checks the ban list to see if it contains the given ip.
     #[inline]
     pub fn is_banned_ip(&self, ip: &IpAddr) -> bool {
         self.banned_ips.contains_key(ip)
     }
 
-    /// checks the ban list to see if it contains the given id
+    /// Checks the ban list to see if it contains the given id.
     #[inline]
     pub fn is_banned_id(&self, id: &PeerId) -> bool {
         self.banned_ids.contains_key(id)
@@ -113,38 +113,38 @@ impl BanList {
         self.banned_ids.remove(id);
     }
 
-    /// Bans the IP until the timestamp.
+    /// Bans the peer ip until the timestamp.
     ///
-    /// This does not ban non-global IPs.
+    /// This policy only bans global IPs.
     pub fn ban_ip_until(&mut self, ip: IpAddr, until: Instant) {
         self.ban_ip_with(ip, Some(until));
     }
 
-    /// Bans the peer until the timestamp
+    /// Bans the peer id until the timestamp
     pub fn ban_id_until(&mut self, id: PeerId, until: Instant) {
         self.ban_id_with(id, Some(until));
     }
 
-    /// Bans the IP indefinitely.
+    /// Bans the peer ip indefinitely.
     ///
-    /// This does not ban non-global IPs.
+    /// This policy only bans global IPs.
     pub fn ban_ip(&mut self, ip: IpAddr) {
         self.ban_ip_with(ip, None);
     }
 
-    /// Bans the peer indefinitely,
+    /// Bans the peer id indefinitely,
     pub fn ban_id(&mut self, id: PeerId) {
         self.ban_id_with(id, None);
     }
 
-    /// Bans the peer indefinitely or until the given timeout.
+    /// Bans the peer id indefinitely or until the given timeout.
     pub fn ban_id_with(&mut self, id: PeerId, until: Option<Instant>) {
         self.banned_ids.insert(id, until);
     }
 
-    /// Bans the ip indefinitely or until the given timeout.
+    /// Bans the peer ip indefinitely or until the given timeout.
     ///
-    /// This does not ban non-global IPs.
+    /// This policy only bans global IPs.
     pub fn ban_ip_with(&mut self, ip: IpAddr, until: Option<Instant>) {
         if is_global(&ip) {
             self.banned_ips.insert(ip, until);
