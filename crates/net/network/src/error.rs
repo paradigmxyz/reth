@@ -94,7 +94,7 @@ impl NetworkError {
 /// Errors thrown when interfacing between discovery services.
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoveryInterfaceError {
-    /// Error parsing an rlp value in [`enr::Enr`].
+    /// Error parsing an rlp value in `enr::Enr`.
     #[error(transparent)]
     ParseRlp(#[from] rlp::DecoderError),
     /// Error converting into a [`reth_primitives::NodeRecord`].
