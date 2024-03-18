@@ -377,10 +377,10 @@ impl NodeConfig {
         Ok(self.load_network_config(
             config,
             client,
-            executor.clone(),
+            executor,
             head,
             secret_key,
-            default_peers_path.clone(),
+            default_peers_path,
         ))
     }
 
@@ -460,16 +460,16 @@ impl NodeConfig {
     {
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            provider_factory.clone(),
+            provider_factory,
             consensus.clone(),
             EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(
             tree_externals,
             tree_config,
-            prune_config.clone().map(|config| config.segments),
+            prune_config.map(|config| config.segments),
         )?
-        .with_sync_metrics_tx(sync_metrics_tx.clone());
+        .with_sync_metrics_tx(sync_metrics_tx);
 
         Ok(tree)
     }

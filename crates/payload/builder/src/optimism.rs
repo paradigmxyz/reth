@@ -263,7 +263,7 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
                 B256::ZERO
             };
         OptimismExecutionPayloadEnvelopeV3 {
-            execution_payload: block_to_payload_v3(block.clone()),
+            execution_payload: block_to_payload_v3(block),
             block_value: fees,
             // From the engine API spec:
             //

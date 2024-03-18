@@ -57,7 +57,7 @@ impl InitCommand {
         info!(target: "reth::cli", "Database opened");
 
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
+            ProviderFactory::new(db, self.chain, data_dir.static_files_path())?;
 
         info!(target: "reth::cli", "Writing genesis block");
 
