@@ -433,12 +433,10 @@ mod tests {
             F: FnOnce(StreamClone) -> Pin<Box<(dyn Future<Output = BytesMut> + Send)>>
                 + Send
                 + Sync
-                + Send
                 + 'static,
             G: FnOnce(StreamClone) -> Pin<Box<(dyn Future<Output = BytesMut> + Send)>>
                 + Send
                 + Sync
-                + Send
                 + 'static,
         {
             let local_addr = self.local_addr;
