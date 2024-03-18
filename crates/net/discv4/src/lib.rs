@@ -263,7 +263,10 @@ impl Discv4 {
         primary_kbuckets_keys_callback: F,
     ) -> io::Result<(Self, Discv4Service<KBucketsKeysMirror<F>>)>
     where
-        F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error> + Send + Unpin + 'static,
+        F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error>
+            + Send
+            + Unpin
+            + 'static,
         KBucketsKeysMirror<F>: MirrorPrimaryKBuckets,
     {
         let socket = UdpSocket::bind(local_address).await?;
@@ -442,6 +445,35 @@ impl Discv4 {
     }
 }
 
+impl HandleDiscovery for Discv4 {
+    fn add_node_to_routing_table(
+        &self,
+        node_record: NodeFromExternalSource,
+    ) -> Result<(), impl Error> {
+        if let NodeFromExternalSource::NodeRecord(node_record) = node_record {
+            self.add_node(node_record);
+        } // todo: handle if not
+
+        Ok::<(), Discv4Error>(())
+    }
+
+    fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
+        self.set_eip868_rlp_pair(key, rlp)
+    }
+
+    fn encode_and_set_eip868_in_local_enr(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
+        self.set_eip868_rlp(key, value)
+    }
+
+    fn ban_peer_by_ip_and_node_id(&self, node_id: PeerId, ip: IpAddr) {
+        self.ban(node_id, ip)
+    }
+
+    fn ban_peer_by_ip(&self, ip: IpAddr) {
+        self.ban_ip(ip)
+    }
+}
+
 /// Manages discv4 peer discovery over UDP.
 ///
 /// This is a [Stream] to handles incoming and outgoing discv4 messages and emits updates via:
@@ -449,7 +481,7 @@ impl Discv4 {
 #[must_use = "Stream does nothing unless polled"]
 #[allow(missing_debug_implementations)]
 #[derive(Deref, DerefMut)]
-pub struct Discv4Service<M = Noop> {
+pub struct Discv4Service<M = NoopMirror> {
     /// Holds data of the discv4 service.
     #[deref]
     #[deref_mut]
@@ -2514,40 +2546,11 @@ where
     }
 }
 
-impl HandleDiscovery for Discv4 {
-    fn add_node_to_routing_table(
-        &self,
-        node_record: NodeFromExternalSource,
-    ) -> Result<(), impl Error> {
-        if let NodeFromExternalSource::NodeRecord(node_record) = node_record {
-            self.add_node(node_record);
-        } // todo: handle if not
-
-        Ok::<(), Discv4Error>(())
-    }
-
-    fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
-        self.set_eip868_rlp_pair(key, rlp)
-    }
-
-    fn encode_and_set_eip868_in_local_enr(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
-        self.set_eip868_rlp(key, value)
-    }
-
-    fn ban_peer_by_ip_and_node_id(&self, node_id: PeerId, ip: IpAddr) {
-        self.ban(node_id, ip)
-    }
-
-    fn ban_peer_by_ip(&self, ip: IpAddr) {
-        self.ban_ip(ip)
-    }
-}
-
 #[doc(hidden)]
 #[derive(Debug)]
-pub struct Noop;
+pub struct NoopMirror;
 
-impl MirrorPrimaryKBuckets for Noop {
+impl MirrorPrimaryKBuckets for NoopMirror {
     fn update_mirror(&mut self) -> Result<(), Discv4Error> {
         Ok(())
     }

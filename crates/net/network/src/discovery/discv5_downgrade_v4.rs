@@ -29,50 +29,6 @@ use super::{discv5::start_discv5, Discovery, DiscoveryEvent};
 #[cfg(feature = "discv5-downgrade-v4")]
 pub type DiscoveryV5V4 = Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>>;
 
-impl<S> Stream for Discovery<DiscV5WithV4Downgrade, S, Enr<SecretKey>>
-where
-    S: Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static,
-{
-    type Item = DiscoveryEvent;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // Drain all buffered events first
-        if let Some(event) = self.queued_events.pop_front() {
-            self.notify_listeners(&event);
-            return Poll::Ready(Some(event))
-        }
-
-        // drain the update streams
-        while let Some(Poll::Ready(Some(update))) =
-            self.disc_updates.as_mut().map(|ref mut updates| updates.poll_next_unpin(cx))
-        {
-            match update {
-                DiscoveryUpdateV5::V4(update) => self.on_discv4_update(update),
-                DiscoveryUpdateV5::V5(update) => {
-                    if let Err(err) = self.on_discv5_update(update) {
-                        error!(target: "net::discovery", %err, "failed to process update");
-                    }
-                }
-            }
-        }
-
-        while let Some(Poll::Ready(Some(update))) =
-            self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
-        {
-            self.add_disc_node(NodeFromExternalSource::Enr(update.node_record.clone()));
-            if let Ok(node_record) = update.node_record.try_into() {
-                self.on_node_record_update(node_record, update.fork_id);
-            }
-        }
-
-        if self.queued_events.is_empty() {
-            cx.waker().wake_by_ref();
-        }
-
-        Poll::Pending
-    }
-}
-
 impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
     /// Spawns the discovery service.
     ///
@@ -221,6 +177,50 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
             dns_discovery_config,
         )
         .await
+    }
+}
+
+impl<S> Stream for Discovery<DiscV5WithV4Downgrade, S, Enr<SecretKey>>
+where
+    S: Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static,
+{
+    type Item = DiscoveryEvent;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Drain all buffered events first
+        if let Some(event) = self.queued_events.pop_front() {
+            self.notify_listeners(&event);
+            return Poll::Ready(Some(event))
+        }
+
+        // drain the update streams
+        while let Some(Poll::Ready(Some(update))) =
+            self.disc_updates.as_mut().map(|ref mut updates| updates.poll_next_unpin(cx))
+        {
+            match update {
+                DiscoveryUpdateV5::V4(update) => self.on_discv4_update(update),
+                DiscoveryUpdateV5::V5(update) => {
+                    if let Err(err) = self.on_discv5_update(update) {
+                        error!(target: "net::discovery", %err, "failed to process update");
+                    }
+                }
+            }
+        }
+
+        while let Some(Poll::Ready(Some(update))) =
+            self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
+        {
+            self.add_disc_node(NodeFromExternalSource::Enr(update.node_record.clone()));
+            if let Ok(node_record) = update.node_record.try_into() {
+                self.on_node_record_update(node_record, update.fork_id);
+            }
+        }
+
+        if self.queued_events.is_empty() {
+            cx.waker().wake_by_ref();
+        }
+
+        Poll::Pending
     }
 }
 

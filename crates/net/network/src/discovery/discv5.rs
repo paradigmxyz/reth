@@ -28,6 +28,61 @@ use super::{Discovery, DiscoveryEvent};
 #[cfg(feature = "discv5")]
 pub type DiscoveryV5 = Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>>;
 
+impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
+    /// Spawns the discovery service.
+    ///
+    /// This will spawn [`discv5::Discv5`] and establish a listener channel to receive all /
+    /// discovered nodes.
+    ///
+    /// Note: if dns discovery is configured, any nodes found by this service will be
+    pub async fn start_discv5(
+        sk: SecretKey,
+        discv5_config: Option<discv5::Config>,
+        dns_discovery_config: Option<DnsDiscoveryConfig>,
+    ) -> Result<Self, NetworkError> {
+        let (disc, disc_updates, bc_local_enr) = match discv5_config {
+            Some(config) => {
+                let (disc, disc_updates, bc_local_enr) = start_discv5(&sk, config).await?;
+
+                (Some(disc), Some(disc_updates.into()), bc_local_enr)
+            }
+            None => (None, None, NodeRecord::from_secret_key("0.0.0.0:0".parse().unwrap(), &sk)),
+        };
+
+        // setup DNS discovery.
+        let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
+            if let Some(dns_config) = dns_discovery_config {
+                new_with_dns_resolver::<Enr<SecretKey>>(dns_config)?
+            } else {
+                (None, None, None)
+            };
+
+        Ok(Discovery {
+            discovery_listeners: Default::default(),
+            local_enr: bc_local_enr,
+            disc,
+            disc_updates,
+            _disc_service: None,
+            discovered_nodes: Default::default(),
+            queued_events: Default::default(),
+            _dns_disc_service,
+            _dns_discovery,
+            dns_discovery_updates,
+        })
+    }
+
+    #[cfg(feature = "discv5")]
+    pub async fn start(
+        _discv4_addr: SocketAddr,
+        sk: SecretKey,
+        _discv4_config: Option<reth_discv4::Discv4Config>,
+        discv5_config: Option<discv5::Config>,
+        dns_discovery_config: Option<DnsDiscoveryConfig>,
+    ) -> Result<Self, NetworkError> {
+        Discovery::start_discv5(sk, discv5_config, dns_discovery_config).await
+    }
+}
+
 impl<D, S, N> Discovery<D, S, N>
 where
     D: HandleDiscovery + HandleDiscv5,
@@ -135,61 +190,6 @@ where
         }
 
         Poll::Pending
-    }
-}
-
-impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
-    /// Spawns the discovery service.
-    ///
-    /// This will spawn [`discv5::Discv5`] and establish a listener channel to receive all /
-    /// discovered nodes.
-    ///
-    /// Note: if dns discovery is configured, any nodes found by this service will be
-    pub async fn start_discv5(
-        sk: SecretKey,
-        discv5_config: Option<discv5::Config>,
-        dns_discovery_config: Option<DnsDiscoveryConfig>,
-    ) -> Result<Self, NetworkError> {
-        let (disc, disc_updates, bc_local_enr) = match discv5_config {
-            Some(config) => {
-                let (disc, disc_updates, bc_local_enr) = start_discv5(&sk, config).await?;
-
-                (Some(disc), Some(disc_updates.into()), bc_local_enr)
-            }
-            None => (None, None, NodeRecord::from_secret_key("0.0.0.0:0".parse().unwrap(), &sk)),
-        };
-
-        // setup DNS discovery.
-        let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
-            if let Some(dns_config) = dns_discovery_config {
-                new_with_dns_resolver::<Enr<SecretKey>>(dns_config)?
-            } else {
-                (None, None, None)
-            };
-
-        Ok(Discovery {
-            discovery_listeners: Default::default(),
-            local_enr: bc_local_enr,
-            disc,
-            disc_updates,
-            _disc_service: None,
-            discovered_nodes: Default::default(),
-            queued_events: Default::default(),
-            _dns_disc_service,
-            _dns_discovery,
-            dns_discovery_updates,
-        })
-    }
-
-    #[cfg(feature = "discv5")]
-    pub async fn start(
-        _discv4_addr: SocketAddr,
-        sk: SecretKey,
-        _discv4_config: Option<reth_discv4::Discv4Config>,
-        discv5_config: Option<discv5::Config>,
-        dns_discovery_config: Option<DnsDiscoveryConfig>,
-    ) -> Result<Self, NetworkError> {
-        Discovery::start_discv5(sk, discv5_config, dns_discovery_config).await
     }
 }
 
