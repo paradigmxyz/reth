@@ -263,10 +263,7 @@ impl Discv4 {
         primary_kbuckets_keys_callback: F,
     ) -> io::Result<(Self, Discv4Service<KBucketsKeysMirror<F>>)>
     where
-        F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error>
-            + Send
-            + Unpin
-            + 'static,
+        F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error> + Send + Unpin + 'static,
         KBucketsKeysMirror<F>: MirrorPrimaryKBuckets,
     {
         let socket = UdpSocket::bind(local_address).await?;
