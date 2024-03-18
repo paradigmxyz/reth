@@ -45,6 +45,7 @@ itertools.workspace = true
 # Bitfinity deps
 candid.workspace = true
 did.workspace = true
+eyre.workspace = true
 ethereum-json-rpc-client.workspace = true
 hex.workspace = true
 ic-cbor.workspace = true

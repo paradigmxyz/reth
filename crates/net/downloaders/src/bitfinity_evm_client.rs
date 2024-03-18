@@ -1,6 +1,7 @@
 use candid::Principal;
 use did::certified::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
+use eyre::Result;
 use ic_cbor::{CertificateToCbor, HashTreeToCbor};
 use ic_certificate_verification::VerifyCertificate;
 use ic_certification::{Certificate, HashTree, LookupResult};
@@ -16,11 +17,12 @@ use reth_interfaces::p2p::{
 
 use alloy_rlp::Decodable;
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256,
+    ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Chain, ChainConfig, ChainSpec, ForkCondition, Genesis, GenesisAccount, Hardfork, Header, HeadersDirection, PeerId, B256, U256
 };
 use rlp::Encodable;
+use serde_json::json;
 
-use std::{self, cmp::min, collections::HashMap};
+use std::{self, cmp::min, collections::{BTreeMap, HashMap}};
 use thiserror::Error;
 
 use tracing::{debug, error, info, trace, warn};
@@ -32,7 +34,7 @@ use tracing::{debug, error, info, trace, warn};
 /// transactions in memory for use in the bodies stage.
 
 #[derive(Debug)]
-pub struct RemoteClient {
+pub struct BitfinityEvmClient {
     /// The buffered headers retrieved when fetching new bodies.
     headers: HashMap<BlockNumber, Header>,
 
@@ -41,6 +43,7 @@ pub struct RemoteClient {
 
     /// The buffered bodies retrieved when fetching new headers.
     bodies: HashMap<BlockHash, BlockBody>,
+
 }
 
 /// An error that can occur when constructing and using a [`RemoteClient`].
@@ -68,8 +71,8 @@ pub struct CertificateCheckSettings {
     pub ic_root_key: String,
 }
 
-impl RemoteClient {
-    /// RemoteClient from rpc url
+impl BitfinityEvmClient {
+    /// BitfinityEvmClient from rpc url
     pub async fn from_rpc_url(
         rpc: &str,
         start_block: u64,
@@ -101,12 +104,12 @@ impl RemoteClient {
             end_block = min(end_block, block_checker.get_block_number());
         }
 
-        info!(target: "downloaders::remote", start_block, end_block, "Fetching blocks");
+        info!(target: "downloaders::bitfinity_evm_client", start_block, end_block, "Fetching blocks");
 
         for begin_block in (start_block..=end_block).step_by(batch_size) {
             let count = std::cmp::min(batch_size as u64, end_block - begin_block);
 
-            debug!(target: "downloaders::remote", begin_block, count, "Fetching blocks");
+            debug!(target: "downloaders::bitfinity_evm_client", begin_block, count, "Fetching blocks");
 
             let blocks_to_fetch =
                 (begin_block..(begin_block + count)).map(Into::into).collect::<Vec<_>>();
@@ -115,9 +118,9 @@ impl RemoteClient {
                 .get_full_blocks_by_number(blocks_to_fetch, batch_size)
                 .await
                 .map_err(|e| {
-                    error!(target: "downloaders::remote", begin_block, "Error fetching block: {}", e);
+                    error!(target: "downloaders::bitfinity_evm_client", begin_block, "Error fetching block: {:?}", e);
                     RemoteClientError::ProviderError(format!(
-                        "Error fetching block {}: {}",
+                        "Error fetching block {}: {:?}",
                         begin_block, e
                     ))
                 })?
@@ -126,7 +129,7 @@ impl RemoteClient {
                 .map(did::Block::<did::Transaction>::from)
                 .collect::<Vec<_>>();
 
-            trace!(target: "downloaders::remote", blocks = full_blocks.len(), "Fetched blocks");
+            trace!(target: "downloaders::bitfinity_evm_client", blocks = full_blocks.len(), "Fetched blocks");
 
             for block in full_blocks {
                 if let Some(block_checker) = &block_checker {
@@ -185,6 +188,78 @@ impl RemoteClient {
             lowest = next;
         }
         true
+    }
+
+    /// Fetch Bitfinity chain spec
+    pub async fn fetch_chain_spec(rpc: String) -> Result<ChainSpec> {
+        let client = ethereum_json_rpc_client::EthJsonRpcClient::new(ReqwestClient::new(rpc));
+
+        let chain_id = client.get_chain_id().await.map_err(|e| eyre::eyre!(e))?;
+
+        tracing::info!("downloaders::bitfinity_evm_client - Bitfinity chain id: {}", chain_id);
+
+        let genesis_block = client
+            .get_block_by_number(0.into())
+            .await
+            .map_err(|e| eyre::eyre!("error getting genesis block: {}", e))?;
+
+        let genesis_accounts = client
+            .get_genesis_balances()
+            .await
+            .map_err(|e| eyre::eyre!(e))?
+            .into_iter()
+            .map(|(k, v)| {
+                tracing::info!("downloaders::bitfinity_evm_client - Bitfinity genesis account: {:?} {:?}", k, v);
+                (k.0.into(), GenesisAccount { balance: Uint::from_limbs(v.0), ..Default::default() })
+            });
+
+        let chain = Chain::from_id(chain_id);
+
+        let mut genesis: Genesis = serde_json::from_value(json!(genesis_block))
+            .map_err(|e| eyre::eyre!("error parsing genesis block: {}", e))?;
+
+        tracing::info!("downloaders::bitfinity_evm_client - Bitfinity genesis: {:?}", genesis);
+
+        genesis.config = ChainConfig {
+            chain_id,
+            homestead_block: Some(0),
+            eip150_block: Some(0),
+            eip155_block: Some(0),
+            eip158_block: Some(0),
+            terminal_total_difficulty: Some(Uint::ZERO),
+            ..Default::default()
+        };
+
+        genesis.alloc = genesis_accounts.collect();
+
+        let spec = ChainSpec {
+            chain,
+            genesis_hash: genesis_block.hash.map(|h| h.0.into()),
+            genesis: genesis.clone(),
+            paris_block_and_final_difficulty: Some((0, Uint::ZERO)),
+            hardforks: BTreeMap::from([
+                (Hardfork::Frontier, ForkCondition::Block(0)),
+                (Hardfork::Homestead, ForkCondition::Block(0)),
+                (Hardfork::Dao, ForkCondition::Block(0)),
+                (Hardfork::Tangerine, ForkCondition::Block(0)),
+                (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+                (Hardfork::Byzantium, ForkCondition::Block(0)),
+                (Hardfork::Constantinople, ForkCondition::Block(0)),
+                (Hardfork::Petersburg, ForkCondition::Block(0)),
+                (Hardfork::Istanbul, ForkCondition::Block(0)),
+                (Hardfork::Berlin, ForkCondition::Block(0)),
+                (Hardfork::London, ForkCondition::Block(0)),
+                (
+                    Hardfork::Paris,
+                    ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+                ),
+            ]),
+            ..Default::default()
+        };
+
+        tracing::info!("downloaders::bitfinity_evm_client - Bitfinity chain_spec: {:#?}", spec);
+
+        Ok(spec)
     }
 
     /// Use the provided bodies as the remote client's block body buffer.
@@ -274,7 +349,7 @@ impl BlockCertificateChecker {
     }
 }
 
-impl HeadersClient for RemoteClient {
+impl HeadersClient for BitfinityEvmClient {
     type Output = HeadersFut;
 
     fn get_headers_with_priority(
@@ -284,7 +359,7 @@ impl HeadersClient for RemoteClient {
     ) -> Self::Output {
         // this just searches the buffer, and fails if it can't find the header
         let mut headers = Vec::new();
-        trace!(target: "downloaders::remote", request=?request, "Getting headers");
+        trace!(target: "downloaders::bitfinity_evm_client", request=?request, "Getting headers");
 
         let start_num = match request.start {
             BlockHashOrNumber::Hash(hash) => match self.hash_to_number.get(&hash) {
@@ -308,7 +383,7 @@ impl HeadersClient for RemoteClient {
             }
         };
 
-        trace!(target: "downloaders::remote", range=?range, "Getting headers with range");
+        trace!(target: "downloaders::bitfinity_evm_client", range=?range, "Getting headers with range");
 
         for block_number in range {
             match self.headers.get(&block_number).cloned() {
@@ -324,7 +399,7 @@ impl HeadersClient for RemoteClient {
     }
 }
 
-impl BodiesClient for RemoteClient {
+impl BodiesClient for BitfinityEvmClient {
     type Output = BodiesFut;
 
     fn get_block_bodies_with_priority(
@@ -348,7 +423,7 @@ impl BodiesClient for RemoteClient {
     }
 }
 
-impl DownloadClient for RemoteClient {
+impl DownloadClient for BitfinityEvmClient {
     fn report_bad_message(&self, _peer_id: PeerId) {
         warn!("Reported a bad message on a remote client, the client may be corrupted or invalid");
         // noop
@@ -367,14 +442,14 @@ mod tests {
     #[tokio::test]
     async fn remote_client_from_rpc_url() {
         let client =
-            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
+            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
         assert!(client.max_block().is_some());
     }
 
     #[tokio::test]
     async fn test_headers_client() {
         let client =
-            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
+            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
         let headers = client
             .get_headers_with_priority(
                 HeadersRequest {
@@ -392,7 +467,7 @@ mod tests {
     #[tokio::test]
     async fn test_bodies_client() {
         let client =
-            RemoteClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
+            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
         let headers = client
             .get_headers_with_priority(
                 HeadersRequest {

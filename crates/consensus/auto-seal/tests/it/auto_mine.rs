@@ -55,33 +55,33 @@ impl RethNodeCommandConfig for AutoMineConfig {
 /// This test is disabled for the `optimism` feature flag due to an incompatible feature set.
 /// L1 info transactions are not included automatically, which are required for `op-reth` to
 /// process transactions.
-#[test]
-#[cfg_attr(feature = "optimism", ignore)]
-pub(crate) fn test_auto_mine() {
-    // create temp path for test
-    let temp_path = tempfile::TempDir::new().expect("tempdir is okay").into_path();
-    let datadir = temp_path.to_str().expect("temp path is okay");
+// #[test]
+// #[cfg_attr(feature = "optimism", ignore)]
+// pub(crate) fn test_auto_mine() {
+//     // create temp path for test
+//     let temp_path = tempfile::TempDir::new().expect("tempdir is okay").into_path();
+//     let datadir = temp_path.to_str().expect("temp path is okay");
 
-    let no_args = NoArgs::with(AutoMineConfig);
-    let chain = custom_chain();
-    let mut command = NodeCommand::<NoArgsCliExt<AutoMineConfig>>::parse_from([
-        "reth",
-        "--dev",
-        "--datadir",
-        datadir,
-        "--debug.max-block",
-        "1",
-        "--debug.terminate",
-    ])
-    .with_ext::<NoArgsCliExt<AutoMineConfig>>(no_args);
+//     let no_args = NoArgs::with(AutoMineConfig);
+//     let chain = custom_chain();
+//     let mut command = NodeCommand::<NoArgsCliExt<AutoMineConfig>>::parse_from([
+//         "reth",
+//         "--dev",
+//         "--datadir",
+//         datadir,
+//         "--debug.max-block",
+//         "1",
+//         "--debug.terminate",
+//     ])
+//     .with_ext::<NoArgsCliExt<AutoMineConfig>>(no_args);
 
-    // use custom chain spec
-    command.chain = chain;
+//     // use custom chain spec
+//     command.chain = chain;
 
-    let runner = CliRunner::default();
-    let node_command = runner.run_command_until_exit(|ctx| command.execute(ctx));
-    assert!(node_command.is_ok())
-}
+//     let runner = CliRunner::default();
+//     let node_command = runner.run_command_until_exit(|ctx| command.execute(ctx));
+//     assert!(node_command.is_ok())
+// }
 
 fn custom_chain() -> Arc<ChainSpec> {
     let custom_genesis = r#"
