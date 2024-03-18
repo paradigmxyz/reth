@@ -15,7 +15,7 @@ use reth::{
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use reth_primitives::{Address, BlockNumberOrTag, B256};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {
@@ -40,6 +40,8 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 
     let eth_attr = eth_payload_attributes();
     let payload_id = node.payload_builder.new_payload(eth_attr).await?;
+    // give it some time to build
+    tokio::time::sleep(Duration::from_millis(10)).await;
 
     let client = node.auth_server_handle().http_client();
 
@@ -68,10 +70,8 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     assert!(fcu.is_valid());
 
     let head = notifications.next().await.unwrap();
-    while let Some(tx) = head.tip().transactions().next() {
-        assert_eq!(tx.hash(), transfer_tx.hash);
-        break;
-    }
+    let tx = head.tip().transactions().next().unwrap();
+    assert_eq!(tx.hash(), transfer_tx.hash);
 
     let latest_block = node.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap();
     assert_eq!(latest_block.hash_slow(), hash);
