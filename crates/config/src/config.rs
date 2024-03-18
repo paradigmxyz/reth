@@ -671,4 +671,21 @@ nanos = 0
 #";
         let _conf: Config = toml::from_str(alpha_0_0_19).unwrap();
     }
+
+    #[test]
+    fn test_conf_trust_nodes_only() {
+        let trusted_nodes_only = r"#
+[peers]
+trusted_nodes_only = true
+#";
+        let conf: Config = toml::from_str(trusted_nodes_only).unwrap();
+        assert!(conf.peers.trusted_nodes_only);
+
+        let trusted_nodes_only = r"#
+[peers]
+connect_trusted_nodes_only = true
+#";
+        let conf: Config = toml::from_str(trusted_nodes_only).unwrap();
+        assert!(conf.peers.trusted_nodes_only);
+    }
 }

@@ -172,7 +172,7 @@ impl Command {
                     let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
                     let mut config = config;
-                    config.peers.connect_trusted_nodes_only = self.network.trusted_only;
+                    config.peers.trusted_nodes_only = self.network.trusted_only;
                     if !self.network.trusted_peers.is_empty() {
                         self.network.trusted_peers.iter().for_each(|peer| {
                             config.peers.trusted_nodes.insert(*peer);
