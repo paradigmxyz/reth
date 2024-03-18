@@ -374,14 +374,7 @@ impl NodeConfig {
         info!(target: "reth::cli", "Connecting to P2P network");
         let secret_key = self.network_secret(data_dir)?;
         let default_peers_path = data_dir.known_peers_path();
-        Ok(self.load_network_config(
-            config,
-            client,
-            executor,
-            head,
-            secret_key,
-            default_peers_path,
-        ))
+        Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
 
     /// Create the [NetworkBuilder].

@@ -1528,7 +1528,7 @@ mod test {
             RequestTxHashes::new(request_hashes.into_iter().collect::<HashSet<_>>());
 
         // but response contains tx 1 + another tx
-        let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2.clone()]);
+        let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2]);
         let payload = UnverifiedPooledTransactions::new(response_txns);
 
         let (outcome, verified_payload) = payload.verify(&request_hashes, &PeerId::ZERO);
