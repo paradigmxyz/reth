@@ -6,7 +6,7 @@ use reth_interfaces::db::LogLevel;
 use crate::version::default_client_version;
 
 /// Parameters for database configuration
-#[derive(Debug, Args, PartialEq, Default, Clone, Copy)]
+#[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
 #[command(next_help_heading = "Database")]
 pub struct DatabaseArgs {
     /// Database logging level. Levels higher than "notice" require a debug build.

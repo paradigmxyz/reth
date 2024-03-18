@@ -23,20 +23,20 @@ use std::borrow::Cow;
 /// Response object of GET `/eth/v1/builder/header/{slot}/{parent_hash}/{pubkey}`
 ///
 /// See also <https://ethereum.github.io/builder-specs/#/Builder/getHeader>
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GetExecutionPayloadHeaderResponse {
     pub version: String,
     pub data: ExecutionPayloadHeaderData,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPayloadHeaderData {
     pub message: ExecutionPayloadHeaderMessage,
     pub signature: String,
 }
 
 #[serde_as]
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPayloadHeaderMessage {
     pub header: ExecutionPayloadHeader,
     #[serde_as(as = "DisplayFromStr")]
@@ -46,7 +46,7 @@ pub struct ExecutionPayloadHeaderMessage {
 
 /// The header of the execution payload.
 #[serde_as]
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPayloadHeader {
     pub parent_hash: B256,
     pub fee_recipient: Address,
