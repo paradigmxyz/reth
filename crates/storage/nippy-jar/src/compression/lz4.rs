@@ -2,7 +2,7 @@ use crate::{compression::Compression, NippyJarError};
 use serde::{Deserialize, Serialize};
 
 /// Wrapper type for `lz4_flex` that implements [`Compression`].
-#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[non_exhaustive]
 pub struct Lz4;
 
