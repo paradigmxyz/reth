@@ -176,8 +176,7 @@ impl Stream for MergedUpdateStream {
             // `discv5::Event::SessionEstablished` event + check the enr for contactable address,
             // to determine if discv4 should be notified.
             //
-            if discv5::IpMode::Ip4.get_contactable_addr(enr).is_none() &&
-                discv5::IpMode::Ip6.get_contactable_addr(enr).is_none()
+            if discv5::IpMode::DualStack.get_contactable_addr(enr).is_none()
             {
                 cx.waker().wake_by_ref();
                 return Poll::Pending
