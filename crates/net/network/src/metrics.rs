@@ -75,7 +75,7 @@ pub struct NetworkMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct SessionManagerMetrics {
-    /// Number of dials that resulted in a peer being added to the peerset
+    /// Number of successful outgoing dial attempts.
     pub(crate) total_dial_successes: Counter,
 }
 
@@ -331,6 +331,7 @@ pub struct TxTypesCounter {
 
 impl TxTypesCounter {
     pub(crate) fn increase_by_tx_type(&mut self, tx_type: TxType) {
+        #[allow(unreachable_patterns)]
         match tx_type {
             TxType::Legacy => {
                 self.legacy += 1;
@@ -344,8 +345,7 @@ impl TxTypesCounter {
             TxType::Eip4844 => {
                 self.eip4844 += 1;
             }
-            #[cfg(feature = "optimism")]
-            TxType::Deposit => {}
+            _ => {}
         }
     }
 }

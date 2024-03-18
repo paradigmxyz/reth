@@ -914,6 +914,8 @@ impl EthPooledTransaction {
     /// [EthBlobTransactionSidecar::Missing]
     pub fn new(transaction: TransactionSignedEcRecovered, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
+
+        #[allow(unreachable_patterns)]
         let gas_cost = match &transaction.transaction {
             Transaction::Legacy(t) => {
                 U256::from(t.gas_price).saturating_mul(U256::from(t.gas_limit))
@@ -928,8 +930,7 @@ impl EthPooledTransaction {
                 blob_sidecar = EthBlobTransactionSidecar::Missing;
                 U256::from(t.max_fee_per_gas).saturating_mul(U256::from(t.gas_limit))
             }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => U256::ZERO,
+            _ => U256::ZERO,
         };
         let mut cost = transaction.value();
         cost = cost.saturating_add(gas_cost);
@@ -1009,13 +1010,13 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     fn max_fee_per_gas(&self) -> u128 {
+        #[allow(unreachable_patterns)]
         match &self.transaction.transaction {
             Transaction::Legacy(tx) => tx.gas_price,
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(tx) => tx.max_fee_per_gas,
             Transaction::Eip4844(tx) => tx.max_fee_per_gas,
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => 0,
+            _ => 0,
         }
     }
 
@@ -1027,12 +1028,12 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        #[allow(unreachable_patterns)]
         match &self.transaction.transaction {
             Transaction::Legacy(_) | Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => None,
+            _ => None,
         }
     }
 

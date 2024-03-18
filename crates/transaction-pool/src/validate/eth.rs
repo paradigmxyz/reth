@@ -709,7 +709,6 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
 #[cfg(test)]
 mod tests {
     // <https://github.com/paradigmxyz/reth/issues/5178>
-    #[cfg(not(feature = "optimism"))]
     #[tokio::test]
     async fn validate_transaction() {
         use super::*;
