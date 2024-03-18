@@ -2006,7 +2006,7 @@ mod tests {
                 assert_eq!(transactions.len(), 1);
             }
             Err(e) => {
-                panic!("error: {:?}", e);
+                panic!("error: {e:?}");
             }
         }
     }

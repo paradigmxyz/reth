@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn parse_table_from_str() {
         for table in Tables::ALL {
-            assert_eq!(format!("{:?}", table), table.name());
+            assert_eq!(format!("{table:?}"), table.name());
             assert_eq!(table.to_string(), table.name());
             assert_eq!(Tables::from_str(table.name()).unwrap(), *table);
         }
