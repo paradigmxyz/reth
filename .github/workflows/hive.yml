@@ -3,10 +3,10 @@
 name: hive
 
 on:
-  pull_request:
-  merge_group:
-  push:
-    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # every day
+    - cron: "0 0 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,7 +19,7 @@ jobs:
   prepare:
     timeout-minutes: 45
     runs-on:
-      group: ubuntu-latest
+      group: Reth
     steps:
       - uses: actions/checkout@v4
       - run: mkdir artifacts
@@ -63,7 +63,7 @@ jobs:
   prepare-discv5:
     timeout-minutes: 45
     runs-on:
-      group: ubuntu-latest
+      group: Reth
     steps:
       - uses: actions/checkout@v4
       - run: mkdir artifacts
@@ -211,7 +211,7 @@ jobs:
     needs: prepare
     name: run
     runs-on:
-      group: ubuntu-latest
+      group: Reth
     permissions:
       issues: write
     steps:
@@ -286,7 +286,7 @@ jobs:
     needs: prepare-discv5
     name: run discv5
     runs-on:
-      group: ubuntu-latest
+      group: Reth
     permissions:
       issues: write
     steps:
