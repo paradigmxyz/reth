@@ -9,7 +9,7 @@ use reth_db::{
     init_db, tables,
     transaction::DbTx,
 };
-use reth_node_core::init::init_genesis;
+use reth_node_core::{args::DatadirArgs, init::init_genesis};
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
 use reth_trie::StateRoot;
@@ -29,6 +29,10 @@ pub struct Command {
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
 
+    /// Configure data storage locations
+    #[command(flatten)]
+    datadir_args: DatadirArgs,
+
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -45,7 +49,8 @@ pub struct Command {
 impl Command {
     /// Execute `storage-tries` recovery command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
+        let data_dir =
+            self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, Default::default())?);

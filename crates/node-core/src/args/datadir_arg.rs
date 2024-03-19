@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for datadir config
 
-use std::path::PathBuf;
 use clap::Args;
+use std::path::PathBuf;
 
 /// Parameters for database configuration
 #[derive(Debug, Args, PartialEq, Default, Clone)]

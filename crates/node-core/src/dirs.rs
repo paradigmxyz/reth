@@ -162,7 +162,7 @@ impl<D> PlatformPath<D> {
         ChainPath::new(platform_path, chain, datadir_args)
     }
 
-    pub fn platform_path_from_chain(&self, chain: &Chain) -> PlatformPath<D> {
+    fn platform_path_from_chain(&self, chain: &Chain) -> PlatformPath<D> {
         let chain_name = config_path_prefix(chain);
         let path = self.0.join(chain_name);
         PlatformPath::<D>(path, std::marker::PhantomData)
@@ -186,9 +186,11 @@ impl<D: XdgPath> MaybePlatformPath<D> {
     /// Returns the path if it is set, otherwise returns the default path for the given chain.
     pub fn unwrap_or_chain_default(&self, chain: Chain, datadir_args: DatadirArgs) -> ChainPath<D> {
         ChainPath(
-            self.0.clone().unwrap_or_else(|| PlatformPath::default().platform_path_from_chain(&chain)),
+            self.0
+                .clone()
+                .unwrap_or_else(|| PlatformPath::default().platform_path_from_chain(&chain)),
             chain,
-            datadir_args
+            datadir_args,
         )
     }
 

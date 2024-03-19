@@ -3,8 +3,8 @@
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
-        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
-        RpcServerArgs, TxPoolArgs, DatadirArgs
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
+        PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
@@ -30,7 +30,7 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     pub datadir: MaybePlatformPath<DataDirPath>,
 
     /// Configure data storage locations
-    #[arg(long, value_name = "DATA_DIR_ARGS")]
+    #[command(flatten)]
     pub datadir_args: DatadirArgs,
 
     /// The path to the configuration file to use.
