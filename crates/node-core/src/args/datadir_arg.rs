@@ -8,7 +8,7 @@ use std::path::PathBuf;
 #[command(next_help_heading = "Datadir")]
 pub struct DatadirArgs {
     /// Set the absolute path to static files
-    #[arg(long = "datadir.static_files")]
+    #[arg(long = "datadir.static_files", help_heading = "Datadir", value_name = "PATH")]
     pub static_files_path: Option<PathBuf>,
 }
 

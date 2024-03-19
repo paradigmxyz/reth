@@ -6,7 +6,7 @@ use crate::{
     args::{
         get_secret_key,
         utils::{chain_help, chain_spec_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, NetworkArgs, StageEnum,
+        DatabaseArgs, DatadirArgs, NetworkArgs, StageEnum,
     },
     dirs::{DataDirPath, MaybePlatformPath},
     prometheus_exporter,
@@ -49,6 +49,10 @@ pub struct Command {
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
+
+    /// Configure data storage locations
+    #[arg(long, value_name = "DATA_DIR_ARGS")]
+    datadir_args: DatadirArgs,
 
     /// The chain this node is running.
     ///
@@ -127,8 +131,9 @@ impl Command {
         let _ = fdlimit::raise_fd_limit();
 
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
+        let data_dir =
+            self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
+        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
 
         let config: Config = confy::load_path(config_path).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", SHORT_VERSION, self.stage);

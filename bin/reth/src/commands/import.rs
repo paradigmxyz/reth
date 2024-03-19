@@ -3,7 +3,7 @@
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
+        DatabaseArgs, DatadirArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
     version::SHORT_VERSION,
@@ -68,6 +68,10 @@ pub struct ImportCommand {
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
 
+    /// Configure data storage locations
+    #[arg(long, value_name = "DATA_DIR_ARGS")]
+    datadir_args: DatadirArgs,
+
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -123,8 +127,9 @@ impl ImportCommand {
         );
 
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
+        let data_dir =
+            self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
+        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
 
         let mut config: Config = self.load_config(config_path.clone())?;
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");

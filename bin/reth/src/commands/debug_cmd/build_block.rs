@@ -3,7 +3,7 @@
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
+        DatabaseArgs, DatadirArgs
     },
     dirs::{DataDirPath, MaybePlatformPath},
 };
@@ -63,6 +63,10 @@ pub struct Command {
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
 
+    /// Configure data storage locations
+    #[arg(long, value_name = "DATA_DIR_ARGS")]
+    datadir_args: DatadirArgs,
+
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -114,7 +118,7 @@ impl Command {
         let factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+            self.datadir.unwrap_or_chain_default(self.chain.chain, self.data).static_files_path(),
         )?;
         let provider = factory.provider()?;
 
@@ -147,7 +151,7 @@ impl Command {
     /// Execute `debug in-memory-merkle` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone().clone());
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
 

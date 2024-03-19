@@ -49,7 +49,7 @@ pub struct Command {
 impl Command {
     /// Execute `storage-tries` recovery command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.database_args())?);

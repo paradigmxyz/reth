@@ -290,7 +290,7 @@ impl<D> ChainPath<D> {
 
     /// Returns the path to the static_files directory for this chain.
     pub fn static_files_path(&self) -> PathBuf {
-        let datadir_args = &self.2; // Accessing DatadirArgs from the tuple
+        let datadir_args = &self.2;
         if let Some(static_path) = &datadir_args.static_files_path {
             static_path.to_path_buf()
         } else {

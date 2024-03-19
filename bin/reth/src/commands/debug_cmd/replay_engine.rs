@@ -2,7 +2,7 @@ use crate::{
     args::{
         get_secret_key,
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, NetworkArgs,
+        DatabaseArgs, NetworkArgs, DatadirArgs
     },
     dirs::{DataDirPath, MaybePlatformPath},
 };
@@ -48,6 +48,10 @@ pub struct Command {
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
+
+    /// Configure data storage locations
+    #[arg(long, value_name = "DATA_DIR_ARGS")]
+    datadir_args: DatadirArgs,
 
     /// The chain this node is running.
     ///
@@ -98,7 +102,7 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone()).static_files_path(),
             )?)
             .start_network()
             .await?;
@@ -112,7 +116,7 @@ impl Command {
         let config = Config::default();
 
         // Add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
 
