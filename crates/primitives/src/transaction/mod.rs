@@ -186,6 +186,8 @@ impl Transaction {
 
     /// Get the transaction's address of the contract that will be called, or the address that will
     /// receive the transfer.
+    ///
+    /// Returns `None` if this is a `CREATE` transaction.
     pub fn to(&self) -> Option<Address> {
         self.kind().to()
     }
