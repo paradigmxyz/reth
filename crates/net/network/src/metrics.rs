@@ -34,6 +34,12 @@ pub struct NetworkMetrics {
     /// Number of active outgoing connections
     pub(crate) outgoing_connections: Gauge,
 
+    /// Number of currently pending outgoing connections
+    pub(crate) pending_outgoing_connections: Gauge,
+
+    /// Total number of pending connections, incoming and outgoing.
+    pub(crate) total_pending_connections: Gauge,
+
     /// Total Number of incoming connections handled
     pub(crate) total_incoming_connections: Counter,
 
