@@ -349,7 +349,7 @@ where
                     // is stripped from the transaction and not included in a block.
                     // check if the blob is in the store, if it's included we previously validated
                     // it and inserted it
-                    if let Ok(true) = self.blob_store.contains(*transaction.hash()) {
+                    if matches!(self.blob_store.contains(*transaction.hash()), Ok(true)) {
                         // validated transaction is already in the store
                     } else {
                         return TransactionValidationOutcome::Invalid(

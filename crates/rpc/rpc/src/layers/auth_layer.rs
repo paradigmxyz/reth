@@ -241,7 +241,7 @@ mod tests {
         let server = spawn_server().await;
         let client = hyper::Client::new();
 
-        let jwt = jwt.unwrap_or("".into());
+        let jwt = jwt.unwrap_or_default();
         let address = format!("http://{AUTH_ADDR}:{AUTH_PORT}");
         let bearer = format!("Bearer {jwt}");
         let body = r#"{"jsonrpc": "2.0", "method": "greet_melkor", "params": [], "id": 1}"#;

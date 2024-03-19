@@ -944,7 +944,7 @@ impl TransactionFetcher {
                 let (verification_outcome, verified_payload) =
                     payload.verify(&requested_hashes, &peer_id);
 
-                if let VerificationOutcome::ReportPeer = verification_outcome {
+                if verification_outcome == VerificationOutcome::ReportPeer {
                     // todo: report peer for sending hashes that weren't requested
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
@@ -971,7 +971,7 @@ impl TransactionFetcher {
                 // passing the rlp encoded length down from active session along with the decoded
                 // tx.
 
-                if let FilterOutcome::ReportPeer = validation_outcome {
+                if validation_outcome == FilterOutcome::ReportPeer {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         unvalidated_payload_len=unvalidated_payload_len,

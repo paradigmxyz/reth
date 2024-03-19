@@ -235,7 +235,7 @@ mod tests {
     fn parse_discovery_addr() {
         let cmd =
             NodeCommand::try_parse_args_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
-        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
+        assert_eq!(cmd.network.discovery.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
     #[test]
@@ -248,8 +248,8 @@ mod tests {
             "127.0.0.1",
         ])
         .unwrap();
-        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
-        assert_eq!(cmd.network.addr, Ipv4Addr::LOCALHOST);
+        assert_eq!(cmd.network.discovery.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(cmd.network.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
     #[test]
@@ -286,14 +286,14 @@ mod tests {
             NodeCommand::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let config_path = cmd.config.unwrap_or(data_dir.config_path());
+        let config_path = cmd.config.unwrap_or_else(|| data_dir.config_path());
         assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
         let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let config_path = cmd.config.clone().unwrap_or(data_dir.config_path());
+        let config_path = cmd.config.clone().unwrap_or_else(|| data_dir.config_path());
         let end = format!("reth/{}/reth.toml", SUPPORTED_CHAINS[0]);
         assert!(config_path.ends_with(end), "{:?}", cmd.config);
     }

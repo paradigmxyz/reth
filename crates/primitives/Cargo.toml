@@ -44,8 +44,8 @@ once_cell.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2 = "0.10.7"
-tempfile.workspace = true
+sha2 = { version = "0.10.7", optional = true }
+tempfile = { workspace = true, optional = true }
 thiserror.workspace = true
 zstd = { version = "0.12", features = ["experimental"] }
 roaring = "0.10.2"
@@ -101,7 +101,7 @@ arbitrary = [
     "dep:proptest",
     "dep:proptest-derive",
 ]
-c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg"]
+c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:sha2", "dep:tempfile"]
 clap = ["dep:clap"]
 optimism = [
     "reth-codecs/optimism",
@@ -117,7 +117,7 @@ harness = false
 
 [[bench]]
 name = "validate_blob_tx"
-required-features = ["arbitrary"]
+required-features = ["arbitrary", "c-kzg"]
 harness = false
 
 [[bench]]
