@@ -56,8 +56,7 @@ impl InitCommand {
         let db = Arc::new(init_db(&db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
 
-        let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
+        let provider_factory = ProviderFactory::new(db, self.chain, data_dir.static_files_path())?;
 
         info!(target: "reth::cli", "Writing genesis block");
 

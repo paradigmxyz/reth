@@ -2359,8 +2359,7 @@ mod tests {
 
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
         let first = f.validated(tx.clone());
-        let first_added =
-            pool.add_transaction(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let first_added = pool.add_transaction(first, on_chain_balance, on_chain_nonce).unwrap();
         let replacement = f.validated(tx.rng_hash().inc_price());
         let replacement_added =
             pool.add_transaction(replacement.clone(), on_chain_balance, on_chain_nonce).unwrap();
@@ -2698,7 +2697,7 @@ mod tests {
         pool.add_transaction(f.validated(tx.clone()), U256::from(1_000), 0).unwrap();
 
         // Create another mock transaction with an incremented price.
-        let tx1 = tx.inc_price().next().clone();
+        let tx1 = tx.inc_price().next();
 
         // Validate the second mock transaction and add it to the pool.
         let tx1_validated = f.validated(tx1.clone());
@@ -2897,13 +2896,13 @@ mod tests {
         let tx_2 = tx_1.next();
 
         // Create 4 transactions
-        let v0 = f.validated(tx_0.clone());
+        let v0 = f.validated(tx_0);
         let v1 = f.validated(tx_1);
         let v2 = f.validated(tx_2);
 
         // Add first 2 to the pool
         let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
-        let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce).unwrap();
 
         assert!(pool.queued_transactions().is_empty());
         assert_eq!(2, pool.pending_transactions().len());
@@ -2912,7 +2911,7 @@ mod tests {
         pool.prune_transaction_by_hash(v0.hash());
 
         // Now add transaction with nonce 2
-        let _res = pool.add_transaction(v2.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v2, on_chain_balance, on_chain_nonce).unwrap();
 
         // v2 is in the queue now. v1 is still in 'pending'.
         assert_eq!(1, pool.queued_transactions().len());
@@ -2942,7 +2941,7 @@ mod tests {
         let tx_1 = tx_0.next();
 
         // Create 2 transactions
-        let v0 = f.validated(tx_0.clone());
+        let v0 = f.validated(tx_0);
         let v1 = f.validated(tx_1);
 
         // Add them to the pool
@@ -2971,14 +2970,14 @@ mod tests {
         let tx_3 = tx_2.next();
 
         // Create 4 transactions
-        let v0 = f.validated(tx_0.clone());
+        let v0 = f.validated(tx_0);
         let v1 = f.validated(tx_1);
         let v2 = f.validated(tx_2);
         let v3 = f.validated(tx_3);
 
         // Add first 2 to the pool
         let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
-        let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce).unwrap();
 
         assert_eq!(0, pool.queued_transactions().len());
         assert_eq!(2, pool.pending_transactions().len());
@@ -2987,7 +2986,7 @@ mod tests {
         pool.remove_transaction(v0.id());
 
         // Now add transaction with nonce 2
-        let _res = pool.add_transaction(v2.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v2, on_chain_balance, on_chain_nonce).unwrap();
 
         // v2 is in the queue now. v1 is still in 'pending'.
         assert_eq!(1, pool.queued_transactions().len());
@@ -3008,7 +3007,7 @@ mod tests {
         assert_eq!(2, pool.pending_transactions().len());
 
         // Add transaction v3 - it 'unclogs' everything.
-        let _res = pool.add_transaction(v3.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v3, on_chain_balance, on_chain_nonce).unwrap();
         assert_eq!(0, pool.queued_transactions().len());
         assert_eq!(3, pool.pending_transactions().len());
 

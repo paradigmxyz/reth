@@ -376,11 +376,8 @@ mod tests {
     fn only_one() {
         let (provider_factory, static_file_provider, _temp_static_files_dir) = setup();
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory,
-            static_file_provider.clone(),
-            PruneModes::default(),
-        );
+        let static_file_producer =
+            StaticFileProducer::new(provider_factory, static_file_provider, PruneModes::default());
 
         let (tx, rx) = channel();
 
