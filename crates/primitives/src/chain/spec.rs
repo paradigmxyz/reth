@@ -1626,7 +1626,7 @@ mod tests {
                     expected_id, &computed_id,
                     "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for hardfork {hardfork}"
                 );
-                if let Hardfork::Shanghai = hardfork {
+                if matches!(hardfork, Hardfork::Shanghai) {
                     if let Some(shangai_id) = spec.shanghai_fork_id() {
                         assert_eq!(
                             expected_id, &shangai_id,

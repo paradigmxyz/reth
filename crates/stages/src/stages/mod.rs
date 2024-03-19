@@ -170,7 +170,7 @@ mod tests {
                 ..Default::default()
             };
 
-            if let Some(PruneMode::Full) = prune_modes.account_history {
+            if prune_modes.account_history == Some(PruneMode::Full) {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {
@@ -186,7 +186,7 @@ mod tests {
                 ..Default::default()
             };
 
-            if let Some(PruneMode::Full) = prune_modes.storage_history {
+            if prune_modes.storage_history == Some(PruneMode::Full) {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {

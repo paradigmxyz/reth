@@ -649,7 +649,7 @@ where
         let (validation_outcome, mut partially_valid_msg) =
             self.transaction_fetcher.filter_valid_message.partially_filter_valid_entries(msg);
 
-        if let FilterOutcome::ReportPeer = validation_outcome {
+        if validation_outcome == FilterOutcome::ReportPeer {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
@@ -698,7 +698,7 @@ where
                 .filter_valid_entries_66(partially_valid_msg)
         };
 
-        if let FilterOutcome::ReportPeer = validation_outcome {
+        if validation_outcome == FilterOutcome::ReportPeer {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
