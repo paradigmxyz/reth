@@ -1286,7 +1286,7 @@ impl TransactionSigned {
         let signature = Signature::decode(data)?;
 
         #[cfg(feature = "optimism")]
-        let signature = if let TxType::Deposit = tx_type {
+        let signature = if tx_type == TxType::Deposit {
             Signature::optimism_deposit_tx_signature()
         } else {
             Signature::decode(data)?
