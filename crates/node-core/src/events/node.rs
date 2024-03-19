@@ -147,32 +147,54 @@ impl<DB> NodeState<DB> {
                     current_stage.eta.update(stage_id, checkpoint);
 
                     let target = OptionalField(current_stage.target);
-                    let stage_progress = OptionalField(
-                        checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
-                    );
+                    let stage_progress =
+                        checkpoint.entities().and_then(|entities| entities.fmt_percentage());
+                    let stage_eta = current_stage.eta.fmt_for_stage(stage_id);
 
                     let message =
                         if done { "Stage finished executing" } else { "Stage committed progress" };
 
-                    if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
-                        info!(
-                            pipeline_stages = %pipeline_stages_progress,
-                            stage = %stage_id,
-                            checkpoint = %checkpoint.block_number,
-                            %target,
-                            %stage_progress,
-                            %stage_eta,
-                            "{message}",
-                        )
-                    } else {
-                        info!(
-                            pipeline_stages = %pipeline_stages_progress,
-                            stage = %stage_id,
-                            checkpoint = %checkpoint.block_number,
-                            %target,
-                            %stage_progress,
-                            "{message}",
-                        )
+                    match (stage_progress, stage_eta) {
+                        (Some(stage_progress), Some(stage_eta)) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_progress,
+                                %stage_eta,
+                                "{message}",
+                            )
+                        }
+                        (Some(stage_progress), None) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_progress,
+                                "{message}",
+                            )
+                        }
+                        (None, Some(stage_eta)) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_eta,
+                                "{message}",
+                            )
+                        }
+                        (None, None) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                "{message}",
+                            )
+                        }
                     }
                 }
 
