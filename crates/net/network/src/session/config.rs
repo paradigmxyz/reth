@@ -11,6 +11,9 @@ use std::time::Duration;
 /// This represents the amount of time we wait for a response until we consider it timed out.
 pub const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Default timeout after which a pending session attempt is considered failed.
+pub const PENDING_SESSION_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// Default timeout after which we'll consider the peer to be in violation of the protocol.
 ///
 /// This is the time a peer has to answer a response.
@@ -48,6 +51,8 @@ pub struct SessionsConfig {
     /// `PROTOCOL_BREACH_REQUEST_TIMEOUT`) this is considered a protocol violation and results in a
     /// dropped session.
     pub protocol_breach_request_timeout: Duration,
+    /// The timeout after which a pending session attempt is considered failed.
+    pub pending_session_timeout: Duration,
 }
 
 impl Default for SessionsConfig {
@@ -66,6 +71,7 @@ impl Default for SessionsConfig {
             limits: Default::default(),
             initial_internal_request_timeout: INITIAL_REQUEST_TIMEOUT,
             protocol_breach_request_timeout: PROTOCOL_BREACH_REQUEST_TIMEOUT,
+            pending_session_timeout: PENDING_SESSION_TIMEOUT,
         }
     }
 }
