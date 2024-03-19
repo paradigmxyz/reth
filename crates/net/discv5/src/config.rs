@@ -56,13 +56,15 @@ impl DiscV5ConfigBuilder {
     pub fn build(self) -> DiscV5Config {
         let Self { discv5_config, bootstrap_nodes, fork_id } = self;
 
-        let discv5_config =
-            discv5_config.unwrap_or(discv5::ConfigBuilder::new(ListenConfig::default()).build());
+        let discv5_config = discv5_config
+            .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
         #[cfg(not(feature = "optimism"))]
-        let fork_id = fork_id.unwrap_or(MAINNET.hardfork_fork_id(Hardfork::latest()).unwrap());
+        let fork_id =
+            fork_id.unwrap_or_else(|| MAINNET.hardfork_fork_id(Hardfork::latest()).unwrap());
         #[cfg(feature = "optimism")]
-        let fork_id = fork_id.unwrap_or(BASE_MAINNET.hardfork_fork_id(Hardfork::latest()).unwrap());
+        let fork_id =
+            fork_id.unwrap_or_else(|| BASE_MAINNET.hardfork_fork_id(Hardfork::latest()).unwrap());
 
         DiscV5Config { discv5_config, bootstrap_nodes, fork_id }
     }
