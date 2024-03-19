@@ -5,6 +5,7 @@ use reth_network_api::{NetworkInfo, PeerKind, Peers};
 use reth_primitives::{ChainSpec, NodeRecord};
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_types::{NodeInfo, PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo};
+use std::sync::Arc;
 
 /// `admin` API implementation.
 ///
@@ -13,13 +14,13 @@ pub struct AdminApi<N> {
     /// An interface to interact with the network
     network: N,
     /// The specification of the blockchain's configuration.
-    chain_spec: ChainSpec,
+    chain_spec: Arc<ChainSpec>,
 }
 
 impl<N> AdminApi<N> {
     /// Creates a new instance of `AdminApi`.
     pub fn new(network: N, chain_spec: ChainSpec) -> Self {
-        AdminApi { network, chain_spec }
+        AdminApi { network, chain_spec: chain_spec.into() }
     }
 }
 
