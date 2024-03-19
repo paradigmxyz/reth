@@ -652,11 +652,12 @@ impl SealedHeader {
         chain_spec: &ChainSpec,
     ) -> Result<(), HeaderValidationError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
-        let mut parent_gas_limit = parent.gas_limit;
-        if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
-            parent_gas_limit =
-                parent.gas_limit * chain_spec.base_fee_params(self.timestamp).elasticity_multiplier;
-        }
+        let parent_gas_limit =
+            if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
+                parent.gas_limit * chain_spec.base_fee_params(self.timestamp).elasticity_multiplier
+            } else {
+                parent.gas_limit
+            };
 
         // Check for an increase in gas limit beyond the allowed threshold.
         if self.gas_limit > parent_gas_limit {

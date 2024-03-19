@@ -7,6 +7,7 @@
 )]
 #![cfg_attr(all(not(test), feature = "optimism"), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![allow(clippy::useless_let_if_seq)]
 
 #[cfg(feature = "optimism")]
 pub use builder::*;
