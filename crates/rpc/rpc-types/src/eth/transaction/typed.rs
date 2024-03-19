@@ -3,9 +3,8 @@
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
 use alloy_primitives::{Address, Bytes, B256, U256, U64};
-use alloy_rlp::{BufMut, Decodable, EMPTY_STRING_CODE, Encodable, Error as RlpError};
+use alloy_rlp::{Buf, BufMut, Decodable, EMPTY_STRING_CODE, Encodable, Error as RlpError};
 use alloy_rpc_types::{AccessList, BlobTransactionSidecar};
-use bytes::Buf;
 use serde::{Deserialize, Serialize};
 
 /// Container type for various Ethereum transaction requests
