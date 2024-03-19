@@ -428,8 +428,8 @@ mod tests {
         let account2 = AccountInfo { nonce: 2, ..Default::default() };
 
         let bundle_state = BundleState::builder(2..=2)
-            .state_present_account_info(address1, account1.clone())
-            .state_present_account_info(address2, account2.clone())
+            .state_present_account_info(address1, account1)
+            .state_present_account_info(address2, account2)
             .state_storage(address1, HashMap::from([(slot1, (U256::ZERO, U256::from(10)))]))
             .state_storage(address2, HashMap::from([(slot2, (U256::ZERO, U256::from(20)))]))
             .build();
