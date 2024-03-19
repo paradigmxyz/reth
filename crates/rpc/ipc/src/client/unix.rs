@@ -45,10 +45,7 @@ impl TransportSenderT for Sender {
 /// Receiving end of IPC transport.
 #[derive(Debug)]
 pub(crate) struct Receiver {
-    #[cfg(unix)]
     pub(crate) inner: FramedRead<OwnedReadHalf, StreamCodec>,
-    #[cfg(windows)]
-    inner: FramedRead<Arc<NamedPipeClient>, StreamCodec>,
 }
 
 #[async_trait::async_trait]
@@ -67,17 +64,6 @@ impl TransportReceiverT for Receiver {
 pub(crate) struct IpcTransportClientBuilder;
 
 impl IpcTransportClientBuilder {
-    /// Try to establish the connection.
-    ///
-    /// ```
-    /// use jsonrpsee::{core::client::ClientT, rpc_params};
-    /// use reth_ipc::client::IpcClientBuilder;
-    /// # async fn run_client() -> Result<(), Box<dyn std::error::Error +  Send + Sync>> {
-    /// let client = IpcClientBuilder::default().build("/tmp/my-uds").await?;
-    /// let response: String = client.request("say_hello", rpc_params![]).await?;
-    /// #   Ok(())
-    /// # }
-    /// ```
     pub(crate) async fn build(
         self,
         path: impl AsRef<Path>,
