@@ -2097,8 +2097,7 @@ dependencies = [
 [[package]]
 name = "discv5"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bac33cb3f99889a57e56a8c6ccb77aaf0cfc7787602b7af09783f736d77314e1"
+source = "git+https://github.com/sigp/discv5?rev=04ac004#04ac0042a345a9edf93b090007e5d31c008261ed"
 dependencies = [
  "aes 0.7.5",
  "aes-gcm",
@@ -5720,9 +5719,11 @@ name = "reth-discv4"
 version = "0.2.0-beta.3"
 dependencies = [
  "alloy-rlp",
+ "derive_more",
  "discv5",
  "enr",
  "generic-array",
+ "itertools 0.12.1",
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "reth-net-common",
@@ -5732,6 +5733,29 @@ dependencies = [
  "rlp",
  "secp256k1 0.27.0",
  "serde",
+ "smallvec",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
+name = "reth-discv5"
+version = "0.2.0-beta.3"
+dependencies = [
+ "alloy-rlp",
+ "derive_more",
+ "discv5",
+ "enr",
+ "futures",
+ "parking_lot 0.12.1",
+ "pin-project",
+ "reth-discv4",
+ "reth-net-common",
+ "reth-primitives",
+ "rlp",
+ "secp256k1 0.27.0",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -5746,6 +5770,7 @@ dependencies = [
  "alloy-rlp",
  "data-encoding",
  "enr",
+ "futures",
  "linked_hash_set",
  "parking_lot 0.12.1",
  "reth-net-common",
@@ -5992,8 +6017,12 @@ dependencies = [
 name = "reth-net-common"
 version = "0.2.0-beta.3"
 dependencies = [
+ "alloy-rlp",
+ "derive_more",
+ "enr",
  "pin-project",
  "reth-primitives",
+ "secp256k1 0.27.0",
  "tokio",
 ]
 
@@ -6021,6 +6050,7 @@ dependencies = [
  "auto_impl",
  "criterion",
  "derive_more",
+ "discv5",
  "enr",
  "ethers-core",
  "ethers-providers",
@@ -6036,6 +6066,7 @@ dependencies = [
  "pprof",
  "rand 0.8.5",
  "reth-discv4",
+ "reth-discv5",
  "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",
@@ -6051,6 +6082,7 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
+ "rlp",
  "schnellru",
  "secp256k1 0.27.0",
  "serde",
@@ -6324,6 +6356,7 @@ dependencies = [
  "clap",
  "criterion",
  "derive_more",
+ "enr",
  "hash-db",
  "itertools 0.12.1",
  "modular-bitfield",
@@ -6578,12 +6611,14 @@ dependencies = [
  "alloy-rpc-types",
  "arbitrary",
  "bytes",
+ "enr",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "jsonrpsee-types",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
+ "reth-ethereum-forks",
  "secp256k1 0.27.0",
  "serde",
  "serde_json",

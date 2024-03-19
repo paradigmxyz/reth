@@ -25,8 +25,8 @@
 //!
 //!        * Responds to incoming ETH related requests: `Headers`, `Bodies`
 //!
-//!    - `Discovery Task`: is a spawned [`Discv4`](reth_discv4::Discv4) future that handles peer
-//!      discovery and emits new peers to the `Network`
+//!    - `Discovery Task`: is a spawned [`Discv4`] future that handles peer discovery and emits new
+//!      peers to the `Network`
 //!
 //!    - [`NetworkManager`] task advances the state of the `Network`, which includes:
 //!
@@ -138,12 +138,17 @@ pub mod transactions;
 
 pub use builder::NetworkBuilder;
 pub use config::{NetworkConfig, NetworkConfigBuilder};
-pub use discovery::{Discovery, DiscoveryEvent};
+pub use discovery::DiscoveryEvent;
 pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
 pub use network::{NetworkEvents, NetworkHandle, NetworkProtocols};
 pub use peers::PeersConfig;
+pub use reth_discv4::Discv4;
+pub use reth_discv5::{
+    discv5_downgrade_v4::DiscoveryUpdateV5, DiscV5WithV4Downgrade, MergedUpdateStream,
+};
+pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
 pub use session::{
     ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
     PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
@@ -151,4 +156,14 @@ pub use session::{
 };
 pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
 
-pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
+/// Discovery using [`Discv4`].
+#[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
+pub type Discovery = discovery::Discovery;
+
+/// Discovery version 5 with support for downgrading connections to version 4.
+#[cfg(feature = "discv5-downgrade-v4")]
+pub type Discovery = discovery::DiscoveryV5V4;
+
+/// Discovery version 5.
+#[cfg(feature = "discv5")]
+pub type Discovery = discovery::DiscoveryV5;

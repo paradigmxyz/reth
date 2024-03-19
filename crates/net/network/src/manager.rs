@@ -18,7 +18,6 @@
 use crate::{
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
-    discovery::Discovery,
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
@@ -33,7 +32,7 @@ use crate::{
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
-    FetchClient, NetworkBuilder,
+    Discovery, FetchClient, NetworkBuilder,
 };
 use futures::{pin_mut, Future, StreamExt};
 use parking_lot::Mutex;
@@ -178,6 +177,8 @@ where
             client,
             secret_key,
             mut discovery_v4_config,
+            #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+            discovery_v5_config,
             discovery_addr,
             listener_addr,
             peers_config,
@@ -213,9 +214,21 @@ where
             disc_config
         });
 
+        #[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
         let discovery =
             Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
                 .await?;
+
+        #[cfg(any(feature = "discv5-downgrade-v4", feature = "discv5"))]
+        let discovery = Discovery::start(
+            discovery_addr,
+            secret_key,
+            discovery_v4_config,
+            discovery_v5_config,
+            dns_discovery_config,
+        )
+        .await?;
+
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
         let discv4 = discovery.discv4();
