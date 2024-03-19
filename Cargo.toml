@@ -93,6 +93,7 @@ clippy.redundant_clone = "deny"
 clippy.trait_duplication_in_bounds = "deny"
 clippy.uninlined_format_args = "deny"
 clippy.equatable_if_let = "deny"
+clippy.or_fun_call = "deny"
 
 [workspace.package]
 version = "0.2.0-beta.3"

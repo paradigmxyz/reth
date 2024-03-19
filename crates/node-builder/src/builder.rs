@@ -470,7 +470,7 @@ where
         let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
         executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
 
-        let prune_config = config.prune_config()?.or(reth_config.prune.clone());
+        let prune_config = config.prune_config()?.or_else(|| reth_config.prune.clone());
 
         let evm_config = types.evm_config();
         let tree_config = BlockchainTreeConfig::default();
