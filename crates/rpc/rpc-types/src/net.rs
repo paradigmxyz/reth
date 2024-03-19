@@ -1,5 +1,7 @@
 use crate::PeerId;
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, RlpDecodable, RlpEncodable};
+use enr::Enr;
+use reth_ethereum_forks::ForkId;
 use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
@@ -9,6 +11,7 @@ use std::{
     num::ParseIntError,
     str::FromStr,
 };
+use thiserror::Error;
 use url::{Host, Url};
 
 /// Represents a ENR in discovery.
@@ -114,8 +117,8 @@ impl fmt::Display for NodeRecord {
     }
 }
 
-/// Possible error types when parsing a `NodeRecord`
-#[derive(Debug, thiserror::Error)]
+/// Possible error types when parsing a [`NodeRecord`]
+#[derive(Debug, Error)]
 pub enum NodeRecordParseError {
     /// Invalid url
     #[error("Failed to parse url: {0}")]
@@ -126,6 +129,9 @@ pub enum NodeRecordParseError {
     /// Invalid discport
     #[error("Failed to discport query: {0}")]
     Discport(ParseIntError),
+    /// Conversion from type [`Enr<SecretKey>`] failed.
+    #[error("failed to convert enr into dns node record, enr: {0}")]
+    ConversionFromEnrFailed(Enr<SecretKey>),
 }
 
 impl FromStr for NodeRecord {
@@ -165,10 +171,95 @@ impl FromStr for NodeRecord {
     }
 }
 
+impl TryFrom<Enr<SecretKey>> for NodeRecord {
+    type Error = NodeRecordParseError;
+
+    fn try_from(enr: Enr<SecretKey>) -> Result<Self, Self::Error> {
+        let Some(address) = enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))
+        else {
+            return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
+        };
+
+        #[cfg(not(any(feature = "discv5", feature = "discv5-downgrade-v4")))]
+        let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
+            return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
+        };
+        #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+        let tcp_port = enr.tcp4().or_else(|| enr.tcp6()).unwrap_or(0);
+
+        let Some(udp_port) = enr.udp4().or_else(|| enr.udp6()) else {
+            return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
+        };
+
+        let id = PeerId::from_slice(&enr.public_key().serialize_uncompressed()[1..]);
+
+        Ok(NodeRecord { address, tcp_port, udp_port, id }.into_ipv4_mapped())
+    }
+}
+
+/// Conversion from [`Enr`] to [`NodeRecordWithForkId`] failed.
+#[derive(Debug, Error)]
+pub enum NodeRecordWithForkIdParseError {
+    /// Missing key used to identify an execution layer enr.
+    #[error("fork id missing on enr, 'eth' key missing")]
+    ForkIdMissing,
+    /// Failed to decode fork ID rlp value.
+    #[error("failed to decode fork id, 'eth': {0:?}")]
+    ForkIdDecodeError(Vec<u8>),
+    /// Conversion from [`Enr`] into [`NodeRecord`] failed.
+    #[error(transparent)]
+    NodeRecordParseError(#[from] NodeRecordParseError),
+}
+
+/// The converted discovered [Enr] object
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct NodeRecordWithForkId<N = NodeRecord> {
+    /// Discovered node and it's addresses
+    pub node_record: N,
+    /// The forkid of the node, if present in the ENR
+    pub fork_id: Option<ForkId>,
+}
+
+impl TryFrom<Enr<SecretKey>> for NodeRecordWithForkId {
+    type Error = NodeRecordWithForkIdParseError;
+
+    fn try_from(enr: Enr<SecretKey>) -> Result<Self, Self::Error> {
+        // fork id is how we know this is an EL node, this isn't spec´d out but by precedent
+        let fork_id = get_fork_id(&enr)?;
+
+        let node_record = NodeRecord::try_from(enr)?;
+
+        Ok(NodeRecordWithForkId { node_record, fork_id: Some(fork_id) })
+    }
+}
+
+impl TryFrom<Enr<SecretKey>> for NodeRecordWithForkId<Enr<SecretKey>> {
+    type Error = NodeRecordWithForkIdParseError;
+
+    fn try_from(enr: Enr<SecretKey>) -> Result<Self, Self::Error> {
+        // fork id is how we know this is an EL node, this isn't spec´d out but by precedent
+        let fork_id = get_fork_id(&enr)?;
+
+        Ok(NodeRecordWithForkId { node_record: enr, fork_id: Some(fork_id) })
+    }
+}
+
+/// Tries to read the [`ForkId`] from given [`Enr`].
+pub fn get_fork_id(enr: &Enr<SecretKey>) -> Result<ForkId, NodeRecordWithForkIdParseError> {
+    let Some(mut maybe_fork_id) = enr.get(b"eth") else {
+        return Err(NodeRecordWithForkIdParseError::ForkIdMissing)
+    };
+
+    let Ok(fork_id) = ForkId::decode(&mut maybe_fork_id) else {
+        return Err(NodeRecordWithForkIdParseError::ForkIdDecodeError(maybe_fork_id.to_vec()))
+    };
+
+    Ok(fork_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rlp::Decodable;
     use rand::{thread_rng, Rng, RngCore};
     use std::net::Ipv6Addr;
 

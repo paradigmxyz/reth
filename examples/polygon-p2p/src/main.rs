@@ -29,6 +29,7 @@ use tokio_stream::StreamExt;
 pub mod chain_cfg;
 
 #[tokio::main]
+#[cfg(not(any(feature = "discv5", feature = "discv5-downgrade-v4")))]
 async fn main() {
     // The ECDSA private key used to create our enode identifier.
     let secret_key = SecretKey::new(&mut rand::thread_rng());

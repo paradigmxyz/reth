@@ -3,24 +3,17 @@
 use alloy_node_bindings::Geth;
 use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
-use reth_discv4::Discv4Config;
 use reth_eth_wire::DisconnectReason;
-use reth_interfaces::{
-    p2p::headers::client::{HeadersClient, HeadersRequest},
-    sync::{NetworkSyncUpdater, SyncState},
-};
 use reth_net_common::ban_list::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
     NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkManager, PeersConfig,
 };
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
-use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord, PeerId};
+use reth_primitives::{NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
-use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
-use tokio::task;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
@@ -194,116 +187,130 @@ async fn test_get_peer_by_id() {
     assert!(peer.is_none());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[ignore]
-async fn test_connect_with_boot_nodes() {
-    reth_tracing::init_test_tracing();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let mut discv4 = Discv4Config::builder();
-    discv4.add_boot_nodes(mainnet_nodes());
+#[cfg(not(feature = "discv5"))]
+mod discv4_tests {
+    use reth_discv4::Discv4Config;
+    use reth_interfaces::{
+        p2p::headers::client::{HeadersClient, HeadersRequest},
+        sync::{NetworkSyncUpdater, SyncState},
+    };
+    use reth_primitives::{mainnet_nodes, HeadersDirection};
+    use reth_transaction_pool::test_utils::testing_pool;
+    use tokio::task;
 
-    let config =
-        NetworkConfigBuilder::new(secret_key).discovery(discv4).build(NoopProvider::default());
-    let network = NetworkManager::new(config).await.unwrap();
+    use super::*;
 
-    let handle = network.handle().clone();
-    let mut events = handle.event_listener();
-    tokio::task::spawn(network);
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn test_connect_with_boot_nodes() {
+        reth_tracing::init_test_tracing();
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let mut discv4 = Discv4Config::builder();
+        discv4.add_boot_nodes(mainnet_nodes());
 
-    while let Some(ev) = events.next().await {
-        dbg!(ev);
-    }
-}
+        let config =
+            NetworkConfigBuilder::new(secret_key).discovery(discv4).build(NoopProvider::default());
+        let network = NetworkManager::new(config).await.unwrap();
 
-#[tokio::test(flavor = "multi_thread")]
-#[ignore]
-async fn test_connect_with_builder() {
-    reth_tracing::init_test_tracing();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let mut discv4 = Discv4Config::builder();
-    discv4.add_boot_nodes(mainnet_nodes());
+        let handle = network.handle().clone();
+        let mut events = handle.event_listener();
+        tokio::task::spawn(network);
 
-    let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
-    let (handle, network, _, requests) = NetworkManager::new(config)
-        .await
-        .unwrap()
-        .into_builder()
-        .request_handler(client)
-        .split_with_handle();
-
-    let mut events = handle.event_listener();
-
-    tokio::task::spawn(async move {
-        tokio::join!(network, requests);
-    });
-
-    let h = handle.clone();
-    task::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            dbg!(h.num_connected_peers());
+        while let Some(ev) = events.next().await {
+            dbg!(ev);
         }
-    });
-
-    while let Some(ev) = events.next().await {
-        dbg!(ev);
     }
-}
 
-// expects a `ENODE="enode://"` env var that holds the record
-#[tokio::test(flavor = "multi_thread")]
-#[ignore]
-async fn test_connect_to_trusted_peer() {
-    reth_tracing::init_test_tracing();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let discv4 = Discv4Config::builder();
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn test_connect_with_builder() {
+        reth_tracing::init_test_tracing();
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let mut discv4 = Discv4Config::builder();
+        discv4.add_boot_nodes(mainnet_nodes());
 
-    let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
-    let transactions_manager_config = config.transactions_manager_config.clone();
-    let (handle, network, transactions, requests) = NetworkManager::new(config)
-        .await
-        .unwrap()
-        .into_builder()
-        .request_handler(client)
-        .transactions(testing_pool(), transactions_manager_config)
-        .split_with_handle();
+        let client = NoopProvider::default();
+        let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
+        let (handle, network, _, requests) = NetworkManager::new(config)
+            .await
+            .unwrap()
+            .into_builder()
+            .request_handler(client)
+            .split_with_handle();
 
-    let mut events = handle.event_listener();
+        let mut events = handle.event_listener();
 
-    tokio::task::spawn(async move {
-        tokio::join!(network, requests, transactions);
-    });
+        tokio::task::spawn(async move {
+            tokio::join!(network, requests);
+        });
 
-    let node: NodeRecord = std::env::var("ENODE").unwrap().parse().unwrap();
+        let h = handle.clone();
+        task::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                dbg!(h.num_connected_peers());
+            }
+        });
 
-    handle.add_trusted_peer(node.id, node.tcp_addr());
-
-    let h = handle.clone();
-    h.update_sync_state(SyncState::Syncing);
-
-    task::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            dbg!(h.num_connected_peers());
+        while let Some(ev) = events.next().await {
+            dbg!(ev);
         }
-    });
+    }
 
-    let fetcher = handle.fetch_client().await.unwrap();
+    // expects a `ENODE="enode://"` env var that holds the record
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn test_connect_to_trusted_peer() {
+        reth_tracing::init_test_tracing();
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let discv4 = Discv4Config::builder();
 
-    let headers = fetcher
-        .get_headers(HeadersRequest {
-            start: 73174u64.into(),
-            limit: 10,
-            direction: HeadersDirection::Falling,
-        })
-        .await;
+        let client = NoopProvider::default();
+        let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
+        let transactions_manager_config = config.transactions_manager_config.clone();
+        let (handle, network, transactions, requests) = NetworkManager::new(config)
+            .await
+            .unwrap()
+            .into_builder()
+            .request_handler(client)
+            .transactions(testing_pool(), transactions_manager_config)
+            .split_with_handle();
 
-    dbg!(&headers);
+        let mut events = handle.event_listener();
 
-    while let Some(ev) = events.next().await {
-        dbg!(ev);
+        tokio::task::spawn(async move {
+            tokio::join!(network, requests, transactions);
+        });
+
+        let node: NodeRecord = std::env::var("ENODE").unwrap().parse().unwrap();
+
+        handle.add_trusted_peer(node.id, node.tcp_addr());
+
+        let h = handle.clone();
+        h.update_sync_state(SyncState::Syncing);
+
+        task::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                dbg!(h.num_connected_peers());
+            }
+        });
+
+        let fetcher = handle.fetch_client().await.unwrap();
+
+        let headers = fetcher
+            .get_headers(HeadersRequest {
+                start: 73174u64.into(),
+                limit: 10,
+                direction: HeadersDirection::Falling,
+            })
+            .await;
+
+        dbg!(&headers);
+
+        while let Some(ev) = events.next().await {
+            dbg!(ev);
+        }
     }
 }
 
