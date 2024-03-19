@@ -126,10 +126,13 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let static_file_provider = provider.static_file_provider();
 
         // We only use static files for Receipts, if there is no receipt pruning of any kind.
-        let mut static_file_producer = None;
-        if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
-            static_file_producer = Some(prepare_static_file_producer(provider, start_block)?);
-        }
+        let static_file_producer = if self.prune_modes.receipts.is_none() &&
+            self.prune_modes.receipts_log_filter.is_empty()
+        {
+            Some(prepare_static_file_producer(provider, start_block)?)
+        } else {
+            None
+        };
 
         // Build executor
         let mut executor = self.executor_factory.with_state(LatestStateProviderRef::new(
