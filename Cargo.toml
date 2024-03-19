@@ -195,13 +195,8 @@ reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 
 # revm
-revm = { version = "7.1.0", features = [
-    "std",
-    "secp256k1",
-], default-features = false }
-revm-primitives = { version = "3.0.0", features = [
-    "std",
-], default-features = false }
+revm = { version = "7.1.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "3.0.0", features = ["std"], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "f96bc1f" }
 
 # eth
@@ -277,9 +272,9 @@ discv5 = "0.4"
 igd-next = "0.14.3"
 
 # rpc
-jsonrpsee = { version = "0.20" }
-jsonrpsee-core = { version = "0.20" }
-jsonrpsee-types = { version = "0.20" }
+jsonrpsee = "0.20"
+jsonrpsee-core = "0.20"
+jsonrpsee-types = "0.20"
 
 # crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [

@@ -163,7 +163,7 @@ pub mod sigsegv_handler {
 }
 
 #[cfg(all(feature = "jemalloc", unix))]
-use jemallocator as _;
+use tikv_jemallocator as _;
 
 // for rendering diagrams
 use aquamarine as _;
