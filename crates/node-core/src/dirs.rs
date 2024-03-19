@@ -368,12 +368,12 @@ mod tests {
     fn test_maybe_data_dir_path() {
         let path = MaybePlatformPath::<DataDirPath>::default();
         let path = path.unwrap_or_chain_default(Chain::mainnet(), DatadirArgs::default());
-        assert!(path.as_ref().ends_with("reth/mainnet"), "{:?}", path);
+        assert!(path.as_ref().ends_with("reth/mainnet"), "{path:?}");
 
         let db_path = path.db_path();
         assert!(db_path.ends_with("reth/mainnet/db"), "{db_path:?}");
 
-        let path = MaybePlatformPath::<DataDirPath>::default();
+        let path = MaybePlatformPath::<DataDirPath>::from_str("my/path/to/datadir").unwrap();
         let path = path.unwrap_or_chain_default(Chain::mainnet(), DatadirArgs::default());
         assert!(path.as_ref().ends_with("my/path/to/datadir"), "{:?}", path);
     }
@@ -382,14 +382,14 @@ mod tests {
     fn test_maybe_testnet_datadir_path() {
         let path = MaybePlatformPath::<DataDirPath>::default();
         let path = path.unwrap_or_chain_default(Chain::goerli(), DatadirArgs::default());
-        assert!(path.as_ref().ends_with("reth/goerli"), "{:?}", path);
+        assert!(path.as_ref().ends_with("reth/goerli"), "{path:?}");
 
         let path = MaybePlatformPath::<DataDirPath>::default();
         let path = path.unwrap_or_chain_default(Chain::holesky(), DatadirArgs::default());
-        assert!(path.as_ref().ends_with("reth/holesky"), "{:?}", path);
+        assert!(path.as_ref().ends_with("reth/holesky"), "{path:?}");
 
         let path = MaybePlatformPath::<DataDirPath>::default();
         let path = path.unwrap_or_chain_default(Chain::sepolia(), DatadirArgs::default());
-        assert!(path.as_ref().ends_with("reth/sepolia"), "{:?}", path);
+        assert!(path.as_ref().ends_with("reth/sepolia"), "{path:?}");
     }
 }
