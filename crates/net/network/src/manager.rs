@@ -176,7 +176,7 @@ where
         let NetworkConfig {
             client,
             secret_key,
-            mut discovery_v4_config,
+            discovery_v4_config,
             #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
             discovery_v5_config,
             discovery_addr,
@@ -207,9 +207,9 @@ where
         })?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
-        discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
+        let discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
             // merge configured boot nodes
-            disc_config.bootstrap_nodes.extend(boot_nodes.clone());
+            disc_config.bootstrap_nodes.extend(boot_nodes);
             disc_config.add_eip868_pair("eth", status.forkid);
             disc_config
         });
@@ -231,7 +231,10 @@ where
 
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
+        #[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
         let discv4 = discovery.discv4();
+        #[cfg(any(feature = "discv5-downgrade-v4", feature = "discv5"))]
+        let discv5 = discovery.discv5();
 
         let num_active_peers = Arc::new(AtomicUsize::new(0));
         let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
@@ -267,7 +270,10 @@ where
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
+            #[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
             discv4,
+            #[cfg(any(feature = "discv5-downgrade-v4", feature = "discv5"))]
+            discv5,
         );
 
         Ok(Self {

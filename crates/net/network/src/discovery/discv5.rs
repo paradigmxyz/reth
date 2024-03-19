@@ -6,19 +6,18 @@ use futures::StreamExt;
 use reth_discv4::SecretKey;
 use reth_discv5::{
     enr::{uncompressed_id_from_enr_pk, EnrCombinedKeyWrapper},
-    DiscV5, HandleDiscv5,
+    DiscV5, DiscV5Config, HandleDiscv5,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::NodeRecord;
-use smallvec::{smallvec, SmallVec};
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, Stream};
-use tracing::{error, info};
+use tracing::error;
 
 use std::{
-    net::SocketAddr,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -35,7 +34,7 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
     /// discovered nodes.
     pub async fn start_discv5(
         sk: SecretKey,
-        discv5_config: Option<discv5::Config>,
+        discv5_config: Option<DiscV5Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         let (disc, disc_updates, bc_local_enr) = match discv5_config {
@@ -68,16 +67,23 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
             dns_discovery_updates,
         })
     }
+}
 
-    #[cfg(feature = "discv5")]
+#[cfg(feature = "discv5")]
+impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
     pub async fn start(
-        _discv4_addr: SocketAddr,
+        _discv4_addr: std::net::SocketAddr,
         sk: SecretKey,
         _discv4_config: Option<reth_discv4::Discv4Config>,
-        discv5_config: Option<discv5::Config>,
+        discv5_config: Option<DiscV5Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         Discovery::start_discv5(sk, discv5_config, dns_discovery_config).await
+    }
+
+    /// Returns a shared reference to the [`DiscV5`] handle.
+    pub fn discv5(&self) -> Option<DiscV5> {
+        self.disc.clone()
     }
 }
 
@@ -194,45 +200,50 @@ where
 /// Spawns [`discv5::Discv5`].
 pub(super) async fn start_discv5(
     sk: &SecretKey,
-    discv5_config: discv5::Config,
+    discv5_config: DiscV5Config,
 ) -> Result<(DiscV5, mpsc::Receiver<discv5::Event>, NodeRecord), NetworkError> {
     //
-    // 1. one port per discovery node
+    // 1. make local enr from listen config
     //
-    // get the discv5 addr
-    let mut discv5_sockets: SmallVec<[SocketAddr; 2]> = smallvec!();
-    use discv5::ListenConfig::*;
-    match discv5_config.listen_config {
-        Ipv4 { ip, port } => discv5_sockets.push((ip, port).into()),
-        Ipv6 { ip, port } => discv5_sockets.push((ip, port).into()),
-        DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
-            discv5_sockets.push((ipv4, ipv4_port).into());
-            discv5_sockets.push((ipv6, ipv6_port).into());
-        }
-    };
+    let (discv5_config, bootstrap_nodes, fork_id) = discv5_config.destruct();
 
-    //
-    // 2. make local enr
-    //
     let (enr, bc_enr) = {
         let mut builder = discv5::enr::Enr::builder();
 
-        let primary_socket = discv5_sockets[0];
-        builder.ip(primary_socket.ip());
-        let port = primary_socket.port();
-        if primary_socket.is_ipv4() {
-            builder.udp4(port);
-            if let Some(secondary_socket) = discv5_sockets.get(1) {
-                builder.udp6(secondary_socket.port());
+        use discv5::ListenConfig::*;
+        let ip_mode = match discv5_config.listen_config {
+            Ipv4 { ip, port } => {
+                builder.ip4(ip);
+                builder.udp4(port);
+
+                IpMode::Ip4
             }
-        } else {
-            builder.udp6(port);
-        }
+            Ipv6 { ip, port } => {
+                builder.ip6(ip);
+                builder.udp6(port);
+
+                IpMode::Ip6
+            }
+            DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
+                builder.ip4(ipv4);
+                builder.udp4(ipv4_port);
+                builder.ip6(ipv6);
+                builder.udp6(ipv6_port);
+
+                IpMode::DualStack
+            }
+        };
+
+        builder.add_value("eth", &alloy_rlp::encode(fork_id));
+
         // enr v4 not to get confused with discv4, independent versioning enr and
         // discovery
         let enr = builder.build(sk).expect("should build enr v4");
+        let EnrCombinedKeyWrapper(enr) = enr.into();
+
         // backwards compatible enr
-        let bc_enr = NodeRecord::from_secret_key(primary_socket, sk);
+        let socket = ip_mode.get_contactable_addr(&enr).unwrap();
+        let bc_enr = NodeRecord::from_secret_key(socket, sk);
 
         (enr, bc_enr)
     };
@@ -245,27 +256,34 @@ pub(super) async fn start_discv5(
         discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk)
             .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?
     };
-    let EnrCombinedKeyWrapper(enr) = enr.into();
+
     let mut discv5 =
         discv5::Discv5::new(enr, sk, discv5_config).map_err(NetworkError::custom_discovery)?;
     discv5.start().await.map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
-
-    info!("Discv5 listening on {discv5_sockets:?}");
 
     // start discv5 updates stream
     let discv5_updates =
         discv5.event_stream().await.map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
 
-    Ok((DiscV5(discv5), discv5_updates, bc_enr))
+    //
+    // 4. add boot nodes
+    //
+    for node in bootstrap_nodes {
+        discv5.add_enr(node).map_err(NetworkError::custom_discovery)?;
+    }
+
+    Ok((DiscV5(Arc::new(discv5)), discv5_updates, bc_enr))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use tracing::trace;
+    use std::net::SocketAddr;
 
     use rand::thread_rng;
+    use reth_discv5::DiscV5ConfigBuilder;
+    use tracing::trace;
+
+    use super::*;
 
     async fn start_discovery_node(
         udp_port_discv5: u16,
@@ -275,7 +293,9 @@ mod tests {
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
 
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
-        let discv5_config = discv5::ConfigBuilder::new(discv5_listen_config).build();
+        let discv5_config = DiscV5ConfigBuilder::default()
+            .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .build();
 
         Discovery::start_discv5(secret_key, Some(discv5_config), None)
             .await

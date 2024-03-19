@@ -195,6 +195,7 @@ async fn test_get_peer_by_id() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(feature = "discv5"))]
 #[ignore]
 async fn test_connect_with_boot_nodes() {
     reth_tracing::init_test_tracing();
@@ -216,6 +217,7 @@ async fn test_connect_with_boot_nodes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(feature = "discv5"))]
 #[ignore]
 async fn test_connect_with_builder() {
     reth_tracing::init_test_tracing();
@@ -253,6 +255,7 @@ async fn test_connect_with_builder() {
 
 // expects a `ENODE="enode://"` env var that holds the record
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(feature = "discv5"))]
 #[ignore]
 async fn test_connect_to_trusted_peer() {
     reth_tracing::init_test_tracing();

@@ -5,7 +5,7 @@ use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey};
 use futures::StreamExt;
 use reth_discv4::{Discv4, Discv4Config, PublicKey, SecretKey};
 use reth_discv5::{
-    discv5_downgrade_v4::DiscoveryUpdateV5, DiscV5WithV4Downgrade, MergedUpdateStream,
+    discv5_downgrade_v4::DiscoveryUpdateV5, DiscV5Config, DiscV5WithV4Downgrade, MergedUpdateStream,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::NodeFromExternalSource;
@@ -38,7 +38,7 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
         discv4_config: Option<Discv4Config>,
-        discv5_config: Option<discv5::Config>,
+        discv5_config: Option<DiscV5Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         let (disc, disc_updates, bc_local_discv5_enr) = match (discv4_config, discv5_config) {
@@ -158,8 +158,10 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
             dns_discovery_updates,
         })
     }
+}
 
-    #[cfg(feature = "discv5-downgrade-v4")]
+#[cfg(feature = "discv5-downgrade-v4")]
+impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
     pub async fn start(
         discv4_addr: SocketAddr,
         sk: SecretKey,
@@ -175,6 +177,11 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
             dns_discovery_config,
         )
         .await
+    }
+
+    /// Returns a shared reference to the [`DiscV5WithV4Downgrade`] handle.
+    pub fn discv5(&self) -> Option<DiscV5WithV4Downgrade> {
+        self.disc.clone()
     }
 }
 
@@ -224,14 +231,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
+    use rand::thread_rng;
     use reth_discv4::{DiscoveryUpdate, Discv4ConfigBuilder};
-    use reth_discv5::{enr::EnrCombinedKeyWrapper, HandleDiscv5};
+    use reth_discv5::{enr::EnrCombinedKeyWrapper, DiscV5ConfigBuilder, HandleDiscv5};
     use reth_net_common::discovery::HandleDiscovery;
     use tracing::trace;
 
-    use rand::thread_rng;
+    use super::*;
 
     async fn start_discovery_node(
         udp_port_discv4: u16,
@@ -246,7 +252,9 @@ mod tests {
         let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
 
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
-        let discv5_config = discv5::ConfigBuilder::new(discv5_listen_config).build();
+        let discv5_config = DiscV5ConfigBuilder::default()
+            .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .build();
 
         Discovery::start_discv5_with_v4_downgrade(
             discv4_addr,

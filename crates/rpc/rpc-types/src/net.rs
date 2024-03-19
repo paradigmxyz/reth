@@ -180,6 +180,11 @@ impl TryFrom<Enr<SecretKey>> for NodeRecord {
             return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
         };
 
+        #[cfg(not(any(feature = "discv5", feature = "discv5-downgrade-v4")))]
+        let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
+            return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
+        };
+        #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
         let tcp_port = enr.tcp4().or_else(|| enr.tcp6()).unwrap_or(0);
 
         let Some(udp_port) = enr.udp4().or_else(|| enr.udp6()) else {

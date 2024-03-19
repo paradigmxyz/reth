@@ -44,4 +44,9 @@ pub trait HandleDiscovery {
     ///
     /// This will prevent any future inclusion in the table
     fn ban_peer_by_ip(&self, ip: IpAddr);
+
+    /// Returns the [`NodeRecord`] of the local node.
+    ///
+    /// This includes the currently tracked external IP address of the node.
+    fn node_record(&self) -> NodeRecord;
 }

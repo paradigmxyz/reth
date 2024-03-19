@@ -1,19 +1,22 @@
 //! Wrapper around [`discv5::Discv5`].
 
-use std::{fmt, net::IpAddr};
+use std::{fmt, net::IpAddr, sync::Arc};
 
+use ::enr::Enr;
 use derive_more::{Deref, DerefMut};
 use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    PeerId,
+    NodeRecord, PeerId,
 };
 use tracing::error;
 
+pub mod config;
 pub mod discv5_downgrade_v4;
 pub mod enr;
 
+pub use config::{DiscV5Config, DiscV5ConfigBuilder};
 pub use discv5_downgrade_v4::{DiscV5WithV4Downgrade, MergedUpdateStream};
 
 /// Errors from using [`discv5::Discv5`] handle.
@@ -33,8 +36,8 @@ pub trait HandleDiscv5 {
 }
 
 /// Transparent wrapper around [`discv5::Discv5`].
-#[derive(Deref, DerefMut)]
-pub struct DiscV5(pub discv5::Discv5);
+#[derive(Deref, DerefMut, Clone)]
+pub struct DiscV5(pub Arc<discv5::Discv5>);
 
 impl DiscV5 {
     fn add_node(&self, node_record: NodeFromExternalSource) -> Result<(), Error> {
@@ -92,6 +95,11 @@ impl HandleDiscovery for DiscV5 {
 
     fn ban_peer_by_ip(&self, ip: IpAddr) {
         self.ban_ip(ip, None);
+    }
+
+    fn node_record(&self) -> NodeRecord {
+        let enr: Enr<_> = EnrCombinedKeyWrapper(self.local_enr()).into();
+        enr.try_into().unwrap()
     }
 }
 

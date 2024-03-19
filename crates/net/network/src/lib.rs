@@ -146,7 +146,8 @@ pub use network::{NetworkEvents, NetworkHandle, NetworkProtocols};
 pub use peers::PeersConfig;
 pub use reth_discv4::Discv4;
 pub use reth_discv5::{
-    discv5_downgrade_v4::DiscoveryUpdateV5, DiscV5WithV4Downgrade, MergedUpdateStream,
+    discv5_downgrade_v4::DiscoveryUpdateV5, DiscV5, DiscV5Config, DiscV5WithV4Downgrade,
+    MergedUpdateStream,
 };
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
 pub use session::{
@@ -156,14 +157,23 @@ pub use session::{
 };
 pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
 
-/// Discovery using [`Discv4`].
+/// Devp2p peer discovery version 4.
 #[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
 pub type Discovery = discovery::Discovery;
+/// Handle to interact with peer discovery node using [`Discv4`].
+#[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
+pub type DiscoveryHandle = Discv4;
 
-/// Discovery version 5 with support for downgrading connections to version 4.
+/// Devp2p peer discovery version 5, with support for downgraded version 4 connections.
 #[cfg(feature = "discv5-downgrade-v4")]
 pub type Discovery = discovery::DiscoveryV5V4;
+/// Handle to interact with peer discovery node using [`DiscV5WithV4Downgrade`].
+#[cfg(feature = "discv5-downgrade-v4")]
+pub type DiscoveryHandle = DiscV5WithV4Downgrade;
 
-/// Discovery version 5.
+/// Devp2p peer discovery version 5.
 #[cfg(feature = "discv5")]
 pub type Discovery = discovery::DiscoveryV5;
+/// Handle to interact with peer discovery node using [`DiscV5`].
+#[cfg(feature = "discv5")]
+pub type DiscoveryHandle = DiscV5;

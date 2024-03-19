@@ -16,7 +16,7 @@ use reth_discv4::{DiscoveryUpdate, Discv4};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    PeerId,
+    NodeRecord, PeerId,
 };
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
@@ -36,7 +36,7 @@ pub enum Error {
 }
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DiscV5WithV4Downgrade {
     discv5: Arc<DiscV5>,
     discv4: Discv4,
@@ -92,6 +92,10 @@ impl HandleDiscovery for DiscV5WithV4Downgrade {
     fn ban_peer_by_ip(&self, ip: IpAddr) {
         self.discv5.ban_peer_by_ip(ip);
         self.discv4.ban_peer_by_ip(ip)
+    }
+
+    fn node_record(&self) -> NodeRecord {
+        self.discv5.node_record()
     }
 }
 

@@ -289,13 +289,6 @@ impl Discv4 {
         self.local_addr
     }
 
-    /// Returns the [NodeRecord] of the local node.
-    ///
-    /// This includes the currently tracked external IP address of the node.
-    pub fn node_record(&self) -> NodeRecord {
-        *self.node_record.lock()
-    }
-
     /// Returns the currently tracked external IP of the node.
     pub fn external_ip(&self) -> IpAddr {
         self.node_record.lock().address
@@ -468,6 +461,10 @@ impl HandleDiscovery for Discv4 {
 
     fn ban_peer_by_ip(&self, ip: IpAddr) {
         self.ban_ip(ip)
+    }
+
+    fn node_record(&self) -> NodeRecord {
+        *self.node_record.lock()
     }
 }
 

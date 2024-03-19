@@ -64,6 +64,11 @@ impl Discovery {
             dns_discovery_updates,
         })
     }
+
+    /// Returns a shared reference to the [`Discv4`] handle.
+    pub fn discv4(&self) -> Option<Discv4> {
+        self.disc.clone()
+    }
 }
 
 impl Stream for Discovery {
