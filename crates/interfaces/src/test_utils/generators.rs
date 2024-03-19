@@ -251,7 +251,7 @@ where
                     }
                     old
                 };
-                Some(StorageEntry { value: old.unwrap_or(U256::from(0)), ..entry })
+                Some(StorageEntry { value: old.unwrap_or(U256::ZERO), ..entry })
             })
             .collect();
         old_entries.sort_by_key(|entry| entry.key);

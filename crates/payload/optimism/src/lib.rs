@@ -276,7 +276,7 @@ mod builder {
         let mut cumulative_gas_used = 0;
         let block_gas_limit: u64 = attributes
             .gas_limit
-            .unwrap_or(initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX));
+            .unwrap_or_else(|| initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX));
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
         let mut executed_txs = Vec::new();

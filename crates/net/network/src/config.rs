@@ -503,7 +503,7 @@ impl NetworkConfigBuilder {
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
             chain_spec,
-            block_import: block_import.unwrap_or(Box::<ProofOfStakeBlockImport>::default()),
+            block_import: block_import.unwrap_or_else(|| Box::<ProofOfStakeBlockImport>::default()),
             network_mode,
             executor: executor.unwrap_or_else(|| Box::<TokioTaskExecutor>::default()),
             status,
