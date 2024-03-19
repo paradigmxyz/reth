@@ -200,10 +200,10 @@ impl AppendableChain {
             let start = Instant::now();
             let (state_root, trie_updates) = if block_attachment.is_canonical() {
                 provider
-                    .state_root_with_updates(&bundle_state)
+                    .state_root_with_updates(bundle_state.state())
                     .map(|(root, updates)| (root, Some(updates)))?
             } else {
-                (provider.state_root(&bundle_state)?, None)
+                (provider.state_root(bundle_state.state())?, None)
             };
             if block.state_root != state_root {
                 return Err(ConsensusError::BodyStateRootDiff(
