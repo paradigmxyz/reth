@@ -12,7 +12,7 @@ use crate::{
 use clap::{value_parser, Args, Parser};
 use reth_db::{init_db, DatabaseEnv};
 use reth_node_builder::{InitState, NodeBuilder, WithLaunchContext};
-use reth_node_core::node_config::NodeConfig;
+use reth_node_core::{node_config::NodeConfig, version};
 use reth_primitives::ChainSpec;
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -143,6 +143,8 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         L: FnOnce(WithLaunchContext<Arc<DatabaseEnv>, InitState>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
+        tracing::info!(target: "reth::cli", version = ?version::SHORT_VERSION, "Starting reth");
+
         let Self {
             datadir,
             config,
