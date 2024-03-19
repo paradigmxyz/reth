@@ -244,7 +244,8 @@ strum = "0.26"
 rayon = "1.7"
 itertools = "0.12"
 parking_lot = "0.12"
-metrics = "0.21.1"                                    # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+# Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1"
 hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
