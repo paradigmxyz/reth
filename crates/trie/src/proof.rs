@@ -4,10 +4,10 @@ use crate::{
     prefix_set::PrefixSetMut,
     trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     walker::TrieWalker,
-    StateRootError, StorageRootError,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::{tables, transaction::DbTx};
+use reth_interfaces::trie::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,

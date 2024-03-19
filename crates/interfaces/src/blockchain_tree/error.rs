@@ -49,9 +49,6 @@ pub enum BlockchainTreeError {
     },
 }
 
-/// Result alias for `CanonicalError`
-pub type CanonicalResult<T> = Result<T, CanonicalError>;
-
 /// Canonical Errors
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalError {
@@ -61,6 +58,9 @@ pub enum CanonicalError {
     /// Error originating from blockchain tree operations.
     #[error(transparent)]
     BlockchainTree(#[from] BlockchainTreeError),
+    /// Error originating from a provider operation.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
     /// Error indicating a transaction reverted during execution.
     #[error("transaction error on revert: {0}")]
     CanonicalRevert(String),
@@ -280,6 +280,7 @@ impl InsertBlockErrorKind {
                 CanonicalError::CanonicalCommit(_) |
                 CanonicalError::CanonicalRevert(_) => false,
                 CanonicalError::Validation(_) => true,
+                CanonicalError::Provider(_) => false,
             },
             InsertBlockErrorKind::BlockchainTree(_) => false,
         }
