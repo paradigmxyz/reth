@@ -291,7 +291,7 @@ mod tests {
         let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
-        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain, dat);
+        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain, cmd.datadir_args.clone());
         let config_path = cmd.config.clone().unwrap_or(data_dir.config_path());
         let end = format!("reth/{}/reth.toml", SUPPORTED_CHAINS[0]);
         assert!(config_path.ends_with(end), "{:?}", cmd.config);
