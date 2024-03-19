@@ -76,5 +76,5 @@ mod size_asserts {
     static_assert_size!(DatabaseError, 40);
     static_assert_size!(ProviderError, 48);
     static_assert_size!(NetworkError, 0);
-    static_assert_size!(CanonicalError, 48);
+    static_assert_size!(CanonicalError, 56);
 }
