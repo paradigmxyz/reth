@@ -235,7 +235,7 @@ mod tests {
     fn parse_discovery_addr() {
         let cmd =
             NodeCommand::try_parse_args_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
-        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
+        assert_eq!(cmd.network.discovery.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
     #[test]
@@ -248,8 +248,8 @@ mod tests {
             "127.0.0.1",
         ])
         .unwrap();
-        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
-        assert_eq!(cmd.network.addr, Ipv4Addr::LOCALHOST);
+        assert_eq!(cmd.network.discovery.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(cmd.network.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
     #[test]
