@@ -19,8 +19,8 @@ pub struct AdminApi<N> {
 
 impl<N> AdminApi<N> {
     /// Creates a new instance of `AdminApi`.
-    pub fn new(network: N, chain_spec: ChainSpec) -> Self {
-        AdminApi { network, chain_spec: chain_spec.into() }
+    pub fn new(network: N, chain_spec: Arc<ChainSpec>) -> Self {
+        AdminApi { network, chain_spec }
     }
 }
 

@@ -1021,7 +1021,7 @@ where
 {
     /// Instantiates AdminApi
     pub fn admin_api(&mut self) -> AdminApi<Network> {
-        AdminApi::new(self.network.clone(), (*self.provider.chain_spec()).clone())
+        AdminApi::new(self.network.clone(), self.provider.chain_spec())
     }
 
     /// Instantiates Web3Api
@@ -1201,12 +1201,11 @@ where
                 self.modules
                     .entry(namespace)
                     .or_insert_with(|| match namespace {
-                        RethRpcModule::Admin => AdminApi::new(
-                            self.network.clone(),
-                            (*self.provider.chain_spec()).clone(),
-                        )
-                        .into_rpc()
-                        .into(),
+                        RethRpcModule::Admin => {
+                            AdminApi::new(self.network.clone(), self.provider.chain_spec())
+                                .into_rpc()
+                                .into()
+                        }
                         RethRpcModule::Debug => DebugApi::new(
                             self.provider.clone(),
                             eth_api.clone(),
