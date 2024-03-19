@@ -460,7 +460,7 @@ mod tests {
             let remote_id = pk2id(&remote_key.public_key(SECP256K1));
             let mut remote_hello = self.local_hello.clone();
             remote_hello.id = remote_id;
-            let fork_filter = self.fork_filter.clone();
+            let fork_filter = self.fork_filter;
 
             let remote_handle = tokio::spawn(async move {
                 let outgoing = TcpStream::connect(local_addr).await.unwrap();

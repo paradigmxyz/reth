@@ -1170,7 +1170,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs.
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = generate_blob_sidecar(blobs);
 
         // Create an in-memory blob store.
         let blob_store = InMemoryBlobStore::default();

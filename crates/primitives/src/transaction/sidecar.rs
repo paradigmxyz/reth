@@ -542,7 +542,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = generate_blob_sidecar(blobs);
 
         // Assert commitment equality
         assert_eq!(
@@ -616,7 +616,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = generate_blob_sidecar(blobs);
 
         // Create a vector to store the encoded RLP
         let mut encoded_rlp = Vec::new();
@@ -647,7 +647,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = generate_blob_sidecar(blobs);
 
         // Create a vector to store the encoded RLP
         let mut encoded_rlp = Vec::new();

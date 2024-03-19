@@ -497,8 +497,7 @@ mod tests {
         // run
         assert_eq!(
             HistoricalStateProviderRef::new(&tx, 1, static_file_provider.clone())
-                .basic_account(ADDRESS)
-                .clone(),
+                .basic_account(ADDRESS),
             Ok(None)
         );
         assert_eq!(
@@ -548,7 +547,7 @@ mod tests {
             Ok(None)
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1000, static_file_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 1000, static_file_provider)
                 .basic_account(HIGHER_ADDRESS),
             Ok(Some(higher_acc_plain))
         );
@@ -712,7 +711,7 @@ mod tests {
                 account_history_block_number: Some(1),
                 storage_history_block_number: Some(1),
             },
-            static_file_provider.clone(),
+            static_file_provider,
         );
         assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
         assert_eq!(

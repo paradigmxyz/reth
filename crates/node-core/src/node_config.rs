@@ -374,14 +374,7 @@ impl NodeConfig {
         info!(target: "reth::cli", "Connecting to P2P network");
         let secret_key = self.network_secret(data_dir)?;
         let default_peers_path = data_dir.known_peers_path();
-        Ok(self.load_network_config(
-            config,
-            client,
-            executor.clone(),
-            head,
-            secret_key,
-            default_peers_path.clone(),
-        ))
+        Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
 
     /// Create the [NetworkBuilder].
@@ -460,16 +453,16 @@ impl NodeConfig {
     {
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            provider_factory.clone(),
+            provider_factory,
             consensus.clone(),
             EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(
             tree_externals,
             tree_config,
-            prune_config.clone().map(|config| config.segments),
+            prune_config.map(|config| config.segments),
         )?
-        .with_sync_metrics_tx(sync_metrics_tx.clone());
+        .with_sync_metrics_tx(sync_metrics_tx);
 
         Ok(tree)
     }

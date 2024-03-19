@@ -84,7 +84,7 @@ where
             consensus,
             sync_gap: None,
             hash_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
-            header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
+            header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir),
             is_etl_ready: false,
         }
     }
@@ -231,7 +231,7 @@ where
         let local_head_number = gap.local_head.number;
 
         // let the downloader know what to sync
-        self.downloader.update_sync_gap(gap.local_head, gap.target.clone());
+        self.downloader.update_sync_gap(gap.local_head, gap.target);
 
         // We only want to stop once we have all the headers on ETL filespace (disk).
         loop {

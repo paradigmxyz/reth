@@ -550,8 +550,8 @@ mod tests {
         block2.set_hash(block2_hash);
         block2.senders.push(Address::new([4; 20]));
 
-        let mut block_state_extended = block_state1.clone();
-        block_state_extended.extend(block_state2.clone());
+        let mut block_state_extended = block_state1;
+        block_state_extended.extend(block_state2);
 
         let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, None);
 

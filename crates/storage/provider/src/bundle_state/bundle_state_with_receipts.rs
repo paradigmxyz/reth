@@ -863,7 +863,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
-                info: account_info.clone(),
+                info: account_info,
                 // 0x00 => 0 => 9
                 storage: HashMap::from([(
                     U256::ZERO,
@@ -1072,7 +1072,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
-                info: account1.clone(),
+                info: account1,
                 // 0x01 => 0 => 5
                 storage: HashMap::from([(
                     U256::from(1),
@@ -1135,7 +1135,7 @@ mod tests {
         assert!(this.revert_to(16));
         assert_eq!(this.receipts.len(), 7);
 
-        let mut this = base.clone();
+        let mut this = base;
         assert!(!this.revert_to(17));
         assert_eq!(this.receipts.len(), 7);
     }

@@ -869,10 +869,8 @@ mod tests {
         // there is no system contract call so there should be NO STORAGE CHANGES
         // this means we'll check the transition state
         let state = executor.evm.context.evm.inner.db;
-        let transition_state = state
-            .transition_state
-            .clone()
-            .expect("the evm should be initialized with bundle updates");
+        let transition_state =
+            state.transition_state.expect("the evm should be initialized with bundle updates");
 
         // assert that it is the default (empty) transition state
         assert_eq!(transition_state, TransitionState::default());

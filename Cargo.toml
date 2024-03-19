@@ -89,8 +89,9 @@ rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
 clippy.empty_line_after_outer_attr = "deny"
 clippy.derive_partial_eq_without_eq = "deny"
+clippy.redundant_clone = "deny"
 clippy.trait_duplication_in_bounds = "deny"
-clippy.uninlined_format_args = "warn"
+clippy.uninlined_format_args = "deny"
 
 [workspace.package]
 version = "0.2.0-beta.3"

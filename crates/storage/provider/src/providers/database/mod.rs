@@ -785,7 +785,7 @@ mod tests {
         static_file_writer.commit().unwrap();
         drop(static_file_writer);
 
-        let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
+        let gap = provider.sync_gap(mode, checkpoint).unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
     }
