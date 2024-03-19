@@ -21,6 +21,10 @@ pub struct ExExHandle {
     finished_height: watch::Receiver<BlockNumber>,
 }
 
+/// The main trait for the custom ExEx.
+///
+/// The ExEx should listen to the canonical state notifications and process them, updating the
+/// `finished_height` in [ExExHandle] accordingly.
 pub trait IntoExEx<DB: Database, P: FullProvider<DB>> {
     /// Spawns the ExEx.
     ///
@@ -44,6 +48,8 @@ pub struct ExExMeta {
     from_height: BlockNumber,
 }
 
+/// The managed version of the [IntoExEx] trait that covers the common use case and simplifies the
+/// usage.
 pub trait ExEx<DB: Database, P: FullProvider<DB>>: Send + Sync + Unpin + 'static {
     /// Initializes the ExEx. Called once when the ExEx is spawned. ExEx should persist the
     /// dependencies such as the provider to re-use them in the future when processing state
