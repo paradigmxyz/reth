@@ -43,6 +43,8 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
     ) -> Result<Self, NetworkError> {
         let (disc, disc_updates, bc_local_discv5_enr) = match (discv4_config, discv5_config) {
             (Some(discv4_config), Some(discv5_config)) => {
+                // todo: verify not same socket discv4 and 5
+                
                 //
                 // 1. start discv5
                 //
