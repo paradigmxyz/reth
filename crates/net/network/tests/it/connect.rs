@@ -589,7 +589,7 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
 async fn test_always_accept_incoming_connections_from_trusted_peers() {
     reth_tracing::init_test_tracing();
     let peer1 = new_random_peer(10, HashSet::new()).await;
-    let peer2 = new_random_peer(1, HashSet::new()).await;
+    let peer2 = new_random_peer(0, HashSet::new()).await;
 
     //  setup the peer with max_inbound = 1, and add other_peer_3 as trust nodes
     let peer =
@@ -605,14 +605,17 @@ async fn test_always_accept_incoming_connections_from_trusted_peers() {
     tokio::task::spawn(peer2);
 
     let mut events = NetworkEventStream::new(handle.event_listener());
-    let mut events2 = NetworkEventStream::new(peer1_handle.event_listener());
+    let mut events_peer1 = NetworkEventStream::new(peer1_handle.event_listener());
 
     // incoming connection should fail because exceeding max_inbound
     peer1_handle.add_peer(*handle.peer_id(), handle.local_addr());
 
-    let (peer_id, reason) = events2.next_session_closed().await.unwrap();
+    let (peer_id, reason) = events_peer1.next_session_closed().await.unwrap();
     assert_eq!(peer_id, *handle.peer_id());
     assert_eq!(reason, Some(DisconnectReason::TooManyPeers));
+
+    let peer_id = events.next_session_established().await.unwrap();
+    assert_eq!(peer_id, *peer1_handle.peer_id());
 
     // outbound connection from `peer2` should succeed
     peer2_handle.add_peer(*handle.peer_id(), handle.local_addr());
