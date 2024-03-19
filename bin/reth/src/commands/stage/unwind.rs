@@ -3,7 +3,7 @@
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, DatadirArgs
+        DatabaseArgs, DatadirArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
 };
@@ -55,7 +55,7 @@ pub struct Command {
     datadir: MaybePlatformPath<DataDirPath>,
 
     /// Configure data storage locations
-    #[arg(long, value_name = "DATA_DIR_ARGS")]
+    #[command(flatten)]
     datadir_args: DatadirArgs,
 
     /// The chain this node is running.
@@ -85,7 +85,8 @@ impl Command {
     /// Execute `db stage unwind` command
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
+        let data_dir =
+            self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let db_path = data_dir.db_path();
         if !db_path.exists() {
             eyre::bail!("Database {db_path:?} does not exist.")

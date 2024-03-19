@@ -45,7 +45,7 @@ pub struct Command {
     datadir: MaybePlatformPath<DataDirPath>,
 
     /// Configure data storage locations
-    #[arg(long, value_name = "DATA_DIR_ARGS")]
+    #[command(flatten)]
     datadir_args: DatadirArgs,
 
     /// The chain this node is running.
@@ -112,7 +112,8 @@ impl Command {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
+        let data_dir =
+            self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let db_path = data_dir.db_path();
         let db_args = self.db.database_args();
         let static_files_path = data_dir.static_files_path();

@@ -16,6 +16,7 @@ use reth_config::Config;
 use reth_db::create_db;
 use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
+use reth_node_core::args::DatadirArgs;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
 use reth_provider::ProviderFactory;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -48,6 +49,10 @@ pub struct Command {
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
+
+    /// Configure data storage locations
+    #[command(flatten)]
+    datadir_args: DatadirArgs,
 
     /// Secret key to use for this node.
     ///

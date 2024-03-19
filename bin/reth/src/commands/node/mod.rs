@@ -30,7 +30,7 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     pub datadir: MaybePlatformPath<DataDirPath>,
 
     /// Configure data storage locations
-    #[arg(long, value_name = "DATA_DIR_ARGS")]
+    #[command(flatten)]
     pub datadir_args: DatadirArgs,
 
     /// The path to the configuration file to use.

@@ -3,7 +3,7 @@
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,DatadirArgs
+        DatabaseArgs, DatadirArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
 };
@@ -29,7 +29,7 @@ pub struct InitCommand {
     datadir: MaybePlatformPath<DataDirPath>,
 
     /// Configure data storage locations
-    #[arg(long, value_name = "DATA_DIR_ARGS")]
+    #[command(flatten)]
     datadir_args: DatadirArgs,
 
     /// The chain this node is running.
@@ -54,7 +54,8 @@ impl InitCommand {
         info!(target: "reth::cli", "reth init starting");
 
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
+        let data_dir =
+            self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path, self.db.database_args())?);

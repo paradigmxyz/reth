@@ -69,7 +69,7 @@ pub struct ImportCommand {
     datadir: MaybePlatformPath<DataDirPath>,
 
     /// Configure data storage locations
-    #[arg(long, value_name = "DATA_DIR_ARGS")]
+    #[command(flatten)]
     datadir_args: DatadirArgs,
 
     /// The chain this node is running.

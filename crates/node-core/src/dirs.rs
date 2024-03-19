@@ -162,7 +162,7 @@ impl<D> PlatformPath<D> {
         ChainPath::new(platform_path, chain, datadir_args)
     }
 
-    pub fn platform_path_from_chain(&self, chain: &Chain) -> PlatformPath<D> {
+    fn platform_path_from_chain(&self, chain: &Chain) -> PlatformPath<D> {
         let chain_name = config_path_prefix(chain);
         let path = self.0.join(chain_name);
         PlatformPath::<D>(path, std::marker::PhantomData)
