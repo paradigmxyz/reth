@@ -256,8 +256,10 @@ where
 
         // Exceptional case: init used too much gas, we need to increase the gas limit and try
         // again
-        if let Err(EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh)) = ethres
-        {
+        if matches!(
+            ethres,
+            Err(EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
+        ) {
             // if price or limit was included in the request then we can execute the request
             // again with the block's gas limit to check if revert is gas related or not
             if request_gas.is_some() || request_gas_price.is_some() {
@@ -339,9 +341,10 @@ where
 
             // Exceptional case: init used too much gas, we need to increase the gas limit and try
             // again
-            if let Err(EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh)) =
-                ethres
-            {
+            if matches!(
+                ethres,
+                Err(EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
+            ) {
                 // increase the lowest gas limit
                 lowest_gas_limit = mid_gas_limit;
 

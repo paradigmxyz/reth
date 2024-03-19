@@ -92,6 +92,7 @@ clippy.derive_partial_eq_without_eq = "deny"
 clippy.redundant_clone = "deny"
 clippy.trait_duplication_in_bounds = "deny"
 clippy.uninlined_format_args = "deny"
+clippy.equatable_if_let = "deny"
 
 [workspace.package]
 version = "0.2.0-beta.3"
