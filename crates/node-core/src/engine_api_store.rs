@@ -119,8 +119,7 @@ impl EngineApiStore {
         Engine: EngineTypes,
         BeaconEngineMessage<Engine>: std::fmt::Debug,
     {
-        loop {
-            let Some(msg) = rx.recv().await else { break };
+        while let Some(msg) = rx.recv().await {
             if let Err(error) = self.on_message(&msg, SystemTime::now()) {
                 error!(target: "engine::intercept", ?msg, %error, "Error handling Engine API message");
             }

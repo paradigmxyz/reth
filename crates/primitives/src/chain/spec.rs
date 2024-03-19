@@ -671,11 +671,7 @@ impl ChainSpec {
 
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> B256 {
-        if let Some(hash) = self.genesis_hash {
-            hash
-        } else {
-            self.genesis_header().hash_slow()
-        }
+        self.genesis_hash.unwrap_or_else(|| self.genesis_header().hash_slow())
     }
 
     /// Get the timestamp of the genesis block.
