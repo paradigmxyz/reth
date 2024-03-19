@@ -271,19 +271,33 @@ impl SessionManager {
             let status = self.status;
             let band_with_meter = self.bandwidth_meter.clone();
             let extra_handlers = self.extra_protocols.on_outgoing(remote_addr, remote_peer_id);
-            self.spawn(start_pending_outbound_session(
-                disconnect_rx,
-                pending_events,
-                session_id,
-                remote_addr,
-                remote_peer_id,
-                secret_key,
-                hello_message,
-                status,
-                fork_filter,
-                band_with_meter,
-                extra_handlers,
-            ));
+            self.spawn(async move {
+                let err = tokio::time::timeout(
+                    Duration::from_secs(20),
+                    start_pending_outbound_session(
+                        disconnect_rx,
+                        pending_events.clone(),
+                        session_id,
+                        remote_addr,
+                        remote_peer_id,
+                        secret_key,
+                        hello_message,
+                        status,
+                        fork_filter,
+                        band_with_meter,
+                        extra_handlers,
+                    ),
+                )
+                .await;
+                if let Err(err) = err {
+                    let _= pending_events.send(PendingSessionEvent::OutgoingConnectionError {
+                        remote_addr,
+                        session_id,
+                        peer_id: remote_peer_id,
+                        error: io::Error::new(io::ErrorKind::TimedOut, err),
+                    }).await;
+                }
+            });
 
             let handle = PendingSessionHandle {
                 disconnect_tx: Some(disconnect_tx),
