@@ -8,6 +8,6 @@ pub fn parse_env_url(var: &str) -> Result<String, std::env::VarError> {
     if var.starts_with("http") {
         Ok(var)
     } else {
-        Ok(format!("http://{}", var))
+        Ok(format!("http://{var}"))
     }
 }

@@ -23,7 +23,7 @@ impl Deref for IntegerList {
 impl fmt::Debug for IntegerList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let vec: Vec<u64> = self.0.iter().collect();
-        write!(f, "IntegerList {:?}", vec)
+        write!(f, "IntegerList {vec:?}")
     }
 }
 

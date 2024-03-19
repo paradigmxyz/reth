@@ -50,7 +50,7 @@ impl MyEvmConfig {
                 address!("0000000000000000000000000000000000000999"),
                 Precompile::Env(Self::my_precompile),
             );
-            precompiles
+            precompiles.into()
         });
     }
 

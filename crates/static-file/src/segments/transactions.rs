@@ -36,7 +36,7 @@ impl<DB: Database> Segment<DB> for Transactions {
 
         for block in block_range {
             let _static_file_block =
-                static_file_writer.increment_block(StaticFileSegment::Transactions)?;
+                static_file_writer.increment_block(StaticFileSegment::Transactions, block)?;
             debug_assert_eq!(_static_file_block, block);
 
             let block_body_indices = provider

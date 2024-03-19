@@ -28,28 +28,7 @@ pub struct TrieWalker<C> {
     trie_updates: Option<TrieUpdates>,
 }
 
-impl<C: TrieCursor> TrieWalker<C> {
-    /// Constructs a new TrieWalker, setting up the initial state of the stack and cursor.
-    pub fn new(cursor: C, changes: PrefixSet) -> Self {
-        // Initialize the walker with a single empty stack element.
-        let mut this = Self {
-            cursor,
-            changes,
-            stack: vec![CursorSubNode::default()],
-            can_skip_current_node: false,
-            trie_updates: None,
-        };
-
-        // Set up the root node of the trie in the stack, if it exists.
-        if let Some((key, value)) = this.node(true).unwrap() {
-            this.stack[0] = CursorSubNode::new(key, Some(value));
-        }
-
-        // Update the skip state for the root node.
-        this.update_skip_node();
-        this
-    }
-
+impl<C> TrieWalker<C> {
     /// Constructs a new TrieWalker from existing stack and a cursor.
     pub fn from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
         let mut this =
@@ -89,6 +68,68 @@ impl<C: TrieCursor> TrieWalker<C> {
     /// The current length of the trie updates.
     pub fn updates_len(&self) -> usize {
         self.trie_updates.as_ref().map(|u| u.len()).unwrap_or(0)
+    }
+
+    /// Returns the current key in the trie.
+    pub fn key(&self) -> Option<&Nibbles> {
+        self.stack.last().map(|n| n.full_key())
+    }
+
+    /// Returns the current hash in the trie if any.
+    pub fn hash(&self) -> Option<B256> {
+        self.stack.last().and_then(|n| n.hash())
+    }
+
+    /// Indicates whether the children of the current node are present in the trie.
+    pub fn children_are_in_trie(&self) -> bool {
+        self.stack.last().map_or(false, |n| n.tree_flag())
+    }
+
+    /// Returns the next unprocessed key in the trie.
+    pub fn next_unprocessed_key(&self) -> Option<B256> {
+        self.key()
+            .and_then(|key| {
+                if self.can_skip_current_node {
+                    key.increment().map(|inc| inc.pack())
+                } else {
+                    Some(key.pack())
+                }
+            })
+            .map(|mut key| {
+                key.resize(32, 0);
+                B256::from_slice(key.as_slice())
+            })
+    }
+
+    /// Updates the skip node flag based on the walker's current state.
+    fn update_skip_node(&mut self) {
+        self.can_skip_current_node = self
+            .stack
+            .last()
+            .map_or(false, |node| !self.changes.contains(node.full_key()) && node.hash_flag());
+    }
+}
+
+impl<C: TrieCursor> TrieWalker<C> {
+    /// Constructs a new TrieWalker, setting up the initial state of the stack and cursor.
+    pub fn new(cursor: C, changes: PrefixSet) -> Self {
+        // Initialize the walker with a single empty stack element.
+        let mut this = Self {
+            cursor,
+            changes,
+            stack: vec![CursorSubNode::default()],
+            can_skip_current_node: false,
+            trie_updates: None,
+        };
+
+        // Set up the root node of the trie in the stack, if it exists.
+        if let Some((key, value)) = this.node(true).unwrap() {
+            this.stack[0] = CursorSubNode::new(key, Some(value));
+        }
+
+        // Update the skip state for the root node.
+        this.update_skip_node();
+        this
     }
 
     /// Advances the walker to the next trie node and updates the skip node flag.
@@ -200,45 +241,6 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         Ok(())
     }
-
-    /// Returns the current key in the trie.
-    pub fn key(&self) -> Option<&Nibbles> {
-        self.stack.last().map(|n| n.full_key())
-    }
-
-    /// Returns the current hash in the trie if any.
-    pub fn hash(&self) -> Option<B256> {
-        self.stack.last().and_then(|n| n.hash())
-    }
-
-    /// Indicates whether the children of the current node are present in the trie.
-    pub fn children_are_in_trie(&self) -> bool {
-        self.stack.last().map_or(false, |n| n.tree_flag())
-    }
-
-    /// Returns the next unprocessed key in the trie.
-    pub fn next_unprocessed_key(&self) -> Option<B256> {
-        self.key()
-            .and_then(|key| {
-                if self.can_skip_current_node {
-                    key.increment().map(|inc| inc.pack())
-                } else {
-                    Some(key.pack())
-                }
-            })
-            .map(|mut key| {
-                key.resize(32, 0);
-                B256::from_slice(key.as_slice())
-            })
-    }
-
-    /// Updates the skip node flag based on the walker's current state.
-    fn update_skip_node(&mut self) {
-        self.can_skip_current_node = self
-            .stack
-            .last()
-            .map_or(false, |node| !self.changes.contains(node.full_key()) && node.hash_flag());
-    }
 }
 
 #[cfg(test)]
@@ -306,7 +308,7 @@ mod tests {
         let mut walker = TrieWalker::new(&mut trie, Default::default());
         assert!(walker.key().unwrap().is_empty());
 
-        // We're traversing the path in lexigraphical order.
+        // We're traversing the path in lexicographical order.
         for expected in expected {
             let got = walker.advance().unwrap();
             assert_eq!(got.unwrap(), Nibbles::from_nibbles_unchecked(expected.clone()));

@@ -582,7 +582,7 @@ impl TransactionPtr {
         Ok((f)(self.txn))
     }
 
-    /// Executes the given closure once the lock on the transaction is acquired. If the tranasction
+    /// Executes the given closure once the lock on the transaction is acquired. If the transaction
     /// is timed out, it will be renewed first.
     ///
     /// Returns the result of the closure or an error if the transaction renewal fails.

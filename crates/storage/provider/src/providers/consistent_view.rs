@@ -1,8 +1,10 @@
 use crate::{BlockNumReader, DatabaseProviderFactory, DatabaseProviderRO, ProviderError};
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
-use reth_interfaces::provider::{ConsistentViewError, ProviderResult};
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{GotExpected, B256};
 use std::marker::PhantomData;
+
+pub use reth_interfaces::provider::ConsistentViewError;
 
 /// A consistent view over state in the database.
 ///
@@ -14,6 +16,11 @@ use std::marker::PhantomData;
 ///
 /// The view should only be used outside of staged-sync.
 /// Otherwise, any attempt to create a provider will result in [ConsistentViewError::Syncing].
+///
+/// When using the view, the consumer should either
+/// 1) have a failover for when the state changes and handle [ConsistentViewError::Inconsistent]
+///    appropriately.
+/// 2) be sure that the state does not change.
 #[derive(Clone, Debug)]
 pub struct ConsistentDbView<DB, Provider> {
     database: PhantomData<DB>,
@@ -56,7 +63,7 @@ where
 
         let tip = last_entry.map(|(_, hash)| hash);
         if self.tip != tip {
-            return Err(ConsistentViewError::InconsistentView {
+            return Err(ConsistentViewError::Inconsistent {
                 tip: GotExpected { got: tip, expected: self.tip },
             })
         }

@@ -1201,7 +1201,7 @@ impl ReverseHeadersDownloaderBuilder {
 
 /// Configures and returns the next [HeadersRequest] based on the given parameters
 ///
-/// The request wil start at the given `next_request_block_number` block.
+/// The request will start at the given `next_request_block_number` block.
 /// The `limit` of the request will either be the targeted `request_limit` or the difference of
 /// `next_request_block_number` and the `local_head` in case this is smaller than the targeted
 /// `request_limit`.

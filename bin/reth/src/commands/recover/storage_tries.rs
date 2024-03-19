@@ -9,7 +9,10 @@ use reth_db::{
     init_db, tables,
     transaction::DbTx,
 };
-use reth_node_core::{args::DatadirArgs, init::init_genesis};
+use reth_node_core::{
+    args::{DatabaseArgs, DatadirArgs},
+    init::init_genesis,
+};
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
 use reth_trie::StateRoot;
@@ -44,6 +47,10 @@ pub struct Command {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    /// All database related arguments
+    #[command(flatten)]
+    pub db: DatabaseArgs,
 }
 
 impl Command {
@@ -53,7 +60,7 @@ impl Command {
             self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
-        let db = Arc::new(init_db(db_path, Default::default())?);
+        let db = Arc::new(init_db(db_path, self.db.database_args())?);
 
         let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files_path())?;
 

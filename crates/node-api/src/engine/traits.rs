@@ -1,15 +1,13 @@
-use crate::{validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion};
+use crate::{
+    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
+};
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
-    engine::{
-        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, OptimismPayloadAttributes,
-        PayloadAttributes as EthPayloadAttributes, PayloadId,
-    },
+    engine::{OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId},
     withdrawal::Withdrawal,
-    ExecutionPayloadV1,
 };
 
 /// Represents a built payload type that contains a built [SealedBlock] and can be converted into
@@ -20,15 +18,6 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
 
     /// Returns the fees collected for the built block
     fn fees(&self) -> U256;
-
-    /// Converts the type into the response expected by `engine_getPayloadV1`
-    fn into_v1_payload(self) -> ExecutionPayloadV1;
-
-    /// Converts the type into the response expected by `engine_getPayloadV2`
-    fn into_v2_payload(self) -> ExecutionPayloadEnvelopeV2;
-
-    /// Converts the type into the response expected by `engine_getPayloadV3`
-    fn into_v3_payload(self) -> ExecutionPayloadEnvelopeV3;
 }
 
 /// This can be implemented by types that describe a currently running payload job.
@@ -58,7 +47,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// Returns the parent block hash for the running payload job.
     fn parent(&self) -> B256;
 
-    /// Returns the timestmap for the running payload job.
+    /// Returns the timestamp for the running payload job.
     fn timestamp(&self) -> u64;
 
     /// Returns the parent beacon block root for the running payload job, if it exists.
@@ -111,7 +100,7 @@ pub trait PayloadAttributes:
         &self,
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-    ) -> Result<(), AttributesValidationError>;
+    ) -> Result<(), EngineObjectValidationError>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -131,7 +120,7 @@ impl PayloadAttributes for EthPayloadAttributes {
         &self,
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-    ) -> Result<(), AttributesValidationError> {
+    ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(chain_spec, version, self.into())
     }
 }
@@ -153,11 +142,11 @@ impl PayloadAttributes for OptimismPayloadAttributes {
         &self,
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-    ) -> Result<(), AttributesValidationError> {
+    ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(chain_spec, version, self.into())?;
 
         if self.gas_limit.is_none() && chain_spec.is_optimism() {
-            return Err(AttributesValidationError::InvalidParams(
+            return Err(EngineObjectValidationError::InvalidParams(
                 "MissingGasLimitInPayloadAttributes".to_string().into(),
             ))
         }

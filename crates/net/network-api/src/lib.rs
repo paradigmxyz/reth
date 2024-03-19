@@ -70,6 +70,11 @@ pub trait Peers: PeersInfo {
         self.add_peer_kind(peer, PeerKind::Basic, addr);
     }
 
+    /// Adds a trusted [PeerId] to the peer set.
+    ///
+    /// This allows marking a peer as trusted without having to know the peer's address.
+    fn add_trusted_peer_id(&self, peer: PeerId);
+
     /// Adds a trusted peer to the peer set.
     fn add_trusted_peer(&self, peer: PeerId, addr: SocketAddr) {
         self.add_peer_kind(peer, PeerKind::Trusted, addr);
@@ -143,6 +148,18 @@ pub enum PeerKind {
     Basic,
     /// Trusted peer.
     Trusted,
+}
+
+impl PeerKind {
+    /// Returns `true` if the peer is trusted.
+    pub const fn is_trusted(&self) -> bool {
+        matches!(self, PeerKind::Trusted)
+    }
+
+    /// Returns `true` if the peer is basic.
+    pub const fn is_basic(&self) -> bool {
+        matches!(self, PeerKind::Basic)
+    }
 }
 
 /// Info about an active peer session.

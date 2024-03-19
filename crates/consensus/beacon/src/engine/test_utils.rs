@@ -6,6 +6,7 @@ use crate::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
+use reth_config::config::EtlConfig;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
 type DatabaseEnv = TempDatabase<DE>;
 use reth_downloaders::{
@@ -399,17 +400,15 @@ where
                     .build(client.clone(), consensus.clone(), provider_factory.clone())
                     .into_task();
 
-                Pipeline::builder().add_stages(
-                    DefaultStages::new(
-                        provider_factory.clone(),
-                        HeaderSyncMode::Tip(tip_rx.clone()),
-                        Arc::clone(&consensus),
-                        header_downloader,
-                        body_downloader,
-                        executor_factory.clone(),
-                    )
-                    .expect("should build"),
-                )
+                Pipeline::builder().add_stages(DefaultStages::new(
+                    provider_factory.clone(),
+                    HeaderSyncMode::Tip(tip_rx.clone()),
+                    Arc::clone(&consensus),
+                    header_downloader,
+                    body_downloader,
+                    executor_factory.clone(),
+                    EtlConfig::default(),
+                ))
             }
         };
 

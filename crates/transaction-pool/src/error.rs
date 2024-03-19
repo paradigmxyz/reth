@@ -288,4 +288,15 @@ impl InvalidPoolTransactionError {
             }
         }
     }
+
+    /// Returns `true` if an import failed due to nonce gap.
+    pub const fn is_nonce_gap(&self) -> bool {
+        matches!(
+            self,
+            InvalidPoolTransactionError::Consensus(InvalidTransactionError::NonceNotConsistent)
+        ) || matches!(
+            self,
+            InvalidPoolTransactionError::Eip4844(Eip4844PoolTransactionError::Eip4844NonceGap)
+        )
+    }
 }

@@ -12,7 +12,7 @@ pub use zstd::{bulk::Decompressor, dict::DecoderDictionary};
 
 type RawDictionary = Vec<u8>;
 
-#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ZstdState {
     #[default]
     PendingDictionary,

@@ -172,7 +172,7 @@ impl BlobTransaction {
         self.sidecar.encode_inner(out);
     }
 
-    /// Ouputs the length of the RLP encoding of the blob transaction, including the tx type byte,
+    /// Outputs the length of the RLP encoding of the blob transaction, including the tx type byte,
     /// optionally including the length of a wrapping string header. If `with_header` is `false`,
     /// the length of the following will be calculated:
     /// `tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs])`
@@ -542,7 +542,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = generate_blob_sidecar(blobs);
 
         // Assert commitment equality
         assert_eq!(
@@ -616,7 +616,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = generate_blob_sidecar(blobs);
 
         // Create a vector to store the encoded RLP
         let mut encoded_rlp = Vec::new();
@@ -647,7 +647,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = generate_blob_sidecar(blobs);
 
         // Create a vector to store the encoded RLP
         let mut encoded_rlp = Vec::new();

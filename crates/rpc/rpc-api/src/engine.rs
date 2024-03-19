@@ -8,9 +8,8 @@ use reth_node_api::EngineTypes;
 use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_types::{
     engine::{
-        ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-        ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
-        ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
+        ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
+        ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
     BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
@@ -75,7 +74,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// Post Cancun forkchoice update handler
     ///
     /// This is the same as `forkchoiceUpdatedV2`, but expects an additional
-    /// `parentBeaconBlockRoot` field in the the `payloadAttributes`, if payload attributes
+    /// `parentBeaconBlockRoot` field in the `payloadAttributes`, if payload attributes
     /// are provided.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
@@ -96,7 +95,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV1")]
-    async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadV1>;
+    async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<Engine::ExecutionPayloadV1>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_getpayloadv2>
     ///
@@ -104,7 +103,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// payload build process at the time of receiving this call. Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV2")]
-    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV2>;
+    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<Engine::ExecutionPayloadV2>;
 
     /// Post Cancun payload handler which also returns a blobs bundle.
     ///
@@ -114,7 +113,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// payload build process at the time of receiving this call. Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
     #[method(name = "getPayloadV3")]
-    async fn get_payload_v3(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV3>;
+    async fn get_payload_v3(&self, payload_id: PayloadId) -> RpcResult<Engine::ExecutionPayloadV3>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     #[method(name = "getPayloadBodiesByHashV1")]

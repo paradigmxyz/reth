@@ -22,7 +22,7 @@ fn priority_bench(
     description: &str,
     input_data: (u128, u128, u128, u128),
 ) {
-    let group_id = format!("txpool | {}", description);
+    let group_id = format!("txpool | {description}");
 
     group.bench_function(group_id, |b| {
         b.iter(|| {
@@ -41,7 +41,7 @@ fn fee_jump_bench(
     description: &str,
     input_data: (u128, u128),
 ) {
-    let group_id = format!("txpool | {}", description);
+    let group_id = format!("txpool | {description}");
 
     group.bench_function(group_id, |b| {
         b.iter(|| {

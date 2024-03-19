@@ -102,7 +102,7 @@ pub trait XdgPath {
 ///
 /// assert_ne!(default.as_ref(), custom.as_ref());
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PlatformPath<D>(PathBuf, std::marker::PhantomData<D>);
 
 impl<D> Display for PlatformPath<D> {
@@ -177,7 +177,7 @@ impl<D> PlatformPath<D> {
 /// An Optional wrapper type around [PlatformPath].
 ///
 /// This is useful for when a path is optional, such as the `--data-dir` flag.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MaybePlatformPath<D>(Option<PlatformPath<D>>);
 
 // === impl MaybePlatformPath ===
@@ -371,7 +371,7 @@ mod tests {
         assert!(path.as_ref().ends_with("reth/mainnet"), "{:?}", path);
 
         let db_path = path.db_path();
-        assert!(db_path.ends_with("reth/mainnet/db"), "{:?}", db_path);
+        assert!(db_path.ends_with("reth/mainnet/db"), "{db_path:?}");
 
         let path = MaybePlatformPath::<DataDirPath>::from_str("my/path/to/datadir").unwrap();
         let path = path.unwrap_or_chain_default(Chain::mainnet(), DatadirArgs::default());

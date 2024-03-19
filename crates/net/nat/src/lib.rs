@@ -133,7 +133,7 @@ impl ResolveNatInterval {
     }
 
     /// Creates a new [ResolveNatInterval] that attempts to resolve the public IP with interval of
-    /// period with the first attempt starting at `sart`. See also [tokio::time::interval_at]
+    /// period with the first attempt starting at `start`. See also [tokio::time::interval_at]
     #[track_caller]
     pub fn interval_at(
         resolver: NatResolver,

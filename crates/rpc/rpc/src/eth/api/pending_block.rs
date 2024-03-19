@@ -183,7 +183,7 @@ impl PendingBlockEnv {
                 tx_type: tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs: result.logs().into_iter().map(Into::into).collect(),
+                logs: result.into_logs().into_iter().map(Into::into).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
                 #[cfg(feature = "optimism")]

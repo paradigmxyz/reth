@@ -42,7 +42,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo clippy --workspace --lib --examples --tests --benches --all-features
+      - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings
 
@@ -73,7 +73,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.75" # MSRV
+          toolchain: "1.76" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true

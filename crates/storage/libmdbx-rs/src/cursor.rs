@@ -576,7 +576,7 @@ where
                                 };
                                 Some(Ok((key, data)))
                             }
-                            // MDBX_ENODATA can occur when the cursor was previously seeked to a
+                            // MDBX_ENODATA can occur when the cursor was previously sought to a
                             // non-existent value, e.g. iter_from with a
                             // key greater than all values in the database.
                             ffi::MDBX_NOTFOUND | ffi::MDBX_ENODATA => None,
@@ -671,7 +671,7 @@ where
                                 };
                                 Some(Ok((key, data)))
                             }
-                            // MDBX_NODATA can occur when the cursor was previously seeked to a
+                            // MDBX_NODATA can occur when the cursor was previously sought to a
                             // non-existent value, e.g. iter_from with a
                             // key greater than all values in the database.
                             ffi::MDBX_NOTFOUND | ffi::MDBX_ENODATA => None,

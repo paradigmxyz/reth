@@ -79,7 +79,6 @@ impl From<alloy_rlp::Error> for EthStreamError {
 
 /// Error  that can occur during the `eth` sub-protocol handshake.
 #[derive(thiserror::Error, Debug)]
-
 pub enum EthHandshakeError {
     /// Status message received or sent outside of the handshake process.
     #[error("status message can only be recv/sent in handshake")]

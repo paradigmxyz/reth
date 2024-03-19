@@ -440,7 +440,7 @@ mod tests {
             excess_blob_gas: 0x580000,
         };
 
-        let _block = try_payload_v3_to_block(new_payload.clone())
+        let _block = try_payload_v3_to_block(new_payload)
             .expect_err("execution payload conversion requires typed txs without a rlp header");
     }
 

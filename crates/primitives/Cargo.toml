@@ -24,7 +24,6 @@ alloy-chains = { workspace = true, features = ["serde", "rlp"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { workspace = true, features = ["serde"] }
-ethers-core = { workspace = true, default-features = false, optional = true }
 nybbles = { workspace = true, features = ["serde", "rlp"] }
 alloy-genesis.workspace = true
 alloy-eips.workspace = true
@@ -110,7 +109,7 @@ optimism = [
     "reth-ethereum-forks/optimism",
     "revm/optimism",
 ]
-test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
+test-utils = ["dep:plain_hasher", "dep:hash-db"]
 
 [[bench]]
 name = "recover_ecdsa_crit"

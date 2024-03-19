@@ -287,6 +287,32 @@ pub trait EthTransactions: Send + Sync {
         F: FnOnce(TransactionInfo, TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R>
             + Send
             + 'static,
+        R: Send + 'static,
+    {
+        self.spawn_trace_transaction_in_block_with_inspector(hash, TracingInspector::new(config), f)
+            .await
+    }
+
+    /// Retrieves the transaction if it exists and returns its trace.
+    ///
+    /// Before the transaction is traced, all previous transaction in the block are applied to the
+    /// state by executing them first.
+    /// The callback `f` is invoked with the [ResultAndState] after the transaction was executed and
+    /// the database that points to the beginning of the transaction.
+    ///
+    /// Note: Implementers should use a threadpool where blocking is allowed, such as
+    /// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool).
+    async fn spawn_trace_transaction_in_block_with_inspector<Insp, F, R>(
+        &self,
+        hash: B256,
+        inspector: Insp,
+        f: F,
+    ) -> EthResult<Option<R>>
+    where
+        F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB) -> EthResult<R>
+            + Send
+            + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
         R: Send + 'static;
 
     /// Executes all transactions of a block and returns a list of callback results invoked for each
@@ -306,17 +332,60 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
-        // This is the callback that's invoked for each transaction with
+        // This is the callback that's invoked for each transaction with the inspector, the result,
+        // state and db
         F: for<'a> Fn(
                 TransactionInfo,
                 TracingInspector,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
+                &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
             + 'static,
-        R: Send + 'static;
+        R: Send + 'static,
+    {
+        self.trace_block_until(block_id, None, config, f).await
+    }
+
+    /// Executes all transactions of a block and returns a list of callback results invoked for each
+    /// transaction in the block.
+    ///
+    /// This
+    /// 1. fetches all transactions of the block
+    /// 2. configures the EVM evn
+    /// 3. loops over all transactions and executes them
+    /// 4. calls the callback with the transaction info, the execution result, the changed state
+    /// _after_ the transaction [State] and the database that points to the state
+    /// right _before_ the transaction, in other words the state the transaction was
+    /// executed on: `changed_state = tx(cached_state)`
+    ///
+    /// This accepts a `inspector_setup` closure that returns the inspector to be used for tracing
+    /// a transaction. This is invoked for each transaction.
+    async fn trace_block_with_inspector<Setup, Insp, F, R>(
+        &self,
+        block_id: BlockId,
+        insp_setup: Setup,
+        f: F,
+    ) -> EthResult<Option<Vec<R>>>
+    where
+        // This is the callback that's invoked for each transaction with the inspector, the result,
+        // state and db
+        F: for<'a> Fn(
+                TransactionInfo,
+                Insp,
+                ExecutionResult,
+                &'a State,
+                &'a StateCacheDB,
+            ) -> EthResult<R>
+            + Send
+            + 'static,
+        Setup: FnMut() -> Insp + Send + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
+        R: Send + 'static,
+    {
+        self.trace_block_until_with_inspector(block_id, None, insp_setup, f).await
+    }
 
     /// Executes all transactions of a block.
     ///
@@ -336,10 +405,48 @@ pub trait EthTransactions: Send + Sync {
                 TracingInspector,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
+                &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
             + 'static,
+        R: Send + 'static,
+    {
+        self.trace_block_until_with_inspector(
+            block_id,
+            highest_index,
+            move || TracingInspector::new(config),
+            f,
+        )
+        .await
+    }
+
+    /// Executes all transactions of a block.
+    ///
+    /// If a `highest_index` is given, this will only execute the first `highest_index`
+    /// transactions, in other words, it will stop executing transactions after the
+    /// `highest_index`th transaction.
+    ///
+    /// This accepts a `inspector_setup` closure that returns the inspector to be used for tracing
+    /// the transactions.
+    async fn trace_block_until_with_inspector<Setup, Insp, F, R>(
+        &self,
+        block_id: BlockId,
+        highest_index: Option<u64>,
+        inspector_setup: Setup,
+        f: F,
+    ) -> EthResult<Option<Vec<R>>>
+    where
+        F: for<'a> Fn(
+                TransactionInfo,
+                Insp,
+                ExecutionResult,
+                &'a State,
+                &'a StateCacheDB,
+            ) -> EthResult<R>
+            + Send
+            + 'static,
+        Setup: FnMut() -> Insp + Send + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
         R: Send + 'static;
 }
 
@@ -756,8 +863,10 @@ where
         let recovered =
             signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-        let pool_transaction =
-            <Pool::Transaction>::from_recovered_pooled_transaction(recovered.into());
+        let pool_transaction = match recovered.try_into() {
+            Ok(converted) => <Pool::Transaction>::from_recovered_pooled_transaction(converted),
+            Err(_) => return Err(EthApiError::TransactionConversionError),
+        };
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
@@ -881,16 +990,17 @@ where
         Ok(block.map(|block| (transaction, block.seal(block_hash))))
     }
 
-    async fn spawn_trace_transaction_in_block<F, R>(
+    async fn spawn_trace_transaction_in_block_with_inspector<Insp, F, R>(
         &self,
         hash: B256,
-        config: TracingInspectorConfig,
+        mut inspector: Insp,
         f: F,
     ) -> EthResult<Option<R>>
     where
-        F: FnOnce(TransactionInfo, TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R>
+        F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB) -> EthResult<R>
             + Send
             + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
         R: Send + 'static,
     {
         let (transaction, block) = match self.transaction_and_block(hash).await? {
@@ -915,53 +1025,32 @@ where
             let env =
                 EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
 
-            let mut inspector = TracingInspector::new(config);
-            let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+            let (res, _) = inspect(&mut db, env, &mut inspector)?;
             f(tx_info, inspector, res, db)
         })
         .await
         .map(Some)
     }
 
-    async fn trace_block_with<F, R>(
-        &self,
-        block_id: BlockId,
-        config: TracingInspectorConfig,
-        f: F,
-    ) -> EthResult<Option<Vec<R>>>
-    where
-        // This is the callback that's invoked for each transaction with
-        F: for<'a> Fn(
-                TransactionInfo,
-                TracingInspector,
-                ExecutionResult,
-                &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
-            ) -> EthResult<R>
-            + Send
-            + 'static,
-        R: Send + 'static,
-    {
-        self.trace_block_until(block_id, None, config, f).await
-    }
-
-    async fn trace_block_until<F, R>(
+    async fn trace_block_until_with_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
         highest_index: Option<u64>,
-        config: TracingInspectorConfig,
+        mut inspector_setup: Setup,
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
         F: for<'a> Fn(
                 TransactionInfo,
-                TracingInspector,
+                Insp,
                 ExecutionResult,
                 &'a State,
-                &'a CacheDB<StateProviderDatabase<StateProviderBox>>,
+                &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
             + 'static,
+        Setup: FnMut() -> Insp + Send + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
         R: Send + 'static,
     {
         let ((cfg, block_env, _), block) =
@@ -1008,7 +1097,7 @@ where
             while let Some((tx_info, tx)) = transactions.next() {
                 let env = EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
 
-                let mut inspector = TracingInspector::new(config);
+                let mut inspector = inspector_setup();
                 let (res, _) = inspect(&mut db, env, &mut inspector)?;
                 let ResultAndState { result, state } = res;
                 results.push(f(tx_info, inspector, result, &state, &db)?);
@@ -1182,10 +1271,9 @@ where
     ) -> EthResult<OptimismTxMeta> {
         let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
 
-        let mut envelope_buf = bytes::BytesMut::new();
-        tx.encode_enveloped(&mut envelope_buf);
-
         let (l1_fee, l1_data_gas) = if !tx.is_deposit() {
+            let envelope_buf = tx.envelope_encoded();
+
             let inner_l1_fee = l1_block_info
                 .l1_tx_data_fee(
                     &self.inner.provider.chain_spec(),
@@ -1252,7 +1340,7 @@ where
         from: &Address,
         request: TypedTransactionRequest,
     ) -> EthResult<TransactionSigned> {
-        for signer in self.inner.signers.iter() {
+        for signer in self.inner.signers.read().iter() {
             if signer.is_signer_for(from) {
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
@@ -1419,6 +1507,11 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
             .unwrap_or_default()
     };
 
+    let blob_gas_used = transaction.transaction.blob_gas_used().map(U128::from);
+    // Blob gas price should only be present if the transaction is a blob transaction
+    let blob_gas_price =
+        blob_gas_used.and_then(|_| meta.excess_blob_gas.map(calc_blob_gasprice).map(U128::from));
+
     #[allow(clippy::needless_update)]
     let mut res_receipt = TransactionReceipt {
         transaction_hash: Some(meta.tx_hash),
@@ -1438,8 +1531,8 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         logs_bloom: receipt.bloom_slow(),
         status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
         // EIP-4844 fields
-        blob_gas_price: meta.excess_blob_gas.map(calc_blob_gasprice).map(U128::from),
-        blob_gas_used: transaction.transaction.blob_gas_used().map(U128::from),
+        blob_gas_price,
+        blob_gas_used,
         ..Default::default()
     };
 

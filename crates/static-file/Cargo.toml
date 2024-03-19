@@ -27,6 +27,7 @@ tokio-stream.workspace = true
 tracing.workspace = true
 clap = { workspace = true, features = ["derive"], optional = true }
 rayon.workspace = true
+parking_lot = { workspace = true, features = ["send_guard", "arc_lock"] }
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }

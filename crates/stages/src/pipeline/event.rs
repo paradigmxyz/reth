@@ -14,6 +14,17 @@ use std::fmt::{Display, Formatter};
 /// - The pipeline will loop indefinitely unless a target block is set
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PipelineEvent {
+    /// Emitted when a stage is about to be prepared for a run.
+    Prepare {
+        /// Pipeline stages progress.
+        pipeline_stages_progress: PipelineStagesProgress,
+        /// The stage that is about to be run.
+        stage_id: StageId,
+        /// The previous checkpoint of the stage.
+        checkpoint: Option<StageCheckpoint>,
+        /// The block number up to which the stage is running, if known.
+        target: Option<BlockNumber>,
+    },
     /// Emitted when a stage is about to be run.
     Run {
         /// Pipeline stages progress.

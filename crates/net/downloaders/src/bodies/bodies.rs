@@ -615,10 +615,12 @@ mod tests {
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
         );
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
         let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
+            ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
@@ -653,11 +655,13 @@ mod tests {
 
         let request_limit = 10;
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
         let mut downloader =
             BodiesDownloaderBuilder::default().with_request_limit(request_limit).build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
+                ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
             );
         downloader.set_download_range(0..=199).expect("failed to set download range");
 
@@ -680,13 +684,14 @@ mod tests {
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
         );
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_stream_batch_size(stream_batch_size)
             .with_request_limit(request_limit)
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
+                ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
             );
 
         let mut range_start = 0;
@@ -713,10 +718,12 @@ mod tests {
         insert_headers(db.db(), &headers);
 
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
         let mut downloader = BodiesDownloaderBuilder::default().with_stream_batch_size(100).build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
+            ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
         );
 
         // Set and download the first range
@@ -747,6 +754,8 @@ mod tests {
         insert_headers(db.db(), &headers);
 
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
+
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
         // Set the max buffered block size to 1 byte, to make sure that every response exceeds the
         // limit
         let mut downloader = BodiesDownloaderBuilder::default()
@@ -756,7 +765,7 @@ mod tests {
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
+                ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
             );
 
         // Set and download the entire range
@@ -781,13 +790,15 @@ mod tests {
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_empty_responses(2),
         );
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_request_limit(3)
             .with_stream_batch_size(100)
             .build(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir()).unwrap(),
+                ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
             );
 
         // Download the requested range

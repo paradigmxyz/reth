@@ -5,7 +5,7 @@ use crate::{
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
-use bytes::{Buf, BytesMut};
+use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -18,12 +18,12 @@ pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::TxEip4844;
 
-pub use error::InvalidTransactionError;
+pub use error::{InvalidTransactionError, TransactionConversionError};
 pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 #[cfg(feature = "c-kzg")]
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-#[cfg(all(feature = "c-kzg", feature = "arbitrary"))]
+#[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
 pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
@@ -857,8 +857,12 @@ impl TransactionSignedNoHash {
     }
 
     /// Converts into a transaction type with its hash: [`TransactionSigned`].
+    ///
+    /// Note: This will recalculate the hash of the transaction.
+    #[inline]
     pub fn with_hash(self) -> TransactionSigned {
-        self.into()
+        let Self { signature, transaction } = self;
+        TransactionSigned::from_transaction_and_signature(transaction, signature)
     }
 
     /// Recovers a list of signers from a transaction list iterator
@@ -941,7 +945,7 @@ impl Compact for TransactionSignedNoHash {
 
 impl From<TransactionSignedNoHash> for TransactionSigned {
     fn from(tx: TransactionSignedNoHash) -> Self {
-        TransactionSigned::from_transaction_and_signature(tx.transaction, tx.signature)
+        tx.with_hash()
     }
 }
 
@@ -1107,9 +1111,9 @@ impl TransactionSigned {
     ///
     /// See also [TransactionSigned::encode_enveloped]
     pub fn envelope_encoded(&self) -> Bytes {
-        let mut buf = BytesMut::new();
+        let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
-        buf.freeze().into()
+        buf.into()
     }
 
     /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).
@@ -1155,6 +1159,7 @@ impl TransactionSigned {
     }
 
     /// Create a new signed transaction from a transaction and its signature.
+    ///
     /// This will also calculate the transaction hash using its encoding.
     pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
@@ -1266,11 +1271,11 @@ impl TransactionSigned {
             return Err(RlpError::Custom("unsupported typed transaction type"))
         };
         let transaction = match tx_type {
-            TxType::EIP2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
-            TxType::EIP1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
-            TxType::EIP4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
+            TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
+            TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
+            TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => Transaction::Deposit(TxDeposit::decode_inner(data)?),
+            TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
             TxType::Legacy => unreachable!("path for legacy tx has diverged before this method"),
         };
 
@@ -1278,7 +1283,7 @@ impl TransactionSigned {
         let signature = Signature::decode(data)?;
 
         #[cfg(feature = "optimism")]
-        let signature = if let TxType::DEPOSIT = tx_type {
+        let signature = if let TxType::Deposit = tx_type {
             Signature::optimism_deposit_tx_signature()
         } else {
             Signature::decode(data)?
@@ -1506,7 +1511,7 @@ impl TransactionSignedEcRecovered {
         self.signed_transaction
     }
 
-    /// Desolve Self to its component
+    /// Dissolve Self to its component
     pub fn to_components(self) -> (TransactionSigned, Address) {
         (self.signed_transaction, self.signer)
     }
@@ -1635,11 +1640,7 @@ mod tests {
 
         let decoded = TransactionSigned::decode(&mut &tx_bytes[..]).unwrap();
         assert_eq!(tx_bytes.len(), decoded.length());
-
-        let mut encoded = BytesMut::new();
-        decoded.encode(&mut encoded);
-
-        assert_eq!(tx_bytes, encoded[..]);
+        assert_eq!(tx_bytes, &alloy_rlp::encode(decoded)[..]);
     }
 
     #[test]
@@ -1664,7 +1665,7 @@ mod tests {
         // https://sepolia.etherscan.io/getRawTx?tx=0x9a22ccb0029bc8b0ddd073be1a1d923b7ae2b2ea52100bae0db4424f9107e9c0
         let raw_tx = alloy_primitives::hex::decode("0x03f9011d83aa36a7820fa28477359400852e90edd0008252089411e9ca82a3a762b4b5bd264d4173a242e7a770648080c08504a817c800f8a5a0012ec3d6f66766bedb002a190126b3549fce0047de0d4c25cffce0dc1c57921aa00152d8e24762ff22b1cfd9f8c0683786a7ca63ba49973818b3d1e9512cd2cec4a0013b98c6c83e066d5b14af2b85199e3d4fc7d1e778dd53130d180f5077e2d1c7a001148b495d6e859114e670ca54fb6e2657f0cbae5b08063605093a4b3dc9f8f1a0011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e654901a0c8de4cced43169f9aa3d36506363b2d2c44f6c49fc1fd91ea114c86f3757077ea01e11fdd0d1934eda0492606ee0bb80a7bf8f35cc5f86ec60fe5031ba48bfd544").unwrap();
         let decoded = TransactionSigned::decode_enveloped(&mut raw_tx.as_slice()).unwrap();
-        assert_eq!(decoded.tx_type(), TxType::EIP4844);
+        assert_eq!(decoded.tx_type(), TxType::Eip4844);
 
         let from = decoded.recover_signer();
         assert_eq!(from, Some(address!("A83C816D4f9b2783761a22BA6FADB0eB0606D7B2")));
@@ -1822,10 +1823,7 @@ mod tests {
 
         let decoded = TransactionSigned::decode(&mut &bytes[..]).unwrap();
         assert_eq!(expected, decoded);
-
-        let mut encoded = BytesMut::new();
-        expected.encode(&mut encoded);
-        assert_eq!(bytes, encoded);
+        assert_eq!(bytes, &alloy_rlp::encode(expected));
     }
 
     #[test]
@@ -1956,10 +1954,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("c98080808080801b8080"), &encoded[..]);
+        let encoded = &alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("c98080808080801b8080"), encoded[..]);
         assert_eq!(MIN_LENGTH_LEGACY_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -1975,10 +1971,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("8d01cb80808080808080c0808080"), &encoded[..]);
+        let encoded = &alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("8d01cb80808080808080c0808080"), encoded[..]);
         assert_eq!(MIN_LENGTH_EIP2930_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -1994,10 +1988,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("8e02cc8080808080808080c0808080"), &encoded[..]);
+        let encoded = &alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("8e02cc8080808080808080c0808080"), encoded[..]);
         assert_eq!(MIN_LENGTH_EIP1559_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -2013,10 +2005,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), &encoded[..]);
+        let encoded = alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), encoded[..]);
         assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -2036,8 +2026,7 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
+        let encoded = &alloy_rlp::encode(signed_tx);
 
         assert_eq!(b"\xb8?~\xf8<\xa0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x94\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\x80\x80\x80\x80\x80", &encoded[..]);
         assert_eq!(MIN_LENGTH_DEPOSIT_TX_ENCODED, encoded.len());

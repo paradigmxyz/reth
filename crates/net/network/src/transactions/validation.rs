@@ -20,8 +20,8 @@ pub const SIGNATURE_DECODED_SIZE_BYTES: usize = mem::size_of::<Signature>();
 /// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)..
 pub trait ValidateTx68 {
     /// Validates a [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)
-    /// entry. Returns [`ValidationOutcome`] which signals to the caller wether to fetch the
-    /// transaction or wether to drop it, and wether the sender of the announcement should be
+    /// entry. Returns [`ValidationOutcome`] which signals to the caller whether to fetch the
+    /// transaction or wether to drop it, and whether the sender of the announcement should be
     /// penalized.
     fn should_fetch(
         &self,
@@ -245,10 +245,10 @@ impl ValidateTx68 for EthMessageFilter {
         // the biggest transaction so far is a blob transaction, which is currently max 2^17,
         // encoded length, nonetheless, the blob tx may become bigger in the future.
         match ty {
-            TxType::Legacy | TxType::EIP2930 | TxType::EIP1559 => Some(MAX_MESSAGE_SIZE),
-            TxType::EIP4844 => None,
+            TxType::Legacy | TxType::Eip2930 | TxType::Eip1559 => Some(MAX_MESSAGE_SIZE),
+            TxType::Eip4844 => None,
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => None,
+            TxType::Deposit => None,
         }
     }
 
@@ -393,7 +393,7 @@ mod test {
     #[test]
     fn eth68_announcement_too_small_tx() {
         let types =
-            vec![TxType::MAX_RESERVED_EIP as u8, TxType::Legacy as u8, TxType::EIP2930 as u8];
+            vec![TxType::MAX_RESERVED_EIP as u8, TxType::Legacy as u8, TxType::Eip2930 as u8];
         let sizes = vec![
             0, // the first length isn't valid
             0, // neither is the second
@@ -433,10 +433,10 @@ mod test {
     #[test]
     fn eth68_announcement_duplicate_tx_hash() {
         let types = vec![
-            TxType::EIP1559 as u8,
-            TxType::EIP4844 as u8,
-            TxType::EIP1559 as u8,
-            TxType::EIP4844 as u8,
+            TxType::Eip1559 as u8,
+            TxType::Eip4844 as u8,
+            TxType::Eip1559 as u8,
+            TxType::Eip4844 as u8,
         ];
         let sizes = vec![1, 1, 1, MAX_MESSAGE_SIZE];
         // first three or the same

@@ -61,7 +61,7 @@ where
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let mut hash_builder =
-            HashBuilder::default().with_proof_retainer(Vec::from([target_nibbles.clone()]));
+            HashBuilder::default().with_proof_retainer(Vec::from([target_nibbles]));
 
         let mut account_rlp = Vec::with_capacity(128);
         let mut account_node_iter = AccountNodeIter::new(walker, hashed_account_cursor);

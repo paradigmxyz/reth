@@ -1,6 +1,6 @@
 //! A simple diskstore for blobs
 
-use crate::{blobstore::BlobStoreSize, BlobStore, BlobStoreError};
+use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
 use alloy_rlp::{Decodable, Encodable};
 use parking_lot::{Mutex, RwLock};
 use reth_primitives::{BlobTransactionSidecar, TxHash, B256};
@@ -71,12 +71,12 @@ impl BlobStore for DiskFileBlobStore {
         Ok(())
     }
 
-    fn cleanup(&self) {
+    fn cleanup(&self) -> BlobStoreCleanupStat {
         let txs_to_delete = {
             let mut txs_to_delete = self.inner.txs_to_delete.write();
             std::mem::take(&mut *txs_to_delete)
         };
-        let mut deleted_blobs = txs_to_delete.len();
+        let mut stat = BlobStoreCleanupStat::default();
         let mut subsize = 0;
         debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
         for tx in txs_to_delete {
@@ -84,14 +84,18 @@ impl BlobStore for DiskFileBlobStore {
             let _ = fs::metadata(&path).map(|meta| {
                 subsize += meta.len();
             });
-            let _ = fs::remove_file(&path).map_err(|e| {
-                deleted_blobs -= 1;
-                let err = DiskFileBlobStoreError::DeleteFile(tx, path, e);
-                debug!(target:"txpool::blob", %err);
-            });
+            match fs::remove_file(&path) {
+                Ok(_) => stat.delete_succeed += 1,
+                Err(e) => {
+                    stat.delete_failed += 1;
+                    let err = DiskFileBlobStoreError::DeleteFile(tx, path, e);
+                    debug!(target:"txpool::blob", %err);
+                }
+            };
         }
         self.inner.size_tracker.sub_size(subsize as usize);
-        self.inner.size_tracker.sub_len(deleted_blobs);
+        self.inner.size_tracker.sub_len(stat.delete_succeed);
+        stat
     }
 
     fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
@@ -454,7 +458,7 @@ mod tests {
         }
         let all = store.get_all(all_hashes.clone()).unwrap();
         for (tx, blob) in all {
-            assert!(blobs.contains(&(tx, blob)), "missing blob {:?}", tx);
+            assert!(blobs.contains(&(tx, blob)), "missing blob {tx:?}");
         }
 
         assert!(store.contains(all_hashes[0]).unwrap());

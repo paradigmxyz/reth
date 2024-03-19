@@ -80,7 +80,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         &mut self.jar.user_header
     }
 
-    /// Gets total writter rows in jar.
+    /// Gets total writer rows in jar.
     pub fn rows(&self) -> usize {
         self.jar.rows()
     }
@@ -113,7 +113,6 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         // First byte of the offset file is the size of one offset in bytes
         offsets_file.write_all(&[OFFSET_SIZE_BYTES as u8])?;
-        offsets_file.sync_all()?;
         offsets_file.seek(SeekFrom::End(0))?;
 
         Ok((data_file, offsets_file, is_created))
@@ -394,8 +393,36 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         Ok(())
     }
 
+    #[cfg(feature = "test-utils")]
+    pub fn commit_without_sync_all(&mut self) -> Result<(), NippyJarError> {
+        self.data_file.flush()?;
+
+        self.commit_offsets_without_sync_all()?;
+
+        // Flushes `max_row_size` and total `rows` to disk.
+        self.jar.freeze_config()?;
+
+        Ok(())
+    }
+
     /// Flushes offsets to disk.
     pub(crate) fn commit_offsets(&mut self) -> Result<(), NippyJarError> {
+        self.commit_offsets_inner()?;
+        self.offsets_file.get_ref().sync_all()?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-utils")]
+    fn commit_offsets_without_sync_all(&mut self) -> Result<(), NippyJarError> {
+        self.commit_offsets_inner()
+    }
+
+    /// Flushes offsets to disk.
+    ///
+    /// CAUTION: Does not call `sync_all` on the offsets file and requires a manual call to
+    /// `self.offsets_file.get_ref().sync_all()`.
+    fn commit_offsets_inner(&mut self) -> Result<(), NippyJarError> {
         // The last offset on disk can be the first offset of `self.offsets` given how
         // `append_column()` works alongside commit. So we need to skip it.
         let mut last_offset_ondisk = None;
@@ -420,7 +447,6 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             self.offsets_file.write_all(&offset.to_le_bytes())?;
         }
         self.offsets_file.flush()?;
-        self.offsets_file.get_ref().sync_all()?;
 
         Ok(())
     }

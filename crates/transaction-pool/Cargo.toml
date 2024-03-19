@@ -66,14 +66,6 @@ default = ["serde"]
 serde = ["dep:serde"]
 test-utils = ["rand", "paste", "serde"]
 arbitrary = ["proptest", "reth-primitives/arbitrary"]
-optimism = [
-    "dep:reth-revm",
-    "reth-revm?/optimism",
-    "reth-primitives/optimism",
-    "reth-provider/test-utils",
-    "reth-provider/optimism",
-    "revm/optimism",
-]
 
 [[bench]]
 name = "truncate"

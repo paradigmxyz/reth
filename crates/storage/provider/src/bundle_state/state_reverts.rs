@@ -97,7 +97,7 @@ struct StorageRevertsIter<R: Iterator, W: Iterator> {
     wiped: Peekable<W>,
 }
 
-impl<R: Iterator, W: Iterator> StorageRevertsIter<R, W>
+impl<R, W> StorageRevertsIter<R, W>
 where
     R: Iterator<Item = (B256, RevertToSlot)>,
     W: Iterator<Item = (B256, U256)>,

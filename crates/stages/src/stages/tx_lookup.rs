@@ -1,5 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use num_traits::Zero;
+use reth_config::config::EtlConfig;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -17,14 +18,12 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
     TransactionsProvider, TransactionsProviderExt,
 };
-use std::sync::Arc;
-use tempfile::TempDir;
 use tracing::*;
 
 /// The transaction lookup stage.
 ///
-/// This stage walks over the bodies table, and sets the transaction hash of each transaction in a
-/// block to the corresponding `BlockNumber` at each block. This is written to the
+/// This stage walks over existing transactions, and sets the transaction hash of each transaction
+/// in a block to the corresponding `BlockNumber` at each block. This is written to the
 /// [`tables::TransactionHashNumbers`] This is used for looking up changesets via the transaction
 /// hash.
 ///
@@ -34,19 +33,20 @@ pub struct TransactionLookupStage {
     /// The maximum number of lookup entries to hold in memory before pushing them to
     /// [`reth_etl::Collector`].
     chunk_size: u64,
+    etl_config: EtlConfig,
     prune_mode: Option<PruneMode>,
 }
 
 impl Default for TransactionLookupStage {
     fn default() -> Self {
-        Self { chunk_size: 5_000_000, prune_mode: None }
+        Self { chunk_size: 5_000_000, etl_config: EtlConfig::default(), prune_mode: None }
     }
 }
 
 impl TransactionLookupStage {
     /// Create new instance of [TransactionLookupStage].
-    pub fn new(chunk_size: u64, prune_mode: Option<PruneMode>) -> Self {
-        Self { chunk_size, prune_mode }
+    pub fn new(chunk_size: u64, etl_config: EtlConfig, prune_mode: Option<PruneMode>) -> Self {
+        Self { chunk_size, etl_config, prune_mode }
     }
 }
 
@@ -102,7 +102,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         // 500MB temporary files
         let mut hash_collector: Collector<TxHash, TxNumber> =
-            Collector::new(Arc::new(TempDir::new()?), 500 * (1024 * 1024));
+            Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
 
         debug!(
             target: "sync::stages::transaction_lookup",
@@ -119,7 +119,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Calculating transaction hashes");
 
             for (key, value) in provider.transaction_hashes_by_range(tx_range)? {
-                hash_collector.insert(key, value);
+                hash_collector.insert(key, value)?;
             }
 
             input.checkpoint = Some(
@@ -222,7 +222,10 @@ fn stage_checkpoint<DB: Database>(
         // number of pruned `TransactionHashNumbers` entries.
         processed: provider.count_entries::<tables::TransactionHashNumbers>()? as u64 +
             pruned_entries,
-        total: provider.count_entries::<tables::Transactions>()? as u64,
+        // Count only static files entries. If we count the database entries too, we may have
+        // duplicates. We're sure that the static files have all entries that database has,
+        // because we run the `StaticFileProducer` before starting the pipeline.
+        total: provider.static_file_provider().count_entries::<tables::Transactions>()? as u64,
     })
 }
 
@@ -397,12 +400,18 @@ mod tests {
     struct TransactionLookupTestRunner {
         db: TestStageDB,
         chunk_size: u64,
+        etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
     }
 
     impl Default for TransactionLookupTestRunner {
         fn default() -> Self {
-            Self { db: TestStageDB::default(), chunk_size: 1000, prune_mode: None }
+            Self {
+                db: TestStageDB::default(),
+                chunk_size: 1000,
+                etl_config: EtlConfig::default(),
+                prune_mode: None,
+            }
         }
     }
 
@@ -449,7 +458,11 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            TransactionLookupStage { chunk_size: self.chunk_size, prune_mode: self.prune_mode }
+            TransactionLookupStage {
+                chunk_size: self.chunk_size,
+                etl_config: self.etl_config.clone(),
+                prune_mode: self.prune_mode,
+            }
         }
     }
 

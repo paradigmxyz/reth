@@ -37,6 +37,13 @@ const BAD_PROTOCOL_REPUTATION_CHANGE: i32 = i32::MIN;
 // todo: current value is a hint, needs to be set properly
 const BAD_ANNOUNCEMENT_REPUTATION_CHANGE: i32 = REPUTATION_UNIT;
 
+/// The maximum reputation change that can be applied to a trusted peer.
+/// This is used to prevent a single bad message from a trusted peer to cause a significant change.
+/// This gives a trusted peer more leeway when interacting with the node, which is useful for in
+/// custom setups. By not setting this to `0` we still allow trusted peer penalization but less than
+/// untrusted peers.
+pub(crate) const MAX_TRUSTED_PEER_REPUTATION_CHANGE: Reputation = 2 * REPUTATION_UNIT;
+
 /// Returns `true` if the given reputation is below the [`BANNED_REPUTATION`] threshold
 #[inline]
 pub(crate) fn is_banned_reputation(reputation: i32) -> bool {
@@ -44,7 +51,7 @@ pub(crate) fn is_banned_reputation(reputation: i32) -> bool {
 }
 
 /// How the [`ReputationChangeKind`] are weighted.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct ReputationChangeWeights {

@@ -147,7 +147,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             .state_storage(account1, HashMap::from([(slot, (U256::ZERO, U256::from(10)))]))
             .build(),
         Receipts::from_vec(vec![vec![Some(Receipt {
-            tx_type: TxType::EIP2930,
+            tx_type: TxType::Eip2930,
             success: true,
             cumulative_gas_used: 300,
             logs: vec![Log {
@@ -205,7 +205,7 @@ fn block2(
             .revert_storage(number, account, Vec::from([(slot, U256::from(10))]))
             .build(),
         Receipts::from_vec(vec![vec![Some(Receipt {
-            tx_type: TxType::EIP1559,
+            tx_type: TxType::Eip1559,
             success: false,
             cumulative_gas_used: 400,
             logs: vec![Log {
@@ -271,7 +271,7 @@ fn block3(
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),
         Receipts::from_vec(vec![vec![Some(Receipt {
-            tx_type: TxType::EIP1559,
+            tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
             logs: vec![Log {
@@ -360,7 +360,7 @@ fn block4(
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),
         Receipts::from_vec(vec![vec![Some(Receipt {
-            tx_type: TxType::EIP1559,
+            tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
             logs: vec![Log {
@@ -444,7 +444,7 @@ fn block5(
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),
         Receipts::from_vec(vec![vec![Some(Receipt {
-            tx_type: TxType::EIP1559,
+            tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
             logs: vec![Log {

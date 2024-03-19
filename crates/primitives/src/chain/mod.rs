@@ -6,7 +6,7 @@ pub use spec::{
     MAINNET, SEPOLIA,
 };
 #[cfg(feature = "optimism")]
-pub use spec::{BASE_MAINNET, BASE_SEPOLIA};
+pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_SEPOLIA};
 
 // The chain spec module.
 mod spec;

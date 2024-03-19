@@ -20,50 +20,51 @@ pub enum ConsensusType {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Hardfork {
-    /// Frontier.
+    /// Frontier: <https://blog.ethereum.org/2015/03/03/ethereum-launch-process>.
     Frontier,
-    /// Homestead.
+    /// Homestead: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/homestead.md>.
     Homestead,
-    /// The DAO fork.
+    /// The DAO fork: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/dao-fork.md>.
     Dao,
-    /// Tangerine.
+    /// Tangerine: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/tangerine-whistle.md>.
     Tangerine,
-    /// Spurious Dragon.
+    /// Spurious Dragon: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/spurious-dragon.md>.
     SpuriousDragon,
-    /// Byzantium.
+    /// Byzantium: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/byzantium.md>.
     Byzantium,
-    /// Constantinople.
+    /// Constantinople: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/constantinople.md>.
     Constantinople,
-    /// Petersburg.
+    /// Petersburg: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/petersburg.md>.
     Petersburg,
-    /// Istanbul.
+    /// Istanbul: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/istanbul.md>.
     Istanbul,
-    /// Muir Glacier.
+    /// Muir Glacier: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/muir-glacier.md>.
     MuirGlacier,
-    /// Berlin.
+    /// Berlin: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/berlin.md>.
     Berlin,
-    /// London.
+    /// London: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/london.md>.
     London,
-    /// Arrow Glacier.
+    /// Arrow Glacier: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/arrow-glacier.md>.
     ArrowGlacier,
-    /// Gray Glacier.
+    /// Gray Glacier: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/gray-glacier.md>.
     GrayGlacier,
-    /// Paris.
+    /// Paris: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/paris.md>.
     Paris,
-    /// Bedrock.
+    /// Bedrock: <https://blog.oplabs.co/introducing-optimism-bedrock>.
     #[cfg(feature = "optimism")]
     Bedrock,
-    /// Regolith
+    /// Regolith: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#regolith>.
     #[cfg(feature = "optimism")]
     Regolith,
-    /// Shanghai.
+    /// Shanghai: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/shanghai.md>.
     Shanghai,
-    /// Canyon
+    /// Canyon:
+    /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#canyon>.
     #[cfg(feature = "optimism")]
     Canyon,
-    /// Cancun.
+    /// Cancun: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/cancun.md>.
     Cancun,
-    /// Ecotone
+    /// Ecotone: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#ecotone>.
     #[cfg(feature = "optimism")]
     Ecotone,
 }
@@ -91,22 +92,22 @@ impl Hardfork {
     /// Retrieves the activation block for the specified hardfork on the given chain.
     pub fn activation_block(&self, chain: Chain) -> Option<u64> {
         if chain == Chain::mainnet() {
-            return self.mainnet_activation_block();
+            return self.mainnet_activation_block()
         }
         if chain == Chain::sepolia() {
-            return self.sepolia_activation_block();
+            return self.sepolia_activation_block()
         }
         if chain == Chain::holesky() {
-            return self.holesky_activation_block();
+            return self.holesky_activation_block()
         }
 
         #[cfg(feature = "optimism")]
         {
             if chain == Chain::base_sepolia() {
-                return self.base_sepolia_activation_block();
+                return self.base_sepolia_activation_block()
             }
             if chain == Chain::base_mainnet() {
-                return self.base_mainnet_activation_block();
+                return self.base_mainnet_activation_block()
             }
         }
 
@@ -133,9 +134,7 @@ impl Hardfork {
             Hardfork::GrayGlacier => Some(15050000),
             Hardfork::Paris => Some(15537394),
             Hardfork::Shanghai => Some(17034870),
-
-            // upcoming hardforks
-            Hardfork::Cancun => None,
+            Hardfork::Cancun => Some(19426587),
 
             _ => None,
         }
@@ -252,21 +251,21 @@ impl Hardfork {
     /// Retrieves the activation timestamp for the specified hardfork on the given chain.
     pub fn activation_timestamp(&self, chain: Chain) -> Option<u64> {
         if chain == Chain::mainnet() {
-            return self.mainnet_activation_timestamp();
+            return self.mainnet_activation_timestamp()
         }
         if chain == Chain::sepolia() {
-            return self.sepolia_activation_timestamp();
+            return self.sepolia_activation_timestamp()
         }
         if chain == Chain::holesky() {
-            return self.holesky_activation_timestamp();
+            return self.holesky_activation_timestamp()
         }
         #[cfg(feature = "optimism")]
         {
             if chain == Chain::base_sepolia() {
-                return self.base_sepolia_activation_timestamp();
+                return self.base_sepolia_activation_timestamp()
             }
             if chain == Chain::base_mainnet() {
-                return self.base_mainnet_activation_timestamp();
+                return self.base_mainnet_activation_timestamp()
             }
         }
 

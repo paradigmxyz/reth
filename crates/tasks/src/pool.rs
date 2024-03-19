@@ -24,8 +24,8 @@ pub struct BlockingTaskGuard(Arc<Semaphore>);
 impl BlockingTaskGuard {
     /// Create a new `BlockingTaskGuard` with the given maximum number of blocking tasks in
     /// parallel.
-    pub fn new(max_blocking_tasks: u32) -> Self {
-        Self(Arc::new(Semaphore::new(max_blocking_tasks as usize)))
+    pub fn new(max_blocking_tasks: usize) -> Self {
+        Self(Arc::new(Semaphore::new(max_blocking_tasks)))
     }
 
     /// See also [Semaphore::acquire_owned]

@@ -168,9 +168,9 @@ impl FromStr for NodeRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rlp::{Decodable, Encodable};
-    use bytes::BytesMut;
+    use alloy_rlp::Decodable;
     use rand::{thread_rng, Rng, RngCore};
+    use std::net::Ipv6Addr;
 
     #[test]
     fn test_mapped_ipv6() {
@@ -219,10 +219,7 @@ mod tests {
                 id: rng.gen(),
             };
 
-            let mut buf = BytesMut::new();
-            record.encode(&mut buf);
-
-            let decoded = NodeRecord::decode(&mut buf.as_ref()).unwrap();
+            let decoded = NodeRecord::decode(&mut alloy_rlp::encode(record).as_slice()).unwrap();
             assert_eq!(record, decoded);
         }
     }
@@ -240,10 +237,7 @@ mod tests {
                 id: rng.gen(),
             };
 
-            let mut buf = BytesMut::new();
-            record.encode(&mut buf);
-
-            let decoded = NodeRecord::decode(&mut buf.as_ref()).unwrap();
+            let decoded = NodeRecord::decode(&mut alloy_rlp::encode(record).as_slice()).unwrap();
             assert_eq!(record, decoded);
         }
     }
@@ -276,25 +270,63 @@ mod tests {
 
     #[test]
     fn test_node_serialize() {
-        let node = NodeRecord{
-            address: IpAddr::V4([10, 3, 58, 6].into()),
-            tcp_port: 30303u16,
-            udp_port: 30301u16,
-            id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
-        };
-        let ser = serde_json::to_string::<NodeRecord>(&node).expect("couldn't serialize");
-        assert_eq!(ser, "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\"")
+        let cases = vec![
+            // IPv4
+            (
+                NodeRecord{
+                    address: IpAddr::V4([10, 3, 58, 6].into()),
+                    tcp_port: 30303u16,
+                    udp_port: 30301u16,
+                    id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
+                },
+                "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\""
+            ),
+            // IPv6
+            (
+                NodeRecord{
+                    address: Ipv6Addr::new(0x2001, 0xdb8, 0x3c4d, 0x15, 0x0, 0x0, 0xabcd, 0xef12).into(),
+                    tcp_port: 52150u16,
+                    udp_port: 52151u16,
+                    id: PeerId::from_str("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439").unwrap(),
+                },
+                "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@[2001:db8:3c4d:15::abcd:ef12]:52150?discport=52151\"",
+            )
+        ];
+
+        for (node, expected) in cases {
+            let ser = serde_json::to_string::<NodeRecord>(&node).expect("couldn't serialize");
+            assert_eq!(ser, expected);
+        }
     }
 
     #[test]
     fn test_node_deserialize() {
-        let url = "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\"";
-        let node: NodeRecord = serde_json::from_str(url).expect("couldn't deserialize");
-        assert_eq!(node, NodeRecord{
-            address: IpAddr::V4([10, 3, 58, 6].into()),
-            tcp_port: 30303u16,
-            udp_port: 30301u16,
-            id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
-        })
+        let cases = vec![
+            // IPv4
+            (
+                "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\"", 
+                NodeRecord{
+                    address: IpAddr::V4([10, 3, 58, 6].into()),
+                    tcp_port: 30303u16,
+                    udp_port: 30301u16,
+                    id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
+                }
+            ),
+            // IPv6
+            (
+                "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@[2001:db8:3c4d:15::abcd:ef12]:52150?discport=52151\"",
+                NodeRecord{
+                    address: Ipv6Addr::new(0x2001, 0xdb8, 0x3c4d, 0x15, 0x0, 0x0, 0xabcd, 0xef12).into(),
+                    tcp_port: 52150u16,
+                    udp_port: 52151u16,
+                    id: PeerId::from_str("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439").unwrap(),
+                }
+            ),
+        ];
+
+        for (url, expected) in cases {
+            let node: NodeRecord = serde_json::from_str(url).expect("couldn't deserialize");
+            assert_eq!(node, expected);
+        }
     }
 }

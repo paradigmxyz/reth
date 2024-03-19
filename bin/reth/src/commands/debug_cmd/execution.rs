@@ -14,7 +14,7 @@ use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
-use reth_db::{database::Database, init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -131,7 +131,8 @@ impl Command {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                )?
+                    stage_conf.etl.clone(),
+                )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
                 })
@@ -215,8 +216,7 @@ impl Command {
             self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
-        let db =
-            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
+        let db = Arc::new(init_db(db_path, self.db.database_args())?);
         let provider_factory =
             ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
 

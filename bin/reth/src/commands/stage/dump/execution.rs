@@ -164,7 +164,7 @@ async fn dry_run<DB: Database>(
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
     let mut exec_stage = ExecutionStage::new_with_factory(EvmProcessorFactory::new(
-        output_provider_factory.chain_spec().clone(),
+        output_provider_factory.chain_spec(),
         EthEvmConfig::default(),
     ));
 

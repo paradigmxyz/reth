@@ -2,6 +2,8 @@ use crate::PayloadAttributes;
 use reth_primitives::B256;
 use reth_rpc_types::engine::ExecutionPayload;
 
+use super::MessageValidationKind;
+
 /// Either an [ExecutionPayload] or a types that implements the [PayloadAttributes] trait.
 #[derive(Debug)]
 pub enum PayloadOrAttributes<'a, AttributesType> {
@@ -50,6 +52,14 @@ where
         match self {
             Self::ExecutionPayload { parent_beacon_block_root, .. } => *parent_beacon_block_root,
             Self::PayloadAttributes(attributes) => attributes.parent_beacon_block_root(),
+        }
+    }
+
+    /// Return a [MessageValidationKind] for the payload or attributes.
+    pub fn message_validation_kind(&self) -> MessageValidationKind {
+        match self {
+            Self::ExecutionPayload { .. } => MessageValidationKind::Payload,
+            Self::PayloadAttributes(_) => MessageValidationKind::PayloadAttributes,
         }
     }
 }

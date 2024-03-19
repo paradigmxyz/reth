@@ -31,6 +31,7 @@ use crate::{
         models::{
             accounts::{AccountBeforeTx, BlockNumberAddress},
             blocks::{HeaderHash, StoredBlockOmmers},
+            client_version::ClientVersion,
             storage_sharded_key::StorageShardedKey,
             ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
         },
@@ -45,7 +46,7 @@ use reth_primitives::{
 use std::fmt;
 
 /// Enum for the types of tables present in libmdbx.
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum TableType {
     /// key value table
     Table,
@@ -372,6 +373,9 @@ tables! {
 
     /// Stores the highest pruned block number and prune mode of each prune segment.
     table PruneCheckpoints<Key = PruneSegment, Value = PruneCheckpoint>;
+
+    /// Stores the history of client versions that have accessed the database with write privileges by unix timestamp in seconds.
+    table VersionHistory<Key = u64, Value = ClientVersion>;
 }
 
 // Alias types.
@@ -390,7 +394,7 @@ mod tests {
     #[test]
     fn parse_table_from_str() {
         for table in Tables::ALL {
-            assert_eq!(format!("{:?}", table), table.name());
+            assert_eq!(format!("{table:?}"), table.name());
             assert_eq!(table.to_string(), table.name());
             assert_eq!(Tables::from_str(table.name()).unwrap(), *table);
         }

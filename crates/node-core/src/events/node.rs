@@ -23,12 +23,15 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::time::Interval;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
-/// The current high-level state of the node.
+/// The current high-level state of the node, including the node's database environemt, network
+/// connections, current processing stage, and the latest block information. It provides
+/// methods to handle different types of events that affect the node's state, such as pipeline
+/// events, network events, and consensus engine events.
 struct NodeState<DB> {
     /// Database environment.
     /// Used for freelist calculation reported in the "Status" log message.
@@ -71,6 +74,30 @@ impl<DB> NodeState<DB> {
     /// Processes an event emitted by the pipeline
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
+            PipelineEvent::Prepare { pipeline_stages_progress, stage_id, checkpoint, target } => {
+                let checkpoint = checkpoint.unwrap_or_default();
+                let current_stage = CurrentStage {
+                    stage_id,
+                    eta: match &self.current_stage {
+                        Some(current_stage) if current_stage.stage_id == stage_id => {
+                            current_stage.eta
+                        }
+                        _ => Eta::default(),
+                    },
+                    checkpoint,
+                    target,
+                };
+
+                info!(
+                    pipeline_stages = %pipeline_stages_progress,
+                    stage = %stage_id,
+                    checkpoint = %checkpoint.block_number,
+                    target = %OptionalField(target),
+                    "Preparing stage",
+                );
+
+                self.current_stage = Some(current_stage);
+            }
             PipelineEvent::Run { pipeline_stages_progress, stage_id, checkpoint, target } => {
                 let checkpoint = checkpoint.unwrap_or_default();
                 let current_stage = CurrentStage {
@@ -117,7 +144,7 @@ impl<DB> NodeState<DB> {
 
                 if let Some(current_stage) = self.current_stage.as_mut() {
                     current_stage.checkpoint = checkpoint;
-                    current_stage.eta.update(checkpoint);
+                    current_stage.eta.update(stage_id, checkpoint);
 
                     let target = OptionalField(current_stage.target);
                     let stage_progress = OptionalField(
@@ -479,18 +506,27 @@ struct Eta {
 
 impl Eta {
     /// Update the ETA given the checkpoint, if possible.
-    fn update(&mut self, checkpoint: StageCheckpoint) {
+    fn update(&mut self, stage: StageId, checkpoint: StageCheckpoint) {
         let Some(current) = checkpoint.entities() else { return };
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
-            let processed_since_last = current.processed - self.last_checkpoint.processed;
+            let Some(processed_since_last) =
+                current.processed.checked_sub(self.last_checkpoint.processed)
+            else {
+                self.eta = None;
+                debug!(target: "reth::cli", %stage, ?current, ?self.last_checkpoint, "Failed to calculate the ETA: processed entities is less than the last checkpoint");
+                return
+            };
             let elapsed = last_checkpoint_time.elapsed();
             let per_second = processed_since_last as f64 / elapsed.as_secs_f64();
 
-            self.eta = Duration::try_from_secs_f64(
-                ((current.total - current.processed) as f64) / per_second,
-            )
-            .ok();
+            let Some(remaining) = current.total.checked_sub(current.processed) else {
+                self.eta = None;
+                debug!(target: "reth::cli", %stage, ?current, "Failed to calculate the ETA: total entities is less than processed entities");
+                return
+            };
+
+            self.eta = Duration::try_from_secs_f64(remaining as f64 / per_second).ok();
         }
 
         self.last_checkpoint = current;

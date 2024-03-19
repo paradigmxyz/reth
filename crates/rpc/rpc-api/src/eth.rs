@@ -27,7 +27,7 @@ pub trait EthApi {
 
     /// Returns a list of addresses owned by client.
     #[method(name = "accounts")]
-    async fn accounts(&self) -> RpcResult<Vec<Address>>;
+    fn accounts(&self) -> RpcResult<Vec<Address>>;
 
     /// Returns the number of most recent block.
     #[method(name = "blockNumber")]

@@ -4,6 +4,7 @@ use crate::{
     consensus::ConsensusError,
     executor::{BlockExecutionError, BlockValidationError},
     provider::ProviderError,
+    RethError,
 };
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 
@@ -108,6 +109,11 @@ impl InsertBlockError {
     /// Create a new InsertInvalidBlockError from an execution error
     pub fn execution_error(error: BlockExecutionError, block: SealedBlock) -> Self {
         Self::new(block, InsertBlockErrorKind::Execution(error))
+    }
+
+    /// Create a new InsertBlockError from a RethError and block.
+    pub fn from_reth_error(error: RethError, block: SealedBlock) -> Self {
+        Self::new(block, error.into())
     }
 
     /// Consumes the error and returns the block that resulted in the error
@@ -324,11 +330,9 @@ impl InsertBlockErrorKind {
     }
 }
 
-// This is a convenience impl to convert from crate::Error to InsertBlockErrorKind, most
-impl From<crate::RethError> for InsertBlockErrorKind {
-    fn from(err: crate::RethError) -> Self {
-        use crate::RethError;
-
+// This is a convenience impl to convert from crate::Error to InsertBlockErrorKind
+impl From<RethError> for InsertBlockErrorKind {
+    fn from(err: RethError) -> Self {
         match err {
             RethError::Execution(err) => InsertBlockErrorKind::Execution(err),
             RethError::Consensus(err) => InsertBlockErrorKind::Consensus(err),

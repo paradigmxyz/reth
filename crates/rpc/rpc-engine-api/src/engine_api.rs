@@ -4,17 +4,17 @@ use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_node_api::{
-    validate_payload_timestamp, BuiltPayload, EngineApiMessageVersion, EngineTypes,
-    PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
+    validate_payload_timestamp, EngineApiMessageVersion, EngineTypes, PayloadAttributes,
+    PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2,
-    ExecutionPayloadEnvelopeV3, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
-    ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
+    CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2,
+    ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    TransitionConfiguration, CAPABILITIES,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
@@ -22,7 +22,7 @@ use reth_rpc_types_compat::engine::payload::{
 use reth_tasks::TaskSpawner;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
@@ -202,14 +202,18 @@ where
     pub async fn get_payload_v1(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<ExecutionPayloadV1> {
-        Ok(self
-            .inner
+    ) -> EngineApiResult<EngineT::ExecutionPayloadV1> {
+        self.inner
             .payload_store
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| payload.into_v1_payload())?)
+            .map_err(|_| EngineApiError::UnknownPayload)?
+            .try_into()
+            .map_err(|_| {
+                warn!("could not transform built payload into ExecutionPayloadV1");
+                EngineApiError::UnknownPayload
+            })
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -222,7 +226,7 @@ where
     pub async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<ExecutionPayloadEnvelopeV2> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadV2> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -234,13 +238,17 @@ where
         )?;
 
         // Now resolve the payload
-        Ok(self
-            .inner
+        self.inner
             .payload_store
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| payload.into_v2_payload())?)
+            .map_err(|_| EngineApiError::UnknownPayload)?
+            .try_into()
+            .map_err(|_| {
+                warn!("could not transform built payload into ExecutionPayloadV2");
+                EngineApiError::UnknownPayload
+            })
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -253,7 +261,7 @@ where
     pub async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<ExecutionPayloadEnvelopeV3> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadV3> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -265,25 +273,17 @@ where
         )?;
 
         // Now resolve the payload
-        let mut resolved_payload = self
-            .inner
+        self.inner
             .payload_store
             .resolve(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)?
-            .map(|payload| payload.into_v3_payload())?;
-
-        // After `Cancun` is enabled on optimism, an extra field `parent_beacon_block_root` is
-        // included in the enveloped V3 payload. On ethereum, this field is not included.
-        if self.inner.chain_spec.is_optimism() &&
-            self.inner
-                .chain_spec
-                .is_fork_active_at_timestamp(Hardfork::Cancun, attributes.timestamp())
-        {
-            resolved_payload.parent_beacon_block_root = attributes.parent_beacon_block_root();
-        }
-
-        Ok(resolved_payload)
+            .map_err(|_| EngineApiError::UnknownPayload)?
+            .try_into()
+            .map_err(|_| {
+                warn!("could not transform built payload into ExecutionPayloadV2");
+                EngineApiError::UnknownPayload
+            })
     }
 
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
@@ -581,7 +581,10 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v1(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadV1> {
+    async fn get_payload_v1(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
         let start = Instant::now();
         let res = EngineApi::get_payload_v1(self, payload_id).await;
@@ -598,7 +601,10 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV2> {
+    async fn get_payload_v2(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadV2> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         let start = Instant::now();
         let res = EngineApi::get_payload_v2(self, payload_id).await;
@@ -615,7 +621,10 @@ where
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v3(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV3> {
+    async fn get_payload_v3(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadV3> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
         let start = Instant::now();
         let res = EngineApi::get_payload_v3(self, payload_id).await;

@@ -139,7 +139,7 @@ pub struct RpcServerArgs {
     #[arg(long, visible_alias = "--rpc.returndata.limit", default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into())]
     pub rpc_max_response_size: MaxU32,
 
-    /// Set the the maximum concurrent subscriptions per connection.
+    /// Set the maximum concurrent subscriptions per connection.
     #[arg(long, default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN.into())]
     pub rpc_max_subscriptions_per_connection: MaxU32,
 
@@ -148,8 +148,8 @@ pub struct RpcServerArgs {
     pub rpc_max_connections: MaxU32,
 
     /// Maximum number of concurrent tracing requests.
-    #[arg(long, value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_TRACING_REQUESTS)]
-    pub rpc_max_tracing_requests: u32,
+    #[arg(long, value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
+    pub rpc_max_tracing_requests: usize,
 
     /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
     #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
@@ -499,7 +499,7 @@ impl Default for RpcServerArgs {
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
             rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN.into(),
             rpc_max_connections: RPC_DEFAULT_MAX_CONNECTIONS.into(),
-            rpc_max_tracing_requests: constants::DEFAULT_MAX_TRACING_REQUESTS,
+            rpc_max_tracing_requests: constants::default_max_tracing_requests(),
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),

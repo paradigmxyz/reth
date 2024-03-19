@@ -273,9 +273,9 @@ mod tests {
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let provider_factory =
-            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir())
-                .expect("create provide factory with static_files");
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
+        let provider_factory = ProviderFactory::new(db, MAINNET.clone(), static_dir_path)
+            .expect("create provide factory with static_files");
         let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5);
 
         // No last pruned block number was set before

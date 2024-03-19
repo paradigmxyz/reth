@@ -7,6 +7,7 @@ use reth_primitives::{
 };
 use reth_rpc_types::TypedTransactionRequest;
 
+use dyn_clone::DynClone;
 use reth_rpc_types_compat::transaction::to_primitive_transaction;
 use secp256k1::SecretKey;
 use std::collections::HashMap;
@@ -15,7 +16,7 @@ type Result<T> = std::result::Result<T, SignError>;
 
 /// An Ethereum Signer used via RPC.
 #[async_trait::async_trait]
-pub(crate) trait EthSigner: Send + Sync {
+pub(crate) trait EthSigner: Send + Sync + DynClone {
     /// Returns the available accounts for this signer.
     fn accounts(&self) -> Vec<Address>;
 
@@ -38,13 +39,38 @@ pub(crate) trait EthSigner: Send + Sync {
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature>;
 }
 
+dyn_clone::clone_trait_object!(EthSigner);
+
 /// Holds developer keys
+#[derive(Clone)]
 pub(crate) struct DevSigner {
     addresses: Vec<Address>,
     accounts: HashMap<Address, SecretKey>,
 }
 
+#[allow(dead_code)]
 impl DevSigner {
+    /// Generates a random dev signer which satisfies [EthSigner] trait
+    pub(crate) fn random() -> Box<dyn EthSigner> {
+        let mut signers = Self::random_signers(1);
+        signers.pop().expect("expect to generate at leas one signer")
+    }
+
+    /// Generates provided number of random dev signers
+    /// which satisfy [EthSigner] trait
+    pub(crate) fn random_signers(num: u32) -> Vec<Box<dyn EthSigner + 'static>> {
+        let mut signers = Vec::new();
+        for _ in 0..num {
+            let (sk, pk) = secp256k1::generate_keypair(&mut rand::thread_rng());
+
+            let address = reth_primitives::public_key_to_address(pk);
+            let addresses = vec![address];
+            let accounts = HashMap::from([(address, sk)]);
+            signers.push(Box::new(DevSigner { addresses, accounts }) as Box<dyn EthSigner>);
+        }
+        signers
+    }
+
     fn get_key(&self, account: Address) -> Result<&SecretKey> {
         self.accounts.get(&account).ok_or(SignError::NoAccount)
     }

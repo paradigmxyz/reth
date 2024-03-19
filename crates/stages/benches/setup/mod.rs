@@ -63,7 +63,7 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>>(
 ) {
     let (input, unwind) = range;
 
-    let mut stage = stage.clone();
+    let mut stage = stage;
     let provider = db.factory.provider_rw().unwrap();
 
     StorageHashingStage::default().unwind(&provider, unwind).unwrap();

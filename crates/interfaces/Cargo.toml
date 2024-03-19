@@ -12,7 +12,6 @@ workspace = true
 
 [dependencies]
 reth-primitives.workspace = true
-reth-nippy-jar.workspace = true
 reth-rpc-types.workspace = true
 reth-network-api.workspace = true
 # TODO(onbjerg): We only need this for [BlockBody]

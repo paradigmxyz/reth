@@ -138,7 +138,7 @@ impl TxDeposit {
 
     /// Get the transaction type
     pub(crate) fn tx_type(&self) -> TxType {
-        TxType::DEPOSIT
+        TxType::Deposit
     }
 }
 

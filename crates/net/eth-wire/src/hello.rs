@@ -95,7 +95,7 @@ impl HelloMessageWithProtocols {
 /// Raw rlpx protocol message used in the `p2p` handshake, containing information about the
 /// supported RLPx protocol version and capabilities.
 ///
-/// See als <https://github.com/ethereum/devp2p/blob/master/rlpx.md#hello-0x00>
+/// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#hello-0x00>
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

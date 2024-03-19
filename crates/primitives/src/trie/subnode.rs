@@ -4,7 +4,7 @@ use reth_codecs::Compact;
 
 /// Walker sub node for storing intermediate state root calculation state in the database.
 /// See [crate::stage::MerkleCheckpoint].
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StoredSubNode {
     /// The key of the current node.
     pub key: Vec<u8>,
@@ -54,8 +54,8 @@ impl Compact for StoredSubNode {
         let nibbles_exists = buf.get_u8() != 0;
         let nibble = if nibbles_exists { Some(buf.get_u8()) } else { None };
 
-        let node_exsists = buf.get_u8() != 0;
-        let node = if node_exsists {
+        let node_exists = buf.get_u8() != 0;
+        let node = if node_exists {
             let (node, rest) = StoredBranchNode::from_compact(buf, 0);
             buf = rest;
             Some(node.0)

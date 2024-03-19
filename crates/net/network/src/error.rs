@@ -9,7 +9,7 @@ use reth_eth_wire::{
 use std::{fmt, io, io::ErrorKind, net::SocketAddr};
 
 /// Service kind.
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum ServiceKind {
     /// Listener service.
     Listener(SocketAddr),

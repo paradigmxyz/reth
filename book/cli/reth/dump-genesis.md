@@ -1,11 +1,9 @@
 # reth dump-genesis
 
-This dumps genesis block JSON configuration to stdout
-
-```bash
-$ reth dump-genesis
 Dumps genesis block JSON configuration to stdout
 
+```bash
+$ reth dump-genesis --help
 Usage: reth dump-genesis [OPTIONS]
 
 Options:
@@ -66,7 +64,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
           
-          [default:  <CACHE_DIR>/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

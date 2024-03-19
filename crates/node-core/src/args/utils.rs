@@ -10,14 +10,14 @@ use std::{
 };
 
 #[cfg(feature = "optimism")]
-use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA};
+use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_SEPOLIA};
 
 #[cfg(not(feature = "optimism"))]
 use reth_primitives::{DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};
 
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
-pub const SUPPORTED_CHAINS: &[&str] = &["base", "base-sepolia"];
+pub const SUPPORTED_CHAINS: &[&str] = &["base", "base-sepolia", "optimism-sepolia"];
 #[cfg(not(feature = "optimism"))]
 /// Chains supported by reth. First value should be used as the default.
 pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "goerli", "holesky", "dev"];
@@ -42,6 +42,8 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         "holesky" => HOLESKY.clone(),
         #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
+        #[cfg(feature = "optimism")]
+        "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
         #[cfg(feature = "optimism")]
         "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
         #[cfg(feature = "optimism")]
@@ -75,6 +77,8 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "holesky" => HOLESKY.clone(),
         #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
+        #[cfg(feature = "optimism")]
+        "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
         #[cfg(feature = "optimism")]
         "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
         #[cfg(feature = "optimism")]

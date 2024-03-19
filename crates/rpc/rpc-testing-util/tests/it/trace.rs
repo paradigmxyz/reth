@@ -44,7 +44,7 @@ async fn replay_transactions() {
     let mut stream = client.replay_transactions(tx_hashes, trace_types);
     let now = Instant::now();
     while let Some(replay_txs) = stream.next().await {
-        println!("Transaction: {:?}", replay_txs);
+        println!("Transaction: {replay_txs:?}");
         println!("Replayed transactions in {:?}", now.elapsed());
     }
 }
@@ -65,7 +65,7 @@ async fn trace_filters() {
     let mut stream = client.trace_filter_stream(filters);
     let start_time = Instant::now();
     while let Some(trace) = stream.next().await {
-        println!("Transaction Trace: {:?}", trace);
+        println!("Transaction Trace: {trace:?}");
         println!("Duration since test start: {:?}", start_time.elapsed());
     }
 }
@@ -82,10 +82,10 @@ async fn trace_call() {
     while let Some(result) = stream.next().await {
         match result {
             Ok(trace_result) => {
-                println!("Trace Result: {:?}", trace_result);
+                println!("Trace Result: {trace_result:?}");
             }
             Err((error, request)) => {
-                eprintln!("Error for request {:?}: {:?}", request, error);
+                eprintln!("Error for request {request:?}: {error:?}");
             }
         }
     }

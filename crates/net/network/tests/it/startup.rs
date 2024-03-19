@@ -48,7 +48,7 @@ async fn test_listener_addr_in_use() {
     let addr = config.listener_addr;
     let result = NetworkManager::new(config).await;
     let err = result.err().unwrap();
-    assert!(is_addr_in_use_kind(&err, ServiceKind::Listener(addr)), "{:?}", err);
+    assert!(is_addr_in_use_kind(&err, ServiceKind::Listener(addr)), "{err:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

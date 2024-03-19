@@ -53,6 +53,13 @@ pub struct AllTransactionsEvents<T: PoolTransaction> {
     pub(crate) events: Receiver<FullTransactionEvent<T>>,
 }
 
+impl<T: PoolTransaction> AllTransactionsEvents<T> {
+    /// Create a new instance of this stream.
+    pub const fn new(events: Receiver<FullTransactionEvent<T>>) -> Self {
+        Self { events }
+    }
+}
+
 impl<T: PoolTransaction> Stream for AllTransactionsEvents<T> {
     type Item = FullTransactionEvent<T>;
 
@@ -122,7 +129,7 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
     pub(crate) fn subscribe_all(&mut self) -> AllTransactionsEvents<T> {
         let (tx, rx) = tokio::sync::mpsc::channel(TX_POOL_EVENT_CHANNEL_SIZE);
         self.all_events_broadcaster.senders.push(tx);
-        AllTransactionsEvents { events: rx }
+        AllTransactionsEvents::new(rx)
     }
 
     /// Notify listeners about a transaction that was added to the pending queue.

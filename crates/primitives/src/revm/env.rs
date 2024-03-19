@@ -285,7 +285,7 @@ where
                     (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
                 })
                 .collect();
-            tx_env.blob_hashes = tx.blob_versioned_hashes.clone();
+            tx_env.blob_hashes.clone_from(&tx.blob_versioned_hashes);
             tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
         }
         #[cfg(feature = "optimism")]

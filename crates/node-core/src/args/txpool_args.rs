@@ -10,7 +10,7 @@ use reth_transaction_pool::{
     TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
 /// Parameters for debugging purposes
-#[derive(Debug, Clone, Args, PartialEq)]
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "TxPool")]
 pub struct TxPoolArgs {
     /// Max number of transaction in the pending sub-pool.

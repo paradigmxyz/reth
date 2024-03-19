@@ -4,6 +4,7 @@ use crate::{
     transactions::TransactionsHandle, FetchClient,
 };
 use parking_lot::Mutex;
+use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_net_common::bandwidth_meter::BandwidthMeter;
@@ -50,6 +51,7 @@ impl NetworkHandle {
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
         #[cfg(feature = "optimism")] sequencer_endpoint: Option<String>,
+        discv4: Option<Discv4>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -66,6 +68,7 @@ impl NetworkHandle {
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
+            discv4,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -219,23 +222,31 @@ impl PeersInfo for NetworkHandle {
     }
 
     fn local_node_record(&self) -> NodeRecord {
-        let id = *self.peer_id();
-        let mut socket_addr = *self.inner.listener_address.lock();
+        if let Some(discv4) = &self.inner.discv4 {
+            discv4.node_record()
+        } else {
+            let id = *self.peer_id();
+            let mut socket_addr = *self.inner.listener_address.lock();
 
-        if socket_addr.ip().is_unspecified() {
-            // zero address is invalid
-            if socket_addr.ip().is_ipv4() {
-                socket_addr.set_ip(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
-            } else {
-                socket_addr.set_ip(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
+            if socket_addr.ip().is_unspecified() {
+                // zero address is invalid
+                if socket_addr.ip().is_ipv4() {
+                    socket_addr.set_ip(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+                } else {
+                    socket_addr.set_ip(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
+                }
             }
-        }
 
-        NodeRecord::new(socket_addr, id)
+            NodeRecord::new(socket_addr, id)
+        }
     }
 }
 
 impl Peers for NetworkHandle {
+    fn add_trusted_peer_id(&self, peer: PeerId) {
+        self.send_message(NetworkHandleMessage::AddTrustedPeerId(peer));
+    }
+
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
     /// set, with the given kind.
     fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr) {
@@ -383,6 +394,8 @@ struct NetworkInner {
     /// The sequencer HTTP Endpoint
     #[cfg(feature = "optimism")]
     sequencer_endpoint: Option<String>,
+    /// The instance of the discv4 service
+    discv4: Option<Discv4>,
 }
 
 /// Provides event subscription for the network.
@@ -404,6 +417,8 @@ pub trait NetworkProtocols: Send + Sync {
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 #[derive(Debug)]
 pub(crate) enum NetworkHandleMessage {
+    /// Marks a peer as trusted.
+    AddTrustedPeerId(PeerId),
     /// Adds an address for a peer, including its ID, kind, and socket address.
     AddPeerAddress(PeerId, PeerKind, SocketAddr),
     /// Removes a peer from the peerset corresponding to the given kind.

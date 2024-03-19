@@ -1,9 +1,9 @@
 use crate::{
-    hashed_cursor::{HashedAccountCursor, HashedStorageCursor},
+    hashed_cursor::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor},
     trie_cursor::TrieCursor,
     walker::TrieWalker,
-    StateRootError, StorageRootError,
 };
+use reth_db::DatabaseError;
 use reth_primitives::{trie::Nibbles, Account, StorageEntry, B256, U256};
 
 /// Represents a branch node in the trie.
@@ -71,6 +71,14 @@ impl<C, H> AccountNodeIter<C, H> {
         }
     }
 
+    /// Create new `AccountNodeIter` by creating hashed account cursor from factory.
+    pub fn from_factory<F: HashedCursorFactory<AccountCursor = H>>(
+        walker: TrieWalker<C>,
+        factory: F,
+    ) -> Result<Self, DatabaseError> {
+        Ok(Self::new(walker, factory.hashed_account_cursor()?))
+    }
+
     /// Sets the last iterated account key and returns the modified `AccountNodeIter`.
     /// This is used to resume iteration from the last checkpoint.
     pub fn with_last_account_key(mut self, previous_account_key: B256) -> Self {
@@ -95,7 +103,7 @@ where
     /// 5. Repeat.
     ///
     /// NOTE: The iteration will start from the key of the previous hashed entry if it was supplied.
-    pub fn try_next(&mut self) -> Result<Option<AccountNode>, StateRootError> {
+    pub fn try_next(&mut self) -> Result<Option<AccountNode>, DatabaseError> {
         loop {
             // If the walker has a key...
             if let Some(key) = self.walker.key() {
@@ -194,7 +202,7 @@ where
     /// 3. Reposition the hashed storage cursor on the next unprocessed key.
     /// 4. Return every hashed storage entry up to the key of the current intermediate branch node.
     /// 5. Repeat.
-    pub fn try_next(&mut self) -> Result<Option<StorageNode>, StorageRootError> {
+    pub fn try_next(&mut self) -> Result<Option<StorageNode>, DatabaseError> {
         loop {
             // Check if there's a key in the walker.
             if let Some(key) = self.walker.key() {

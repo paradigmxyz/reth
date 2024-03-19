@@ -55,7 +55,7 @@ body:
         - Windows (ARM)
     validations:
       required: true
-  - type: input
+  - type: textarea
     id: client-version
     attributes:
       label: What version/commit are you on?

@@ -705,7 +705,7 @@ impl InflightRequest {
 enum OnIncomingMessageOutcome {
     /// Message successfully handled.
     Ok,
-    /// Message is considered to be in violation fo the protocol
+    /// Message is considered to be in violation of the protocol
     BadMessage { error: EthStreamError, message: EthMessage },
     /// Currently no capacity to handle the message
     NoCapacity(ActiveSessionMessage),

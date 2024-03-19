@@ -14,5 +14,7 @@ pub const DEFAULT_MAX_COUNT_PEERS_OUTBOUND: u32 = 100;
 /// Maximum number of available slots for inbound sessions.
 pub const DEFAULT_MAX_COUNT_PEERS_INBOUND: u32 = 30;
 
-/// Maximum number of available slots concurrent outgoing dials.
-pub const DEFAULT_MAX_COUNT_CONCURRENT_DIALS: usize = 10;
+/// Maximum number of available slots for concurrent outgoing dials.
+///
+/// This restricts how many outbound dials can be performed concurrently.
+pub const DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS: usize = 15;
