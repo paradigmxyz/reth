@@ -1,7 +1,7 @@
 /* mdbx_drop.c - memory-mapped database delete tool */
 
 /*
- * Copyright 2021-2023 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2021-2024 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  *
  * Copyright 2016-2021 Howard Chu, Symas Corp.
@@ -24,7 +24,7 @@
 
 #define xMDBX_TOOLS /* Avoid using internal eASSERT() */
 /*
- * Copyright 2015-2023 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -36,7 +36,7 @@
  * top-level directory of the distribution or, alternatively, at
  * <http://www.OpenLDAP.org/license.html>. */
 
-#define MDBX_BUILD_SOURCERY cd9d526652f8327384fdca9e5942a61289a5580c33de34f8fd0773fc2835ff49_v0_12_9_50_g4f770999_dirty
+#define MDBX_BUILD_SOURCERY 1ace89d775502777988b9d1e1705e124f14115eac6bc96d4a8e4c7d003066d9a_v0_12_10_52_g8cc3dba7
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -163,7 +163,7 @@
 
 #include "mdbx.h"
 /*
- * Copyright 2015-2023 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -1017,7 +1017,7 @@ extern "C" {
 /* https://en.wikipedia.org/wiki/Operating_system_abstraction_layer */
 
 /*
- * Copyright 2015-2023 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -3652,8 +3652,12 @@ struct MDBX_env {
   struct MDBX_lockinfo *me_lck;
 
   unsigned me_psize;          /* DB page size, initialized from me_os_psize */
-  unsigned me_leaf_nodemax;   /* max size of a leaf-node */
-  unsigned me_branch_nodemax; /* max size of a branch-node */
+  uint16_t me_leaf_nodemax;   /* max size of a leaf-node */
+  uint16_t me_branch_nodemax; /* max size of a branch-node */
+  uint16_t me_subpage_limit;
+  uint16_t me_subpage_room_threshold;
+  uint16_t me_subpage_reserve_prereq;
+  uint16_t me_subpage_reserve_limit;
   atomic_pgno_t me_mlocked_pgno;
   uint8_t me_psize2log; /* log2 of DB page size */
   int8_t me_stuck_meta; /* recovery-only: target meta page or less that zero */
