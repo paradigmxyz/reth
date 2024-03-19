@@ -184,12 +184,15 @@ impl Transaction {
         }
     }
 
-    /// Get the transaction's nonce.
+    /// Get the transaction's address of the contract that will be called, or the address that will
+    /// receive the transfer.
+    ///
+    /// Returns `None` if this is a `CREATE` transaction.
     pub fn to(&self) -> Option<Address> {
         self.kind().to()
     }
 
-    /// Get transaction type
+    /// Get the transaction's type
     pub fn tx_type(&self) -> TxType {
         match self {
             Transaction::Legacy(legacy_tx) => legacy_tx.tx_type(),
