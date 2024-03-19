@@ -236,6 +236,13 @@ impl PeersManager {
         if self.ban_list.is_banned_ip(&addr) {
             return Err(InboundConnectionError::IpBanned)
         }
+
+        if self.connection_info.max_inbound == 0 && self.trusted_peer_ids.is_empty() {
+            // if we don't have any inbound slots and no trusted peers, we don't accept any new
+            // connections
+            return Err(InboundConnectionError::ExceedsCapacity)
+        }
+
         self.connection_info.inc_pending_in();
         Ok(())
     }
@@ -1492,9 +1499,13 @@ impl Default for PeerBackoffDurations {
     }
 }
 
+/// Error thrown when a incoming connection is rejected right away
 #[derive(Debug, Error)]
 pub enum InboundConnectionError {
+    /// The remote's ip address is banned
     IpBanned,
+    /// No capacity for new inbound connections
+    ExceedsCapacity,
 }
 
 impl Display for InboundConnectionError {
@@ -2373,6 +2384,7 @@ mod tests {
                 super::InboundConnectionError::IpBanned {} => {
                     assert_eq!(peer_manager.connection_info.num_pending_in, 0)
                 }
+                _ => unreachable!(),
             },
         }
     }
