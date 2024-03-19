@@ -208,10 +208,16 @@ impl PeersManager {
         self.connection_info.num_inbound
     }
 
-    /// Returns the number of currently active outbound connections.
+    /// Returns the number of currently __active__ outbound connections.
     #[inline]
     pub(crate) fn num_outbound_connections(&self) -> usize {
         self.connection_info.num_outbound
+    }
+
+    /// Returns the number of currently pending outbound connections.
+    #[inline]
+    pub(crate) fn num_pending_outbound_connections(&self) -> usize {
+        self.connection_info.num_pending_out
     }
 
     /// Returns the number of currently backed off peers.

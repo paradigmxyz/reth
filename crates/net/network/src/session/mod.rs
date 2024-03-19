@@ -187,6 +187,12 @@ impl SessionManager {
         self.extra_protocols.push(protocol)
     }
 
+    /// Returns the number of currently pending connections.
+    #[inline]
+    pub(crate) fn num_pending_connections(&self) -> usize {
+        self.pending_sessions.len()
+    }
+
     /// Spawns the given future onto a new task that is tracked in the `spawned_tasks`
     /// [`JoinSet`](tokio::task::JoinSet).
     fn spawn<F>(&self, f: F)
