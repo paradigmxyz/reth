@@ -1,4 +1,4 @@
-//! Discovery support for the network.
+//! Discovery support for the network using [`discv5::Discv5`].
 
 use crate::error::NetworkError;
 use discv5::{enr::Enr, IpMode};

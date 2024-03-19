@@ -1,4 +1,5 @@
-//! Discovery support for the network.
+//! Discovery support for the network using [`discv5::Discv5`], with support for downgraded
+//! [`Discv4`] connections.
 
 use crate::error::{NetworkError, ServiceKind};
 use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey};
@@ -44,7 +45,7 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
         let (disc, disc_updates, bc_local_discv5_enr) = match (discv4_config, discv5_config) {
             (Some(discv4_config), Some(discv5_config)) => {
                 // todo: verify not same socket discv4 and 5
-                
+
                 //
                 // 1. start discv5
                 //
