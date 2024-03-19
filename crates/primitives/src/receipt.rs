@@ -1,19 +1,23 @@
 use crate::{
-    compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
     logs_bloom, Bloom, Bytes, Log, PruneSegmentError, TxType, B256,
 };
+#[cfg(feature = "zstd-codec")]
+use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{Buf, BufMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::strategy::Strategy;
-use reth_codecs::{add_arbitrary_tests, main_codec, Compact, CompactZstd};
+use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
+#[cfg(feature = "zstd-codec")]
+use reth_codecs::CompactZstd;
 use std::{
     cmp::Ordering,
     ops::{Deref, DerefMut},
 };
 
 /// Receipt containing result of transaction execution.
-#[main_codec(no_arbitrary, zstd)]
+#[cfg_attr(feature = "zstd-codec", main_codec(no_arbitrary, zstd))]
+#[cfg_attr(not(feature = "zstd-codec"), main_codec(no_arbitrary))]
 #[add_arbitrary_tests]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Receipt {

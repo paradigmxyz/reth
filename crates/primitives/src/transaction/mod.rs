@@ -1,7 +1,9 @@
 use crate::{
-    compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR},
     keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256,
 };
+#[cfg(any(feature = "arbitrary", feature ="zstd-codec"))]
+use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
+
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -884,6 +886,7 @@ impl TransactionSignedNoHash {
     }
 }
 
+#[cfg(feature = "zstd-codec")]
 impl Compact for TransactionSignedNoHash {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
@@ -941,6 +944,47 @@ impl Compact for TransactionSignedNoHash {
             let transaction_type = bitflags >> 1;
             Transaction::from_compact(buf, transaction_type)
         };
+
+        (TransactionSignedNoHash { signature, transaction }, buf)
+    }
+}
+
+#[cfg(not(feature = "zstd-codec"))]
+impl Compact for TransactionSignedNoHash {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+        where
+            B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let start = buf.as_mut().len();
+
+        // Placeholder for bitflags.
+        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
+        buf.put_u8(0);
+
+        let sig_bit = self.signature.to_compact(buf) as u8;
+        let zstd_bit = false;
+        let tx_bits =  self.transaction.to_compact(buf) as u8;
+
+        // Replace bitflags with the actual values
+        buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
+
+        buf.as_mut().len() - start
+    }
+
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
+        let bitflags = buf.get_u8() as usize;
+
+        let sig_bit = bitflags & 1;
+        let (signature, buf) = Signature::from_compact(buf, sig_bit);
+
+        let zstd_bit = bitflags >> 3;
+        if zstd_bit != 0 {
+            panic!("zstd-coded is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag")
+        }
+
+        let transaction_type = bitflags >> 1;
+        let (transaction, buf) = Transaction::from_compact(buf, transaction_type);
 
         (TransactionSignedNoHash { signature, transaction }, buf)
     }
