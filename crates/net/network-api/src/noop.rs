@@ -35,6 +35,7 @@ impl NetworkInfo for NoopNetwork {
                 head: Default::default(),
                 network: 1,
                 genesis: Default::default(),
+                config: Default::default(),
             },
         })
     }

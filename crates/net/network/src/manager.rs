@@ -359,6 +359,7 @@ where
                 head: status.blockhash,
                 network: status.chain.id(),
                 genesis: status.genesis,
+                config: Default::default(),
             },
         }
     }
