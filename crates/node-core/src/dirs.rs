@@ -265,7 +265,7 @@ impl<D> From<PathBuf> for MaybePlatformPath<D> {
 ///  * sepolia: `<DIR>/sepolia`
 /// Otherwise, the path will be dependent on the chain ID:
 ///  * `<DIR>/<CHAIN_ID>`
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChainPath<D>(PlatformPath<D>, Chain, DatadirArgs);
 
 impl<D> ChainPath<D> {

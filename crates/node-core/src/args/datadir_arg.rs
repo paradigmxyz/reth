@@ -4,7 +4,7 @@ use clap::Args;
 use std::path::PathBuf;
 
 /// Parameters for database configuration
-#[derive(Debug, Args, PartialEq, Default, Clone)]
+#[derive(Debug, Args, PartialEq, Eq, Default, Clone)]
 #[command(next_help_heading = "Datadir")]
 pub struct DatadirArgs {
     /// Set the absolute path to static files
