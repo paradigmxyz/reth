@@ -127,7 +127,7 @@ where
         self.run_pipeline_continuously
     }
 
-    /// Pushes an [EventListener] to the sync controller's listeners.
+    /// Pushes an [UnboundedSender] to the sync controller's listeners.
     pub(crate) fn push_listener(&mut self, listener: UnboundedSender<BeaconConsensusEngineEvent>) {
         self.listeners.push_listener(listener);
     }
