@@ -41,7 +41,6 @@ reth-db.workspace = true
 optimism = [
     "reth-network/optimism",
     "reth-primitives/optimism",
-    "reth-transaction-pool/optimism",
     "reth-rpc-types/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",

@@ -99,5 +99,4 @@ optimism = [
     "reth-network-api/optimism",
     "reth-network/optimism",
     "reth-provider/optimism",
-    "reth-transaction-pool/optimism",
 ]

@@ -291,9 +291,7 @@ mod tests {
         }
 
         assert_eq!(
-            ParallelStateRoot::new(consistent_view.clone(), hashed_state)
-                .incremental_root()
-                .unwrap(),
+            ParallelStateRoot::new(consistent_view, hashed_state).incremental_root().unwrap(),
             test_utils::state_root(state)
         );
     }

@@ -249,7 +249,7 @@ pub mod test_utils {
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let path = tempdir_path();
-        let emsg = format!("{}: {:?}", ERROR_DB_CREATION, path);
+        let emsg = format!("{ERROR_DB_CREATION}: {path:?}");
 
         let db = init_db(
             &path,

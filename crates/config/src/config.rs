@@ -11,7 +11,7 @@ use std::{
 };
 
 /// Configuration for the reth node.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct Config {
     /// Configuration for each stage in the pipeline.
@@ -50,7 +50,7 @@ impl Config {
 }
 
 /// Configuration for each stage in the pipeline.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct StageConfig {
     /// Header stage configuration.
@@ -78,7 +78,7 @@ pub struct StageConfig {
 }
 
 /// Header stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct HeadersConfig {
     /// The maximum number of requests to send concurrently.
@@ -111,7 +111,7 @@ impl Default for HeadersConfig {
 }
 
 /// Body stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct BodiesConfig {
     /// The batch size of non-empty blocks per one request
@@ -164,7 +164,7 @@ impl Default for SenderRecoveryConfig {
 }
 
 /// Execution stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct ExecutionConfig {
     /// The maximum number of blocks to process before the execution stage commits.
@@ -195,7 +195,7 @@ impl Default for ExecutionConfig {
 }
 
 /// Hashing stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct HashingConfig {
     /// The threshold (in number of blocks) for switching between
@@ -212,7 +212,7 @@ impl Default for HashingConfig {
 }
 
 /// Merkle stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct MerkleConfig {
     /// The threshold (in number of blocks) for switching from incremental trie building of changes
@@ -227,7 +227,7 @@ impl Default for MerkleConfig {
 }
 
 /// Transaction Lookup stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct TransactionLookupConfig {
     /// The maximum number of transactions to process before writing to disk.
@@ -241,7 +241,7 @@ impl Default for TransactionLookupConfig {
 }
 
 /// Common ETL related configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct EtlConfig {
     /// Data directory where temporary files are created.
@@ -275,7 +275,7 @@ impl EtlConfig {
 }
 
 /// History stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct IndexHistoryConfig {
     /// The maximum number of blocks to process before committing progress to the database.
@@ -289,7 +289,7 @@ impl Default for IndexHistoryConfig {
 }
 
 /// Pruning configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct PruneConfig {
     /// Minimum pruning interval measured in blocks.

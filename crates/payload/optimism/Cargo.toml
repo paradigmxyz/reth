@@ -34,7 +34,6 @@ thiserror.workspace = true
 optimism = [
     "reth-primitives/optimism",
     "reth-revm/optimism",
-    "reth-transaction-pool/optimism",
     "reth-provider/optimism",
     "reth-payload-builder/optimism",
 ]

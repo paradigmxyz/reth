@@ -12,7 +12,7 @@ use crate::{
 use clap::{value_parser, Args, Parser};
 use reth_db::{init_db, DatabaseEnv};
 use reth_node_builder::{InitState, NodeBuilder, WithLaunchContext};
-use reth_node_core::node_config::NodeConfig;
+use reth_node_core::{node_config::NodeConfig, version};
 use reth_primitives::ChainSpec;
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -143,6 +143,8 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         L: FnOnce(WithLaunchContext<Arc<DatabaseEnv>, InitState>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
+        tracing::info!(target: "reth::cli", version = ?version::SHORT_VERSION, "Starting reth");
+
         let Self {
             datadir,
             config,
@@ -233,7 +235,7 @@ mod tests {
     fn parse_discovery_addr() {
         let cmd =
             NodeCommand::try_parse_args_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
-        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
+        assert_eq!(cmd.network.discovery.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
     #[test]
@@ -246,8 +248,8 @@ mod tests {
             "127.0.0.1",
         ])
         .unwrap();
-        assert_eq!(cmd.network.discovery.addr, Ipv4Addr::LOCALHOST);
-        assert_eq!(cmd.network.addr, Ipv4Addr::LOCALHOST);
+        assert_eq!(cmd.network.discovery.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(cmd.network.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
     #[test]

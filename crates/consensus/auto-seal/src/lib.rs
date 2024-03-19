@@ -410,7 +410,7 @@ impl StorageInner {
         let state_root = client
             .latest()
             .map_err(|_| BlockExecutionError::ProviderError)?
-            .state_root(bundle_state)
+            .state_root(bundle_state.state())
             .unwrap();
         header.state_root = state_root;
         Ok(header)

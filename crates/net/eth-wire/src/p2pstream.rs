@@ -335,10 +335,10 @@ impl<S> DisconnectP2P for P2PStream<S> {
         // clear any buffered messages and queue in
         self.outgoing_messages.clear();
         let disconnect = P2PMessage::Disconnect(reason);
-        let mut buf = BytesMut::with_capacity(disconnect.length());
+        let mut buf = Vec::with_capacity(disconnect.length());
         disconnect.encode(&mut buf);
 
-        let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(buf.len() - 1));
+        let mut compressed = vec![0u8; 1 + snap::raw::max_compress_len(buf.len() - 1)];
         let compressed_size =
             self.encoder.compress(&buf[1..], &mut compressed[1..]).map_err(|err| {
                 debug!(
@@ -357,7 +357,7 @@ impl<S> DisconnectP2P for P2PStream<S> {
         // message
         compressed[0] = buf[0];
 
-        self.outgoing_messages.push_back(compressed.freeze());
+        self.outgoing_messages.push_back(compressed.into());
         self.disconnecting = true;
         Ok(())
     }

@@ -107,7 +107,7 @@ impl Command {
 
             bench(
                 BenchKind::RandomHash,
-                provider_factory.clone(),
+                provider_factory,
                 StaticFileSegment::Headers,
                 filters,
                 compression,

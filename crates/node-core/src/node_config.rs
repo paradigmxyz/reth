@@ -72,11 +72,7 @@ use reth_transaction_pool::{
     EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
-use std::{
-    net::{SocketAddr, SocketAddrV4},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{
     mpsc::{Receiver, UnboundedSender},
     watch,
@@ -374,14 +370,7 @@ impl NodeConfig {
         info!(target: "reth::cli", "Connecting to P2P network");
         let secret_key = self.network_secret(data_dir)?;
         let default_peers_path = data_dir.known_peers_path();
-        Ok(self.load_network_config(
-            config,
-            client,
-            executor.clone(),
-            head,
-            secret_key,
-            default_peers_path.clone(),
-        ))
+        Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
 
     /// Create the [NetworkBuilder].
@@ -460,16 +449,16 @@ impl NodeConfig {
     {
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            provider_factory.clone(),
+            provider_factory,
             consensus.clone(),
             EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(
             tree_externals,
             tree_config,
-            prune_config.clone().map(|config| config.segments),
+            prune_config.map(|config| config.segments),
         )?
-        .with_sync_metrics_tx(sync_metrics_tx.clone());
+        .with_sync_metrics_tx(sync_metrics_tx);
 
         Ok(tree)
     }
@@ -786,16 +775,16 @@ impl NodeConfig {
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
+            .listener_addr(SocketAddr::new(
                 self.network.addr,
                 // set discovery port based on instance number
                 self.network.port + self.instance - 1,
-            )))
-            .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
+            ))
+            .discovery_addr(SocketAddr::new(
                 self.network.discovery.addr,
                 // set discovery port based on instance number
                 self.network.discovery.port + self.instance - 1,
-            )));
+            ));
 
         cfg_builder.build(client)
     }

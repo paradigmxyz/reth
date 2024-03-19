@@ -47,7 +47,7 @@ where
         address: Address,
         block_id: Option<BlockId>,
     ) -> EthResult<U256> {
-        if let Some(BlockId::Number(BlockNumberOrTag::Pending)) = block_id {
+        if block_id == Some(BlockId::Number(BlockNumberOrTag::Pending)) {
             let address_txs = self.pool().get_transactions_by_sender(address);
             if let Some(highest_nonce) =
                 address_txs.iter().map(|item| item.transaction.nonce()).max()
@@ -143,7 +143,7 @@ mod tests {
             GasPriceOracle::new(NoopProvider::default(), Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
+            FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
         );
         let address = Address::random();
@@ -164,10 +164,10 @@ mod tests {
             pool,
             (),
             cache.clone(),
-            GasPriceOracle::new(mock_provider.clone(), Default::default(), cache.clone()),
+            GasPriceOracle::new(mock_provider, Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default()),
+            FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
         );
 

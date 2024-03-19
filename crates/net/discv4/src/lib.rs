@@ -87,7 +87,7 @@ pub use reth_net_nat::{external_ip, NatResolver};
 /// The default address for discv4 via UDP
 ///
 /// Note: the default TCP address is the same.
-pub const DEFAULT_DISCOVERY_ADDR: Ipv4Addr = Ipv4Addr::UNSPECIFIED;
+pub const DEFAULT_DISCOVERY_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
 /// The default port for discv4 via UDP
 ///
