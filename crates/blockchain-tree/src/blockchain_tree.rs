@@ -936,11 +936,14 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
         if let Some(header) = canonical_header {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
             // TODO: this could be fetched from the chainspec first
-            let td = self.externals.provider_factory.provider()?.header_td(block_hash)?.ok_or(
-                CanonicalError::from(BlockValidationError::MissingTotalDifficulty {
-                    hash: *block_hash,
-                }),
-            )?;
+            let td =
+                self.externals.provider_factory.provider()?.header_td(block_hash)?.ok_or_else(
+                    || {
+                        CanonicalError::from(BlockValidationError::MissingTotalDifficulty {
+                            hash: *block_hash,
+                        })
+                    },
+                )?;
             if !self
                 .externals
                 .provider_factory
@@ -950,8 +953,7 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
             {
                 return Err(CanonicalError::from(BlockValidationError::BlockPreMerge {
                     hash: *block_hash,
-                })
-                .into())
+                }))
             }
             return Ok(CanonicalOutcome::AlreadyCanonical { header })
         }
@@ -960,8 +962,7 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
             debug!(target: "blockchain_tree", ?block_hash, "Block hash not found in block indices");
             return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
                 block_hash: *block_hash,
-            })
-            .into())
+            }))
         };
         let chain = self.state.chains.remove(&chain_id).expect("To be present");
 
