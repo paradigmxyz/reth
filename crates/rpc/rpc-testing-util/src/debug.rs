@@ -419,7 +419,7 @@ mod tests {
         let mut stream = client.debug_trace_transactions_in_block(block, opts).await.unwrap();
         while let Some(res) = stream.next().await {
             if let Err((err, tx)) = res {
-                println!("failed to trace {:?}  {}", tx, err);
+                println!("failed to trace {tx:?}  {err}");
             }
         }
     }
