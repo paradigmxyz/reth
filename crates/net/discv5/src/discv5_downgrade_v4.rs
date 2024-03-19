@@ -8,6 +8,7 @@ use std::{
 };
 
 use derive_more::From;
+use discv5::IpMode;
 use futures::{
     stream::{select, Select},
     Stream, StreamExt,
@@ -106,6 +107,11 @@ impl HandleDiscv5 for DiscV5WithV4Downgrade {
     {
         f(&self.discv5)
     }
+
+    /// Returns the [`IpMode`] of the local node.
+    fn ip_mode(&self) -> IpMode {
+        self.discv5.ip_mode()
+    }
 }
 
 /// Wrapper around update type used in [`discv5::Discv5`] and [`Discv4`].
@@ -189,7 +195,7 @@ impl Stream for MergedUpdateStream {
             // todo: upstream discovered discv4 peers to ping from discv5?
 
             if let Err(err) = self.notify_discv4_of_kbuckets_update() {
-                error!(target: "net::discv5",
+                error!(target: "net::discovery",
                     "failed to notify discv4 of discv5 kbuckets update, {err}",
                 );
             }

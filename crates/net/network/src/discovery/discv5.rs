@@ -13,7 +13,7 @@ use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::NodeRecord;
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, Stream};
-use tracing::error;
+use tracing::{error, trace};
 
 use std::{
     pin::Pin,
@@ -142,10 +142,17 @@ where
         &mut self,
         enr: discv5::Enr,
     ) -> Result<(), NetworkError> {
-        // todo: configure `IpMode` as field on `Discovery`
-        let Some(udp_socket) = IpMode::DualStack.get_contactable_addr(&enr) else { return Ok(()) };
+        let Some(ref discv5) = self.disc else { return Ok(()) };
+        let Some(udp_socket) = discv5.ip_mode().get_contactable_addr(&enr) else {
+            trace!(target: "net::discovery",
+                %enr,
+                "received ENR that is not WAN-reachable"
+            );
+
+            return Ok(())
+        };
         // todo: get tcp port v6 with respect to ip mode of local node
-        let tcp_port = enr.tcp4().unwrap_or(enr.tcp6().unwrap_or(0));
+        let tcp_port = enr.tcp4().unwrap_or_else(|| enr.tcp6().unwrap_or(0));
 
         let id = uncompressed_id_from_enr_pk(&enr);
 
@@ -207,7 +214,7 @@ pub(super) async fn start_discv5(
     //
     let (discv5_config, bootstrap_nodes, fork_id) = discv5_config.destruct();
 
-    let (enr, bc_enr) = {
+    let (enr, bc_enr, ip_mode) = {
         let mut builder = discv5::enr::Enr::builder();
 
         use discv5::ListenConfig::*;
@@ -245,7 +252,7 @@ pub(super) async fn start_discv5(
         let socket = ip_mode.get_contactable_addr(&enr).unwrap();
         let bc_enr = NodeRecord::from_secret_key(socket, sk);
 
-        (enr, bc_enr)
+        (enr, bc_enr, ip_mode)
     };
 
     //
@@ -272,7 +279,7 @@ pub(super) async fn start_discv5(
         discv5.add_enr(node).map_err(NetworkError::custom_discovery)?;
     }
 
-    Ok((DiscV5(Arc::new(discv5)), discv5_updates, bc_enr))
+    Ok((DiscV5::new(Arc::new(discv5), ip_mode), discv5_updates, bc_enr))
 }
 
 #[cfg(test)]

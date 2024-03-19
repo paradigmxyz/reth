@@ -3,7 +3,8 @@
 use std::{fmt, net::IpAddr, sync::Arc};
 
 use ::enr::Enr;
-use derive_more::{Deref, DerefMut};
+use derive_more::{Constructor, Deref, DerefMut};
+use discv5::IpMode;
 use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{
@@ -33,11 +34,19 @@ pub trait HandleDiscv5 {
     fn with_discv5<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&DiscV5) -> R;
+
+    /// Returns the [`IpMode`] of the local node.
+    fn ip_mode(&self) -> IpMode;
 }
 
 /// Transparent wrapper around [`discv5::Discv5`].
-#[derive(Deref, DerefMut, Clone)]
-pub struct DiscV5(pub Arc<discv5::Discv5>);
+#[derive(Deref, DerefMut, Clone, Constructor)]
+pub struct DiscV5 {
+    #[deref]
+    #[deref_mut]
+    discv5: Arc<discv5::Discv5>,
+    ip_mode: IpMode,
+}
 
 impl DiscV5 {
     fn add_node(&self, node_record: NodeFromExternalSource) -> Result<(), Error> {
@@ -109,5 +118,9 @@ impl HandleDiscv5 for DiscV5 {
         F: FnOnce(&DiscV5) -> R,
     {
         f(self)
+    }
+
+    fn ip_mode(&self) -> IpMode {
+        self.ip_mode
     }
 }
