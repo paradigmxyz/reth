@@ -6750,6 +6750,7 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-db",
+ "reth-interfaces",
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
