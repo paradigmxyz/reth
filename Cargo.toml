@@ -94,6 +94,7 @@ clippy.trait_duplication_in_bounds = "deny"
 clippy.uninlined_format_args = "deny"
 clippy.equatable_if_let = "deny"
 clippy.or_fun_call = "deny"
+clippy.branches_sharing_code = "deny"
 
 [workspace.package]
 version = "0.2.0-beta.3"
@@ -193,8 +194,13 @@ reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 
 # revm
-revm = { version = "7.1.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "3.0.0", features = ["std"], default-features = false }
+revm = { version = "7.1.0", features = [
+    "std",
+    "secp256k1",
+], default-features = false }
+revm-primitives = { version = "3.0.0", features = [
+    "std",
+], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "f96bc1f" }
 
 # eth
@@ -238,7 +244,8 @@ strum = "0.26"
 rayon = "1.7"
 itertools = "0.12"
 parking_lot = "0.12"
-metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+# Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1"
 hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
