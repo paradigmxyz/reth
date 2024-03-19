@@ -56,8 +56,8 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         self.size_of += tx.size();
 
         let transaction = BlobTransaction::new(tx, submission_id, &self.pending_fees);
-        self.by_id.insert(id, Arc::new(transaction.clone()));
-        self.all.insert(Arc::new(transaction));
+        self.by_id.insert(id, transaction.clone());
+        self.all.insert(transaction);
     }
 
     fn next_id(&mut self) -> u64 {
