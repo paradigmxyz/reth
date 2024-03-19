@@ -290,6 +290,7 @@ impl SessionManager {
                 )
                 .await;
                 if let Err(err) = err {
+                    println!("Timeout Error: {:?}", err);
                     let _= pending_events.send(PendingSessionEvent::OutgoingConnectionError {
                         remote_addr,
                         session_id,
