@@ -72,11 +72,7 @@ use reth_transaction_pool::{
     EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
-use std::{
-    net::{SocketAddr, SocketAddrV4},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{
     mpsc::{Receiver, UnboundedSender},
     watch,
@@ -779,16 +775,16 @@ impl NodeConfig {
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
+            .listener_addr(SocketAddr::new(
                 self.network.addr,
                 // set discovery port based on instance number
                 self.network.port + self.instance - 1,
-            )))
-            .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
+            ))
+            .discovery_addr(SocketAddr::new(
                 self.network.discovery.addr,
                 // set discovery port based on instance number
                 self.network.discovery.port + self.instance - 1,
-            )));
+            ));
 
         cfg_builder.build(client)
     }
