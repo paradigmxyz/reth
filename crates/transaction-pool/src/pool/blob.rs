@@ -45,17 +45,19 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T>>) {
         assert!(tx.is_eip4844(), "transaction is not a blob tx");
         let id = *tx.id();
-        assert!(!self.contains(&id), "transaction already included {:?}", self.get(&id).unwrap());
+
+        
+        if let Some(existing_tx) = self.by_id.get(&id) {
+            panic!("transaction already included {:?}", existing_tx);
+        }
+
         let submission_id = self.next_id();
 
-        // keep track of size
         self.size_of += tx.size();
 
-        // set transaction, which will also calculate priority based on current pending fees
         let transaction = BlobTransaction::new(tx, submission_id, &self.pending_fees);
-
-        self.by_id.insert(id, transaction.clone());
-        self.all.insert(transaction);
+        self.by_id.insert(id, Arc::new(transaction.clone()));
+        self.all.insert(Arc::new(transaction));
     }
 
     fn next_id(&mut self) -> u64 {
