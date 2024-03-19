@@ -15,6 +15,7 @@ use reth_config::Config;
 use reth_db::open_db;
 use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
+use reth_node_core::args::DatadirArgs;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
 use reth_provider::ProviderFactory;
 use std::{path::PathBuf, sync::Arc};
@@ -47,6 +48,10 @@ pub struct Command {
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
+
+    /// Configure data storage locations
+    #[command(flatten)]
+    datadir_args: DatadirArgs,
 
     /// Secret key to use for this node.
     ///
@@ -103,7 +108,8 @@ impl Command {
         let noop_db = Arc::new(open_db(&tempdir.into_path(), self.db.database_args())?);
 
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir =
+            self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let config_path = self.config.clone().unwrap_or(data_dir.config_path());
 
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();

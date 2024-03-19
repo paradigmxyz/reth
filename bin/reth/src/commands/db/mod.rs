@@ -13,6 +13,7 @@ use reth_db::{
     open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
 };
+use reth_node_core::args::DatadirArgs;
 use reth_primitives::ChainSpec;
 use reth_provider::ProviderFactory;
 use std::{
@@ -41,6 +42,10 @@ pub struct Command {
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t, global = true)]
     datadir: MaybePlatformPath<DataDirPath>,
+
+    /// Configure data storage locations
+    #[command(flatten)]
+    datadir_args: DatadirArgs,
 
     /// The chain this node is running.
     ///
@@ -104,7 +109,8 @@ impl Command {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir =
+            self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let db_path = data_dir.db_path();
         let db_args = self.db.database_args();
         let static_files_path = data_dir.static_files_path();

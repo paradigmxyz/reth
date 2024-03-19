@@ -51,6 +51,10 @@ pub use dev_args::DevArgs;
 mod pruning_args;
 pub use pruning_args::PruningArgs;
 
+/// DatadirArgs for configuring data storage paths
+mod datadir_arg;
+pub use datadir_arg::DatadirArgs;
+
 pub mod utils;
 
 pub mod types;

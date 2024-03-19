@@ -29,6 +29,7 @@ use reth_db::{
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_core::{
+    args::DatadirArgs,
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     engine_api_store::EngineApiStore,
@@ -205,7 +206,8 @@ impl<DB> NodeBuilder<DB, InitState> {
         let db_path_str = db.path().to_str().expect("Path is not valid unicode");
         let path =
             MaybePlatformPath::<DataDirPath>::from_str(db_path_str).expect("Path is not valid");
-        let data_dir = path.unwrap_or_chain_default(self.config.chain.chain);
+        let data_dir =
+            path.unwrap_or_chain_default(self.config.chain.chain, DatadirArgs::default());
 
         WithLaunchContext { builder: self.with_database(db), task_executor, data_dir }
     }
