@@ -95,6 +95,7 @@ clippy.uninlined_format_args = "deny"
 clippy.equatable_if_let = "deny"
 clippy.or_fun_call = "deny"
 clippy.branches_sharing_code = "deny"
+clippy.useless_let_if_seq = "deny"
 
 [workspace.package]
 version = "0.2.0-beta.3"

@@ -425,15 +425,14 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     fn commit_offsets_inner(&mut self) -> Result<(), NippyJarError> {
         // The last offset on disk can be the first offset of `self.offsets` given how
         // `append_column()` works alongside commit. So we need to skip it.
-        let mut last_offset_ondisk = None;
-
-        if self.offsets_file.get_ref().metadata()?.len() > 1 {
+        let mut last_offset_ondisk = if self.offsets_file.get_ref().metadata()?.len() > 1 {
             self.offsets_file.seek(SeekFrom::End(-(OFFSET_SIZE_BYTES as i64)))?;
-
             let mut buf = [0u8; OFFSET_SIZE_BYTES as usize];
             self.offsets_file.get_ref().read_exact(&mut buf)?;
-            last_offset_ondisk = Some(u64::from_le_bytes(buf));
-        }
+            Some(u64::from_le_bytes(buf))
+        } else {
+            None
+        };
 
         self.offsets_file.seek(SeekFrom::End(0))?;
 
