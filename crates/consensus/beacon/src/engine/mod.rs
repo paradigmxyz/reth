@@ -607,7 +607,7 @@ where
         self.handle.clone()
     }
 
-    /// Pushes an [UnboundedSender] to the engine's listeners. Also pushed an [UnboundedSender] to
+    /// Pushes an [UnboundedSender] to the engine's listeners. Also pushes an [UnboundedSender] to
     /// the sync controller's listeners.
     pub(crate) fn push_listener(&mut self, listener: UnboundedSender<BeaconConsensusEngineEvent>) {
         self.listeners.push_listener(listener.clone());

@@ -21,7 +21,7 @@ pub enum BeaconConsensusEngineEvent {
 /// Progress of the consensus engine during live sync.
 #[derive(Clone, Debug)]
 pub enum ConsensusEngineLiveSyncProgress {
-    /// The consensus engine is downloading blocks on the network.
+    /// The consensus engine is downloading blocks from the network.
     DownloadingBlocks {
         /// The number of blocks remaining to download.
         remaining_blocks: u64,
