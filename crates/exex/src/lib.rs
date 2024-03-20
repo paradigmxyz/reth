@@ -63,10 +63,15 @@ pub trait ExEx<DB: Database, P: FullProvider<DB>>: Send + Sync + Unpin + 'static
     /// Returns the meta information about the ExEx.
     fn init(&self, provider: P) -> ExExMeta;
 
-    /// Processes the state notification. Once processed, the ExEx will not ever receive the same
-    /// notification again, and Reth is allowed to prune the blocks from notification.
+    /// Processes the state notification. Once processed, Reth is allowed to prune the blocks from
+    /// notification.
     ///
-    /// [Result::Err] does not stop the ExEx, and used only for observability purposes. The ExEx
+    /// The ExEx may receive the same notification again, and ExEx's reaction to that should be
+    /// idempotent. For example, if Reth sends a notification during the pipeline sync, but
+    /// restarts before committing the data to the database, the same notification will be sent
+    /// again.
+    ///
+    /// [Result::Err] does not stop the ExEx, and is used only for observability purposes. The ExEx
     /// will continue to receive new notifications.
     fn on_state_notification(
         &self,
