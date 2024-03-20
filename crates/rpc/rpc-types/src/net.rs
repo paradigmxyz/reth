@@ -180,12 +180,11 @@ impl TryFrom<Enr<SecretKey>> for NodeRecord {
             return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
         };
 
-        #[cfg(not(any(feature = "discv5", feature = "discv5-downgrade-v4")))]
+        // todo: convert to node record w.r.t. ip mode of local node, requires passing ip mode to
+        // DNS from DiscV5
         let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
             return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
         };
-        #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
-        let tcp_port = enr.tcp4().or_else(|| enr.tcp6()).unwrap_or(0);
 
         let Some(udp_port) = enr.udp4().or_else(|| enr.udp6()) else {
             return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
@@ -211,12 +210,13 @@ pub enum NodeRecordWithForkIdParseError {
     NodeRecordParseError(#[from] NodeRecordParseError),
 }
 
+// todo: remove type by adding `fork_id` field to NodeRecord
 /// The converted discovered [Enr] object
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct NodeRecordWithForkId<N = NodeRecord> {
     /// Discovered node and it's addresses
     pub node_record: N,
-    /// The forkid of the node, if present in the ENR
+    /// The for kid of the node, if present in the ENR
     pub fork_id: Option<ForkId>,
 }
 
@@ -225,11 +225,11 @@ impl TryFrom<Enr<SecretKey>> for NodeRecordWithForkId {
 
     fn try_from(enr: Enr<SecretKey>) -> Result<Self, Self::Error> {
         // fork id is how we know this is an EL node, this isn't spec´d out but by precedent
-        let fork_id = get_fork_id(&enr)?;
+        let fork_id = get_fork_id(&enr).ok();
 
         let node_record = NodeRecord::try_from(enr)?;
 
-        Ok(NodeRecordWithForkId { node_record, fork_id: Some(fork_id) })
+        Ok(NodeRecordWithForkId { node_record, fork_id })
     }
 }
 

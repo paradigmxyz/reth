@@ -99,7 +99,7 @@ where
                 // node has been discovered as part of a query. discv5::Config sets
                 // `report_discovered_peers` to true by default.
 
-                self.try_insert_enr_into_discovered_nodes(enr)?;
+                self.on_discovered_peer(enr);
             }
             discv5::Event::EnrAdded { .. } => {
                 // not used in discv5 codebase
@@ -129,7 +129,7 @@ where
                 // node has been discovered unrelated to a query, e.g. an incoming connection to
                 // discv5
 
-                self.try_insert_enr_into_discovered_nodes(enr)?;
+                self.on_discovered_peer(enr);
             }
             discv5::Event::SocketUpdated(_socket_addr) => {}
             discv5::Event::TalkRequest(_talk_req) => {}
@@ -138,30 +138,19 @@ where
         Ok(())
     }
 
-    fn try_insert_enr_into_discovered_nodes(
-        &mut self,
-        enr: discv5::Enr,
-    ) -> Result<(), NetworkError> {
-        let Some(ref discv5) = self.disc else { return Ok(()) };
-        let Some(udp_socket) = discv5.ip_mode().get_contactable_addr(&enr) else {
-            trace!(target: "net::discovery",
-                %enr,
-                "received ENR that is not WAN-reachable"
-            );
-
-            return Ok(())
-        };
-        // todo: get tcp port v6 with respect to ip mode of local node
-        let tcp_port = enr.tcp4().unwrap_or_else(|| enr.tcp6().unwrap_or(0));
-
-        let id = uncompressed_id_from_enr_pk(&enr);
-
-        let record =
-            NodeRecord { address: udp_socket.ip(), tcp_port, udp_port: udp_socket.port(), id };
-
-        self.on_node_record_update(record, None);
-
-        Ok(())
+    fn on_discovered_peer(&mut self, enr: discv5::Enr) {
+        let Some(ref discv5) = self.disc else { return };
+        let fork_id = discv5.get_fork_id(&enr).ok();
+        match discv5.try_into_reachable(enr) {
+            Ok(enr_bc) => self.on_node_record_update(enr_bc, fork_id),
+            Err(err) => {
+                trace!(target: "net::discovery::discv5",
+                    ?fork_id,
+                    %err,
+                    "discovered unreachable peer"
+                )
+            }
+        }
     }
 }
 
@@ -183,7 +172,7 @@ where
             self.disc_updates.as_mut().map(|ref mut updates| updates.poll_next_unpin(cx))
         {
             if let Err(err) = self.on_discv5_update(update) {
-                error!(target: "net::discovery", %err, "failed to process update");
+                error!(target: "net::discovery::discv5", %err, "failed to process update");
             }
         }
 
@@ -212,7 +201,7 @@ pub(super) async fn start_discv5(
     //
     // 1. make local enr from listen config
     //
-    let (discv5_config, bootstrap_nodes, fork_id, tcp_port, allow_no_tcp_discovered_nodes) =
+    let (discv5_config, bootstrap_nodes, fork_id, tcp_port, _allow_no_tcp_discovered_nodes) =
         discv5_config.destruct();
 
     let (enr, bc_enr, ip_mode) = {
@@ -325,7 +314,7 @@ mod tests {
         let mut node_2 = start_discovery_node(30355).await;
         let node_2_enr = node_2.disc.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
 
-        trace!(target: "net::discovery::discv5_tests",
+        trace!(target: "net::discovery::tests",
             node_1_node_id=format!("{:#}", node_1_enr.node_id()),
             node_2_node_id=format!("{:#}", node_2_enr.node_id()),
             "started nodes"

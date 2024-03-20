@@ -1,7 +1,7 @@
 //! Interface between node identification on protocol version 5 and 4. Specifically, between types
 //! [`discv5::enr::NodeId`] and [`PeerId`].
 
-use discv5::enr::{CombinedPublicKey, Enr, EnrKey, EnrPublicKey, NodeId};
+use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey, NodeId};
 use reth_primitives::PeerId;
 use secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
 
@@ -38,11 +38,6 @@ pub fn uncompressed_to_compressed_id(peer_id: PeerId) -> NodeId {
     pk.into()
 }
 
-/// Checks if the fork id is set for an [`Enr`] received over [`discv5::Discv5`].
-pub fn is_fork_id_set_for_discv5_peer<K: EnrKey>(enr: &Enr<K>) -> bool {
-    enr.get("eth").is_some()
-}
-
 /// Wrapper around [`discv5::Enr`] ([`Enr<CombinedKey>`]).
 #[derive(Debug, Clone)]
 pub struct EnrCombinedKeyWrapper(pub discv5::Enr);
@@ -67,7 +62,7 @@ impl From<EnrCombinedKeyWrapper> for Enr<SecretKey> {
 
 #[cfg(test)]
 mod tests {
-    use discv5::enr::CombinedKey;
+    use discv5::enr::{CombinedKey, EnrKey};
 
     use super::*;
 

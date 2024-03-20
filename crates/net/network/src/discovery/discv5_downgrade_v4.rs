@@ -209,7 +209,7 @@ where
                 DiscoveryUpdateV5::V4(update) => self.on_discv4_update(update),
                 DiscoveryUpdateV5::V5(update) => {
                     if let Err(err) = self.on_discv5_update(update) {
-                        error!(target: "net::discovery", %err, "failed to process update");
+                        error!(target: "net::discovery::discv5_downgrade_v4", %err, "failed to process update");
                     }
                 }
             }
@@ -288,7 +288,7 @@ mod tests {
         let discv4_id_2 = discv4_enr_2.id;
         let discv5_id_2 = discv5_enr_node_2.node_id();
 
-        trace!(target: "net::discovery::tests",
+        trace!(target: "net::discovery::discv5_downgrade_v4::tests",
             node_1_node_id=format!("{:#}", discv5_id_1),
             node_2_node_id=format!("{:#}", discv5_id_2),
             "started nodes"

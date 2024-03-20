@@ -3,13 +3,14 @@
 use std::{fmt, net::IpAddr, sync::Arc};
 
 use ::enr::Enr;
+use alloy_rlp::Decodable;
 use derive_more::{Constructor, Deref, DerefMut};
 use discv5::IpMode;
 use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
-    NodeRecord, PeerId,
+    ForkId, NodeRecord, PeerId,
 };
 use tracing::error;
 
@@ -19,6 +20,7 @@ pub mod enr;
 
 pub use config::{DiscV5Config, DiscV5ConfigBuilder};
 pub use discv5_downgrade_v4::{DiscV5WithV4Downgrade, MergedUpdateStream};
+pub use enr::uncompressed_id_from_enr_pk;
 
 /// Errors from using [`discv5::Discv5`] handle.
 #[derive(thiserror::Error, Debug)]
@@ -26,6 +28,24 @@ pub enum Error {
     /// Failure adding node to [`discv5::Discv5`].
     #[error("failed adding node to discv5, {0}")]
     AddNodeToDiscv5Failed(&'static str),
+    /// Missing key used to identify mempool network.
+    #[error("fork id missing on enr, 'eth' key missing")]
+    ForkIdMissing,
+    /// Failed to decode [`ForkId`] rlp value.
+    #[error("failed to decode fork id, 'eth': {0:?}")]
+    ForkIdDecodeError(#[from] alloy_rlp::Error),
+    /// Peer is unreachable over discovery.
+    #[error("discovery socket missing from ENR")]
+    UnreachableDiscovery,
+    /// Peer is unreachable over mempool.
+    #[error("mempool TCP socket missing from ENR")]
+    UnreachableMempool,
+    /// Peer is not using same IP version as local node in discovery.
+    #[error("discovery socket on ENR is unsupported IP version")]
+    IpVersionMismatchDiscovery,
+    /// Peer is not using same IP version as local node in mempool.
+    #[error("mempool TCP socket on ENR is unsupported IP version")]
+    IpVersionMismatchMempool,
 }
 
 /// Use API of [`discv5::Discv5`].
@@ -37,6 +57,38 @@ pub trait HandleDiscv5 {
 
     /// Returns the [`IpMode`] of the local node.
     fn ip_mode(&self) -> IpMode;
+
+    /// Returns the [`ForkId`] of the given [`Enr`](discv5::Enr), if field is set.
+    fn get_fork_id<K: discv5::enr::EnrKey>(
+        &self,
+        enr: &discv5::enr::Enr<K>,
+    ) -> Result<ForkId, Error> {
+        let mut fork_id_bytes = enr.get(b"eth").ok_or(Error::ForkIdMissing)?;
+
+        Ok(ForkId::decode(&mut fork_id_bytes)?)
+    }
+
+    /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
+    /// w.r.t. local [`IpMode`].
+    fn try_into_reachable(&self, enr: discv5::Enr) -> Result<NodeRecord, Error> {
+        // todo: track unreachable with metrics
+        if enr.udp4_socket().is_none() && enr.udp6_socket().is_none() {
+            return Err(Error::UnreachableDiscovery)
+        }
+        let udp_socket =
+            self.ip_mode().get_contactable_addr(&enr).ok_or(Error::IpVersionMismatchDiscovery)?;
+        // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
+        // too
+        let tcp_port = match self.ip_mode() {
+            IpMode::Ip4 | IpMode::DualStack => enr.tcp4(),
+            IpMode::Ip6 => enr.tcp6(),
+        }
+        .ok_or(Error::IpVersionMismatchMempool)?;
+
+        let id = uncompressed_id_from_enr_pk(&enr);
+
+        Ok(NodeRecord { address: udp_socket.ip(), tcp_port, udp_port: udp_socket.port(), id })
+    }
 }
 
 /// Transparent wrapper around [`discv5::Discv5`].
@@ -46,6 +98,8 @@ pub struct DiscV5 {
     #[deref_mut]
     discv5: Arc<discv5::Discv5>,
     ip_mode: IpMode,
+    // Notify app of discovered nodes that don't have a TCP port set in their ENR. These nodes are
+    // filtered out by default. allow_no_tcp_discovered_nodes: bool,
 }
 
 impl DiscV5 {
