@@ -3049,10 +3049,32 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
+          "expr": "reth_network_pending_outgoing_connections{instance=~\"$instance\"}",
+          "legendFormat": "Pending outgoing connections",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
           "expr": "reth_network_outgoing_connections{instance=~\"$instance\"}",
           "legendFormat": "Outgoing connections",
           "range": true,
-          "refId": "A"
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_network_total_pending_connections{instance=~\"$instance\"}",
+          "legendFormat": "Total pending connections",
+          "range": true,
+          "refId": "C"
         },
         {
           "datasource": {
@@ -3064,7 +3086,7 @@
           "hide": false,
           "legendFormat": "Incoming connections",
           "range": true,
-          "refId": "B"
+          "refId": "D"
         },
         {
           "datasource": {
@@ -3076,7 +3098,7 @@
           "hide": false,
           "legendFormat": "Connected peers",
           "range": true,
-          "refId": "C"
+          "refId": "E"
         }
       ],
       "title": "Connections",
