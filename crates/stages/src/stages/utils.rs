@@ -183,11 +183,14 @@ where
 
         let mut iter = chunks.into_iter().peekable();
         while let Some(chunk) = iter.next() {
-            let highest = *chunk.last().expect("only exist when there's an indice");
+            let mut highest = *chunk.last().expect("only exist when there's an indice");
 
             if !mode.is_flush() && iter.peek().is_none() {
                 *list = chunk;
             } else {
+                if iter.peek().is_none() {
+                    highest = u64::MAX;
+                }
                 let key = sharded_key_factory(partial_key, highest);
                 let value = BlockNumberList::new_pre_sorted(chunk);
 
