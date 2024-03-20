@@ -1,12 +1,13 @@
+use super::{collect_history_indices, load_history_indices};
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use reth_db::database::Database;
+use num_traits::Zero;
+use reth_db::{database::Database, models::ShardedKey, table::Decode};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
+    Address, PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
 };
 use reth_provider::{
-    AccountExtReader, DatabaseProviderRW, HistoryWriter, PruneCheckpointReader,
-    PruneCheckpointWriter,
+    DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
 };
 use std::fmt::Debug;
 
@@ -81,13 +82,29 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
+        let range = input.next_block_range();
 
-        let indices = provider.changed_accounts_and_blocks_with_range(range.clone())?;
-        // Insert changeset to history index
-        provider.insert_account_history_index(indices)?;
+        let collector =
+            collect_history_indices::<
+                _,
+                reth_db::tables::AccountChangeSets,
+                reth_db::tables::AccountsHistory,
+                _,
+            >(provider.tx_ref(), range.clone(), ShardedKey::new, |(index, value)| {
+                (index, value.address)
+            })?;
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })
+        let append_only = provider.count_entries::<reth_db::tables::AccountsHistory>()?.is_zero();
+        load_history_indices::<_, reth_db::tables::AccountsHistory, _>(
+            provider.tx_ref(),
+            collector,
+            append_only,
+            ShardedKey::new,
+            |key| Ok(ShardedKey::<Address>::decode(key).unwrap()),
+            |key| key.key,
+        )?;
+
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
 
     /// Unwind the stage.

@@ -1,11 +1,17 @@
+use super::{collect_history_indices, load_history_indices};
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use reth_db::{database::Database, models::BlockNumberAddress};
+use num_traits::Zero;
+use reth_db::{
+    database::Database,
+    models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
+    table::Decode,
+};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
 };
 use reth_provider::{
-    DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter, StorageReader,
+    DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
 };
 use std::fmt::Debug;
 
@@ -80,12 +86,35 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
+        let range = input.next_block_range();
 
-        let indices = provider.changed_storages_and_blocks_with_range(range.clone())?;
-        provider.insert_storage_history_index(indices)?;
+        let collector = collect_history_indices::<
+            _,
+            reth_db::tables::StorageChangeSets,
+            reth_db::tables::StoragesHistory,
+            _,
+        >(
+            provider.tx_ref(),
+            BlockNumberAddress::range(range.clone()),
+            |AddressStorageKey((address, storage_key)), highest_block_number| {
+                StorageShardedKey::new(address, storage_key, highest_block_number)
+            },
+            |(key, value)| (key.block_number(), AddressStorageKey((key.address(), value.key))),
+        )?;
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })
+        let append_only = provider.count_entries::<reth_db::tables::StoragesHistory>()?.is_zero();
+        load_history_indices::<_, reth_db::tables::StoragesHistory, _>(
+            provider.tx_ref(),
+            collector,
+            append_only,
+            |AddressStorageKey((address, storage_key)), highest_block_number| {
+                StorageShardedKey::new(address, storage_key, highest_block_number)
+            },
+            |key| Ok(StorageShardedKey::decode(key).unwrap()),
+            |key| AddressStorageKey((key.address, key.sharded_key.key)),
+        )?;
+
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
 
     /// Unwind the stage.
