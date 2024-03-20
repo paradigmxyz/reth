@@ -203,7 +203,7 @@ where
     Ok(())
 }
 
-/// Mode on how to load indice shards into memory.
+/// Mode on how to load indice shards into the database.
 pub(crate) enum LoadMode {
     /// Keep the last shard in memory and don't flush it to the database
     KeepLast,
