@@ -6114,7 +6114,6 @@ dependencies = [
 name = "reth-node-core"
 version = "0.2.0-beta.3"
 dependencies = [
- "alloy-rlp",
  "assert_matches",
  "clap",
  "const-str",

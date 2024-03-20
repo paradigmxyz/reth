@@ -89,7 +89,7 @@ impl TypedValueParser for ExtradataValueParser {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
                 format!(
-                    "Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}bytes limit"
+                    "Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}-byte limit"
                 ),
             ))
         }
