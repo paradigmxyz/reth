@@ -11,7 +11,10 @@ use reth_tasks::TaskExecutor;
 use std::pin::Pin;
 
 /// An ExEx (Execution Extension) that processes new blocks and emits events on a stream.
-pub trait ExEx: Stream<Item = ExExEvent> + Send + 'static {}
+pub trait ExEx: Stream<Item = ExExEvent> + Send + 'static {
+    /// Returns the name of the ExEx. It will appear in logs and metrics.
+    fn name(&self) -> &'static str;
+}
 
 /// Events emitted by an ExEx.
 #[derive(Debug)]
@@ -52,7 +55,7 @@ trait LaunchExEx<Node: FullNodeTypes>: Send {
         -> impl Future<Output = eyre::Result<impl ExEx>> + Send;
 }
 
-type BoxExEx = Pin<Box<dyn ExEx<Item = ExExEvent> + Send + 'static>>;
+type BoxExEx = Pin<Box<dyn ExEx + Send + 'static>>;
 
 /// A version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
 pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
