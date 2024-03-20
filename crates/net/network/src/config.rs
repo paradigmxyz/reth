@@ -121,7 +121,7 @@ impl<C> NetworkConfig<C> {
     /// [`DiscV5ConfigBuilder`].
     /// ```
     /// use reth_discv4::SecretKey;
-    /// use reth_discv5::{DiscV5Config, DiscV5ConfigBuilder};
+    /// use reth_discv5::DiscV5Config;
     /// use reth_network::NetworkConfigBuilder;
     /// use secp256k1::rand::thread_rng;
     ///
@@ -136,7 +136,7 @@ impl<C> NetworkConfig<C> {
         self,
         f: impl FnOnce(DiscV5ConfigBuilder) -> DiscV5Config,
     ) -> Self {
-        self.set_discovery_v5(f(DiscV5ConfigBuilder::default()))
+        self.set_discovery_v5(f(DiscV5Config::builder()))
     }
 
     /// Sets the config to use for the discovery v5 protocol.
@@ -567,8 +567,7 @@ impl NetworkConfigBuilder {
             dns_discovery_config,
             discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
             #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
-            discovery_v5_config: enable_discovery_v5
-                .then_some(DiscV5ConfigBuilder::default().build()),
+            discovery_v5_config: enable_discovery_v5.then_some(DiscV5Config::builder().build()),
             discovery_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
             listener_addr,
             peers_config: peers_config.unwrap_or_default(),

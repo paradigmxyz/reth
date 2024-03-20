@@ -112,15 +112,18 @@ impl DiscV5 {
         self.add_enr(enr).map_err(Error::AddNodeToDiscv5Failed)
     }
 
-    fn enr_insert_fork_id(&self, key: &[u8], rlp: &Bytes) {
+    fn update_local_enr(&self, key: &[u8], rlp: &Bytes) {
         let Ok(key_str) = std::str::from_utf8(key) else {
-            error!(target: "discv5", "fork id should be utf-8");
+            error!(target: "discv5",
+                err="key not utf-8",
+                "failed to update local enr"
+            );
             return
         };
         if let Err(err) = self.enr_insert(key_str, rlp) {
             error!(target: "discv5",
                 %err,
-                "failed to update discv5 enr"
+                "failed to update local enr"
             );
         }
     }
@@ -141,7 +144,7 @@ impl HandleDiscovery for DiscV5 {
     }
 
     fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
-        self.enr_insert_fork_id(&key, &rlp)
+        self.update_local_enr(&key, &rlp)
     }
 
     fn encode_and_set_eip868_in_local_enr(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {

@@ -255,7 +255,7 @@ mod tests {
         let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
 
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
-        let discv5_config = DiscV5ConfigBuilder::default()
+        let discv5_config = DiscV5Config::builder()
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .build();
 
