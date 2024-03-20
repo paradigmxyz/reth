@@ -15,6 +15,7 @@ use reth_provider::{
     DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
 };
 use std::fmt::Debug;
+use tracing::info;
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
@@ -96,6 +97,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             range = 0..=*input.next_block_range().end();
         }
 
+        info!(target: "sync::stages::index_storage_history::exec", ?first_sync, "Collecting indices");
         let collector =
             collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(
                 provider.tx_ref(),
@@ -106,6 +108,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
                 |(key, value)| (key.block_number(), AddressStorageKey((key.address(), value.key))),
             )?;
 
+        info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
         load_history_indices::<_, tables::StoragesHistory, _>(
             provider.tx_ref(),
             collector,

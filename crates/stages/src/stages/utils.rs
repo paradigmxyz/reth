@@ -10,9 +10,10 @@ use reth_db::{
 use reth_etl::Collector;
 use reth_primitives::BlockNumber;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
+use tracing::info;
 
 /// Number of entries before pushing indices from cache to [`Collector`]
-const DEFAULT_CACHE_THRESHOLD: u64 = 200_000;
+const DEFAULT_CACHE_THRESHOLD: usize = 200_000;
 
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
@@ -60,9 +61,17 @@ where
         Ok::<(), StageError>(())
     };
 
+    // observability
+    let total_changesets = tx.entries::<CS>()?;
+    let interval = (total_changesets / 100).max(1);
+
     for entry in changeset_cursor.walk_range(range)? {
         let (index, key) = partial_key_factory(entry?);
         cache.entry(key).or_default().push(index);
+
+        if entries > 0 && entries % interval == 0 && total_changesets > 100 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (entries as f64 / total_changesets as f64) * 100.0), "Collecting indices");
+        }
 
         entries += 1;
         if entries > DEFAULT_CACHE_THRESHOLD {
@@ -102,10 +111,18 @@ where
     let mut current_partial = P::default();
     let mut current_list = Vec::<u64>::new();
 
-    for element in collector.iter()? {
+    // observability
+    let total_entries = collector.len();
+    let interval = (total_entries / 100).max(1);
+
+    for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
         let sharded_key = decode_key(k)?;
         let new_list = BlockNumberList::decompress_owned(v)?;
+
+        if index > 0 && index % interval == 0 && total_entries > 100 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
+        }
 
         // AccountsHistory: `Address`.
         // StorageHistory: `Address.StorageKey`.
