@@ -11,6 +11,7 @@ use reth_etl::Collector;
 use reth_primitives::BlockNumber;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 
+/// Number of entries before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 200_000;
 
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
