@@ -5,7 +5,7 @@ use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use reth_primitives::BlockNumber;
 use std::pin::Pin;
 
-/// The stream of events emitted by an ExEx (Execution Extension).
+/// An ExEx (Execution Extension) that processes new blocks and emits events on a stream.
 pub trait ExEx: Stream<Item = ExExEvent> + Send + 'static {}
 
 /// Events emitted by an ExEx.
@@ -23,7 +23,11 @@ pub enum ExExEvent {
 /// Captures the context that an ExEx has access to.
 #[derive(Debug)]
 pub struct ExExContext<Node: FullNodeTypes> {
-    builder: BuilderContext<Node>,
+    /// Different components of the node.
+    ///
+    /// Can be used to access the head block, the database, a stream of canonical state
+    /// notifications, etc.
+    pub builder: BuilderContext<Node>,
     // TODO(alexey): add pool, payload builder, anything else?
 }
 
