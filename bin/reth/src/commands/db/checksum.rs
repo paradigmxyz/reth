@@ -7,14 +7,14 @@ use reth_db::{
 use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
-/// The arguments for the `reth db list` command
+/// The arguments for the `reth db checksum` command
 pub struct Command {
     /// The table name
     table: Tables,
 }
 
 impl Command {
-    /// Execute `db list` command
+    /// Execute `db checksum` command
     pub fn execute(self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<()> {
         self.table.view(&ChecksumViewer { tool })
     }
