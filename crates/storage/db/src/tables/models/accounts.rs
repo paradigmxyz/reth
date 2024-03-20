@@ -8,7 +8,7 @@ use crate::{
     DatabaseError,
 };
 use reth_codecs::{derive_arbitrary, Compact};
-use reth_primitives::{Account, Address, BlockNumber, Buf, B256};
+use reth_primitives::{Account, Address, BlockNumber, Buf, StorageKey};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSets`][crate::tables::AccountChangeSets].
@@ -127,7 +127,7 @@ impl Decode for BlockNumberAddress {
 #[derive(
     Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd, Hash,
 )]
-pub struct AddressStorageKey(pub (Address, B256));
+pub struct AddressStorageKey(pub (Address, StorageKey));
 
 impl Encode for AddressStorageKey {
     type Encoded = [u8; 52];
@@ -148,7 +148,7 @@ impl Decode for AddressStorageKey {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
         let value = value.as_ref();
         let address = Address::from_slice(&value[..20]);
-        let storage_key = B256::from_slice(&value[20..]);
+        let storage_key = StorageKey::from_slice(&value[20..]);
 
         Ok(AddressStorageKey((address, storage_key)))
     }
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_address_storage_key() {
-        let storage_key = B256::random();
+        let storage_key = StorageKey::random();
         let address = Address::from_str("ba5e000000000000000000000000000000000000").unwrap();
         let key = AddressStorageKey((address, storage_key));
 
