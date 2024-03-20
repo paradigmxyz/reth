@@ -212,7 +212,8 @@ pub(super) async fn start_discv5(
     //
     // 1. make local enr from listen config
     //
-    let (discv5_config, bootstrap_nodes, fork_id) = discv5_config.destruct();
+    let (discv5_config, bootstrap_nodes, fork_id, tcp_port, allow_no_tcp_discovered_nodes) =
+        discv5_config.destruct();
 
     let (enr, bc_enr, ip_mode) = {
         let mut builder = discv5::enr::Enr::builder();
@@ -222,18 +223,22 @@ pub(super) async fn start_discv5(
             Ipv4 { ip, port } => {
                 builder.ip4(ip);
                 builder.udp4(port);
+                builder.tcp4(tcp_port);
 
                 IpMode::Ip4
             }
             Ipv6 { ip, port } => {
                 builder.ip6(ip);
                 builder.udp6(port);
+                builder.tcp6(tcp_port);
 
                 IpMode::Ip6
             }
             DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
                 builder.ip4(ipv4);
                 builder.udp4(ipv4_port);
+                builder.tcp4(tcp_port);
+
                 builder.ip6(ipv6);
                 builder.udp6(ipv6_port);
 
@@ -241,6 +246,7 @@ pub(super) async fn start_discv5(
             }
         };
 
+        // add fork id
         builder.add_value("eth", &alloy_rlp::encode(fork_id));
 
         // enr v4 not to get confused with discv4, independent versioning enr and
