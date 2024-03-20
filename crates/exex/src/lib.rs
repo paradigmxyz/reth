@@ -33,6 +33,14 @@ pub struct ExExHandle {
 pub trait IntoExEx<DB: Database, P: FullProvider<DB>> {
     /// Spawns the ExEx.
     ///
+    /// The ExEx should listen to the canonical state notifications and process them, updating the
+    /// `finished_height` in [ExExHandle] accordingly. The ExEx may receive the same notification
+    /// again, and ExEx's reaction to that should be idempotent. Example cases when a duplicate
+    /// notification is possible are:
+    /// 1. Reth sends a notification during the pipeline sync, but restarts before committing the
+    /// data to the database.
+    /// 2. The ExEx doesn't update the `finished_height` in the handle.
+    ///
     /// Returns a future that should be polled to advance the ExEx and a handle to the ExEx.
     fn spawn_exex(
         self,
