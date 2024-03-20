@@ -9,16 +9,21 @@ use reth_provider::{
 use std::future::Future;
 use tokio::sync::watch;
 
+/// The handle to the ExEx.
+///
+/// The spawner of the ExEx is responsible for monitoring the ExEx and reacting to the changes in
+/// the height of the last processed block.
+#[derive(Debug, Clone)]
 pub struct ExExHandle {
     /// Meta information about the ExEx.
-    meta: ExExMeta,
+    pub meta: ExExMeta,
     /// A watch channel that will receive the height of the last block processed by the ExEx.
     ///
     /// ExEx should guarantee that it will not require all earlier blocks in the future, meaning
     /// that Reth is allowed to prune them.
     ///
     /// On reorgs, it's possible for the height to go down.
-    finished_height: watch::Receiver<BlockNumber>,
+    pub finished_height: watch::Receiver<BlockNumber>,
 }
 
 /// The main trait for the custom ExEx.
@@ -36,16 +41,16 @@ pub trait IntoExEx<DB: Database, P: FullProvider<DB>> {
     ) -> (BoxFuture<'static, ()>, ExExHandle);
 }
 
-// == optional ==
+/// The meta information about the ExEx.
 #[derive(Debug, Clone)]
 pub struct ExExMeta {
     /// The identifier of the ExEx. It will appear in logs and metrics.
-    id: String,
+    pub id: String,
     /// The height from which the ExEx should start processing blocks. Earlier blocks will not be
     /// sent to the ExEx.
     ///
     /// In case when the ExEx needs all blocks from the genesis, it should be set to `0`.
-    from_height: BlockNumber,
+    pub from_height: BlockNumber,
 }
 
 /// The managed version of the [IntoExEx] trait that covers the common use case and simplifies the
