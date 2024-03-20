@@ -88,7 +88,7 @@ pub trait PayloadBuilderConfig {
 
     /// Returns the extradata as bytes.
     fn extradata_bytes(&self) -> Bytes {
-        self.extradata().as_bytes().to_owned().into()
+        self.extradata().as_bytes().to_vec().into()
     }
 
     /// The interval at which the job should build a new payload after the last.
