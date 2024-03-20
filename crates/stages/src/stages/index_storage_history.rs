@@ -1,23 +1,24 @@
 use super::{collect_history_indices, load_history_indices};
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use num_traits::Zero;
 use reth_db::{
     database::Database,
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
     table::Decode,
+    tables,
+    transaction::DbTxMut,
 };
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
 };
 use reth_provider::{
-    DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
+    DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
 };
 use std::fmt::Debug;
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
-/// on index sharding take a look at [`reth_db::tables::StoragesHistory`].
+/// on index sharding take a look at [`tables::StoragesHistory`].
 #[derive(Debug)]
 pub struct IndexStorageHistoryStage {
     /// Number of blocks after which the control
@@ -86,27 +87,29 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let range = input.next_block_range();
+        let mut range = input.next_block_range();
+        let first_sync = input.checkpoint().block_number == 0;
 
-        let collector = collect_history_indices::<
-            _,
-            reth_db::tables::StorageChangeSets,
-            reth_db::tables::StoragesHistory,
-            _,
-        >(
-            provider.tx_ref(),
-            BlockNumberAddress::range(range.clone()),
-            |AddressStorageKey((address, storage_key)), highest_block_number| {
-                StorageShardedKey::new(address, storage_key, highest_block_number)
-            },
-            |(key, value)| (key.block_number(), AddressStorageKey((key.address(), value.key))),
-        )?;
+        // On first sync it's faster to rebuild the history from scratch.
+        if first_sync {
+            provider.tx_ref().clear::<tables::StoragesHistory>()?;
+            range = 0..=*input.next_block_range().end();
+        }
 
-        let append_only = provider.count_entries::<reth_db::tables::StoragesHistory>()?.is_zero();
-        load_history_indices::<_, reth_db::tables::StoragesHistory, _>(
+        let collector =
+            collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(
+                provider.tx_ref(),
+                BlockNumberAddress::range(range.clone()),
+                |AddressStorageKey((address, storage_key)), highest_block_number| {
+                    StorageShardedKey::new(address, storage_key, highest_block_number)
+                },
+                |(key, value)| (key.block_number(), AddressStorageKey((key.address(), value.key))),
+            )?;
+
+        load_history_indices::<_, tables::StoragesHistory, _>(
             provider.tx_ref(),
             collector,
-            append_only,
+            first_sync,
             |AddressStorageKey((address, storage_key)), highest_block_number| {
                 StorageShardedKey::new(address, storage_key, highest_block_number)
             },
@@ -146,8 +149,7 @@ mod tests {
             sharded_key, storage_sharded_key::NUM_OF_INDICES_IN_SHARD, ShardedKey,
             StoredBlockBodyIndices,
         },
-        tables,
-        transaction::{DbTx, DbTxMut},
+        transaction::DbTx,
         BlockNumberList,
     };
     use reth_interfaces::test_utils::{
