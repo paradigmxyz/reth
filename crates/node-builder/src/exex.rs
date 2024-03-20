@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::{BuilderContext, FullNodeTypes};
 use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use reth_primitives::BlockNumber;
