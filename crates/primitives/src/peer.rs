@@ -33,7 +33,7 @@ impl AnyNode {
     /// Returns the full node record if available.
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
-            AnyNode::NodeRecord(record) => Some(record.clone()),
+            AnyNode::NodeRecord(record) => Some(*record),
             AnyNode::Enr(enr) => {
                 let node_record = NodeRecord {
                     address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
@@ -65,16 +65,15 @@ impl FromStr for AnyNode {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.starts_with("enode://") {
+        if let Some(rem) = s.strip_prefix("enode://") {
             if let Ok(record) = NodeRecord::from_str(s) {
                 return Ok(AnyNode::NodeRecord(record));
             }
             // incomplete enode
-            let pk = &s[8..];
-            if let Ok(peer_id) = PeerId::from_str(pk) {
+            if let Ok(peer_id) = PeerId::from_str(rem) {
                 return Ok(AnyNode::PeerId(peer_id));
             }
-            return Err(format!("invalid public key: {pk}"));
+            return Err(format!("invalid public key: {rem}"));
         }
         if s.starts_with("enr:") {
             return Enr::from_str(s).map(AnyNode::Enr)
@@ -86,8 +85,8 @@ impl FromStr for AnyNode {
 impl std::fmt::Display for AnyNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AnyNode::NodeRecord(record) => write!(f, "{}", record),
-            AnyNode::Enr(enr) => write!(f, "{}", enr),
+            AnyNode::NodeRecord(record) => write!(f, "{record}"),
+            AnyNode::Enr(enr) => write!(f, "{enr}"),
             AnyNode::PeerId(peer_id) => {
                 write!(f, "enode:{}", crate::hex::encode(peer_id.as_slice()))
             }
