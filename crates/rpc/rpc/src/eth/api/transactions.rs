@@ -1058,6 +1058,11 @@ where
 
         let Some(block) = block else { return Ok(None) };
 
+        if block.body.is_empty() {
+            // nothing to trace
+            return Ok(Some(Vec::new()));
+        }
+
         // replay all transactions of the block
         self.spawn_tracing_task_with(move |this| {
             // we need to get the state of the parent block because we're replaying this block on
