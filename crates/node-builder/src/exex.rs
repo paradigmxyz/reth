@@ -8,12 +8,12 @@ use reth_node_core::{
 };
 use reth_primitives::{BlockNumber, Head};
 use reth_tasks::TaskExecutor;
-use std::pin::Pin;
+use std::{borrow::Cow, pin::Pin};
 
 /// An ExEx (Execution Extension) that processes new blocks and emits events on a stream.
 pub trait ExEx: Stream<Item = ExExEvent> + Send + 'static {
     /// Returns the name of the ExEx. It will appear in logs and metrics.
-    fn name(&self) -> &'static str;
+    fn name(&self) -> Cow<'static, str>;
 }
 
 /// Events emitted by an ExEx.
