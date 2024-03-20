@@ -37,7 +37,6 @@ reth-network-api.workspace = true
 reth-downloaders.workspace = true
 reth-tracing.workspace = true
 reth-tasks.workspace = true
-reth-optimism-payload-builder = { workspace = true, optional = true }
 reth-ethereum-payload-builder.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
@@ -129,8 +128,6 @@ optimism = [
     "reth-network/optimism",
     "reth-network-api/optimism",
     "reth-blockchain-tree/optimism",
-    "reth-payload-builder/optimism",
-    "reth-optimism-payload-builder/optimism",
     "dep:reth-node-optimism",
     "reth-node-core/optimism",
 ]
