@@ -441,7 +441,10 @@ impl BlobTransactionSidecarRlp {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for BlobTransactionSidecar {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut arr = vec![0u8; BYTES_PER_BLOB];
+        let mut arr = [0u8; BYTES_PER_BLOB];
+
+        // Note: the "fix" for this is kinda pointless.
+        #[allow(clippy::large_stack_frames)]
         let blobs: Vec<Blob> = (0..u.int_in_range(1..=16)?)
             .map(|_| {
                 arr = arbitrary::Arbitrary::arbitrary(u).unwrap();
@@ -452,7 +455,7 @@ impl<'a> arbitrary::Arbitrary<'a> for BlobTransactionSidecar {
                     arr[i * BYTES_PER_FIELD_ELEMENT] = 0;
                 }
 
-                Blob::from_bytes(arr.as_slice()).unwrap()
+                Blob::from(arr)
             })
             .collect();
 
