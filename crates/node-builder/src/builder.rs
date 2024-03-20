@@ -7,13 +7,14 @@ use crate::{
         ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, NodeComponents,
         NodeComponentsBuilder, PoolBuilder,
     },
+    exex::{BoxedLaunchExEx, ExEx},
     hooks::NodeHooks,
     node::{FullNode, FullNodeTypes, FullNodeTypesAdapter},
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     Node, NodeHandle,
 };
 use eyre::Context;
-use futures::{future::Either, stream, stream_select, StreamExt};
+use futures::{future::Either, stream, stream_select, Future, StreamExt};
 use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
@@ -300,6 +301,7 @@ where
                 components_builder,
                 hooks: NodeHooks::new(),
                 rpc: RpcHooks::new(),
+                exexs: Vec::new(),
             },
         }
     }
@@ -334,6 +336,7 @@ where
                 components_builder: f(self.state.components_builder),
                 hooks: self.state.hooks,
                 rpc: self.state.rpc,
+                exexs: self.state.exexs,
             },
         }
     }
@@ -411,6 +414,26 @@ where
         self
     }
 
+    /// Installs an ExEx (Execution Extension) in the node.
+    pub fn install_exex<F, R, E>(mut self, exex: F) -> Self
+    where
+        F: Fn(
+                &'_ BuilderContext<
+                    FullNodeComponentsAdapter<
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        Components::Pool,
+                    >,
+                >,
+            ) -> R
+            + Send
+            + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: ExEx,
+    {
+        self.state.exexs.push(Box::new(exex));
+        self
+    }
+
     /// Launches the node and returns a handle to it.
     ///
     /// This bootstraps the node internals, creates all the components with the provider
@@ -434,7 +457,7 @@ where
 
         let Self {
             config,
-            state: ComponentsState { types, components_builder, hooks, rpc },
+            state: ComponentsState { types, components_builder, hooks, rpc, exexs: _ },
             database,
         } = self;
 
@@ -515,8 +538,10 @@ where
         };
 
         debug!(target: "reth::cli", "creating components");
-        let NodeComponents { transaction_pool, network, payload_builder, exexs } =
+        let NodeComponents { transaction_pool, network, payload_builder } =
             components_builder.build_components(&ctx).await?;
+
+        // TODO(alexey): launch ExExs and consume their events
 
         let BuilderContext {
             provider: blockchain_db,
@@ -1201,7 +1226,6 @@ where
 ///
 /// Additionally, this state captures additional hooks that are called at specific points in the
 /// node's launch lifecycle.
-#[derive(Debug)]
 pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
     /// The types of the node.
     types: Types,
@@ -1211,4 +1235,6 @@ pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
     hooks: NodeHooks<FullNode>,
     /// Additional RPC hooks.
     rpc: RpcHooks<FullNode>,
+    /// The ExExs (execution extensions) of the node.
+    exexs: Vec<Box<dyn BoxedLaunchExEx<FullNode>>>,
 }

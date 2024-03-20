@@ -3,10 +3,11 @@ use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use reth_primitives::BlockNumber;
 use std::pin::Pin;
 
-/// The ExEx (Execution Extension) component.
+/// The ExEx (Execution Extension) stream of events.
 pub trait ExEx: Stream<Item = ExExEvent> + Send + 'static {}
 
 /// Events emitted by the ExEx.
+#[derive(Debug)]
 pub enum ExExEvent {
     /// Highest block processed by the ExEx.
     ///
@@ -19,6 +20,9 @@ pub enum ExExEvent {
 
 /// A trait for launching an ExEx.
 pub trait LaunchExEx<Node: FullNodeTypes>: Send {
+    /// Launches the ExEx.
+    ///
+    /// The ExEx should be able to run independently and emit events on the stream.
     fn launch(
         self,
         ctx: &BuilderContext<Node>,

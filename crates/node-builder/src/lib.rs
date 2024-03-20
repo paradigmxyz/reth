@@ -27,6 +27,9 @@ pub use handle::NodeHandle;
 pub mod provider;
 pub mod rpc;
 
+/// Support for configuring the ExExs (execution extensions) of a node.
+pub mod exex;
+
 /// Re-export the core configuration traits.
 pub use reth_node_core::cli::config::{
     PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig, RethTransactionPoolConfig,
