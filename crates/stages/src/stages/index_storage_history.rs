@@ -261,7 +261,7 @@ mod tests {
 
         // verify
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3])]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![0, 1, 2, 3])]));
 
         // unwind
         unwind(&db, 5, 0);
