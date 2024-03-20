@@ -110,7 +110,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             |AddressStorageKey((address, storage_key)), highest_block_number| {
                 StorageShardedKey::new(address, storage_key, highest_block_number)
             },
-            |key| Ok(StorageShardedKey::decode(key).unwrap()),
+            StorageShardedKey::decode,
             |key| AddressStorageKey((key.address, key.sharded_key.key)),
         )?;
 

@@ -100,7 +100,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             collector,
             append_only,
             ShardedKey::new,
-            |key| Ok(ShardedKey::<Address>::decode(key).unwrap()),
+            ShardedKey::<Address>::decode,
             |key| key.key,
         )?;
 

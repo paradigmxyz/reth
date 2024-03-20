@@ -11,6 +11,8 @@ use reth_etl::Collector;
 use reth_primitives::BlockNumber;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 
+const DEFAULT_CACHE_THRESHOLD: u64 = 200_000;
+
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
 ///
@@ -45,7 +47,6 @@ where
     let mut collector = Collector::new(500 * 1024 * 1024, None);
     let mut cache: HashMap<P, Vec<u64>> = HashMap::new();
     let mut entries = 0;
-    let entries_threshold = 100_000;
 
     let mut collect = |cache: HashMap<P, Vec<u64>>| {
         for (key, indice_list) in cache {
@@ -63,7 +64,7 @@ where
         cache.entry(key).or_default().push(index);
 
         entries += 1;
-        if entries > entries_threshold {
+        if entries > DEFAULT_CACHE_THRESHOLD {
             entries = 0;
 
             collect(cache)?;
