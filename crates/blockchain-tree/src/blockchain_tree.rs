@@ -6,7 +6,7 @@ use crate::{
     state::{BlockChainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
-use reth_db::{database::Database, DatabaseError};
+use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -15,7 +15,7 @@ use reth_interfaces::{
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
     provider::RootMismatch,
-    RethError, RethResult,
+    RethResult,
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, PruneModes, Receipt,
@@ -877,7 +877,10 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
     ///
     /// Returns `Ok(None)` if the block hash is not canonical (block hash does not exist, or is
     /// included in a sidechain).
-    pub fn find_canonical_header(&self, hash: &BlockHash) -> RethResult<Option<SealedHeader>> {
+    pub fn find_canonical_header(
+        &self,
+        hash: &BlockHash,
+    ) -> Result<Option<SealedHeader>, ProviderError> {
         // if the indices show that the block hash is not canonical, it's either in a sidechain or
         // canonical, but in the db. If it is in a sidechain, it is not canonical. If it is not in
         // the db, then it is not canonical.
@@ -901,7 +904,7 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
     }
 
     /// Determines whether or not a block is canonical, checking the db if necessary.
-    pub fn is_block_hash_canonical(&self, hash: &BlockHash) -> RethResult<bool> {
+    pub fn is_block_hash_canonical(&self, hash: &BlockHash) -> Result<bool, ProviderError> {
         self.find_canonical_header(hash).map(|header| header.is_some())
     }
 
@@ -917,7 +920,10 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
     /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
     #[track_caller]
     #[instrument(level = "trace", skip(self), target = "blockchain_tree")]
-    pub fn make_canonical(&mut self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
+    pub fn make_canonical(
+        &mut self,
+        block_hash: &BlockHash,
+    ) -> Result<CanonicalOutcome, CanonicalError> {
         let mut durations_recorder = MakeCanonicalDurationsRecorder::default();
 
         let old_block_indices = self.block_indices().clone();
@@ -947,8 +953,7 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
             {
                 return Err(CanonicalError::from(BlockValidationError::BlockPreMerge {
                     hash: *block_hash,
-                })
-                .into())
+                }))
             }
             return Ok(CanonicalOutcome::AlreadyCanonical { header })
         }
@@ -957,8 +962,7 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
             debug!(target: "blockchain_tree", ?block_hash, "Block hash not found in block indices");
             return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
                 block_hash: *block_hash,
-            })
-            .into())
+            }))
         };
         let chain = self.state.chains.remove(&chain_id).expect("To be present");
 
@@ -1102,7 +1106,7 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
         &self,
         chain: Chain,
         recorder: &mut MakeCanonicalDurationsRecorder,
-    ) -> RethResult<()> {
+    ) -> Result<(), CanonicalError> {
         let (blocks, state, chain_trie_updates) = chain.into_inner();
         let hashed_state = state.hash_state_slow();
 
@@ -1126,16 +1130,15 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
                     .disable_long_read_transaction_safety();
                 let (state_root, trie_updates) = hashed_state
                     .state_root_with_updates(provider.tx_ref())
-                    .map_err(Into::<DatabaseError>::into)?;
+                    .map_err(Into::<BlockValidationError>::into)?;
                 let tip = blocks.tip();
                 if state_root != tip.state_root {
-                    return Err(RethError::Provider(ProviderError::StateRootMismatch(Box::new(
-                        RootMismatch {
-                            root: GotExpected { got: state_root, expected: tip.state_root },
-                            block_number: tip.number,
-                            block_hash: tip.hash(),
-                        },
-                    ))))
+                    return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
+                        root: GotExpected { got: state_root, expected: tip.state_root },
+                        block_number: tip.number,
+                        block_hash: tip.hash(),
+                    }))
+                    .into())
                 }
                 self.metrics.trie_updates_insert_recomputed.increment(1);
                 trie_updates
@@ -1152,7 +1155,7 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
                 trie_updates,
                 self.prune_modes.as_ref(),
             )
-            .map_err(|e| BlockExecutionError::CanonicalCommit { inner: e.to_string() })?;
+            .map_err(|e| CanonicalError::CanonicalCommit(e.to_string()))?;
 
         provider_rw.commit()?;
         recorder.record_relative(MakeCanonicalAction::CommitCanonicalChainToDatabase);
@@ -1186,7 +1189,7 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
     fn revert_canonical_from_database(
         &mut self,
         revert_until: BlockNumber,
-    ) -> RethResult<Option<Chain>> {
+    ) -> Result<Option<Chain>, CanonicalError> {
         // read data that is needed for new sidechain
         let provider_rw = self.externals.provider_factory.provider_rw()?;
 
@@ -1199,7 +1202,7 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
                 self.externals.provider_factory.chain_spec().as_ref(),
                 revert_range,
             )
-            .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
+            .map_err(|e| CanonicalError::CanonicalRevert(e.to_string()))?;
 
         provider_rw.commit()?;
 

@@ -2,6 +2,7 @@ use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets
 use alloy_rlp::{BufMut, Encodable};
 use rayon::prelude::*;
 use reth_db::database::Database;
+use reth_interfaces::trie::StorageRootError;
 use reth_primitives::{
     trie::{HashBuilder, Nibbles, TrieAccount},
     B256,
@@ -16,7 +17,7 @@ use reth_trie::{
     trie_cursor::TrieCursorFactory,
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashedPostState, StorageRoot, StorageRootError,
+    HashedPostState, StorageRoot,
 };
 use std::collections::HashMap;
 use thiserror::Error;

@@ -1,3 +1,4 @@
+use crate::db::DatabaseError;
 use thiserror::Error;
 
 /// State root error.
@@ -5,13 +6,13 @@ use thiserror::Error;
 pub enum StateRootError {
     /// Internal database error.
     #[error(transparent)]
-    DB(#[from] reth_db::DatabaseError),
+    DB(#[from] DatabaseError),
     /// Storage root error.
     #[error(transparent)]
     StorageRootError(#[from] StorageRootError),
 }
 
-impl From<StateRootError> for reth_db::DatabaseError {
+impl From<StateRootError> for DatabaseError {
     fn from(err: StateRootError) -> Self {
         match err {
             StateRootError::DB(err) => err,
@@ -25,5 +26,5 @@ impl From<StateRootError> for reth_db::DatabaseError {
 pub enum StorageRootError {
     /// Internal database error.
     #[error(transparent)]
-    DB(#[from] reth_db::DatabaseError),
+    DB(#[from] DatabaseError),
 }
