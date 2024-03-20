@@ -25,7 +25,7 @@ pub trait LaunchExEx<Node: FullNodeTypes>: Send {
     /// The ExEx should be able to run independently and emit events on the stream.
     fn launch(
         self,
-        ctx: &BuilderContext<Node>,
+        ctx: BuilderContext<Node>,
     ) -> impl Future<Output = eyre::Result<impl ExEx>> + Send;
 }
 
@@ -33,10 +33,10 @@ pub(crate) type BoxExEx = Pin<Box<dyn ExEx<Item = ExExEvent> + Send + 'static>>;
 
 /// A version of `LaunchExEx` that returns a boxed future. Makes the trait object-safe.
 pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
-    fn launch<'a>(
+    fn launch(
         self: Box<Self>,
-        ctx: &'a BuilderContext<Node>,
-    ) -> BoxFuture<'a, eyre::Result<BoxExEx>>;
+        ctx: BuilderContext<Node>,
+    ) -> BoxFuture<'static, eyre::Result<BoxExEx>>;
 }
 
 /// Implements `BoxedLaunchExEx` for any `LaunchExEx` that is `Send` and `'static`.
@@ -45,10 +45,10 @@ where
     E: LaunchExEx<Node> + Send + 'static,
     Node: FullNodeTypes,
 {
-    fn launch<'a>(
+    fn launch(
         self: Box<Self>,
-        ctx: &'a BuilderContext<Node>,
-    ) -> BoxFuture<'a, eyre::Result<BoxExEx>> {
+        ctx: BuilderContext<Node>,
+    ) -> BoxFuture<'static, eyre::Result<BoxExEx>> {
         async move {
             let exex = self.launch(ctx).await?;
             Ok(exex)
@@ -61,13 +61,13 @@ where
 impl<Node, F, Fut, E> LaunchExEx<Node> for F
 where
     Node: FullNodeTypes,
-    F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
+    F: FnOnce(BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<E>> + Send,
     E: ExEx,
 {
     fn launch(
         self,
-        ctx: &BuilderContext<Node>,
+        ctx: BuilderContext<Node>,
     ) -> impl Future<Output = eyre::Result<impl ExEx>> + Send {
         self(ctx)
     }

@@ -418,7 +418,7 @@ where
     pub fn install_exex<F, R, E>(mut self, exex: F) -> Self
     where
         F: Fn(
-                &'_ BuilderContext<
+                BuilderContext<
                     FullNodeComponentsAdapter<
                         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
                         Components::Pool,
