@@ -241,7 +241,7 @@ where
             .interval(conf.interval())
             .deadline(conf.deadline())
             .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_rlp_bytes())
+            .extradata(conf.extradata_bytes())
             .max_gas_limit(conf.max_gas_limit());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
