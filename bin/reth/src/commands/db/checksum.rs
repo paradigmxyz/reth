@@ -49,7 +49,7 @@ impl<DB: Database> TableViewer<()> for ChecksumViewer<'_, DB> {
             hasher.update(v.raw_value());
         }
 
-        println!("{:#}", hasher.finalize());
+        info!("{:#}", hasher.finalize());
 
         Ok(())
     }
