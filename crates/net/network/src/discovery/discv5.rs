@@ -11,7 +11,7 @@ use reth_discv5::{
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::NodeRecord;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tracing::{error, trace};
 
@@ -284,7 +284,14 @@ pub(super) async fn start_discv5(
         discv5.add_enr(node).map_err(NetworkError::custom_discovery)?;
     }
 
-    Ok((DiscV5::new(Arc::new(discv5), ip_mode), discv5_updates, bc_enr))
+    // manually initiate first lookup, discard result
+    let discv5 = Arc::new(discv5);
+    task::spawn({
+        let discv5 = discv5.clone();
+        async move { discv5.find_node(discv5.local_enr().node_id()).await }
+    });
+
+    Ok((DiscV5::new(discv5, ip_mode), discv5_updates, bc_enr))
 }
 
 #[cfg(test)]
