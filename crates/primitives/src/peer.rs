@@ -178,15 +178,17 @@ mod tests {
         assert_eq!(err, "invalid public key: ");
     }
 
+    // <https://eips.ethereum.org/EIPS/eip-778>
     #[test]
     fn test_enr_parse() {
-        let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0";
+        let url = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
         let node: AnyNode = url.parse().unwrap();
-        assert_eq!(node, AnyNode::PeerId("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse().unwrap()));
+        assert_eq!(
+            node.peer_id(),
+            "0xca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f"
+                .parse::<PeerId>()
+                .unwrap()
+        );
         assert_eq!(node.to_string(), url);
-
-        let url = "enode://";
-        let err = url.parse::<AnyNode>().unwrap_err();
-        assert_eq!(err, "invalid public key: ");
     }
 }
