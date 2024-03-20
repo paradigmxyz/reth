@@ -41,25 +41,23 @@ trait LaunchExEx<Node: FullNodeTypes>: Send {
 
 type BoxExEx = Pin<Box<dyn ExEx<Item = ExExEvent> + Send + 'static>>;
 
-/// A boxed version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
+/// A version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
 pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
-    fn launch(self: Box<Self>, ctx: ExExContext<Node>)
-        -> BoxFuture<'static, eyre::Result<BoxExEx>>;
+    fn launch(self, ctx: ExExContext<Node>) -> BoxFuture<'static, eyre::Result<BoxExEx>>;
 }
 
 /// Implements [BoxedLaunchExEx] for any [LaunchExEx] that is [Send] and `'static`.
+///
+/// Returns a [BoxFuture] that resolves to a [BoxExEx].
 impl<E, Node> BoxedLaunchExEx<Node> for E
 where
     E: LaunchExEx<Node> + Send + 'static,
     Node: FullNodeTypes,
 {
-    fn launch(
-        self: Box<Self>,
-        ctx: ExExContext<Node>,
-    ) -> BoxFuture<'static, eyre::Result<BoxExEx>> {
+    fn launch(self, ctx: ExExContext<Node>) -> BoxFuture<'static, eyre::Result<BoxExEx>> {
         async move {
             let exex = self.launch(ctx).await?;
-            Ok(exex)
+            Ok(Box::pin(exex) as BoxExEx)
         }
         .boxed()
     }
