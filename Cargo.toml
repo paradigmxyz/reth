@@ -233,6 +233,7 @@ tracing-appender = "0.2"
 thiserror = "1.0"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
+serde_with = "3.3.0"
 humantime-serde = "1.1"
 rand = "0.8.5"
 schnellru = "0.2"
