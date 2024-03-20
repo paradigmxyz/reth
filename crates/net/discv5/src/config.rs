@@ -21,7 +21,7 @@ pub struct DiscV5ConfigBuilder {
     fork_id: Option<ForkId>,
     /// Mempool TCP port to listen on.
     tcp_port: Option<u16>,
-    /// Allow no TCP port set on disocvered nodes. Disallowed by default.
+    /// Allow no TCP port set on discovered nodes. Disallowed by default.
     allow_no_tcp_discovered_nodes: bool,
 }
 
@@ -122,7 +122,7 @@ pub struct DiscV5Config {
     fork_id: ForkId,
     /// Mempool TCP port to listen on.
     tcp_port: u16,
-    /// Allow no TCP port set on disocvered nodes. Disallowed by default.
+    /// Allow no TCP port set on discovered nodes. Disallowed by default.
     allow_no_tcp_discovered_nodes: bool,
 }
 
