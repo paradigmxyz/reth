@@ -171,12 +171,12 @@ where
             }
         }
 
-        let block_hash = match self.provider().block_hash_for_id(block_id)? {
+        let block_hash = match self.provider().block_hash_for_id(block_id).unwrap() {
             Some(block_hash) => block_hash,
             None => return Ok(None),
         };
 
-        Ok(self.cache().get_sealed_block_with_senders(block_hash).await?)
+        Ok(self.cache().get_sealed_block_with_senders(block_hash).await.unwrap())
     }
 
     /// Returns the populated rpc block object for the given block id.

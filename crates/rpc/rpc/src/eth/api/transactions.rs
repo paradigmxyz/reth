@@ -1054,8 +1054,10 @@ where
         R: Send + 'static,
     {
         let ((cfg, block_env, _), block) =
-            futures::try_join!(self.evm_env_at(block_id), self.block_with_senders(block_id))?;
+            futures::try_join!(self.evm_env_at(block_id), self.block_with_senders(block_id))
+                .unwrap();
 
+        println!("here");
         let Some(block) = block else { return Ok(None) };
 
         // replay all transactions of the block

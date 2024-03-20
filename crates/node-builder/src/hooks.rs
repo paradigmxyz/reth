@@ -1,10 +1,12 @@
 use crate::{components::FullNodeComponents, node::FullNode};
-use std::fmt;
+use futures::{future::BoxFuture, stream::BoxStream, FutureExt, Stream};
+use std::{fmt, future::Future, pin::Pin};
 
 /// Container for all the configurable hook functions.
 pub(crate) struct NodeHooks<Node: FullNodeComponents> {
     pub(crate) on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
     pub(crate) on_node_started: Box<dyn OnNodeStartedHook<Node>>,
+    pub(crate) exex: Vec<Box<dyn BoxedLaunchExEx<Node>>>,
     pub(crate) _marker: std::marker::PhantomData<Node>,
 }
 
@@ -14,6 +16,7 @@ impl<Node: FullNodeComponents> NodeHooks<Node> {
         Self {
             on_component_initialized: Box::<()>::default(),
             on_node_started: Box::<()>::default(),
+            exex: vec![],
             _marker: Default::default(),
         }
     }
@@ -115,5 +118,49 @@ impl<Node> OnComponentInitializedHook<Node> for () {
 impl<Node: FullNodeComponents> OnNodeStartedHook<Node> for () {
     fn on_event(&self, _node: FullNode<Node>) -> eyre::Result<()> {
         Ok(())
+    }
+}
+
+pub trait ExEx: Stream<Item = ExExEvent> + Send + 'static {}
+
+pub enum ExExEvent {}
+
+/// A helper trait that is run once the node is started.
+pub trait LaunchExEx<Node: FullNodeComponents>: Send {
+    /// Consumes the event hook and runs it.
+    ///
+    /// If this returns an error, the node launch will be aborted.
+    fn launch(self, node: FullNode<Node>) -> impl Future<Output = eyre::Result<impl ExEx>> + Send;
+}
+
+type BoxExEx = Pin<Box<dyn ExEx<Item = ExExEvent> + Send + 'static>>;
+
+pub(crate) trait BoxedLaunchExEx<Node: FullNodeComponents>: Send {
+    fn launch(self, node: FullNode<Node>) -> BoxFuture<'static, eyre::Result<BoxExEx>>;
+}
+
+impl<Node, E> BoxedLaunchExEx<Node> for E
+where
+    Node: FullNodeComponents,
+    E: LaunchExEx<Node> + Send + 'static,
+{
+    fn launch(self, node: FullNode<Node>) -> BoxFuture<'static, eyre::Result<BoxExEx>> {
+        async move {
+            let exex = self.launch(node).await?;
+            Ok(Box::pin(exex) as BoxExEx)
+        }
+        .boxed()
+    }
+}
+
+impl<F, Node, Fut, E> LaunchExEx<Node> for F
+where
+    Node: FullNodeComponents,
+    F: FnOnce(FullNode<Node>) -> Fut + Send,
+    Fut: Future<Output = eyre::Result<E>> + Send,
+    E: ExEx,
+{
+    fn launch(self, node: FullNode<Node>) -> impl Future<Output = eyre::Result<impl ExEx>> + Send {
+        self(node)
     }
 }

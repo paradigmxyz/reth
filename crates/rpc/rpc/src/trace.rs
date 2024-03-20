@@ -338,6 +338,7 @@ where
         &self,
         block_id: BlockId,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
+        println!("{:?}", block_id);
         let traces = self.inner.eth_api.trace_block_with(
             block_id,
             TracingInspectorConfig::default_parity(),
@@ -351,7 +352,7 @@ where
         );
 
         let block = self.inner.eth_api.block_by_id(block_id);
-        let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
+        let (maybe_traces, maybe_block) = futures::try_join!(traces, block).unwrap();
 
         let mut maybe_traces =
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
