@@ -16,6 +16,7 @@ workspace = true
 reth-primitives.workspace = true
 reth-db.workspace = true
 reth-trie.workspace = true
+reth-interfaces.workspace = true
 reth-provider.workspace = true
 
 # alloy

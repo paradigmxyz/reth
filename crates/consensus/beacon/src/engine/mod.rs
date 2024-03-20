@@ -429,15 +429,13 @@ where
 
                 PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
             }
-            Err(error) => {
-                if let RethError::Canonical(ref err) = error {
-                    if err.is_fatal() {
-                        error!(target: "consensus::engine", %err, "Encountered fatal error");
-                        return Err(error)
-                    }
+            Err(err) => {
+                if err.is_fatal() {
+                    error!(target: "consensus::engine", %err, "Encountered fatal error");
+                    return Err(err.into())
                 }
 
-                self.on_failed_canonical_forkchoice_update(&state, error)
+                self.on_failed_canonical_forkchoice_update(&state, err)
             }
         };
 
@@ -801,7 +799,7 @@ where
     fn record_make_canonical_latency(
         &self,
         start: Instant,
-        outcome: &Result<CanonicalOutcome, RethError>,
+        outcome: &Result<CanonicalOutcome, CanonicalError>,
     ) -> Duration {
         let elapsed = start.elapsed();
         self.metrics.make_canonical_latency.record(elapsed);
@@ -989,7 +987,7 @@ where
     fn on_failed_canonical_forkchoice_update(
         &mut self,
         state: &ForkchoiceState,
-        error: RethError,
+        error: CanonicalError,
     ) -> PayloadStatus {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
@@ -1002,18 +1000,16 @@ where
         }
 
         match &error {
-            RethError::Canonical(
-                error @ CanonicalError::Validation(BlockValidationError::BlockPreMerge { .. }),
-            ) => {
+            CanonicalError::Validation(BlockValidationError::BlockPreMerge { .. }) => {
                 warn!(target: "consensus::engine", %error, ?state, "Failed to canonicalize the head hash");
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
                 .with_latest_valid_hash(B256::ZERO)
             }
-            RethError::Canonical(CanonicalError::BlockchainTree(
-                BlockchainTreeError::BlockHashNotFoundInChain { .. },
-            )) => {
+            CanonicalError::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain {
+                ..
+            }) => {
                 // This just means we couldn't find the block when attempting to make it canonical,
                 // so we should not warn the user, since this will result in us attempting to sync
                 // to a new target and is considered normal operation during sync
@@ -1132,13 +1128,9 @@ where
                             if let Err((_hash, error)) =
                                 self.try_make_sync_target_canonical(block_num_hash)
                             {
-                                if let RethError::Canonical(ref err) = error {
-                                    if err.is_fatal() {
-                                        error!(target: "consensus::engine", %err, "Encountered fatal error");
-                                        return Err(BeaconOnNewPayloadError::Internal(Box::new(
-                                            error,
-                                        )))
-                                    }
+                                if error.is_fatal() {
+                                    error!(target: "consensus::engine", %error, "Encountered fatal error");
+                                    return Err(BeaconOnNewPayloadError::Internal(Box::new(error)))
                                 } else {
                                     // If we could not make the sync target block canonical, we
                                     // should return the error as an invalid payload status.
@@ -1530,7 +1522,7 @@ where
     fn try_make_sync_target_canonical(
         &mut self,
         inserted: BlockNumHash,
-    ) -> Result<(), (B256, RethError)> {
+    ) -> Result<(), (B256, CanonicalError)> {
         if let Some(target) = self.forkchoice_state_tracker.sync_target_state() {
             // optimistically try to make the head of the current FCU target canonical, the sync
             // target might have changed since the block download request was issued
@@ -1568,9 +1560,9 @@ where
                     // it's part of the canonical chain: if it's the safe or the finalized block
                     if matches!(
                         err,
-                        RethError::Canonical(CanonicalError::BlockchainTree(
+                        CanonicalError::BlockchainTree(
                             BlockchainTreeError::BlockHashNotFoundInChain { .. }
-                        ))
+                        )
                     ) {
                         // if the inserted block is the currently targeted `finalized` or `safe`
                         // block, we will attempt to make them canonical,
