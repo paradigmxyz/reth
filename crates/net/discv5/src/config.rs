@@ -4,9 +4,6 @@ use std::{collections::HashSet, net::SocketAddr};
 
 use discv5::ListenConfig;
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-#[cfg(feature = "optimism")]
-use reth_primitives::BASE_MAINNET;
-#[cfg(not(feature = "optimism"))]
 use reth_primitives::MAINNET;
 use reth_primitives::{ForkId, Hardfork};
 
