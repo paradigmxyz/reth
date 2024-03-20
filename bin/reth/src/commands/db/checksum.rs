@@ -2,7 +2,8 @@ use crate::utils::DbTool;
 use blake3::Hasher;
 use clap::Parser;
 use reth_db::{
-    database::Database, table::Table, DatabaseEnv, RawKey, RawTable, RawValue, TableViewer, Tables,
+    cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, DatabaseEnv, RawKey,
+    RawTable, RawValue, TableViewer, Tables,
 };
 use tracing::{info, warn};
 
@@ -23,7 +24,7 @@ impl Command {
 struct ChecksumViewer<'a, DB: Database> {
     tool: &'a DbTool<DB>,
 }
-use reth_db::{cursor::DbCursorRO, transaction::DbTx};
+
 impl<DB: Database> TableViewer<()> for ChecksumViewer<'_, DB> {
     type Error = eyre::Report;
 
