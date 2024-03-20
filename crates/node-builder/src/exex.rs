@@ -1,8 +1,13 @@
 #![allow(dead_code)]
 
-use crate::{BuilderContext, FullNodeTypes};
+use crate::FullNodeTypes;
 use futures::{future::BoxFuture, Future, FutureExt, Stream};
-use reth_primitives::BlockNumber;
+use reth_node_core::{
+    dirs::{ChainPath, DataDirPath},
+    node_config::NodeConfig,
+};
+use reth_primitives::{BlockNumber, Head};
+use reth_tasks::TaskExecutor;
 use std::pin::Pin;
 
 /// An ExEx (Execution Extension) that processes new blocks and emits events on a stream.
@@ -13,7 +18,7 @@ pub trait ExEx: Stream<Item = ExExEvent> + Send + 'static {}
 pub enum ExExEvent {
     /// Highest block processed by the ExEx.
     ///
-    /// ExEx should guarantee that it will not require all earlier blocks in the future, meaning
+    /// ExEx must guarantee that it will not require all earlier blocks in the future, meaning
     /// that Reth is allowed to prune them.
     ///
     /// On reorgs, it's possible for the height to go down.
@@ -23,11 +28,18 @@ pub enum ExExEvent {
 /// Captures the context that an ExEx has access to.
 #[derive(Debug)]
 pub struct ExExContext<Node: FullNodeTypes> {
-    /// Different components of the node.
-    ///
-    /// Can be used to access the head block, the database, a stream of canonical state
-    /// notifications, etc.
-    pub builder: BuilderContext<Node>,
+    /// The current head of the blockchain at launch.
+    head: Head,
+    /// The configured provider to interact with the blockchain.
+    provider: Node::Provider,
+    /// The executor of the node.
+    executor: TaskExecutor,
+    /// The data dir of the node.
+    data_dir: ChainPath<DataDirPath>,
+    /// The config of the node
+    config: NodeConfig,
+    /// loaded config
+    reth_config: reth_config::Config,
     // TODO(alexey): add pool, payload builder, anything else?
 }
 
