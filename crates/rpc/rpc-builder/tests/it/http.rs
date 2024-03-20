@@ -141,9 +141,9 @@ where
     let node: NodeRecord = url.parse().unwrap();
 
     AdminApiClient::add_peer(client, node).await.unwrap();
-    AdminApiClient::remove_peer(client, node).await.unwrap();
-    AdminApiClient::add_trusted_peer(client, node).await.unwrap();
-    AdminApiClient::remove_trusted_peer(client, node).await.unwrap();
+    AdminApiClient::remove_peer(client, node.into()).await.unwrap();
+    AdminApiClient::add_trusted_peer(client, node.into()).await.unwrap();
+    AdminApiClient::remove_trusted_peer(client, node.into()).await.unwrap();
     AdminApiClient::node_info(client).await.unwrap();
 }
 
