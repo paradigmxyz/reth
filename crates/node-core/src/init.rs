@@ -100,9 +100,10 @@ pub fn insert_genesis_state<DB: Database>(
     tx: &<DB as Database>::TXMut,
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
-    let mut state_init: BundleStateInit = HashMap::new();
-    let mut reverts_init = HashMap::new();
-    let mut contracts: HashMap<B256, Bytecode> = HashMap::new();
+    let capacity = genesis.alloc.len();
+    let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
+    let mut reverts_init = HashMap::with_capacity(capacity);
+    let mut contracts: HashMap<B256, Bytecode> = HashMap::with_capacity(capacity);
 
     for (address, account) in &genesis.alloc {
         let bytecode_hash = if let Some(code) = &account.code {
