@@ -26,7 +26,6 @@ use tracing::{debug, trace, warn};
 
 // re-export so can be used during builder setup
 use crate::server::connection::IpcConnDriver;
-pub use parity_tokio_ipc::Endpoint;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -580,7 +579,6 @@ mod tests {
         core::client::{ClientT, Subscription, SubscriptionClientT},
         rpc_params, PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
-    use parity_tokio_ipc::dummy_endpoint;
     use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
 

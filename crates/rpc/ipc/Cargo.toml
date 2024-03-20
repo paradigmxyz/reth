@@ -15,7 +15,7 @@ workspace = true
 
 # async/net
 futures.workspace = true
-parity-tokio-ipc = "0.9.0"
+interprocess = "1.2.1"
 tokio = { workspace = true, features = ["net", "time", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["codec"] }
 tokio-stream.workspace = true
