@@ -134,7 +134,7 @@ mod tests {
     use reth_db::{
         cursor::DbCursorRO,
         models::{
-            sharded_key, sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey,
+            sharded_key, sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx,
             StoredBlockBodyIndices,
         },
         tables,
@@ -145,7 +145,7 @@ mod tests {
         generators,
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
-    use reth_primitives::{address, Address, BlockNumber, B256};
+    use reth_primitives::{address, BlockNumber, B256};
     use reth_provider::providers::StaticFileWriter;
     use std::collections::BTreeMap;
 

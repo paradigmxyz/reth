@@ -143,9 +143,8 @@ mod tests {
     use reth_db::{
         cursor::DbCursorRO,
         models::{
-            sharded_key,
-            storage_sharded_key::{StorageShardedKey, NUM_OF_INDICES_IN_SHARD},
-            ShardedKey, StoredBlockBodyIndices,
+            sharded_key, storage_sharded_key::NUM_OF_INDICES_IN_SHARD, ShardedKey,
+            StoredBlockBodyIndices,
         },
         tables,
         transaction::{DbTx, DbTxMut},
