@@ -6539,6 +6539,7 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.2.0-beta.3"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-engine-types",
