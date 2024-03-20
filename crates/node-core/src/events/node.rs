@@ -30,7 +30,7 @@ use tracing::{debug, info, warn};
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
-/// The current high-level state of the node, including the node's database environemt, network
+/// The current high-level state of the node, including the node's database environment, network
 /// connections, current processing stage, and the latest block information. It provides
 /// methods to handle different types of events that affect the node's state, such as pipeline
 /// events, network events, and consensus engine events.
@@ -223,13 +223,21 @@ impl<DB> NodeState<DB> {
                     (self.safe_block_hash != Some(safe_block_hash) &&
                         self.finalized_block_hash != Some(finalized_block_hash))
                 {
-                    info!(
-                        ?head_block_hash,
-                        ?safe_block_hash,
-                        ?finalized_block_hash,
-                        ?status,
-                        "Forkchoice updated"
-                    );
+                    if status == ForkchoiceStatus::Invalid {
+                        info!(
+                            ?head_block_hash,
+                            ?safe_block_hash,
+                            ?finalized_block_hash,
+                            "Received invalid forkchoice updated message"
+                        );
+                    } else if status == ForkchoiceStatus::Syncing {
+                        info!(
+                            ?head_block_hash,
+                            ?safe_block_hash,
+                            ?finalized_block_hash,
+                            "Received forkchoice updated message when syncing"
+                        );
+                    }
                 }
                 self.head_block_hash = Some(head_block_hash);
                 self.safe_block_hash = Some(safe_block_hash);
