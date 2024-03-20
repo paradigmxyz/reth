@@ -63,7 +63,7 @@ mod invalid_headers;
 use invalid_headers::InvalidHeaderCache;
 
 mod event;
-pub use event::BeaconConsensusEngineEvent;
+pub use event::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
 
 mod handle;
 pub use handle::BeaconConsensusEngineHandle;
@@ -287,6 +287,7 @@ where
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
         let handle = BeaconConsensusEngineHandle { to_engine };
+        let listeners = EventListeners::default();
         let sync = EngineSyncController::new(
             pipeline,
             client,
@@ -294,6 +295,7 @@ where
             run_pipeline_continuously,
             max_block,
             blockchain.chain_spec(),
+            listeners.clone(),
         );
         let mut this = Self {
             sync,
@@ -304,7 +306,7 @@ where
             handle: handle.clone(),
             forkchoice_state_tracker: Default::default(),
             payload_builder,
-            listeners: EventListeners::default(),
+            listeners,
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: EngineMetrics::default(),
             pipeline_run_threshold,
@@ -603,6 +605,13 @@ where
     /// [`BeaconConsensusEngine`]
     pub fn handle(&self) -> BeaconConsensusEngineHandle<EngineT> {
         self.handle.clone()
+    }
+
+    /// Pushes an [UnboundedSender] to the engine's listeners. Also pushes an [UnboundedSender] to
+    /// the sync controller's listeners.
+    pub(crate) fn push_listener(&mut self, listener: UnboundedSender<BeaconConsensusEngineEvent>) {
+        self.listeners.push_listener(listener.clone());
+        self.sync.push_listener(listener);
     }
 
     /// Returns true if the distance from the local tip to the block is greater than the configured
@@ -1867,9 +1876,7 @@ where
                         BeaconEngineMessage::TransitionConfigurationExchanged => {
                             this.blockchain.on_transition_configuration_exchanged();
                         }
-                        BeaconEngineMessage::EventListener(tx) => {
-                            this.listeners.push_listener(tx);
-                        }
+                        BeaconEngineMessage::EventListener(tx) => this.push_listener(tx),
                     }
                     continue
                 }

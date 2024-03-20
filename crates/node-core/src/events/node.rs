@@ -2,7 +2,9 @@
 
 use crate::events::cl::ConsensusLayerHealthEvent;
 use futures::Stream;
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, ForkchoiceStatus};
+use reth_beacon_consensus::{
+    BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
+};
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
@@ -147,32 +149,54 @@ impl<DB> NodeState<DB> {
                     current_stage.eta.update(stage_id, checkpoint);
 
                     let target = OptionalField(current_stage.target);
-                    let stage_progress = OptionalField(
-                        checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
-                    );
+                    let stage_progress =
+                        checkpoint.entities().and_then(|entities| entities.fmt_percentage());
+                    let stage_eta = current_stage.eta.fmt_for_stage(stage_id);
 
                     let message =
                         if done { "Stage finished executing" } else { "Stage committed progress" };
 
-                    if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
-                        info!(
-                            pipeline_stages = %pipeline_stages_progress,
-                            stage = %stage_id,
-                            checkpoint = %checkpoint.block_number,
-                            %target,
-                            %stage_progress,
-                            %stage_eta,
-                            "{message}",
-                        )
-                    } else {
-                        info!(
-                            pipeline_stages = %pipeline_stages_progress,
-                            stage = %stage_id,
-                            checkpoint = %checkpoint.block_number,
-                            %target,
-                            %stage_progress,
-                            "{message}",
-                        )
+                    match (stage_progress, stage_eta) {
+                        (Some(stage_progress), Some(stage_eta)) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_progress,
+                                %stage_eta,
+                                "{message}",
+                            )
+                        }
+                        (Some(stage_progress), None) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_progress,
+                                "{message}",
+                            )
+                        }
+                        (None, Some(stage_eta)) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_eta,
+                                "{message}",
+                            )
+                        }
+                        (None, None) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                "{message}",
+                            )
+                        }
                     }
                 }
 
@@ -210,6 +234,20 @@ impl<DB> NodeState<DB> {
                 self.head_block_hash = Some(head_block_hash);
                 self.safe_block_hash = Some(safe_block_hash);
                 self.finalized_block_hash = Some(finalized_block_hash);
+            }
+            BeaconConsensusEngineEvent::LiveSyncProgress(live_sync_progress) => {
+                match live_sync_progress {
+                    ConsensusEngineLiveSyncProgress::DownloadingBlocks {
+                        remaining_blocks,
+                        target,
+                    } => {
+                        info!(
+                            remaining_blocks,
+                            target_block_hash=?target,
+                            "Live sync in progress, downloading blocks"
+                        );
+                    }
+                }
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
                 info!(

@@ -232,9 +232,9 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
                 }
             }
             // Return either non-empty entry
-            _ => {
-                db_item.or(post_state_item.copied().map(|(key, value)| StorageEntry { key, value }))
-            }
+            _ => db_item.or_else(|| {
+                post_state_item.copied().map(|(key, value)| StorageEntry { key, value })
+            }),
         }
     }
 }
@@ -252,7 +252,7 @@ where
             Some(storage) => {
                 // If the storage has been wiped at any point
                 storage.wiped &&
-                    // and the current storage does not contain any non-zero values 
+                    // and the current storage does not contain any non-zero values
                     storage.non_zero_valued_slots.is_empty()
             }
             None => self.cursor.is_storage_empty(key)?,

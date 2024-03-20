@@ -449,16 +449,17 @@ impl StorageInner {
         let Block { header, body, .. } = block.block;
         let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
 
-        let mut blob_gas_used = None;
-        if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
+        let blob_gas_used = if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
             let mut sum_blob_gas_used = 0;
             for tx in &body.transactions {
                 if let Some(blob_tx) = tx.transaction.as_eip4844() {
                     sum_blob_gas_used += blob_tx.blob_gas();
                 }
             }
-            blob_gas_used = Some(sum_blob_gas_used);
-        }
+            Some(sum_blob_gas_used)
+        } else {
+            None
+        };
 
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 

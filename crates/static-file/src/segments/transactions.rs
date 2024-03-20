@@ -85,15 +85,16 @@ impl<DB: Database> Segment<DB> for Transactions {
         )?;
 
         // Generate list of hashes for filters & PHF
-        let mut hashes = None;
-        if config.filters.has_filters() {
-            hashes = Some(
+        let hashes = if config.filters.has_filters() {
+            Some(
                 provider
                     .transaction_hashes_by_range(*tx_range.start()..(*tx_range.end() + 1))?
                     .into_iter()
                     .map(|(tx, _)| Ok(tx)),
-            );
-        }
+            )
+        } else {
+            None
+        };
 
         create_static_file_T1::<tables::Transactions, TxNumber, SegmentHeader>(
             provider.tx_ref(),

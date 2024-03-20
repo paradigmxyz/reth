@@ -930,11 +930,14 @@ impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
         if let Some(header) = canonical_header {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
             // TODO: this could be fetched from the chainspec first
-            let td = self.externals.provider_factory.provider()?.header_td(block_hash)?.ok_or(
-                CanonicalError::from(BlockValidationError::MissingTotalDifficulty {
-                    hash: *block_hash,
-                }),
-            )?;
+            let td =
+                self.externals.provider_factory.provider()?.header_td(block_hash)?.ok_or_else(
+                    || {
+                        CanonicalError::from(BlockValidationError::MissingTotalDifficulty {
+                            hash: *block_hash,
+                        })
+                    },
+                )?;
             if !self
                 .externals
                 .provider_factory

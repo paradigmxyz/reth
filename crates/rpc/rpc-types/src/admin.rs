@@ -1,4 +1,5 @@
 use crate::{NodeRecord, PeerId};
+use alloy_genesis::ChainConfig;
 use alloy_primitives::{B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -32,7 +33,7 @@ pub struct NodeInfo {
 
 impl NodeInfo {
     /// Creates a new instance of `NodeInfo`.
-    pub fn new(enr: NodeRecord, status: NetworkStatus) -> NodeInfo {
+    pub fn new(enr: NodeRecord, status: NetworkStatus, config: ChainConfig) -> NodeInfo {
         NodeInfo {
             enode: enr,
             id: enr.id,
@@ -40,7 +41,10 @@ impl NodeInfo {
             listen_addr: enr.tcp_addr(),
             ports: Ports { discovery: enr.udp_port, listener: enr.tcp_port },
             name: status.client_version,
-            protocols: Protocols { eth: status.eth_protocol_info, other: Default::default() },
+            protocols: Protocols {
+                eth: EthProtocolInfo::new(status.eth_protocol_info, config),
+                other: Default::default(),
+            },
         }
     }
 }
@@ -87,6 +91,21 @@ pub struct EthProtocolInfo {
     pub network: u64,
     /// Genesis block of the current chain.
     pub genesis: B256,
+    /// Configuration of the chain.
+    pub config: ChainConfig,
+}
+
+impl EthProtocolInfo {
+    /// Creates a new instance of `EthProtocolInfo`.
+    pub fn new(info: EthProtocolInfo, config: ChainConfig) -> EthProtocolInfo {
+        EthProtocolInfo {
+            difficulty: info.difficulty,
+            head: info.head,
+            network: info.network,
+            genesis: info.genesis,
+            config,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -95,7 +114,7 @@ mod tests {
 
     #[test]
     fn test_parse_node_info_roundtrip() {
-        let sample = r#"{"enode":"enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@[::]:30303","id":"44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d","ip":"::","listenAddr":"[::]:30303","name":"reth","ports":{"discovery":30303,"listener":30303},"protocols":{"eth":{"difficulty":17334254859343145000,"genesis":"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","head":"0xb83f73fbe6220c111136aefd27b160bf4a34085c65ba89f24246b3162257c36a","network":1}}}"#;
+        let sample = r#"{"enode":"enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@[::]:30303","id":"44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d","ip":"::","listenAddr":"[::]:30303","name":"reth","ports":{"discovery":30303,"listener":30303},"protocols":{"eth":{"difficulty":17334254859343145000,"genesis":"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","head":"0xb83f73fbe6220c111136aefd27b160bf4a34085c65ba89f24246b3162257c36a","network":1, "config": {"chainId": 17000,"homesteadBlock": 0,"daoForkSupport": true,"eip150Block": 0,"eip155Block": 0,"eip158Block": 0,"byzantiumBlock": 0,"constantinopleBlock": 0,"petersburgBlock": 0,"istanbulBlock": 0,"berlinBlock": 0,"londonBlock": 0,"shanghaiTime": 1696000704,"cancunTime": 1707305664,"terminalTotalDifficulty": 0,"terminalTotalDifficultyPassed": true,"ethash": {}}}}}"#;
 
         let info: NodeInfo = serde_json::from_str(sample).unwrap();
         let serialized = serde_json::to_string_pretty(&info).unwrap();

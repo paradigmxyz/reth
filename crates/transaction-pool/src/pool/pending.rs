@@ -264,13 +264,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // the transaction already has an ancestor, so we only need to ensure that the
             // highest nonces set actually contains the highest nonce for that sender
             self.highest_nonces.remove(ancestor);
-            self.highest_nonces.insert(tx.clone());
         } else {
             // If there's __no__ ancestor in the pool, then this transaction is independent, this is
             // guaranteed because this pool is gapless.
             self.independent_transactions.insert(tx.clone());
-            self.highest_nonces.insert(tx.clone());
         }
+        self.highest_nonces.insert(tx.clone());
     }
 
     /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
