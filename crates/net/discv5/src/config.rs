@@ -95,12 +95,8 @@ impl DiscV5ConfigBuilder {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        #[cfg(not(feature = "optimism"))]
         let fork_id =
             fork_id.unwrap_or_else(|| MAINNET.hardfork_fork_id(Hardfork::latest()).unwrap());
-        #[cfg(feature = "optimism")]
-        let fork_id =
-            fork_id.unwrap_or_else(|| BASE_MAINNET.hardfork_fork_id(Hardfork::latest()).unwrap());
 
         let tcp_port = tcp_port.unwrap_or(DEFAULT_DISCOVERY_PORT);
 
