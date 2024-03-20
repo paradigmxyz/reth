@@ -27,7 +27,7 @@ pub use handle::NodeHandle;
 pub mod provider;
 pub mod rpc;
 
-/// Support for configuring the ExExs (execution extensions) of a node.
+/// Support for installing the ExExs (execution extensions) in a node.
 pub mod exex;
 
 /// Re-export the core configuration traits.

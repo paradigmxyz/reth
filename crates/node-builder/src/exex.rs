@@ -3,10 +3,10 @@ use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use reth_primitives::BlockNumber;
 use std::pin::Pin;
 
-/// The ExEx (Execution Extension) stream of events.
+/// The stream of events emitted by an ExEx (Execution Extension).
 pub trait ExEx: Stream<Item = ExExEvent> + Send + 'static {}
 
-/// Events emitted by the ExEx.
+/// Events emitted by an ExEx.
 #[derive(Debug)]
 pub enum ExExEvent {
     /// Highest block processed by the ExEx.
@@ -18,28 +18,36 @@ pub enum ExExEvent {
     FinishedHeight(BlockNumber),
 }
 
+/// Captures the context that an ExEx has access to.
+pub struct ExExContext<Node: FullNodeTypes> {
+    builder: BuilderContext<Node>,
+    // TODO(alexey): add pool, payload builder, anything else?
+}
+
+impl<Node: FullNodeTypes> std::fmt::Debug for ExExContext<Node> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExExContext").field("builder", &self.builder).finish()
+    }
+}
+
 /// A trait for launching an ExEx.
 pub trait LaunchExEx<Node: FullNodeTypes>: Send {
     /// Launches the ExEx.
     ///
     /// The ExEx should be able to run independently and emit events on the stream.
-    fn launch(
-        self,
-        ctx: BuilderContext<Node>,
-    ) -> impl Future<Output = eyre::Result<impl ExEx>> + Send;
+    fn launch(self, ctx: ExExContext<Node>)
+        -> impl Future<Output = eyre::Result<impl ExEx>> + Send;
 }
 
 pub(crate) type BoxExEx = Pin<Box<dyn ExEx<Item = ExExEvent> + Send + 'static>>;
 
-/// A version of `LaunchExEx` that returns a boxed future. Makes the trait object-safe.
+/// A version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
 pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
-    fn launch(
-        self: Box<Self>,
-        ctx: BuilderContext<Node>,
-    ) -> BoxFuture<'static, eyre::Result<BoxExEx>>;
+    fn launch(self: Box<Self>, ctx: ExExContext<Node>)
+        -> BoxFuture<'static, eyre::Result<BoxExEx>>;
 }
 
-/// Implements `BoxedLaunchExEx` for any `LaunchExEx` that is `Send` and `'static`.
+/// Implements [BoxedLaunchExEx] for any [LaunchExEx] that is [Send] and `'static`.
 impl<E, Node> BoxedLaunchExEx<Node> for E
 where
     E: LaunchExEx<Node> + Send + 'static,
@@ -47,7 +55,7 @@ where
 {
     fn launch(
         self: Box<Self>,
-        ctx: BuilderContext<Node>,
+        ctx: ExExContext<Node>,
     ) -> BoxFuture<'static, eyre::Result<BoxExEx>> {
         async move {
             let exex = self.launch(ctx).await?;
@@ -57,17 +65,17 @@ where
     }
 }
 
-/// Implements `LaunchExEx` for any closure that takes a `BuilderContext` and returns a future.
+/// Implements `LaunchExEx` for any closure that takes an [ExExContext] and returns a future.
 impl<Node, F, Fut, E> LaunchExEx<Node> for F
 where
     Node: FullNodeTypes,
-    F: FnOnce(BuilderContext<Node>) -> Fut + Send,
+    F: FnOnce(ExExContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<E>> + Send,
     E: ExEx,
 {
     fn launch(
         self,
-        ctx: BuilderContext<Node>,
+        ctx: ExExContext<Node>,
     ) -> impl Future<Output = eyre::Result<impl ExEx>> + Send {
         self(ctx)
     }

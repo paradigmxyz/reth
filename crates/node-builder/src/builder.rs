@@ -7,7 +7,7 @@ use crate::{
         ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, NodeComponents,
         NodeComponentsBuilder, PoolBuilder,
     },
-    exex::{BoxedLaunchExEx, ExEx},
+    exex::{BoxedLaunchExEx, ExEx, ExExContext},
     hooks::NodeHooks,
     node::{FullNode, FullNodeTypes, FullNodeTypesAdapter},
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
@@ -418,7 +418,7 @@ where
     pub fn install_exex<F, R, E>(mut self, exex: F) -> Self
     where
         F: Fn(
-                BuilderContext<
+                ExExContext<
                     FullNodeComponentsAdapter<
                         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
                         Components::Pool,
@@ -1073,7 +1073,6 @@ where
 }
 
 /// Captures the necessary context for building the components of the node.
-#[derive(Debug)]
 pub struct BuilderContext<Node: FullNodeTypes> {
     /// The current head of the blockchain at launch.
     head: Head,
@@ -1087,6 +1086,18 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     config: NodeConfig,
     /// loaded config
     reth_config: reth_config::Config,
+}
+
+impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BuilderContext")
+            .field("head", &self.head)
+            .field("provider", &std::any::type_name::<Node::Provider>())
+            .field("executor", &self.executor)
+            .field("data_dir", &self.data_dir)
+            .field("config", &self.config)
+            .finish()
+    }
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -1237,4 +1248,18 @@ pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
     rpc: RpcHooks<FullNode>,
     /// The ExExs (execution extensions) of the node.
     exexs: Vec<Box<dyn BoxedLaunchExEx<FullNode>>>,
+}
+
+impl<Types, Components, FullNode: FullNodeComponents> std::fmt::Debug
+    for ComponentsState<Types, Components, FullNode>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ComponentsState")
+            .field("types", &std::any::type_name::<Types>())
+            .field("components_builder", &std::any::type_name::<Components>())
+            .field("hooks", &self.hooks)
+            .field("rpc", &self.rpc)
+            .field("exexs", &self.exexs.len())
+            .finish()
+    }
 }
