@@ -201,8 +201,14 @@ pub(super) async fn start_discv5(
     //
     // 1. make local enr from listen config
     //
-    let (discv5_config, bootstrap_nodes, fork_id, tcp_port, _allow_no_tcp_discovered_nodes) =
-        discv5_config.destruct();
+    let (
+        discv5_config,
+        bootstrap_nodes,
+        fork_id,
+        tcp_port,
+        other_enr_data,
+        _allow_no_tcp_discovered_nodes,
+    ) = discv5_config.destruct();
 
     let (enr, bc_enr, ip_mode) = {
         let mut builder = discv5::enr::Enr::builder();
@@ -237,6 +243,10 @@ pub(super) async fn start_discv5(
 
         // add fork id
         builder.add_value("eth", &alloy_rlp::encode(fork_id));
+        // add other data
+        for (key, value) in other_enr_data {
+            builder.add_value(key, &alloy_rlp::encode(value));
+        }
 
         // enr v4 not to get confused with discv4, independent versioning enr and
         // discovery
@@ -282,7 +292,6 @@ mod tests {
     use std::net::SocketAddr;
 
     use rand::thread_rng;
-    use reth_discv5::DiscV5ConfigBuilder;
     use tracing::trace;
 
     use super::*;

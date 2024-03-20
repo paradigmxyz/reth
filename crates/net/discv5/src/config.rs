@@ -17,8 +17,8 @@ pub struct DiscV5ConfigBuilder {
     fork_id: Option<ForkId>,
     /// Mempool TCP port to advertise.
     tcp_port: Option<u16>,
-    /// Additional kv-pairs to include in local node record.
-    additional_local_enr_data: Vec<(&'static str, Bytes)>,
+    /// Additional kv-pairs that should be advertised to peers by including in local node record.
+    other_enr_data: Vec<(&'static str, Bytes)>,
     /// Allow no TCP port advertised by discovered nodes. Disallowed by default.
     allow_no_tcp_discovered_nodes: bool,
 }
@@ -31,7 +31,7 @@ impl DiscV5ConfigBuilder {
             bootstrap_nodes,
             fork_id,
             tcp_port,
-            additional_local_enr_data,
+            other_enr_data,
             allow_no_tcp_discovered_nodes,
         } = discv5_config;
 
@@ -40,7 +40,7 @@ impl DiscV5ConfigBuilder {
             bootstrap_nodes,
             fork_id: Some(fork_id),
             tcp_port: Some(tcp_port),
-            additional_local_enr_data,
+            other_enr_data,
             allow_no_tcp_discovered_nodes,
         }
     }
@@ -87,6 +87,12 @@ impl DiscV5ConfigBuilder {
         self
     }
 
+    /// Adds an additional kv-pair to include in the local [`Enr`](discv5::enr::Enr).
+    pub fn add_enr_kv_pair(mut self, kv_pair: (&'static str, Bytes)) -> Self {
+        self.other_enr_data.push(kv_pair);
+        self
+    }
+
     /// Allows discovered nodes without tcp port set in their ENR to be passed from
     /// [`discv5::Discv5`] up to the app.
     pub fn allow_no_tcp_discovered_nodes(mut self) -> Self {
@@ -101,7 +107,7 @@ impl DiscV5ConfigBuilder {
             bootstrap_nodes,
             fork_id,
             tcp_port,
-            additional_local_enr_data,
+            other_enr_data,
             allow_no_tcp_discovered_nodes,
         } = self;
 
@@ -118,7 +124,7 @@ impl DiscV5ConfigBuilder {
             bootstrap_nodes,
             fork_id,
             tcp_port,
-            additional_local_enr_data,
+            other_enr_data,
             allow_no_tcp_discovered_nodes,
         }
     }
@@ -137,7 +143,7 @@ pub struct DiscV5Config {
     /// Mempool TCP port to advertise.
     tcp_port: u16,
     /// Additional kv-pairs to include in local node record.
-    additional_local_enr_data: Vec<(&'static str, Bytes)>,
+    other_enr_data: Vec<(&'static str, Bytes)>,
     /// Allow no TCP port advertised by discovered nodes. Disallowed by default.
     allow_no_tcp_discovered_nodes: bool,
 }
@@ -167,7 +173,7 @@ impl DiscV5Config {
             bootstrap_nodes,
             fork_id,
             tcp_port,
-            additional_local_enr_data,
+            other_enr_data,
             allow_no_tcp_discovered_nodes,
         } = self;
 
@@ -176,7 +182,7 @@ impl DiscV5Config {
             bootstrap_nodes,
             fork_id,
             tcp_port,
-            additional_local_enr_data,
+            other_enr_data,
             allow_no_tcp_discovered_nodes,
         )
     }

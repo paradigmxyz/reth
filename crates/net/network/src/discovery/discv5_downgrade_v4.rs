@@ -236,7 +236,7 @@ where
 mod tests {
     use rand::thread_rng;
     use reth_discv4::{DiscoveryUpdate, Discv4ConfigBuilder};
-    use reth_discv5::{enr::EnrCombinedKeyWrapper, DiscV5ConfigBuilder, HandleDiscv5};
+    use reth_discv5::{enr::EnrCombinedKeyWrapper, HandleDiscv5};
     use reth_net_common::discovery::HandleDiscovery;
     use tracing::trace;
 
