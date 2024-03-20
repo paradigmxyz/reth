@@ -1,11 +1,23 @@
 use crate::{BuilderContext, FullNodeTypes};
 use futures::{future::BoxFuture, Future, FutureExt, Stream};
+use reth_primitives::BlockNumber;
 use std::pin::Pin;
 
+/// The ExEx (Execution Extension) component.
 pub trait ExEx: Stream<Item = ExExEvent> + Send + 'static {}
 
-pub enum ExExEvent {}
+/// Events emitted by the ExEx.
+pub enum ExExEvent {
+    /// Highest block processed by the ExEx.
+    ///
+    /// ExEx should guarantee that it will not require all earlier blocks in the future, meaning
+    /// that Reth is allowed to prune them.
+    ///
+    /// On reorgs, it's possible for the height to go down.
+    FinishedHeight(BlockNumber),
+}
 
+/// A trait for launching an ExEx.
 pub trait LaunchExEx<Node: FullNodeTypes>: Send {
     fn launch(
         self,
@@ -15,6 +27,7 @@ pub trait LaunchExEx<Node: FullNodeTypes>: Send {
 
 pub(crate) type BoxExEx = Pin<Box<dyn ExEx<Item = ExExEvent> + Send + 'static>>;
 
+/// A version of `LaunchExEx` that returns a boxed future. Makes the trait object-safe.
 pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
     fn launch<'a>(
         self: Box<Self>,
@@ -22,9 +35,11 @@ pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
     ) -> BoxFuture<'a, eyre::Result<BoxExEx>>;
 }
 
-impl<E, Node: FullNodeTypes> BoxedLaunchExEx<Node> for E
+/// Implements `BoxedLaunchExEx` for any `LaunchExEx` that is `Send` and `'static`.
+impl<E, Node> BoxedLaunchExEx<Node> for E
 where
     E: LaunchExEx<Node> + Send + 'static,
+    Node: FullNodeTypes,
 {
     fn launch<'a>(
         self: Box<Self>,
@@ -38,6 +53,7 @@ where
     }
 }
 
+/// Implements `LaunchExEx` for any closure that takes a `BuilderContext` and returns a future.
 impl<Node, F, Fut, E> LaunchExEx<Node> for F
 where
     Node: FullNodeTypes,
@@ -48,7 +64,7 @@ where
     fn launch(
         self,
         ctx: &BuilderContext<Node>,
-    ) -> impl Future<Output = Result<impl ExEx, eyre::Report>> + Send {
+    ) -> impl Future<Output = eyre::Result<impl ExEx>> + Send {
         self(ctx)
     }
 }

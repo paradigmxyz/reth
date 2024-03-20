@@ -164,10 +164,10 @@ where
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
     NetworkB: NetworkBuilder<Node, PoolB::Pool>,
 {
-    /// Configures the payload builder.
+    /// Adds an Execution Extension.
     ///
-    /// This accepts a [PayloadServiceBuilder] instance that will be used to create the node's
-    /// payload builder service.
+    /// This accepts a (LaunchExEx)[crate::components::exex::LaunchExEx] instance that will be used
+    /// to launch the Execution Extension.
     pub fn add_exex(
         self,
         exex: Box<dyn BoxedLaunchExEx<Node>>,
