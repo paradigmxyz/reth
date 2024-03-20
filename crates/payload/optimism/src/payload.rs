@@ -1,6 +1,10 @@
-use crate::EthPayloadBuilderAttributes;
-use alloy_rlp::{Encodable, Error as DecodeError};
+//! Payload related types
+
+//! Optimism builder support
+
+use alloy_rlp::Encodable;
 use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
+use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
@@ -15,6 +19,7 @@ use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v3, convert_block_to_payload_field_v2,
     convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
 };
+use revm::primitives::HandlerCfg;
 use std::sync::Arc;
 
 /// Optimism Payload Builder Attributes
@@ -32,12 +37,12 @@ pub struct OptimismPayloadBuilderAttributes {
 
 impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     type RpcPayloadAttributes = OptimismPayloadAttributes;
-    type Error = DecodeError;
+    type Error = alloy_rlp::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
     /// Derives the unique [PayloadId] for the given parent and attributes
-    fn try_new(parent: B256, attributes: OptimismPayloadAttributes) -> Result<Self, DecodeError> {
+    fn try_new(parent: B256, attributes: OptimismPayloadAttributes) -> Result<Self, Self::Error> {
         let (id, transactions) = {
             let transactions: Vec<_> = attributes
                 .transactions
@@ -148,11 +153,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
         {
             cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
                 cfg_env: cfg,
-                handler_cfg: revm_primitives::HandlerCfg {
-                    spec_id,
-                    #[cfg(feature = "optimism")]
-                    is_optimism: chain_spec.is_optimism(),
-                },
+                handler_cfg: HandlerCfg { spec_id, is_optimism: chain_spec.is_optimism() },
             };
         }
 

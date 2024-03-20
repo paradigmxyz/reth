@@ -42,7 +42,6 @@ proptest-derive = { workspace = true, optional = true }
 default = ["jsonrpsee-types"]
 arbitrary = ["dep:arbitrary", "dep:proptest-derive", "dep:proptest", "alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]
 ssz = ["dep:ethereum_ssz" ,"dep:ethereum_ssz_derive", "alloy-primitives/ssz", "alloy-rpc-types/ssz", "alloy-rpc-engine-types/ssz"]
-optimism = []
 
 
 [dev-dependencies]

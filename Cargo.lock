@@ -5456,7 +5456,6 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-node-optimism",
- "reth-optimism-payload-builder",
  "reth-payload-builder",
  "reth-payload-validator",
  "reth-primitives",
@@ -6226,13 +6225,18 @@ dependencies = [
 name = "reth-optimism-payload-builder"
 version = "0.2.0-beta.3"
 dependencies = [
+ "alloy-rlp",
  "reth-basic-payload-builder",
+ "reth-node-api",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-rpc-types",
+ "reth-rpc-types-compat",
  "reth-transaction-pool",
  "revm",
+ "sha2",
  "thiserror",
  "tracing",
 ]

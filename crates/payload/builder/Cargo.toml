@@ -36,7 +36,7 @@ metrics.workspace = true
 
 # misc
 thiserror.workspace = true
-sha2 = { version = "0.10", default-features = false }
+sha2.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
@@ -45,9 +45,3 @@ serde_json.workspace = true
 
 [features]
 test-utils = []
-optimism = [
-    "reth-primitives/optimism",
-    "reth-rpc-types/optimism",
-    "reth-rpc-types-compat/optimism",
-    "reth-interfaces/optimism",
-]
