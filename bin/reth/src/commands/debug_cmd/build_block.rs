@@ -269,7 +269,10 @@ impl Command {
                 },
             )?,
             #[cfg(not(feature = "optimism"))]
-            EthPayloadBuilderAttributes::try_new(best_block.hash(), payload_attrs)?,
+            reth_payload_builder::EthPayloadBuilderAttributes::try_new(
+                best_block.hash(),
+                payload_attrs,
+            )?,
             self.chain.clone(),
         );
 
