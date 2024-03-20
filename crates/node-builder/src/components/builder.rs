@@ -9,6 +9,8 @@ use crate::{
 };
 use std::marker::PhantomData;
 
+use super::BoxedLaunchExEx;
+
 /// A generic, customizable [`NodeComponentsBuilder`].
 ///
 /// This type is stateful and captures the configuration of the node's components.
@@ -28,11 +30,12 @@ use std::marker::PhantomData;
 /// First all standalone components are built. Then the service components are spawned.
 /// All component builders are captured in the builder state and will be consumed once the node is
 /// launched.
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct ComponentsBuilder<Node, PoolB, PayloadB, NetworkB> {
     pool_builder: PoolB,
     payload_builder: PayloadB,
     network_builder: NetworkB,
+    exex_launchers: Vec<Box<dyn BoxedLaunchExEx<Node>>>,
     _marker: PhantomData<Node>,
 }
 
@@ -42,11 +45,12 @@ impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, N
     where
         Types: FullNodeTypes,
     {
-        let Self { pool_builder, payload_builder, network_builder, _marker } = self;
+        let Self { pool_builder, payload_builder, network_builder, exex_launchers, _marker } = self;
         ComponentsBuilder {
             pool_builder,
             payload_builder,
             network_builder,
+            exex_launchers,
             _marker: Default::default(),
         }
     }
@@ -57,6 +61,7 @@ impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, N
             pool_builder: f(self.pool_builder),
             payload_builder: self.payload_builder,
             network_builder: self.network_builder,
+            exex_launchers: self.exex_launchers,
             _marker: self._marker,
         }
     }
@@ -67,6 +72,7 @@ impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, N
             pool_builder: self.pool_builder,
             payload_builder: f(self.payload_builder),
             network_builder: self.network_builder,
+            exex_launchers: self.exex_launchers,
             _marker: self._marker,
         }
     }
@@ -77,6 +83,7 @@ impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, N
             pool_builder: self.pool_builder,
             payload_builder: self.payload_builder,
             network_builder: f(self.network_builder),
+            exex_launchers: self.exex_launchers,
             _marker: self._marker,
         }
     }
@@ -94,8 +101,15 @@ where
     where
         PB: PoolBuilder<Node>,
     {
-        let Self { payload_builder, network_builder, _marker, .. } = self;
-        ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
+        let Self { pool_builder: _, payload_builder, network_builder, exex_launchers, _marker } =
+            self;
+        ComponentsBuilder {
+            pool_builder,
+            payload_builder,
+            network_builder,
+            exex_launchers,
+            _marker,
+        }
     }
 }
 
@@ -112,8 +126,15 @@ where
     where
         NB: NetworkBuilder<Node, PoolB::Pool>,
     {
-        let Self { payload_builder, pool_builder, _marker, .. } = self;
-        ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
+        let Self { pool_builder, payload_builder, network_builder: _, exex_launchers, _marker } =
+            self;
+        ComponentsBuilder {
+            pool_builder,
+            payload_builder,
+            network_builder,
+            exex_launchers,
+            _marker,
+        }
     }
 
     /// Configures the payload builder.
@@ -124,8 +145,43 @@ where
     where
         PB: PayloadServiceBuilder<Node, PoolB::Pool>,
     {
-        let Self { pool_builder, network_builder, _marker, .. } = self;
-        ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
+        let Self { pool_builder, payload_builder: _, network_builder, exex_launchers, _marker } =
+            self;
+        ComponentsBuilder {
+            pool_builder,
+            payload_builder,
+            network_builder,
+            exex_launchers,
+            _marker,
+        }
+    }
+}
+
+impl<Node, PoolB, PayloadB, NetworkB> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB>
+where
+    Node: FullNodeTypes,
+    PoolB: PoolBuilder<Node>,
+    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
+    NetworkB: NetworkBuilder<Node, PoolB::Pool>,
+{
+    /// Configures the payload builder.
+    ///
+    /// This accepts a [PayloadServiceBuilder] instance that will be used to create the node's
+    /// payload builder service.
+    pub fn add_exex(
+        self,
+        exex: Box<dyn BoxedLaunchExEx<Node>>,
+    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB> {
+        let Self { pool_builder, payload_builder, network_builder, mut exex_launchers, _marker } =
+            self;
+        exex_launchers.push(exex);
+        ComponentsBuilder {
+            pool_builder,
+            payload_builder,
+            network_builder,
+            exex_launchers,
+            _marker,
+        }
     }
 }
 
@@ -143,13 +199,19 @@ where
         self,
         context: &BuilderContext<Node>,
     ) -> eyre::Result<NodeComponents<Node, Self::Pool>> {
-        let Self { pool_builder, payload_builder, network_builder, _marker } = self;
+        let Self { pool_builder, payload_builder, network_builder, exex_launchers, _marker } = self;
 
-        let pool = pool_builder.build_pool(context).await?;
-        let network = network_builder.build_network(context, pool.clone()).await?;
-        let payload_builder = payload_builder.spawn_payload_service(context, pool.clone()).await?;
+        let transaction_pool = pool_builder.build_pool(context).await?;
+        let network = network_builder.build_network(context, transaction_pool.clone()).await?;
+        let payload_builder =
+            payload_builder.spawn_payload_service(context, transaction_pool.clone()).await?;
+        let mut exexs = Vec::with_capacity(exex_launchers.len());
+        for exex in exex_launchers {
+            let exex = exex.launch(context).await?;
+            exexs.push(exex);
+        }
 
-        Ok(NodeComponents { transaction_pool: pool, network, payload_builder })
+        Ok(NodeComponents { transaction_pool, network, payload_builder, exexs })
     }
 }
 
@@ -159,6 +221,7 @@ impl Default for ComponentsBuilder<(), (), (), ()> {
             pool_builder: (),
             payload_builder: (),
             network_builder: (),
+            exex_launchers: Vec::new(),
             _marker: Default::default(),
         }
     }

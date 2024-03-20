@@ -9,6 +9,7 @@
 
 use crate::node::FullNodeTypes;
 pub use builder::*;
+pub use exex::*;
 pub use network::*;
 pub use payload::*;
 pub use pool::*;
@@ -17,6 +18,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 pub use traits::*;
 
 mod builder;
+mod exex;
 mod network;
 mod payload;
 mod pool;
@@ -25,7 +27,7 @@ mod traits;
 /// All the components of the node.
 ///
 /// This provides access to all the components of the node.
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct NodeComponents<Node: FullNodeTypes, Pool> {
     /// The transaction pool of the node.
     pub transaction_pool: Pool,
@@ -33,6 +35,8 @@ pub struct NodeComponents<Node: FullNodeTypes, Pool> {
     pub network: NetworkHandle,
     /// The handle to the payload builder service.
     pub payload_builder: PayloadBuilderHandle<Node::Engine>,
+    /// The execution extensions of the node.
+    pub exexs: Vec<BoxExEx>,
 }
 
 impl<Node: FullNodeTypes, Pool> NodeComponents<Node, Pool> {

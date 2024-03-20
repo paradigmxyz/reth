@@ -515,7 +515,7 @@ where
         };
 
         debug!(target: "reth::cli", "creating components");
-        let NodeComponents { transaction_pool, network, payload_builder } =
+        let NodeComponents { transaction_pool, network, payload_builder, exexs } =
             components_builder.build_components(&ctx).await?;
 
         let BuilderContext {
