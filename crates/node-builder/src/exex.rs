@@ -31,7 +31,7 @@ impl<Node: FullNodeTypes> std::fmt::Debug for ExExContext<Node> {
 }
 
 /// A trait for launching an ExEx.
-pub trait LaunchExEx<Node: FullNodeTypes>: Send {
+trait LaunchExEx<Node: FullNodeTypes>: Send {
     /// Launches the ExEx.
     ///
     /// The ExEx should be able to run independently and emit events on the stream.
@@ -39,9 +39,9 @@ pub trait LaunchExEx<Node: FullNodeTypes>: Send {
         -> impl Future<Output = eyre::Result<impl ExEx>> + Send;
 }
 
-pub(crate) type BoxExEx = Pin<Box<dyn ExEx<Item = ExExEvent> + Send + 'static>>;
+type BoxExEx = Pin<Box<dyn ExEx<Item = ExExEvent> + Send + 'static>>;
 
-/// A version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
+/// A boxed version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
 pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
     fn launch(self: Box<Self>, ctx: ExExContext<Node>)
         -> BoxFuture<'static, eyre::Result<BoxExEx>>;
