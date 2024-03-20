@@ -21,15 +21,10 @@ pub enum ExExEvent {
 }
 
 /// Captures the context that an ExEx has access to.
+#[derive(Debug)]
 pub struct ExExContext<Node: FullNodeTypes> {
     builder: BuilderContext<Node>,
     // TODO(alexey): add pool, payload builder, anything else?
-}
-
-impl<Node: FullNodeTypes> std::fmt::Debug for ExExContext<Node> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ExExContext").field("builder", &self.builder).finish()
-    }
 }
 
 /// A trait for launching an ExEx.
