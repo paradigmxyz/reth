@@ -3,7 +3,12 @@ use crate::{
     PrunerError,
 };
 use itertools::Itertools;
-use reth_db::{database::Database, tables};
+use reth_db::{
+    cursor::{DbCursorRO, RangeWalker},
+    database::Database,
+    tables,
+    transaction::DbTxMut,
+};
 
 use reth_primitives::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder};
@@ -56,11 +61,24 @@ impl<DB: Database> Segment<DB> for Headers {
         let last_pruned_block =
             if block_range_start == 0 { None } else { Some(block_range_start - 1) };
 
-        let tables_iter =
-            HeaderTablesIter::new(provider, &mut limiter, last_pruned_block, block_range_end);
+        let range = last_pruned_block.map_or(0, |block| block + 1)..=block_range_end;
+
+        let mut headers_cursor = provider.tx_ref().cursor_write::<tables::Headers>()?;
+        let mut header_tds_cursor =
+            provider.tx_ref().cursor_write::<tables::HeaderTerminalDifficulties>()?;
+        let mut canonical_headers_cursor =
+            provider.tx_ref().cursor_write::<tables::CanonicalHeaders>()?;
+
+        let tables_iter = HeaderTablesIter::new(
+            provider,
+            &mut limiter,
+            headers_cursor.walk_range(range.clone())?,
+            header_tds_cursor.walk_range(range.clone())?,
+            canonical_headers_cursor.walk_range(range)?,
+        );
 
         let mut last_pruned_block: Option<u64> = None;
-        for res in tables_iter.into_iter() {
+        for res in tables_iter {
             last_pruned_block = res?;
         }
 
@@ -89,80 +107,74 @@ impl<DB: Database> Segment<DB> for Headers {
     }
 }
 
-#[derive(Debug)]
-struct HeaderTablesIter<'a, 'b, DB>
+type Walker<'a, DB, T> = RangeWalker<'a, T, <<DB as Database>::TXMut as DbTxMut>::CursorMut<T>>;
+
+#[allow(missing_debug_implementations)]
+struct HeaderTablesIter<'a, DB>
 where
     DB: Database,
 {
     provider: &'a DatabaseProviderRW<DB>,
-    limiter: &'b mut PruneLimiter,
-    last_pruned_block: Option<u64>,
-    to_block: u64,
+    limiter: &'a mut PruneLimiter,
+    headers_walker: Walker<'a, DB, tables::Headers>,
+    header_tds_walker: Walker<'a, DB, tables::HeaderTerminalDifficulties>,
+    canonical_headers_walker: Walker<'a, DB, tables::CanonicalHeaders>,
 }
 
-impl<'a, 'b, DB> HeaderTablesIter<'a, 'b, DB>
+impl<'a, DB> HeaderTablesIter<'a, DB>
 where
     DB: Database,
 {
     fn new(
         provider: &'a DatabaseProviderRW<DB>,
-        limiter: &'b mut PruneLimiter,
-        last_pruned_block: Option<u64>,
-        to_block: u64,
+        limiter: &'a mut PruneLimiter,
+        headers_walker: Walker<'a, DB, tables::Headers>,
+        header_tds_walker: Walker<'a, DB, tables::HeaderTerminalDifficulties>,
+        canonical_headers_walker: Walker<'a, DB, tables::CanonicalHeaders>,
     ) -> Self {
-        Self { provider, limiter, last_pruned_block, to_block }
+        Self { provider, limiter, headers_walker, header_tds_walker, canonical_headers_walker }
     }
 }
 
-impl<'a, 'b, DB> Iterator for HeaderTablesIter<'a, 'b, DB>
+impl<'a, DB> Iterator for HeaderTablesIter<'a, DB>
 where
     DB: Database,
 {
     type Item = Result<Option<u64>, PrunerError>;
     fn next(&mut self) -> Option<Self::Item> {
-        let Self { provider, limiter, last_pruned_block, to_block } = self;
-
-        if limiter.is_limit_reached() || Some(*to_block) == *last_pruned_block {
+        if self.limiter.is_limit_reached() {
             return None
         }
 
-        let block_step =
-            if let Some(block) = *last_pruned_block { block + 1..=block + 2 } else { 0..=1 };
-
-        let next_up_last_pruned_block = Some(*block_step.start());
         let mut last_pruned_block_headers = None;
         let mut last_pruned_block_td = None;
         let mut last_pruned_block_canonical = None;
         // todo: guarantee skip filter and delete callback are same for all header table types
 
-        if let Err(err) =
-            provider.with_walker::<tables::Headers, _, _>(block_step.clone(), |ref mut walker| {
-                provider.step_prune_range(walker, limiter, &mut |_| false, &mut |row| {
-                    last_pruned_block_headers = Some(row.0)
-                })
-            })
-        {
-            return Some(Err(err.into()))
-        }
-
-        if let Err(err) = provider.with_walker::<tables::HeaderTerminalDifficulties, _, _>(
-            block_step.clone(),
-            |ref mut walker| {
-                provider.step_prune_range(walker, limiter, &mut |_| false, &mut |row| {
-                    last_pruned_block_td = Some(row.0)
-                })
-            },
+        if let Err(err) = self.provider.step_prune_range(
+            &mut self.headers_walker,
+            self.limiter,
+            &mut |_| false,
+            &mut |row| last_pruned_block_headers = Some(row.0),
         ) {
             return Some(Err(err.into()))
         }
 
-        if let Err(err) =
-            provider.with_walker::<tables::CanonicalHeaders, _, _>(block_step, |ref mut walker| {
-                provider.step_prune_range(walker, limiter, &mut |_| false, &mut |row| {
-                    last_pruned_block_canonical = Some(row.0)
-                })
-            })
-        {
+        if let Err(err) = self.provider.step_prune_range(
+            &mut self.header_tds_walker,
+            self.limiter,
+            &mut |_| false,
+            &mut |row| last_pruned_block_td = Some(row.0),
+        ) {
+            return Some(Err(err.into()))
+        }
+
+        if let Err(err) = self.provider.step_prune_range(
+            &mut self.canonical_headers_walker,
+            self.limiter,
+            &mut |_| false,
+            &mut |row| last_pruned_block_canonical = Some(row.0),
+        ) {
             return Some(Err(err.into()))
         }
 
@@ -175,9 +187,7 @@ where
             )))
         }
 
-        *last_pruned_block = next_up_last_pruned_block;
-
-        Some(Ok(*last_pruned_block))
+        last_pruned_block_headers.map(move |block| Ok(Some(block)))
     }
 }
 
