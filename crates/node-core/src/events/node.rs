@@ -222,25 +222,14 @@ impl<DB> NodeState<DB> {
                 if self.safe_block_hash != Some(safe_block_hash) &&
                     self.finalized_block_hash != Some(finalized_block_hash)
                 {
-                    match status {
-                        ForkchoiceStatus::Valid => {}
-                        ForkchoiceStatus::Invalid => {
-                            info!(
-                                ?head_block_hash,
-                                ?safe_block_hash,
-                                ?finalized_block_hash,
-                                "Received invalid forkchoice updated message"
-                            );
-                        }
+                    let msg = match status {
+                        ForkchoiceStatus::Valid => "Forkchoice updated",
+                        ForkchoiceStatus::Invalid => "Received invalid forkchoice updated message",
                         ForkchoiceStatus::Syncing => {
-                            info!(
-                                ?head_block_hash,
-                                ?safe_block_hash,
-                                ?finalized_block_hash,
-                                "Received forkchoice updated message when syncing"
-                            );
+                            "Received forkchoice updated message when syncing"
                         }
-                    }
+                    };
+                    info!(?head_block_hash, ?safe_block_hash, ?finalized_block_hash, "{}", msg);
                 }
                 self.head_block_hash = Some(head_block_hash);
                 self.safe_block_hash = Some(safe_block_hash);
