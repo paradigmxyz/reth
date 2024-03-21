@@ -219,24 +219,27 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
-                if status != ForkchoiceStatus::Valid ||
-                    (self.safe_block_hash != Some(safe_block_hash) &&
-                        self.finalized_block_hash != Some(finalized_block_hash))
+                if self.safe_block_hash != Some(safe_block_hash) &&
+                    self.finalized_block_hash != Some(finalized_block_hash)
                 {
-                    if status == ForkchoiceStatus::Invalid {
-                        info!(
-                            ?head_block_hash,
-                            ?safe_block_hash,
-                            ?finalized_block_hash,
-                            "Received invalid forkchoice updated message"
-                        );
-                    } else if status == ForkchoiceStatus::Syncing {
-                        info!(
-                            ?head_block_hash,
-                            ?safe_block_hash,
-                            ?finalized_block_hash,
-                            "Received forkchoice updated message when syncing"
-                        );
+                    match status {
+                        ForkchoiceStatus::Valid => {}
+                        ForkchoiceStatus::Invalid => {
+                            info!(
+                                ?head_block_hash,
+                                ?safe_block_hash,
+                                ?finalized_block_hash,
+                                "Received invalid forkchoice updated message"
+                            );
+                        }
+                        ForkchoiceStatus::Syncing => {
+                            info!(
+                                ?head_block_hash,
+                                ?safe_block_hash,
+                                ?finalized_block_hash,
+                                "Received forkchoice updated message when syncing"
+                            );
+                        }
                     }
                 }
                 self.head_block_hash = Some(head_block_hash);
