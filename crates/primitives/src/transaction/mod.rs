@@ -2009,7 +2009,10 @@ mod tests {
         );
 
         let encoded = alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("a403e280808080809400000000000000000000000000000000000000008080c080c0808080"), encoded[..]);
+        assert_eq!(
+            hex!("a403e280808080809400000000000000000000000000000000000000008080c080c0808080"),
+            encoded[..]
+        );
         assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
