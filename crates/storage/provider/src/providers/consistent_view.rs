@@ -65,7 +65,7 @@ where
             .into())
         }
 
-        let best_block_number = provider_ro.best_block_number()?;
+        let best_block_number = provider_ro.last_block_number()?;
         if last_entry.map(|(number, _)| number).unwrap_or_default() != best_block_number {
             return Err(ConsistentViewError::Syncing(best_block_number).into())
         }
