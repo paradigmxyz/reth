@@ -65,12 +65,12 @@ where
     let total_changesets = tx.entries::<CS>()?;
     let interval = (total_changesets / 100).max(1);
 
-    for entry in changeset_cursor.walk_range(range)? {
+    for (idx, entry) in changeset_cursor.walk_range(range)?.enumerate() {
         let (index, key) = partial_key_factory(entry?);
         cache.entry(key).or_default().push(index);
 
-        if entries > 0 && entries % interval == 0 && total_changesets > 100 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (entries as f64 / total_changesets as f64) * 100.0), "Collecting indices");
+        if idx > 0 && idx % interval == 0 && total_changesets > 100 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
         }
 
         entries += 1;
