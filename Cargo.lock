@@ -6086,6 +6086,7 @@ dependencies = [
  "eyre",
  "fdlimit",
  "futures",
+ "rayon",
  "reth-auto-seal-consensus",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
