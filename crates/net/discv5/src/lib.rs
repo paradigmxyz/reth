@@ -40,16 +40,16 @@ pub enum Error {
     #[error("failed to decode fork id, 'eth': {0:?}")]
     ForkIdDecodeError(#[from] alloy_rlp::Error),
     /// Peer is unreachable over discovery.
-    #[error("discovery socket missing, ENR: {0}")]
+    #[error("discovery socket missing, ENR: {0:?}")]
     UnreachableDiscovery(discv5::Enr),
     /// Peer is unreachable over mempool.
-    #[error("mempool TCP socket missing, ENR: {0}")]
+    #[error("mempool TCP socket missing, ENR: {0:?}")]
     UnreachableMempool(discv5::Enr),
     /// Peer is not using same IP version as local node in discovery.
-    #[error("discovery socket is unsupported IP version, ENR: {0}, local ip mode: {1:?}")]
+    #[error("discovery socket is unsupported IP version, ENR: {0:?}, local ip mode: {1:?}")]
     IpVersionMismatchDiscovery(discv5::Enr, IpMode),
     /// Peer is not using same IP version as local node in mempool.
-    #[error("mempool TCP socket is unsupported IP version, ENR: {0}, local ip mode: {1:?}")]
+    #[error("mempool TCP socket is unsupported IP version, ENR: {0:?}, local ip mode: {1:?}")]
     IpVersionMismatchMempool(discv5::Enr, IpMode),
     /// Failed to initialize [`discv5::Discv5`].
     #[error("init failed, {0}")]
@@ -290,6 +290,7 @@ impl DiscV5 {
                         ),
                         Ok(peers) => trace!(target: "net::discovery::discv5",
                             self_lookup_interval=format!("{:#?}", self_lookup_interval),
+                            peers_count=peers.len(),
                             peers=format!("[{:#}]", peers.iter()
                                 .map(|enr| enr.node_id()
                             ).format(", ")),
