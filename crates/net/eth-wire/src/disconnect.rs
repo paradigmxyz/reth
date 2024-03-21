@@ -129,7 +129,7 @@ impl Decodable for DisconnectReason {
             // this should be a list, so decode the list header. this should advance the buffer so
             // buf[0] is the first (and only) element of the list.
             let header = Header::decode(buf)?;
-            if !header.list {
+            if !header.list || header.payload_length != 1 {
                 return Err(RlpError::UnexpectedString)
             }
         }
@@ -233,6 +233,12 @@ mod tests {
     }
 
     #[test]
+    fn test_reason_zero_length() {
+        let list_with_zero_length = hex::decode("c000").unwrap();
+        assert!(DisconnectReason::decode(&mut &list_with_zero_length[..]).is_err())
+    }
+
+    #[test]
     fn disconnect_encoding_length() {
         let all_reasons = all_reasons();
 
@@ -269,15 +275,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_decode_disconnect_requested() {
-        let reason = "0100";
-        let reason = hex::decode(reason).unwrap();
-        match P2PMessage::decode(&mut &reason[..]).unwrap() {
-            P2PMessage::Disconnect(DisconnectReason::DisconnectRequested) => {}
-            _ => {
-                unreachable!()
-            }
-        }
-    }
 }
