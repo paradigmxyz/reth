@@ -89,7 +89,7 @@ impl<DB: Database> Segment<DB> for Headers {
     }
 }
 
-#[allow(missing_debug_implementations)]
+#[derive(Debug)]
 struct HeaderTablesIter<'a, 'b, DB>
 where
     DB: Database,

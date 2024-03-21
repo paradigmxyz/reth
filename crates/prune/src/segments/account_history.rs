@@ -84,7 +84,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
     }
 }
 
-#[allow(missing_debug_implementations)]
+#[derive(Debug)]
 struct AccountHistoryTablesIter<'a, 'b, DB>
 where
     DB: Database,
