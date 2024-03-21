@@ -5,11 +5,9 @@ bitflags::bitflags! {
     ///
     /// The [SubPool] the transaction belongs to is derived from it's state and determined by the following sequential checks:
     ///
-    /// If it satisfies the [TxState::PENDING_POOL_BITS] it belongs in the pending sub-pool: [SubPool::Pending].
-    ///
-    /// If it is an EIP-4844 blob transaction it belongs in the blob sub-pool: [SubPool::Blob].
-    ///
-    /// If it satisfies the [TxState::BASE_FEE_POOL_BITS] it belongs in the base fee sub-pool: [SubPool::BaseFee].
+    /// - If it satisfies the [TxState::PENDING_POOL_BITS] it belongs in the pending sub-pool: [SubPool::Pending].
+    /// - If it is an EIP-4844 blob transaction it belongs in the blob sub-pool: [SubPool::Blob].
+    /// -  If it satisfies the [TxState::BASE_FEE_POOL_BITS] it belongs in the base fee sub-pool: [SubPool::BaseFee].
     ///
     /// Otherwise it belongs in the queued sub-pool: [SubPool::Queued].
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
