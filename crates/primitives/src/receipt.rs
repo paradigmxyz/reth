@@ -1,15 +1,13 @@
-use crate::{
-    logs_bloom, Bloom, Log, PruneSegmentError, TxType, B256,
-};
 #[cfg(feature = "zstd-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
+use crate::{logs_bloom, Bloom, Log, PruneSegmentError, TxType, B256};
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::{Buf, BufMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::strategy::Strategy;
-use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 #[cfg(feature = "zstd-codec")]
 use reth_codecs::CompactZstd;
+use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use std::{
     cmp::Ordering,
     ops::{Deref, DerefMut},

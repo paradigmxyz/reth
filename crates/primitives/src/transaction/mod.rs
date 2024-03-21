@@ -1,8 +1,6 @@
-use crate::{
-    keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256,
-};
-#[cfg(any(feature = "arbitrary", feature ="zstd-codec"))]
+#[cfg(any(feature = "arbitrary", feature = "zstd-codec"))]
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
+use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256};
 
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -945,8 +943,8 @@ impl Compact for TransactionSignedNoHash {
 #[cfg(not(feature = "zstd-codec"))]
 impl Compact for TransactionSignedNoHash {
     fn to_compact<B>(self, buf: &mut B) -> usize
-        where
-            B: bytes::BufMut + AsMut<[u8]>,
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
     {
         let start = buf.as_mut().len();
 
@@ -956,7 +954,7 @@ impl Compact for TransactionSignedNoHash {
 
         let sig_bit = self.signature.to_compact(buf) as u8;
         let zstd_bit = false;
-        let tx_bits =  self.transaction.to_compact(buf) as u8;
+        let tx_bits = self.transaction.to_compact(buf) as u8;
 
         // Replace bitflags with the actual values
         buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
@@ -973,7 +971,9 @@ impl Compact for TransactionSignedNoHash {
 
         let zstd_bit = bitflags >> 3;
         if zstd_bit != 0 {
-            panic!("zstd-coded is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag")
+            panic!(
+                "zstd-coded is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
+            )
         }
 
         let transaction_type = bitflags >> 1;
