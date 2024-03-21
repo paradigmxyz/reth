@@ -7,10 +7,7 @@ use reth_primitives::{
     trie::{HashBuilder, Nibbles, TrieAccount},
     B256,
 };
-use reth_provider::{
-    providers::{ConsistentDbView, ConsistentViewError},
-    DatabaseProviderFactory, ProviderError,
-};
+use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
@@ -219,9 +216,6 @@ pub enum AsyncStateRootError {
         /// The hashed address for which channel was closed.
         hashed_address: B256,
     },
-    /// Consistency error on attempt to create new database provider.
-    #[error(transparent)]
-    ConsistentView(#[from] ConsistentViewError),
     /// Error while calculating storage root.
     #[error(transparent)]
     StorageRoot(#[from] StorageRootError),
@@ -244,7 +238,7 @@ mod tests {
         let blocking_pool = BlockingTaskPool::new(ThreadPoolBuilder::default().build().unwrap());
 
         let factory = create_test_provider_factory();
-        let consistent_view = ConsistentDbView::new(factory.clone());
+        let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
         let mut rng = rand::thread_rng();
         let mut state = (0..100)

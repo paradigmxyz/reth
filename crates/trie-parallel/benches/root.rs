@@ -33,7 +33,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             provider_rw.commit().unwrap();
         }
 
-        let view = ConsistentDbView::new(provider_factory.clone());
+        let view = ConsistentDbView::new(provider_factory.clone(), None);
 
         // state root
         group.bench_function(BenchmarkId::new("sync root", size), |b| {
