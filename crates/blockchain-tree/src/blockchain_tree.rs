@@ -76,7 +76,11 @@ pub struct BlockchainTree<DB: Database, EVM: ExecutorFactory> {
     prune_modes: Option<PruneModes>,
 }
 
-impl<DB: Database, EVM: ExecutorFactory> BlockchainTree<DB, EVM> {
+impl<DB, EVM> BlockchainTree<DB, EVM>
+where
+    DB: Database + Clone,
+    EVM: ExecutorFactory,
+{
     /// Create a new blockchain tree.
     pub fn new(
         externals: TreeExternals<DB, EVM>,
