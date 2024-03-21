@@ -79,7 +79,7 @@ where
     }
 }
 
-/// Implements `LaunchExEx` for any closure that takes an [ExExContext] and returns a future.
+/// Implements `LaunchExEx` for any closure that takes an [ExExContext] and returns a future resolving to an [ExEx]
 impl<Node, F, Fut, E> LaunchExEx<Node> for F
 where
     Node: FullNodeTypes,
