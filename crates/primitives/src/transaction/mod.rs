@@ -76,7 +76,7 @@ pub const MIN_LENGTH_EIP2930_TX_ENCODED: usize = 14;
 /// Minimum length of a rlp-encoded eip1559 transaction.
 pub const MIN_LENGTH_EIP1559_TX_ENCODED: usize = 15;
 /// Minimum length of a rlp-encoded eip4844 transaction.
-pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 17;
+pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 37;
 /// Minimum length of a rlp-encoded deposit transaction.
 #[cfg(feature = "optimism")]
 pub const MIN_LENGTH_DEPOSIT_TX_ENCODED: usize = 65;
@@ -2009,7 +2009,7 @@ mod tests {
         );
 
         let encoded = alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), encoded[..]);
+        assert_eq!(hex!("a403e280808080809400000000000000000000000000000000000000008080c080c0808080"), encoded[..]);
         assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
