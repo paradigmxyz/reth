@@ -408,6 +408,32 @@ impl Hardfork {
             _ => None,
         }
     }
+
+    /// Returns the latest hardfork.
+    pub fn latest() -> Self {
+        use Hardfork::*;
+        // just ensures exhaustive match to make sure this function is updated
+        match Hardfork::Frontier {
+            Frontier | Homestead | Dao | Tangerine | SpuriousDragon | Byzantium |
+            Constantinople | Petersburg | Istanbul | MuirGlacier | Berlin | London |
+            ArrowGlacier | GrayGlacier | Paris => (),
+            #[cfg(feature = "optimism")]
+            Hardfork::Bedrock | Hardfork::Regolith => (),
+            Shanghai => (),
+            #[cfg(feature = "optimism")]
+            Hardfork::Canyon => (),
+            Cancun => (),
+            #[cfg(feature = "optimism")]
+            Hardfork::Ecotone => (),
+        }
+
+        #[cfg(feature = "optimism")]
+        if cfg!(feature = "optimism") {
+            return Hardfork::Ecotone
+        }
+
+        Hardfork::Cancun
+    }
 }
 
 impl FromStr for Hardfork {

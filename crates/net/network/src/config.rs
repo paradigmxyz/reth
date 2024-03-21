@@ -9,6 +9,8 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
+#[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+use reth_discv5::{DiscV5Config, DiscV5ConfigBuilder};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
@@ -44,6 +46,9 @@ pub struct NetworkConfig<C> {
     pub dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery.
     pub discovery_v4_config: Option<Discv4Config>,
+    #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+    /// How to set up discovery version 5.
+    pub discovery_v5_config: Option<DiscV5Config>,
     /// Address to use for discovery
     pub discovery_addr: SocketAddr,
     /// Address to listen for incoming connections
@@ -106,8 +111,39 @@ impl<C> NetworkConfig<C> {
     }
 
     /// Sets the config to use for the discovery v4 protocol.
+    //#[cfg(not(feature = "discv5"))]
     pub fn set_discovery_v4(mut self, discovery_config: Discv4Config) -> Self {
         self.discovery_v4_config = Some(discovery_config);
+        self
+    }
+
+    /// Sets the config to use for the discovery v5 protocol, with help of the
+    /// [`DiscV5ConfigBuilder`].
+    /// ```
+    /// use reth_discv4::SecretKey;
+    /// use reth_discv5::DiscV5Config;
+    /// use reth_network::NetworkConfigBuilder;
+    /// use secp256k1::rand::thread_rng;
+    ///
+    /// let sk = SecretKey::new(&mut thread_rng());
+    /// let network_config = NetworkConfigBuilder::new(sk).build(());
+    /// let fork_id = network_config.status.forkid;
+    /// let network_config = network_config
+    ///     .set_discovery_v5_with_config_builder(|builder| builder.fork_id(fork_id).build());
+    /// ```
+    #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+    pub fn set_discovery_v5_with_config_builder(
+        self,
+        f: impl FnOnce(DiscV5ConfigBuilder) -> DiscV5Config,
+    ) -> Self {
+        self.set_discovery_v5(f(DiscV5Config::builder()))
+    }
+
+    /// Sets the config to use for the discovery v5 protocol.
+    #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+    pub fn set_discovery_v5(mut self, discv5_config: DiscV5Config) -> Self {
+        self.discovery_v5_config = Some(discv5_config);
+        self.discovery_addr = self.discovery_v5_config.as_ref().unwrap().socket();
         self
     }
 
@@ -143,8 +179,10 @@ pub struct NetworkConfigBuilder {
     secret_key: SecretKey,
     /// How to configure discovery over DNS.
     dns_discovery_config: Option<DnsDiscoveryConfig>,
-    /// How to set up discovery.
+    /// How to set up discovery version 4.
     discovery_v4_builder: Option<Discv4ConfigBuilder>,
+    #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+    enable_discovery_v5: bool,
     /// All boot nodes to start network discovery with.
     boot_nodes: HashSet<NodeRecord>,
     /// Address to use for discovery
@@ -198,7 +236,12 @@ impl NetworkConfigBuilder {
         Self {
             secret_key,
             dns_discovery_config: Some(Default::default()),
+            #[cfg(any(not(feature = "discv5"), feature = "discv5-downgrade-v4"))]
             discovery_v4_builder: Some(Default::default()),
+            #[cfg(feature = "discv5")]
+            discovery_v4_builder: None,
+            #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+            enable_discovery_v5: true,
             boot_nodes: Default::default(),
             discovery_addr: None,
             listener_addr: None,
@@ -327,8 +370,16 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the discv4 config to use.
+    //#[cfg(not(feature = "discv5"))]
     pub fn discovery(mut self, builder: Discv4ConfigBuilder) -> Self {
         self.discovery_v4_builder = Some(builder);
+        self
+    }
+
+    /// Allows discv5 discovery.
+    #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+    pub fn discovery_v5(mut self) -> Self {
+        self.enable_discovery_v5 = true;
         self
     }
 
@@ -361,8 +412,14 @@ impl NetworkConfigBuilder {
     }
 
     /// Disables all discovery.
+    #[cfg(not(any(feature = "discv5", feature = "discv5-downgrade-v4")))]
     pub fn disable_discovery(self) -> Self {
         self.disable_discv4_discovery().disable_dns_discovery()
+    }
+
+    #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+    pub fn disable_discovery(self) -> Self {
+        self.disable_discv4_discovery().disable_dns_discovery().disable_discv5_discovery()
     }
 
     /// Disables all discovery if the given condition is true.
@@ -377,6 +434,13 @@ impl NetworkConfigBuilder {
     /// Disable the Discv4 discovery.
     pub fn disable_discv4_discovery(mut self) -> Self {
         self.discovery_v4_builder = None;
+        self
+    }
+
+    /// Disable the Discv5 discovery.
+    #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+    pub fn disable_discv5_discovery(mut self) -> Self {
+        self.enable_discovery_v5 = false;
         self
     }
 
@@ -443,6 +507,8 @@ impl NetworkConfigBuilder {
             secret_key,
             mut dns_discovery_config,
             discovery_v4_builder,
+            #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+            enable_discovery_v5,
             boot_nodes,
             discovery_addr,
             listener_addr,
@@ -492,12 +558,16 @@ impl NetworkConfigBuilder {
             }
         }
 
+        #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+        tracing::info!(enable_discovery_v5);
         NetworkConfig {
             client,
             secret_key,
             boot_nodes,
             dns_discovery_config,
             discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
+            #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+            discovery_v5_config: enable_discovery_v5.then_some(DiscV5Config::builder().build()),
             discovery_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
             listener_addr,
             peers_config: peers_config.unwrap_or_default(),

@@ -29,6 +29,7 @@ use crate::{
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use derive_more::{Deref, DerefMut};
 use discv5::{
     kbucket,
     kbucket::{
@@ -38,13 +39,18 @@ use discv5::{
     ConnectionDirection, ConnectionState,
 };
 use enr::Enr;
+use error::MirrorUpdateError;
+use itertools::Itertools;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
+use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{bytes::Bytes, hex, ForkId, PeerId, B256};
-use secp256k1::SecretKey;
+use smallvec::{smallvec, SmallVec};
 use std::{
     cell::RefCell,
-    collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
+    collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
+    env,
+    error::Error,
     fmt, io,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     pin::Pin,
@@ -55,12 +61,12 @@ use std::{
 };
 use tokio::{
     net::UdpSocket,
-    sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender},
+    sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender, watch},
     task::{JoinHandle, JoinSet},
     time::Interval,
 };
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tracing::{debug, trace};
+use tracing::{debug, error, info, trace};
 
 pub mod error;
 pub mod proto;
@@ -75,6 +81,9 @@ mod table;
 
 // reexport NodeRecord primitive
 pub use reth_primitives::NodeRecord;
+// re-export key type used to help with using reth discv4 as dep outside of workspace
+pub use secp256k1;
+use secp256k1::SecretKey;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
@@ -244,16 +253,41 @@ impl Discv4 {
         Ok((discv4, service))
     }
 
+    /// Returns a new [`Discv4Service`] that uses the [`MirrorPrimaryKBuckets`] interface to act
+    /// as a secondary discovery service.
+    pub async fn bind_as_secondary_disc_node<F>(
+        local_address: SocketAddr,
+        mut local_node_record: NodeRecord,
+        secret_key: SecretKey,
+        config: Discv4Config,
+        primary_kbuckets_change_rx: watch::Receiver<()>,
+        primary_kbuckets_keys_callback: F,
+    ) -> io::Result<(Self, Discv4Service<KBucketsKeysMirror<F>>)>
+    where
+        F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error> + Send + Unpin + 'static,
+        KBucketsKeysMirror<F>: MirrorPrimaryKBuckets,
+    {
+        let socket = UdpSocket::bind(local_address).await?;
+        let local_addr = socket.local_addr()?;
+        local_node_record.udp_port = local_addr.port();
+        trace!(target: "discv4",  ?local_addr,"opened UDP socket");
+
+        let service = Discv4Service::new_as_secondary_discovery_node(
+            socket,
+            local_addr,
+            local_node_record,
+            secret_key,
+            config,
+            primary_kbuckets_change_rx,
+            primary_kbuckets_keys_callback,
+        );
+        let discv4 = service.handle();
+        Ok((discv4, service))
+    }
+
     /// Returns the address of the UDP socket.
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
-    }
-
-    /// Returns the [NodeRecord] of the local node.
-    ///
-    /// This includes the currently tracked external IP address of the node.
-    pub fn node_record(&self) -> NodeRecord {
-        *self.node_record.lock()
     }
 
     /// Returns the currently tracked external IP of the node.
@@ -402,12 +436,60 @@ impl Discv4 {
     }
 }
 
+impl HandleDiscovery for Discv4 {
+    fn add_node_to_routing_table(
+        &self,
+        node_record: NodeFromExternalSource,
+    ) -> Result<(), impl Error> {
+        if let NodeFromExternalSource::NodeRecord(node_record) = node_record {
+            self.add_node(node_record);
+        } // todo: handle if not
+
+        Ok::<(), Discv4Error>(())
+    }
+
+    fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
+        self.set_eip868_rlp_pair(key, rlp)
+    }
+
+    fn encode_and_set_eip868_in_local_enr(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
+        self.set_eip868_rlp(key, value)
+    }
+
+    fn ban_peer_by_ip_and_node_id(&self, node_id: PeerId, ip: IpAddr) {
+        self.ban(node_id, ip)
+    }
+
+    fn ban_peer_by_ip(&self, ip: IpAddr) {
+        self.ban_ip(ip)
+    }
+
+    fn node_record(&self) -> NodeRecord {
+        *self.node_record.lock()
+    }
+}
+
 /// Manages discv4 peer discovery over UDP.
 ///
 /// This is a [Stream] to handles incoming and outgoing discv4 messages and emits updates via:
 /// [Discv4Service::update_stream].
 #[must_use = "Stream does nothing unless polled"]
-pub struct Discv4Service {
+#[allow(missing_debug_implementations)]
+#[derive(Deref, DerefMut)]
+pub struct Discv4Service<M = NoopMirror> {
+    /// Holds data of the discv4 service.
+    #[deref]
+    #[deref_mut]
+    inner: Discv4ServiceInner,
+    /// Mirrors some primary kbuckets if configured, and filters nodes received in [`Neighbours`]
+    /// responses against them. Will be set if the node is ran alongside discv5, to support
+    /// downgrading to discv4.
+    primary_kbuckets: Option<M>,
+}
+
+/// Hold data necessary to manage discv4 peer discovery over UDP.
+#[allow(missing_debug_implementations)]
+pub struct Discv4ServiceInner {
     /// Local address of the UDP socket.
     local_address: SocketAddr,
     /// The local ENR for EIP-868 <https://eips.ethereum.org/EIPS/eip-868>
@@ -478,7 +560,10 @@ pub struct Discv4Service {
     expire_interval: Interval,
 }
 
-impl Discv4Service {
+impl<M> Discv4Service<M>
+where
+    M: MirrorPrimaryKBuckets + Unpin + Send + 'static,
+{
     /// Create a new instance for a bound [`UdpSocket`].
     pub(crate) fn new(
         socket: UdpSocket,
@@ -549,33 +634,36 @@ impl Discv4Service {
         let shared_node_record = Arc::new(Mutex::new(local_node_record));
 
         Discv4Service {
-            local_address,
-            local_eip_868_enr,
-            local_node_record,
-            shared_node_record,
-            _socket: socket,
-            kbuckets,
-            secret_key,
-            _tasks: tasks,
-            ingress: ingress_rx,
-            egress: egress_tx,
-            queued_pings: Default::default(),
-            pending_pings: Default::default(),
-            pending_lookup: Default::default(),
-            pending_find_nodes: Default::default(),
-            pending_enr_requests: Default::default(),
-            commands_rx,
-            to_service,
-            update_listeners: Vec::with_capacity(1),
-            lookup_interval: self_lookup_interval,
-            ping_interval,
-            evict_expired_requests_interval,
-            lookup_rotator,
-            resolve_external_ip_interval: config.resolve_external_ip_interval(),
-            config,
-            queued_events: Default::default(),
-            received_pongs: Default::default(),
-            expire_interval: tokio::time::interval(EXPIRE_DURATION),
+            inner: Discv4ServiceInner {
+                local_address,
+                local_eip_868_enr,
+                local_node_record,
+                shared_node_record,
+                _socket: socket,
+                kbuckets,
+                secret_key,
+                _tasks: tasks,
+                ingress: ingress_rx,
+                egress: egress_tx,
+                queued_pings: Default::default(),
+                pending_pings: Default::default(),
+                pending_lookup: Default::default(),
+                pending_find_nodes: Default::default(),
+                pending_enr_requests: Default::default(),
+                commands_rx,
+                to_service,
+                update_listeners: Vec::with_capacity(1),
+                lookup_interval: self_lookup_interval,
+                ping_interval,
+                evict_expired_requests_interval,
+                lookup_rotator,
+                resolve_external_ip_interval: config.resolve_external_ip_interval(),
+                config,
+                queued_events: Default::default(),
+                received_pongs: Default::default(),
+                expire_interval: tokio::time::interval(EXPIRE_DURATION),
+            },
+            primary_kbuckets: None,
         }
     }
 
@@ -604,7 +692,7 @@ impl Discv4Service {
         if self.local_node_record.address != external_ip {
             debug!(target: "discv4", ?external_ip, "Updating external ip");
             self.local_node_record.address = external_ip;
-            let _ = self.local_eip_868_enr.set_ip(external_ip, &self.secret_key);
+            let _ = self.inner.local_eip_868_enr.set_ip(external_ip, &self.inner.secret_key);
             let mut lock = self.shared_node_record.lock();
             *lock = self.local_node_record;
             debug!(target: "discv4", enr=?self.local_eip_868_enr, "Updated local ENR");
@@ -612,19 +700,19 @@ impl Discv4Service {
     }
 
     /// Returns the [PeerId] that identifies this node
-    pub const fn local_peer_id(&self) -> &PeerId {
+    pub fn local_peer_id(&self) -> &PeerId {
         &self.local_node_record.id
     }
 
     /// Returns the address of the UDP socket
-    pub const fn local_addr(&self) -> SocketAddr {
+    pub fn local_addr(&self) -> SocketAddr {
         self.local_address
     }
 
     /// Returns the ENR of this service.
     ///
     /// Note: this will include the external address if resolved.
-    pub const fn local_enr(&self) -> NodeRecord {
+    pub fn local_enr(&self) -> NodeRecord {
         self.local_node_record
     }
 
@@ -684,6 +772,11 @@ impl Discv4Service {
         tokio::task::spawn(async move {
             self.bootstrap();
 
+            info!(target: "net::discv4",
+                socket=%self.inner.local_address,
+                "Discv4 listening"
+            );
+
             while let Some(event) = self.next().await {
                 trace!(target: "discv4", ?event, "processed");
             }
@@ -725,17 +818,29 @@ impl Discv4Service {
     /// This takes an optional Sender through which all successfully discovered nodes are sent once
     /// the request has finished.
     fn lookup_with(&mut self, target: PeerId, tx: Option<NodeRecordSender>) {
-        trace!(target: "discv4", ?target, "Starting lookup");
+        trace!(target: "discv4",
+            ?target,
+            local_node_id=format!("{:#}", self.local_enr().id),
+            "Starting lookup"
+        );
+
         let target_key = kad_key(target);
+
+        // disconnect to nodes that are in discv5 kbuckets if node is running as
+        // downgrade from discv5.
+        if let Err(err) = self.filter_kbuckets_against_primary_kbuckets() {
+            error!(target: "discv4", %err);
+        }
 
         // Start a lookup context with the 16 (MAX_NODES_PER_BUCKET) closest nodes
         let ctx = LookupContext::new(
             target_key.clone(),
-            self.kbuckets
+            self.inner
+                .kbuckets
                 .closest_values(&target_key)
                 .filter(|node| {
                     node.value.has_endpoint_proof &&
-                        !self.pending_find_nodes.contains_key(&node.key.preimage().0)
+                        !self.inner.pending_find_nodes.contains_key(node.key.preimage().as_ref())
                 })
                 .take(MAX_NODES_PER_BUCKET)
                 .map(|n| (target_key.distance(&n.key), n.value.record)),
@@ -754,7 +859,11 @@ impl Discv4Service {
             return
         }
 
-        trace!(target: "discv4", ?target, num = closest.len(), "Start lookup closest nodes");
+        trace!(target: "discv4",
+            local_node_id=format!("{:#}", self.local_enr().id),
+            ?target, num = closest.len(),
+            "Start lookup closest nodes"
+        );
 
         for node in closest {
             self.find_node(&node, ctx.clone());
@@ -793,7 +902,7 @@ impl Discv4Service {
 
     /// Adds the peer to the ban list indefinitely.
     pub fn ban_node(&mut self, node_id: PeerId) {
-        self.remove_node(node_id);
+        self.remove_node_from_kbuckets(node_id);
         self.config.ban_list.ban_peer(node_id);
     }
 
@@ -804,7 +913,7 @@ impl Discv4Service {
 
     /// Adds the peer to the ban list and bans it until the given timestamp
     pub fn ban_node_until(&mut self, node_id: PeerId, until: Instant) {
-        self.remove_node(node_id);
+        self.remove_node_from_kbuckets(node_id);
         self.config.ban_list.ban_peer_until(node_id, until);
     }
 
@@ -812,7 +921,7 @@ impl Discv4Service {
     ///
     /// This allows applications, for whatever reason, to remove nodes from the local routing
     /// table. Returns `true` if the node was in the table and `false` otherwise.
-    pub fn remove_node(&mut self, node_id: PeerId) -> bool {
+    pub fn remove_node_from_kbuckets(&mut self, node_id: PeerId) -> bool {
         let key = kad_key(node_id);
         let removed = self.kbuckets.remove(&key);
         if removed {
@@ -820,6 +929,17 @@ impl Discv4Service {
             self.notify(DiscoveryUpdate::Removed(node_id));
         }
         removed
+    }
+
+    /// Removes a peer from discv4.
+    pub fn remove_node(&mut self, peer_id: PeerId) {
+        self.inner.pending_find_nodes.remove(&peer_id);
+        self.pending_pings.remove(&peer_id);
+        self.pending_lookup.remove(&peer_id);
+        self.pending_find_nodes.remove(&peer_id);
+        self.pending_enr_requests.remove(&peer_id);
+        self.queued_pings.retain(|(n, _)| n.id != peer_id);
+        _ = self.remove_node_from_kbuckets(peer_id);
     }
 
     /// Gets the number of entries that are considered connected.
@@ -1388,13 +1508,13 @@ impl Discv4Service {
     }
 
     fn evict_expired_requests(&mut self, now: Instant) {
-        self.pending_enr_requests.retain(|_node_id, enr_request| {
-            now.duration_since(enr_request.sent_at) < self.config.ping_expiration
+        self.inner.pending_enr_requests.retain(|_node_id, enr_request| {
+            now.duration_since(enr_request.sent_at) < self.inner.config.ping_expiration
         });
 
         let mut failed_pings = Vec::new();
-        self.pending_pings.retain(|node_id, ping_request| {
-            if now.duration_since(ping_request.sent_at) > self.config.ping_expiration {
+        self.inner.pending_pings.retain(|node_id, ping_request| {
+            if now.duration_since(ping_request.sent_at) > self.inner.config.ping_expiration {
                 failed_pings.push(*node_id);
                 return false
             }
@@ -1405,12 +1525,12 @@ impl Discv4Service {
 
         // remove nodes that failed to pong
         for node_id in failed_pings {
-            self.remove_node(node_id);
+            self.remove_node_from_kbuckets(node_id);
         }
 
         let mut failed_lookups = Vec::new();
-        self.pending_lookup.retain(|node_id, (lookup_sent_at, _)| {
-            if now.duration_since(*lookup_sent_at) > self.config.ping_expiration {
+        self.inner.pending_lookup.retain(|node_id, (lookup_sent_at, _)| {
+            if now.duration_since(*lookup_sent_at) > self.inner.config.ping_expiration {
                 failed_lookups.push(*node_id);
                 return false
             }
@@ -1420,7 +1540,7 @@ impl Discv4Service {
 
         // remove nodes that failed the e2e lookup process, so we can restart it
         for node_id in failed_lookups {
-            self.remove_node(node_id);
+            self.remove_node_from_kbuckets(node_id);
         }
 
         self.evict_failed_neighbours(now);
@@ -1429,8 +1549,8 @@ impl Discv4Service {
     /// Handles failed responses to FindNode
     fn evict_failed_neighbours(&mut self, now: Instant) {
         let mut failed_neighbours = Vec::new();
-        self.pending_find_nodes.retain(|node_id, find_node_request| {
-            if now.duration_since(find_node_request.sent_at) > self.config.request_timeout {
+        self.inner.pending_find_nodes.retain(|node_id, find_node_request| {
+            if now.duration_since(find_node_request.sent_at) > self.inner.config.request_timeout {
                 if !find_node_request.answered {
                     // node actually responded but with fewer entries than expected, but we don't
                     // treat this as an hard error since it responded.
@@ -1467,7 +1587,7 @@ impl Discv4Service {
                         continue
                     }
                 }
-                self.remove_node(node_id);
+                self.remove_node_from_kbuckets(node_id);
             }
         }
     }
@@ -1561,7 +1681,15 @@ impl Discv4Service {
             // trigger self lookup
             if self.config.enable_lookup {
                 while self.lookup_interval.poll_tick(cx).is_ready() {
-                    let target = self.lookup_rotator.next(&self.local_node_record.id);
+                    let local_node_id = self.local_node_record.id;
+
+                    trace!(target: "discv4",
+                        connected_peers=self.num_connected(),
+                        peers_in_kbuckets=self.kbuckets.iter().count(),
+                        local_node_id=format!("{:#}", local_node_id)
+                    );
+
+                    let target = self.lookup_rotator.next(&local_node_id);
                     self.lookup_with(target, None);
                 }
             }
@@ -1597,7 +1725,7 @@ impl Discv4Service {
                     }
                     Discv4Command::BanPeer(node_id) => self.ban_node(node_id),
                     Discv4Command::Remove(node_id) => {
-                        self.remove_node(node_id);
+                        self.remove_node_from_kbuckets(node_id);
                     }
                     Discv4Command::Ban(node_id, ip) => {
                         self.ban_node(node_id);
@@ -1609,15 +1737,21 @@ impl Discv4Service {
                     Discv4Command::SetEIP868RLPPair { key, rlp } => {
                         debug!(target: "discv4", key=%String::from_utf8_lossy(&key), "Update EIP-868 extension pair");
 
-                        let _ = self.local_eip_868_enr.insert_raw_rlp(key, rlp, &self.secret_key);
+                        let _ = self.inner.local_eip_868_enr.insert_raw_rlp(
+                            key,
+                            rlp,
+                            &self.inner.secret_key,
+                        );
                     }
                     Discv4Command::SetTcpPort(port) => {
                         debug!(target: "discv4", %port, "Update tcp port");
                         self.local_node_record.tcp_port = port;
                         if self.local_node_record.address.is_ipv4() {
-                            let _ = self.local_eip_868_enr.set_tcp4(port, &self.secret_key);
+                            let _ =
+                                self.inner.local_eip_868_enr.set_tcp4(port, &self.inner.secret_key);
                         } else {
-                            let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
+                            let _ =
+                                self.inner.local_eip_868_enr.set_tcp6(port, &self.inner.secret_key);
                         }
                     }
 
@@ -1640,31 +1774,74 @@ impl Discv4Service {
                     IngressEvent::BadPacket(from, err, data) => {
                         trace!(target: "discv4", ?from, %err, packet=?hex::encode(&data), "bad packet");
                     }
-                    IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => {
-                        trace!(target: "discv4", r#type=?msg.msg_type(), from=?remote_addr,"received packet");
+
+                    IngressEvent::Packet(remote_addr, Packet { msg, node_id: src_id, hash }) => {
+                        if let Some(ref mut filter) = self.primary_kbuckets {
+                            match filter.filter_traffic(&src_id) {
+                                Err(err) => debug!(target: "discv4",
+                                    src_id=format!("{:#}", src_id),
+                                    err=?err,
+                                    "failed to filter sender against primary kbuckets mirror"
+                                ),
+                                Ok(should_process) => {
+                                    if !should_process {
+                                        trace!(target: "discv4",
+                                            src_id=format!("{:#}", src_id),
+                                            "dropping message from peer, connected over primary discovery network"
+                                        );
+
+                                        continue
+                                    }
+                                }
+                            }
+                        }
+
+                        trace!(target: "discv4",  r#type=?msg.msg_type(), from=?remote_addr,"received packet");
+
                         let event = match msg {
                             Message::Ping(ping) => {
-                                self.on_ping(ping, remote_addr, node_id, hash);
+                                self.on_ping(ping, remote_addr, src_id, hash);
                                 Discv4Event::Ping
                             }
                             Message::Pong(pong) => {
-                                self.on_pong(pong, remote_addr, node_id);
+                                self.on_pong(pong, remote_addr, src_id);
                                 Discv4Event::Pong
                             }
                             Message::FindNode(msg) => {
-                                self.on_find_node(msg, remote_addr, node_id);
+                                self.on_find_node(msg, remote_addr, src_id);
                                 Discv4Event::FindNode
                             }
-                            Message::Neighbours(msg) => {
-                                self.on_neighbours(msg, remote_addr, node_id);
+                            Message::Neighbours(mut msg) => {
+                                let nodes = &mut msg.nodes;
+                                if let Some(ref mut primary_kbuckets) = self.primary_kbuckets {
+                                    match primary_kbuckets.filter_neighbours(nodes) {
+                                        Err(err) => debug!(target: "discv4",
+                                            src_id=format!("{:#}", src_id),
+                                            nodes=format!("[{}]", nodes.iter().format(", ")),
+                                            err=?err,
+                                            "failed to filter nodes against primary kbuckets mirror"
+                                        ),
+                                        Ok(filtered_out_nodes) => {
+                                            if !filtered_out_nodes.is_empty() {
+                                                trace!(target: "discv4",
+                                                    src_id=format!("{:#}", src_id),
+                                                    filtered_out_nodes=format!("[{:#}]", filtered_out_nodes.iter().format(", ")), "filtered out peers from `Neighbours` response from peer, nodes connected over primary discovery network"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                // anyhow let the message go down the usual pipeline, even with
+                                // empty nodes, so discv4 doesn't think it's broken
+                                self.on_neighbours(msg, remote_addr, src_id);
                                 Discv4Event::Neighbours
                             }
                             Message::EnrRequest(msg) => {
-                                self.on_enr_request(msg, remote_addr, node_id, hash);
+                                self.on_enr_request(msg, remote_addr, src_id, hash);
                                 Discv4Event::EnrRequest
                             }
                             Message::EnrResponse(msg) => {
-                                self.on_enr_response(msg, remote_addr, node_id);
+                                self.on_enr_response(msg, remote_addr, src_id);
                                 Discv4Event::EnrResponse
                             }
                         };
@@ -1703,10 +1880,48 @@ impl Discv4Service {
             }
         }
     }
+
+    /// Filters kbuckets against primary kbuckets. If this node is running as downgrade from
+    /// discv5, then discv5 kbuckets are the primary kbuckets.
+    #[must_use = "must handle mirror update error"]
+    fn filter_kbuckets_against_primary_kbuckets(&mut self) -> Result<(), Discv4Error> {
+        if self.primary_kbuckets.is_none() {
+            return Ok(())
+        }
+
+        // apply pending nodes
+        for _ in self.kbuckets.iter() {}
+
+        // refresh mirror of discv5 kbuckets
+        self.primary_kbuckets.as_mut().map(|filter| filter.update_mirror()).transpose()?;
+
+        // find intersection
+        let connected_over_discv5 =
+            self.primary_kbuckets.as_ref().unwrap().find_intersection(&self.kbuckets);
+
+        if !connected_over_discv5.is_empty() {
+            trace!(target: "discv4",
+                evicted_nodes=format!("[{:#}]",
+                connected_over_discv5.iter().format(", ")),
+                local_node_id=format!("{:#}", self.local_enr().id),
+                "evicting peers from kbuckets, nodes connected over primary discovery network"
+            );
+        }
+
+        // disconnect nodes that are already connected over discv5
+        for peer_id in connected_over_discv5 {
+            self.remove_node(peer_id);
+        }
+
+        Ok(())
+    }
 }
 
 /// Endless future impl
-impl Stream for Discv4Service {
+impl<M> Stream for Discv4Service<M>
+where
+    M: MirrorPrimaryKBuckets + Unpin + Send + 'static,
+{
     type Item = Discv4Event;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -1717,6 +1932,31 @@ impl Stream for Discv4Service {
             // For any other event, return Poll::Ready(Some(event))
             ev => Poll::Ready(Some(ev)),
         }
+    }
+}
+
+impl<F> Discv4Service<KBucketsKeysMirror<F>>
+where
+    F: FnOnce() -> Result<HashSet<PeerId>, secp256k1::Error> + Unpin + Send + 'static,
+    KBucketsKeysMirror<F>: MirrorPrimaryKBuckets,
+{
+    /// Returns a new [`Discv4Service`] that uses the [`MirrorPrimaryKBuckets`] interface.
+    pub fn new_as_secondary_discovery_node(
+        socket: UdpSocket,
+        local_address: SocketAddr,
+        local_node_record: NodeRecord,
+        secret_key: SecretKey,
+        config: Discv4Config,
+        primary_kbuckets_change_tx: watch::Receiver<()>,
+        primary_kbuckets_keys_callback: F,
+    ) -> Self {
+        let mut discv4 = Self::new(socket, local_address, local_node_record, secret_key, config);
+        discv4.primary_kbuckets = Some(KBucketsKeysMirror::new(
+            primary_kbuckets_change_tx,
+            primary_kbuckets_keys_callback,
+        ));
+
+        discv4
     }
 }
 
@@ -2065,7 +2305,7 @@ struct EnrRequestState {
 
 /// Stored node info.
 #[derive(Debug, Clone, Eq, PartialEq)]
-struct NodeEntry {
+pub struct NodeEntry {
     /// Node record info.
     record: NodeRecord,
     /// Timestamp of last pong.
@@ -2151,7 +2391,7 @@ enum PingReason {
 }
 
 /// Represents node related updates state changes in the underlying node table
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoveryUpdate {
     /// A new node was discovered _and_ added to the table.
     Added(NodeRecord),
@@ -2182,6 +2422,152 @@ pub struct EnrForkIdEntry {
 impl From<ForkId> for EnrForkIdEntry {
     fn from(fork_id: ForkId) -> Self {
         Self { fork_id }
+    }
+}
+
+/// Mirrors another favoured node's kbuckets.
+pub trait MirrorPrimaryKBuckets {
+    /// Updates mirror of the primary kbuckets.
+    #[must_use = "must handle error"]
+    fn update_mirror(&mut self) -> Result<(), Discv4Error>;
+    /// Filters neighbour nodes passed as parameter against the mirror of the primary kbuckets.
+    fn filter_neighbours(
+        &mut self,
+        nodes: &mut Vec<NodeRecord>,
+    ) -> Result<SmallVec<[PeerId; 8]>, Discv4Error>;
+    /// Filters incoming/outgoing packets against mirror of primary kbuckets. Returns `Ok(true)`
+    /// if the message from given peer should be processed further.
+    fn filter_traffic(&mut self, peer_id: &PeerId) -> Result<bool, Discv4Error>;
+    /// Finds intersection between given kbuckets and mirror. Note: doesn't update mirror.
+    fn find_intersection(
+        &self,
+        kbuckets: &KBucketsTable<NodeKey, NodeEntry>,
+    ) -> SmallVec<[PeerId; 8]>;
+}
+
+/// Mirror of keys in a kbucket table.
+#[derive(Debug)]
+pub struct KBucketsKeysMirror<F> {
+    /// Mirror of keys in the kbuckets table.
+    mirror: HashSet<PeerId>,
+    /// Callback to update the mirror to match the source kbuckets.
+    update_callback: F,
+    /// Channel that notifies of change in source kbuckets.
+    change_tx: watch::Receiver<()>,
+    /// Reads the configured log level at start up.
+    #[doc(hidden)]
+    is_log_level_trace: bool,
+}
+
+impl<F> KBucketsKeysMirror<F>
+where
+    F: FnOnce() -> Result<HashSet<PeerId>, secp256k1::Error> + Unpin + Send,
+{
+    /// Returns a new [KBucketsKeysMirror].
+    pub fn new(change_tx: watch::Receiver<()>, callback: F) -> Self {
+        let is_log_level_trace =
+            if let Ok(var) = env::var("RUST_LOG") { var.to_lowercase() == "trace" } else { false }; // todo: will fail if target specified
+
+        Self {
+            mirror: Default::default(),
+            update_callback: callback,
+            change_tx,
+            is_log_level_trace,
+        }
+    }
+}
+
+impl<F> MirrorPrimaryKBuckets for KBucketsKeysMirror<F>
+where
+    F: Fn() -> Result<HashSet<PeerId>, secp256k1::Error>,
+{
+    fn update_mirror(&mut self) -> Result<(), Discv4Error> {
+        if self
+            .change_tx
+            .has_changed()
+            .map_err(<watch::error::RecvError as Into<MirrorUpdateError>>::into)?
+        {
+            self.mirror = (self.update_callback)()
+                .map_err(<secp256k1::Error as Into<MirrorUpdateError>>::into)?;
+
+            trace!(target: "discv4",
+                primary_kbuckets_len=self.mirror.len(),
+                "updated mirror"
+            );
+
+            self.change_tx.borrow_and_update();
+        }
+
+        Ok(())
+    }
+
+    fn filter_neighbours(
+        &mut self,
+        nodes: &mut Vec<NodeRecord>,
+    ) -> Result<SmallVec<[PeerId; 8]>, Discv4Error> {
+        self.update_mirror()?;
+
+        let mut filtered_out = smallvec!();
+
+        nodes.retain(|node| {
+            let filter_out = self.mirror.contains(&node.id);
+
+            if filter_out && self.is_log_level_trace {
+                filtered_out.push(node.id);
+            }
+
+            filter_out
+        });
+
+        // empty unless verbose logging enabled
+        Ok(filtered_out)
+    }
+
+    fn filter_traffic(&mut self, peer_id: &PeerId) -> Result<bool, Discv4Error> {
+        self.update_mirror()?;
+
+        Ok(!self.mirror.contains(peer_id))
+    }
+
+    fn find_intersection(
+        &self,
+        kbuckets: &KBucketsTable<NodeKey, NodeEntry>,
+    ) -> SmallVec<[PeerId; 8]> {
+        let mut connected_over_discv5: SmallVec<[PeerId; 8]> = smallvec!();
+
+        for entry in kbuckets.iter_ref() {
+            let peer_id = entry.node.key.preimage().as_ref();
+            if self.mirror.contains(peer_id) {
+                connected_over_discv5.push(*peer_id)
+            }
+        }
+
+        connected_over_discv5
+    }
+}
+
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct NoopMirror;
+
+impl MirrorPrimaryKBuckets for NoopMirror {
+    fn update_mirror(&mut self) -> Result<(), Discv4Error> {
+        Ok(())
+    }
+    fn filter_neighbours(
+        &mut self,
+        _nodes: &mut Vec<NodeRecord>,
+    ) -> Result<SmallVec<[PeerId; 8]>, Discv4Error> {
+        Ok(smallvec!())
+    }
+    fn filter_traffic(&mut self, _peer_id: &PeerId) -> Result<bool, Discv4Error> {
+        Ok(false)
+    }
+    fn find_intersection(
+        &self,
+        _kbuckets: &KBucketsTable<NodeKey, NodeEntry>,
+    ) -> SmallVec<[PeerId; 8]> {
+        smallvec!()
     }
 }
 

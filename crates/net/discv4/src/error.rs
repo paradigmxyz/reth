@@ -1,6 +1,6 @@
 //! Error types that can occur in this crate.
 
-use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
+use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError, watch};
 
 /// Error thrown when decoding a UDP packet.
 #[derive(Debug, thiserror::Error)]
@@ -36,6 +36,26 @@ pub enum Discv4Error {
     /// Failed to receive a command response
     #[error(transparent)]
     Receive(#[from] RecvError),
+    /// Error updating kbuckets mirror.
+    #[error(transparent)]
+    MirrorUpdateError(#[from] MirrorUpdateError),
+    /// Decoding a packet received over the network failed.
+    #[error(transparent)]
+    DecodePacketError(#[from] DecodePacketError),
+    /// Unexpected node record type.
+    #[error("conversion to node record failed")]
+    ConversionToNodeRecordFailed,
+}
+
+/// Updating mirror of remote kbuckets failed.
+#[derive(Debug, thiserror::Error)]
+pub enum MirrorUpdateError {
+    /// Failed to receive state change update.
+    #[error("failed to receive update on state change of primary kbuckets")]
+    ReceiveUpdateStatus(#[from] watch::error::RecvError),
+    /// Failed to parse node id.
+    #[error("failed to parse node id from primary kbuckets")]
+    ParseNodeId(#[from] secp256k1::Error),
 }
 
 impl<T> From<SendError<T>> for Discv4Error {

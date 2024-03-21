@@ -87,7 +87,7 @@ pub struct TransactionsHandle {
 }
 
 /// Implementation of the `TransactionsHandle` API for use in testnet via type
-/// [`PeerHandle`](crate::test_utils::PeerHandle).
+/// `crate::test_utils::testnet::PeerHandle`.
 impl TransactionsHandle {
     fn send(&self, cmd: TransactionsCommand) {
         let _ = self.manager_tx.send(cmd);

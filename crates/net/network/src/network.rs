@@ -1,13 +1,12 @@
 use crate::{
     config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
     peers::PeersHandle, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
-    transactions::TransactionsHandle, FetchClient,
+    transactions::TransactionsHandle, DiscoveryHandle, FetchClient,
 };
 use parking_lot::Mutex;
-use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
-use reth_net_common::bandwidth_meter::BandwidthMeter;
+use reth_net_common::{bandwidth_meter::BandwidthMeter, discovery::HandleDiscovery};
 use reth_network_api::{
     NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
     ReputationChangeKind,
@@ -51,7 +50,7 @@ impl NetworkHandle {
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
         #[cfg(feature = "optimism")] sequencer_endpoint: Option<String>,
-        discv4: Option<Discv4>,
+        discovery: Option<DiscoveryHandle>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -68,7 +67,7 @@ impl NetworkHandle {
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
-            discv4,
+            discovery,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -222,8 +221,8 @@ impl PeersInfo for NetworkHandle {
     }
 
     fn local_node_record(&self) -> NodeRecord {
-        if let Some(discv4) = &self.inner.discv4 {
-            discv4.node_record()
+        if let Some(disc) = &self.inner.discovery {
+            disc.node_record()
         } else {
             let id = *self.peer_id();
             let mut socket_addr = *self.inner.listener_address.lock();
@@ -394,8 +393,8 @@ struct NetworkInner {
     /// The sequencer HTTP Endpoint
     #[cfg(feature = "optimism")]
     sequencer_endpoint: Option<String>,
-    /// The instance of the discv4 service
-    discv4: Option<Discv4>,
+    /// Handle to the peer [`Discovery`](crate::Discovery) service.
+    discovery: Option<DiscoveryHandle>,
 }
 
 /// Provides event subscription for the network.
