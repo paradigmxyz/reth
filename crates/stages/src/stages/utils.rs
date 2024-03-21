@@ -42,7 +42,7 @@ where
     TX: DbTxMut + DbTx,
     CS: Table,
     H: Table<Value = BlockNumberList>,
-    P: Eq + Hash,
+    P: Copy + Eq + Hash,
 {
     let mut changeset_cursor = tx.cursor_read::<CS>()?;
 
@@ -50,11 +50,11 @@ where
     let mut cache: HashMap<P, Vec<u64>> = HashMap::new();
     let mut entries = 0;
 
-    let mut collect = |cache: HashMap<P, Vec<u64>>| {
+    let mut collect = |cache: &HashMap<P, Vec<u64>>| {
         for (key, indice_list) in cache {
             let last = indice_list.last().expect("qed");
             collector.insert(
-                sharded_key_factory(key, *last),
+                sharded_key_factory(*key, *last),
                 BlockNumberList::new_pre_sorted(indice_list),
             )?;
         }
@@ -77,11 +77,11 @@ where
         if entries > DEFAULT_CACHE_THRESHOLD {
             entries = 0;
 
-            collect(cache)?;
-            cache = HashMap::default();
+            collect(&cache)?;
+            cache.clear();
         }
     }
-    collect(cache)?;
+    collect(&cache)?;
 
     Ok(collector)
 }
