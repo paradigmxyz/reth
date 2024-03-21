@@ -229,7 +229,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn insert_index_to_empty() {
+    async fn insert_index_to_genesis() {
         // init
         let db = TestStageDB::default();
 
@@ -247,8 +247,8 @@ mod tests {
         unwind(&db, 3, 0);
 
         // verify initial state
-        let table = db.table::<tables::AccountsHistory>().unwrap();
-        assert!(table.is_empty());
+        let table = cast(db.table::<tables::AccountsHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![0])]));
     }
 
     #[tokio::test]
