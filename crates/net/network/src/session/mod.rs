@@ -77,7 +77,7 @@ pub struct SessionManager {
     secret_key: SecretKey,
     /// The `Status` message to send to peers.
     status: Status,
-    /// THe `HelloMessage` message to send to peers.
+    /// The `HelloMessage` message to send to peers.
     hello_message: HelloMessageWithProtocols,
     /// The [`ForkFilter`] used to validate the peer's `Status` message.
     fork_filter: ForkFilter,
