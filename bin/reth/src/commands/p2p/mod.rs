@@ -100,7 +100,7 @@ impl Command {
     /// Execute `p2p` command
     pub async fn execute(&self) -> eyre::Result<()> {
         let tempdir = tempfile::TempDir::new()?;
-        let noop_db = Arc::new(create_db(&tempdir.into_path(), self.db.database_args())?);
+        let noop_db = Arc::new(create_db(tempdir.into_path(), self.db.database_args())?);
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
