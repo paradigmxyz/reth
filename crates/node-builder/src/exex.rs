@@ -29,7 +29,7 @@ pub enum ExExEvent {
 }
 
 /// Captures the context that an ExEx has access to.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ExExContext<Node: FullNodeTypes> {
     /// The current head of the blockchain at launch.
     pub head: Head,
@@ -59,7 +59,8 @@ type BoxExEx = Pin<Box<dyn ExEx + Send + 'static>>;
 
 /// A version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
 pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
-    fn launch(self, ctx: ExExContext<Node>) -> BoxFuture<'static, eyre::Result<BoxExEx>>;
+    fn launch(self: Box<Self>, ctx: ExExContext<Node>)
+        -> BoxFuture<'static, eyre::Result<BoxExEx>>;
 }
 
 /// Implements [BoxedLaunchExEx] for any [LaunchExEx] that is [Send] and `'static`.
@@ -70,9 +71,12 @@ where
     E: LaunchExEx<Node> + Send + 'static,
     Node: FullNodeTypes,
 {
-    fn launch(self, ctx: ExExContext<Node>) -> BoxFuture<'static, eyre::Result<BoxExEx>> {
+    fn launch(
+        self: Box<Self>,
+        ctx: ExExContext<Node>,
+    ) -> BoxFuture<'static, eyre::Result<BoxExEx>> {
         async move {
-            let exex = self.launch(ctx).await?;
+            let exex = LaunchExEx::launch(*self, ctx).await?;
             Ok(Box::pin(exex) as BoxExEx)
         }
         .boxed()
