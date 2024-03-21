@@ -13,7 +13,7 @@ use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey};
 use futures::StreamExt;
 use reth_discv4::{Discv4, Discv4Config, PublicKey, SecretKey};
 use reth_discv5::{
-    discv5_downgrade_v4::DiscoveryUpdateV5, DiscV5Config, DiscV5WithV4Downgrade, MergedUpdateStream,
+    v4_downgradable::DiscoveryUpdateV5, DiscV5Config, DiscV5WithV4Downgrade, MergedUpdateStream,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::NodeFromExternalSource;

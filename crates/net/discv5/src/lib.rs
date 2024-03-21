@@ -15,11 +15,11 @@ use reth_primitives::{
 use tracing::error;
 
 pub mod config;
-pub mod discv5_downgrade_v4;
+pub mod v4_downgradeable;
 pub mod enr;
 
 pub use config::{BootNode, DiscV5Config, DiscV5ConfigBuilder};
-pub use discv5_downgrade_v4::{DiscV5WithV4Downgrade, MergedUpdateStream};
+pub use v4_downgradeable::{DiscV5WithV4Downgrade, MergedUpdateStream};
 pub use enr::uncompressed_id_from_enr_pk;
 
 /// Errors from using [`discv5::Discv5`] handle.
