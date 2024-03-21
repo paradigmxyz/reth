@@ -30,7 +30,7 @@ jsonrpsee-types = { workspace = true, optional = true }
 url = "2.3"
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
-secp256k1.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
 
 # arbitrary
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -42,7 +42,6 @@ default = ["jsonrpsee-types"]
 arbitrary = ["dep:arbitrary", "dep:proptest-derive", "dep:proptest", "alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]
 ssz = ["dep:ethereum_ssz" ,"dep:ethereum_ssz_derive", "alloy-primitives/ssz", "alloy-rpc-types/ssz", "alloy-rpc-engine-types/ssz"]
 optimism = []
-
 
 [dev-dependencies]
 # misc
