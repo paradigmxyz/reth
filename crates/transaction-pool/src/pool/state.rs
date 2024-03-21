@@ -2,6 +2,14 @@ bitflags::bitflags! {
     /// Marker to represents the current state of a transaction in the pool and from which the corresponding sub-pool is derived, depending on what bits are set.
     ///
     /// This mirrors [erigon's ephemeral state field](https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design#ordering-function).
+    ///
+    /// The [SubPool] the transaction belongs to is derived from it's state and determined by the following sequential checks:
+    ///
+    /// - If it satisfies the [TxState::PENDING_POOL_BITS] it belongs in the pending sub-pool: [SubPool::Pending].
+    /// - If it is an EIP-4844 blob transaction it belongs in the blob sub-pool: [SubPool::Blob].
+    /// -  If it satisfies the [TxState::BASE_FEE_POOL_BITS] it belongs in the base fee sub-pool: [SubPool::BaseFee].
+    ///
+    /// Otherwise it belongs in the queued sub-pool: [SubPool::Queued].
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
     pub(crate) struct TxState: u8 {
         /// Set to `1` if all ancestor transactions are pending.
@@ -70,7 +78,8 @@ impl TxState {
 #[repr(u8)]
 pub enum SubPool {
     /// The queued sub-pool contains transactions that are not ready to be included in the next
-    /// block because they have missing or queued ancestors.
+    /// block because they have missing or queued ancestors or the sender the lacks funds to
+    /// execute this transaction.
     Queued = 0,
     /// The base-fee sub-pool contains transactions that are not ready to be included in the next
     /// block because they don't meet the base fee requirement.
