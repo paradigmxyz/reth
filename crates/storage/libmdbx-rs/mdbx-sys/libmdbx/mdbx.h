@@ -25,7 +25,7 @@ _The Future will (be) [Positive](https://www.ptsecurity.com). Всё будет 
 
 \section copyright LICENSE & COPYRIGHT
 
-\authors Copyright (c) 2015-2023, Leonid Yuriev <leo@yuriev.ru>
+\authors Copyright (c) 2015-2024, Leonid Yuriev <leo@yuriev.ru>
 and other _libmdbx_ authors: please see [AUTHORS](./AUTHORS) file.
 
 \copyright Redistribution and use in source and binary forms, with or without

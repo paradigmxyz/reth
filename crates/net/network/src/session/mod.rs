@@ -37,7 +37,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{instrument, trace};
+use tracing::{debug, instrument, trace};
 
 mod active;
 mod config;
@@ -52,9 +52,6 @@ pub use handle::{
 };
 use reth_eth_wire::multiplex::RlpxProtocolMultiplexer;
 pub use reth_network_api::{Direction, PeerInfo};
-
-/// Maximum allowed graceful disconnects at a time.
-const MAX_GRACEFUL_DISCONNECTS: usize = 15;
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
@@ -74,11 +71,13 @@ pub struct SessionManager {
     /// If an [ActiveSession] does not receive a response at all within this duration then it is
     /// considered a protocol violation and the session will initiate a drop.
     protocol_breach_request_timeout: Duration,
+    /// The timeout after which a pending session attempt is considered failed.
+    pending_session_timeout: Duration,
     /// The secret key used for authenticating sessions.
     secret_key: SecretKey,
     /// The `Status` message to send to peers.
     status: Status,
-    /// THe `HelloMessage` message to send to peers.
+    /// The `HelloMessage` message to send to peers.
     hello_message: HelloMessageWithProtocols,
     /// The [`ForkFilter`] used to validate the peer's `Status` message.
     fork_filter: ForkFilter,
@@ -113,8 +112,6 @@ pub struct SessionManager {
     bandwidth_meter: BandwidthMeter,
     /// Metrics for the session manager.
     metrics: SessionManagerMetrics,
-    /// Tracks the number of active graceful disconnects for incoming connections.
-    graceful_disconnects_counter: GracefulDisconnects,
 }
 
 // === impl SessionManager ===
@@ -141,6 +138,7 @@ impl SessionManager {
             counter: SessionCounter::new(config.limits),
             initial_internal_request_timeout: config.initial_internal_request_timeout,
             protocol_breach_request_timeout: config.protocol_breach_request_timeout,
+            pending_session_timeout: config.pending_session_timeout,
             secret_key,
             status,
             hello_message,
@@ -156,7 +154,6 @@ impl SessionManager {
             bandwidth_meter,
             extra_protocols,
             metrics: Default::default(),
-            graceful_disconnects_counter: Default::default(),
         }
     }
 
@@ -191,6 +188,12 @@ impl SessionManager {
     /// Adds an additional protocol handler to the RLPx sub-protocol list.
     pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.extra_protocols.push(protocol)
+    }
+
+    /// Returns the number of currently pending connections.
+    #[inline]
+    pub(crate) fn num_pending_connections(&self) -> usize {
+        self.pending_sessions.len()
     }
 
     /// Spawns the given future onto a new task that is tracked in the `spawned_tasks`
@@ -242,17 +245,24 @@ impl SessionManager {
         let status = self.status;
         let fork_filter = self.fork_filter.clone();
         let extra_handlers = self.extra_protocols.on_incoming(remote_addr);
-        self.spawn(start_pending_incoming_session(
-            disconnect_rx,
+        self.spawn(pending_session_with_timeout(
+            self.pending_session_timeout,
             session_id,
-            metered_stream,
-            pending_events,
             remote_addr,
-            secret_key,
-            hello_message,
-            status,
-            fork_filter,
-            extra_handlers,
+            Direction::Incoming,
+            pending_events.clone(),
+            start_pending_incoming_session(
+                disconnect_rx,
+                session_id,
+                metered_stream,
+                pending_events,
+                remote_addr,
+                secret_key,
+                hello_message,
+                status,
+                fork_filter,
+                extra_handlers,
+            ),
         ));
 
         let handle = PendingSessionHandle {
@@ -277,18 +287,25 @@ impl SessionManager {
             let status = self.status;
             let band_with_meter = self.bandwidth_meter.clone();
             let extra_handlers = self.extra_protocols.on_outgoing(remote_addr, remote_peer_id);
-            self.spawn(start_pending_outbound_session(
-                disconnect_rx,
-                pending_events,
+            self.spawn(pending_session_with_timeout(
+                self.pending_session_timeout,
                 session_id,
                 remote_addr,
-                remote_peer_id,
-                secret_key,
-                hello_message,
-                status,
-                fork_filter,
-                band_with_meter,
-                extra_handlers,
+                Direction::Outgoing(remote_peer_id),
+                pending_events.clone(),
+                start_pending_outbound_session(
+                    disconnect_rx,
+                    pending_events,
+                    session_id,
+                    remote_addr,
+                    remote_peer_id,
+                    secret_key,
+                    hello_message,
+                    status,
+                    fork_filter,
+                    band_with_meter,
+                    extra_handlers,
+                ),
             ));
 
             let handle = PendingSessionHandle {
@@ -308,27 +325,6 @@ impl SessionManager {
         if let Some(session) = self.active_sessions.get(&node) {
             session.disconnect(reason);
         }
-    }
-
-    /// Sends a disconnect message to the peer with the given [DisconnectReason].
-    pub(crate) fn disconnect_incoming_connection(
-        &mut self,
-        stream: TcpStream,
-        reason: DisconnectReason,
-    ) {
-        let counter = self.graceful_disconnects_counter.clone();
-        if counter.exceeds_limit() {
-            // simply drop the connection if there are too many active disconnects already
-            return
-        }
-        let secret_key = self.secret_key;
-
-        self.spawn(async move {
-            if let Ok(stream) = get_eciess_stream(stream, secret_key, Direction::Incoming).await {
-                let _ = UnauthedP2PStream::new(stream).send_disconnect(reason).await;
-            }
-            drop(counter)
-        });
     }
 
     /// Initiates a shutdown of all sessions.
@@ -548,14 +544,14 @@ impl SessionManager {
                     Direction::Incoming => {
                         Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
                             remote_addr,
-                            error: error.map(PendingSessionHandshakeError::Eth),
+                            error,
                         })
                     }
                     Direction::Outgoing(peer_id) => {
                         Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
                             remote_addr,
                             peer_id,
-                            error: error.map(PendingSessionHandshakeError::Eth),
+                            error,
                         })
                     }
                 }
@@ -632,18 +628,6 @@ impl SessionManager {
             }
         }
         infos
-    }
-}
-
-/// Keep track of graceful disconnects for incoming connections.
-#[derive(Debug, Clone, Default)]
-struct GracefulDisconnects(Arc<()>);
-
-impl GracefulDisconnects {
-    /// Returns true if the number of graceful disconnects exceeds the limit
-    /// [MAX_GRACEFUL_DISCONNECTS]
-    fn exceeds_limit(&self) -> bool {
-        Arc::strong_count(&self.0) > MAX_GRACEFUL_DISCONNECTS
     }
 }
 
@@ -761,6 +745,9 @@ pub enum PendingSessionHandshakeError {
     /// The pending session failed due to an error while establishing the ECIES stream
     #[error(transparent)]
     Ecies(ECIESError),
+    /// Thrown when the authentication timed out
+    #[error("authentication timed out")]
+    Timeout,
 }
 
 impl PendingSessionHandshakeError {
@@ -778,6 +765,29 @@ impl PendingSessionHandshakeError {
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("session limit reached {0}")]
 pub struct ExceedsSessionLimit(pub(crate) u32);
+
+/// Starts a pending session authentication with a timeout.
+pub(crate) async fn pending_session_with_timeout<F>(
+    timeout: Duration,
+    session_id: SessionId,
+    remote_addr: SocketAddr,
+    direction: Direction,
+    events: mpsc::Sender<PendingSessionEvent>,
+    f: F,
+) where
+    F: Future<Output = ()>,
+{
+    if tokio::time::timeout(timeout, f).await.is_err() {
+        debug!(target: "net::session", ?remote_addr, ?direction, "pending session timed out");
+        let event = PendingSessionEvent::Disconnected {
+            remote_addr,
+            session_id,
+            direction,
+            error: Some(PendingSessionHandshakeError::Timeout),
+        };
+        let _ = events.send(event).await;
+    }
+}
 
 /// Starts the authentication process for a connection initiated by a remote peer.
 ///
@@ -969,7 +979,7 @@ async fn authenticate_stream(
                 remote_addr,
                 session_id,
                 direction,
-                error: Some(err.into()),
+                error: Some(PendingSessionHandshakeError::Eth(err.into())),
             }
         }
     };
@@ -982,7 +992,7 @@ async fn authenticate_stream(
                 remote_addr,
                 session_id,
                 direction,
-                error: Some(err.into()),
+                error: Some(PendingSessionHandshakeError::Eth(err.into())),
             }
         }
     };
@@ -1000,7 +1010,7 @@ async fn authenticate_stream(
                     remote_addr,
                     session_id,
                     direction,
-                    error: Some(err),
+                    error: Some(PendingSessionHandshakeError::Eth(err)),
                 }
             }
         };

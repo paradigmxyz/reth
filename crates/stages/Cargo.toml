@@ -22,6 +22,7 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-tokio-util.workspace = true
 reth-etl.workspace = true
 reth-static-file.workspace = true
+reth-config.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }

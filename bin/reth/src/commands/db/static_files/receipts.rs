@@ -37,7 +37,7 @@ impl Command {
         let tx_range =
             provider_factory.provider()?.transaction_range_by_block_range(block_range.into())?;
 
-        let mut row_indexes = tx_range.clone().collect::<Vec<_>>();
+        let mut row_indexes = tx_range.collect::<Vec<_>>();
 
         let path: PathBuf = StaticFileSegment::Receipts
             .filename_with_configuration(filters, compression, &block_range)

@@ -10,7 +10,6 @@ use crate::{
 };
 use clap::{Parser, Subcommand};
 use reth_db::{
-    mdbx::DatabaseArguments,
     open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
 };
@@ -90,48 +89,47 @@ pub enum Subcommands {
     Path,
 }
 
+/// db_ro_exec opens a database in read-only mode, and then execute with the provided command
+macro_rules! db_ro_exec {
+    ($chain:expr, $db_path:expr, $db_args:ident, $sfp:ident, $tool:ident, $command:block) => {
+        let db = open_db_read_only($db_path, $db_args)?;
+        let provider_factory = ProviderFactory::new(db, $chain.clone(), $sfp)?;
+
+        let $tool = DbTool::new(provider_factory, $chain.clone())?;
+        $command;
+    };
+}
+
 impl Command {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
-        let db_log_level = DatabaseArguments::default().log_level(self.db.log_level);
+        let db_args = self.db.database_args();
         let static_files_path = data_dir.static_files_path();
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
-                let db = open_db_read_only(&db_path, db_log_level)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
-
-                let tool = DbTool::new(provider_factory, self.chain.clone())?;
-                command.execute(data_dir, &tool)?;
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(data_dir, &tool)?;
+                });
             }
             Subcommands::List(command) => {
-                let db = open_db_read_only(&db_path, db_log_level)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
-
-                let tool = DbTool::new(provider_factory, self.chain.clone())?;
-                command.execute(&tool)?;
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(&tool)?;
+                });
             }
             Subcommands::Diff(command) => {
-                let db = open_db_read_only(&db_path, db_log_level)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
-
-                let tool = DbTool::new(provider_factory, self.chain.clone())?;
-                command.execute(&tool)?;
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(&tool)?;
+                });
             }
             Subcommands::Get(command) => {
-                let db = open_db_read_only(&db_path, db_log_level)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
-
-                let tool = DbTool::new(provider_factory, self.chain.clone())?;
-                command.execute(&tool)?;
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(&tool)?;
+                });
             }
             Subcommands::Drop { force } => {
                 if !force {
@@ -149,7 +147,7 @@ impl Command {
                     }
                 }
 
-                let db = open_db(&db_path, db_log_level)?;
+                let db = open_db(&db_path, db_args)?;
                 let provider_factory =
                     ProviderFactory::new(db, self.chain.clone(), static_files_path.clone())?;
 
@@ -157,14 +155,14 @@ impl Command {
                 tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {
-                let db = open_db(&db_path, db_log_level)?;
+                let db = open_db(&db_path, db_args)?;
                 let provider_factory =
                     ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
 
                 command.execute(provider_factory)?;
             }
             Subcommands::CreateStaticFiles(command) => {
-                command.execute(data_dir, self.db.log_level, self.chain.clone())?;
+                command.execute(data_dir, self.db.database_args(), self.chain.clone())?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {

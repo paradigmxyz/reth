@@ -154,36 +154,22 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    str::FromStr,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-
-use hyper::{header::AUTHORIZATION, HeaderMap};
-pub use jsonrpsee::server::ServerBuilder;
-use jsonrpsee::{
-    server::{IdProvider, Server, ServerHandle},
-    Methods, RpcModule,
-};
-use reth_node_api::{ConfigureEvmEnv, EngineTypes};
-use serde::{Deserialize, Serialize, Serializer};
-use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
-use tower::layer::util::{Identity, Stack};
-use tower_http::cors::CorsLayer;
-use tracing::{instrument, trace};
-
 use crate::{
     auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
     RpcModuleSelection::Selection,
 };
 use constants::*;
 use error::{RpcError, ServerKind};
+use hyper::{header::AUTHORIZATION, HeaderMap};
+pub use jsonrpsee::server::ServerBuilder;
+use jsonrpsee::{
+    server::{IdProvider, Server, ServerHandle},
+    Methods, RpcModule,
+};
 use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -205,6 +191,19 @@ use reth_tasks::{
     TaskSpawner, TokioTaskExecutor,
 };
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
+use serde::{Deserialize, Serialize, Serializer};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    str::FromStr,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
+use tower::layer::util::{Identity, Stack};
+use tower_http::cors::CorsLayer;
+use tracing::{instrument, trace};
+
 // re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
 
@@ -1015,14 +1014,14 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
+impl<Provider: ChainSpecProvider, Pool, Network, Tasks, Events, EvmConfig>
     RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig>
 where
     Network: NetworkInfo + Peers + Clone + 'static,
 {
     /// Instantiates AdminApi
     pub fn admin_api(&mut self) -> AdminApi<Network> {
-        AdminApi::new(self.network.clone())
+        AdminApi::new(self.network.clone(), self.provider.chain_spec())
     }
 
     /// Instantiates Web3Api
@@ -1203,7 +1202,9 @@ where
                     .entry(namespace)
                     .or_insert_with(|| match namespace {
                         RethRpcModule::Admin => {
-                            AdminApi::new(self.network.clone()).into_rpc().into()
+                            AdminApi::new(self.network.clone(), self.provider.chain_spec())
+                                .into_rpc()
+                                .into()
                         }
                         RethRpcModule::Debug => DebugApi::new(
                             self.provider.clone(),

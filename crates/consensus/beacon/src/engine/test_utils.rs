@@ -6,6 +6,7 @@ use crate::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
+use reth_config::config::EtlConfig;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
 type DatabaseEnv = TempDatabase<DE>;
 use reth_downloaders::{
@@ -406,6 +407,7 @@ where
                     header_downloader,
                     body_downloader,
                     executor_factory.clone(),
+                    EtlConfig::default(),
                 ))
             }
         };

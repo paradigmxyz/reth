@@ -61,6 +61,12 @@ Options:
       --batch-size <BATCH_SIZE>
           Batch size for stage execution and unwind
 
+      --etl-file-size <ETL_FILE_SIZE>
+          The maximum size in bytes of data held in memory before being flushed to disk as a file
+
+      --etl-dir <ETL_DIR>
+          Directory where to collect ETL files
+
   -s, --skip-unwind
           Normally, running the stage requires unwinding for stages that already have been run, in order to not rewrite to the same database slots.
           

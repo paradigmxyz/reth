@@ -2,7 +2,7 @@ use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobTran
 use reth_primitives::B256;
 
 /// A blobstore implementation that does nothing
-#[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct NoopBlobStore;
 

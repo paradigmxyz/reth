@@ -5,13 +5,13 @@ use crate::{
 };
 use clap::Parser;
 use reth_db::{
-    cursor::DbCursorRO, database::Database, mdbx::DatabaseArguments, open_db_read_only,
-    table::Table, transaction::DbTx, AccountChangeSets, AccountsHistory, AccountsTrie,
-    BlockBodyIndices, BlockOmmers, BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv,
-    HashedAccounts, HashedStorages, HeaderNumbers, HeaderTerminalDifficulties, Headers,
-    PlainAccountState, PlainStorageState, PruneCheckpoints, Receipts, StageCheckpointProgresses,
-    StageCheckpoints, StorageChangeSets, StoragesHistory, StoragesTrie, Tables, TransactionBlocks,
-    TransactionHashNumbers, TransactionSenders, Transactions,
+    cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
+    AccountChangeSets, AccountsHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
+    BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccounts, HashedStorages,
+    HeaderNumbers, HeaderTerminalDifficulties, Headers, PlainAccountState, PlainStorageState,
+    PruneCheckpoints, Receipts, StageCheckpointProgresses, StageCheckpoints, StorageChangeSets,
+    StoragesHistory, StoragesTrie, Tables, TransactionBlocks, TransactionHashNumbers,
+    TransactionSenders, Transactions, VersionHistory,
 };
 use std::{
     collections::HashMap,
@@ -60,10 +60,7 @@ impl Command {
     pub fn execute(self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<()> {
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
-        let second_db = open_db_read_only(
-            &second_db_path,
-            DatabaseArguments::default().log_level(self.second_db.log_level),
-        )?;
+        let second_db = open_db_read_only(&second_db_path, self.second_db.database_args())?;
 
         let tables = match &self.table {
             Some(table) => std::slice::from_ref(table),
@@ -147,6 +144,9 @@ impl Command {
                 }
                 Tables::PruneCheckpoints => {
                     find_diffs::<PruneCheckpoints>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::VersionHistory => {
+                    find_diffs::<VersionHistory>(primary_tx, secondary_tx, output_dir)?
                 }
             };
         }

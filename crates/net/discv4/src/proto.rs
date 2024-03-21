@@ -665,9 +665,10 @@ mod tests {
         let msg = rng_message(&mut rng);
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
         let (buf, _) = msg.encode(&secret_key);
-        let mut buf = BytesMut::from(buf.as_ref());
-        buf.put_u8(0);
-        match Message::decode(buf.as_ref()).unwrap_err() {
+
+        let mut buf_vec = buf.to_vec();
+        buf_vec.push(0);
+        match Message::decode(buf_vec.as_slice()).unwrap_err() {
             DecodePacketError::HashMismatch => {}
             err => {
                 unreachable!("unexpected err {}", err)
@@ -813,9 +814,7 @@ mod tests {
         assert_eq!(pubkey.to_vec(), expected_pubkey);
         assert!(enr.0.verify());
 
-        let mut encoded = Vec::new();
-        enr.encode(&mut encoded);
-        assert_eq!(&encoded[..], &valid_record[..]);
+        assert_eq!(&alloy_rlp::encode(&enr)[..], &valid_record[..]);
 
         // ensure the length is equal
         assert_eq!(enr.length(), valid_record.len());
@@ -867,9 +866,7 @@ mod tests {
             EnrWrapper::new(builder.build(&key).unwrap())
         };
 
-        let mut encoded = Vec::new();
-        enr.encode(&mut encoded);
-        let mut encoded_bytes = &encoded[..];
+        let mut encoded_bytes = &alloy_rlp::encode(&enr)[..];
         let decoded_enr = EnrWrapper::<SecretKey>::decode(&mut encoded_bytes).unwrap();
 
         // Byte array must be consumed after enr has finished decoding

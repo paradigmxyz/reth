@@ -4,6 +4,9 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StageId {
     /// Static File stage in the process.
+    #[deprecated(
+        note = "Static Files are generated outside of the pipeline and do not require a separate stage"
+    )]
     StaticFile,
     /// Header stage in the process.
     Headers,
@@ -35,8 +38,7 @@ pub enum StageId {
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [StageId; 13] = [
-        StageId::StaticFile,
+    pub const ALL: [StageId; 12] = [
         StageId::Headers,
         StageId::Bodies,
         StageId::SenderRecovery,
@@ -54,6 +56,7 @@ impl StageId {
     /// Return stage id formatted as string.
     pub fn as_str(&self) -> &str {
         match self {
+            #[allow(deprecated)]
             StageId::StaticFile => "StaticFile",
             StageId::Headers => "Headers",
             StageId::Bodies => "Bodies",
@@ -94,7 +97,6 @@ mod tests {
 
     #[test]
     fn stage_id_as_string() {
-        assert_eq!(StageId::StaticFile.to_string(), "StaticFile");
         assert_eq!(StageId::Headers.to_string(), "Headers");
         assert_eq!(StageId::Bodies.to_string(), "Bodies");
         assert_eq!(StageId::SenderRecovery.to_string(), "SenderRecovery");
@@ -117,5 +119,12 @@ mod tests {
         assert!(StageId::Bodies.is_downloading_stage());
 
         assert!(!StageId::Execution.is_downloading_stage());
+    }
+
+    // Multiple places around the codebase assume headers is the first stage.
+    // Feel free to remove this test if the assumption changes.
+    #[test]
+    fn stage_all_headers_first() {
+        assert_eq!(*StageId::ALL.first().unwrap(), StageId::Headers);
     }
 }

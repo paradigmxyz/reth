@@ -126,10 +126,13 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let static_file_provider = provider.static_file_provider();
 
         // We only use static files for Receipts, if there is no receipt pruning of any kind.
-        let mut static_file_producer = None;
-        if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
-            static_file_producer = Some(prepare_static_file_producer(provider, start_block)?);
-        }
+        let static_file_producer = if self.prune_modes.receipts.is_none() &&
+            self.prune_modes.receipts_log_filter.is_empty()
+        {
+            Some(prepare_static_file_producer(provider, start_block)?)
+        } else {
+            None
+        };
 
         // Build executor
         let mut executor = self.executor_factory.with_state(LatestStateProviderRef::new(
@@ -803,6 +806,12 @@ mod tests {
             .unwrap()
             .commit()
             .unwrap();
+        {
+            let mut receipts_writer =
+                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+            receipts_writer.commit().unwrap();
+        }
         provider.commit().unwrap();
 
         // insert pre state
@@ -948,6 +957,12 @@ mod tests {
             .unwrap()
             .commit()
             .unwrap();
+        {
+            let mut receipts_writer =
+                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+            receipts_writer.commit().unwrap();
+        }
         provider.commit().unwrap();
 
         // variables
@@ -1061,6 +1076,12 @@ mod tests {
             .unwrap()
             .commit()
             .unwrap();
+        {
+            let mut receipts_writer =
+                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+            receipts_writer.commit().unwrap();
+        }
         provider.commit().unwrap();
 
         // variables

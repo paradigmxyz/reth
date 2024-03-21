@@ -184,12 +184,15 @@ impl Transaction {
         }
     }
 
-    /// Get the transaction's nonce.
+    /// Get the transaction's address of the contract that will be called, or the address that will
+    /// receive the transfer.
+    ///
+    /// Returns `None` if this is a `CREATE` transaction.
     pub fn to(&self) -> Option<Address> {
         self.kind().to()
     }
 
-    /// Get transaction type
+    /// Get the transaction's type
     pub fn tx_type(&self) -> TxType {
         match self {
             Transaction::Legacy(legacy_tx) => legacy_tx.tx_type(),
@@ -1283,7 +1286,7 @@ impl TransactionSigned {
         let signature = Signature::decode(data)?;
 
         #[cfg(feature = "optimism")]
-        let signature = if let TxType::Deposit = tx_type {
+        let signature = if tx_type == TxType::Deposit {
             Signature::optimism_deposit_tx_signature()
         } else {
             Signature::decode(data)?
@@ -1640,11 +1643,7 @@ mod tests {
 
         let decoded = TransactionSigned::decode(&mut &tx_bytes[..]).unwrap();
         assert_eq!(tx_bytes.len(), decoded.length());
-
-        let mut encoded = BytesMut::new();
-        decoded.encode(&mut encoded);
-
-        assert_eq!(tx_bytes, encoded[..]);
+        assert_eq!(tx_bytes, &alloy_rlp::encode(decoded)[..]);
     }
 
     #[test]
@@ -1827,10 +1826,7 @@ mod tests {
 
         let decoded = TransactionSigned::decode(&mut &bytes[..]).unwrap();
         assert_eq!(expected, decoded);
-
-        let mut encoded = BytesMut::new();
-        expected.encode(&mut encoded);
-        assert_eq!(bytes, encoded);
+        assert_eq!(bytes, &alloy_rlp::encode(expected));
     }
 
     #[test]
@@ -1961,10 +1957,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("c98080808080801b8080"), &encoded[..]);
+        let encoded = &alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("c98080808080801b8080"), encoded[..]);
         assert_eq!(MIN_LENGTH_LEGACY_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -1980,10 +1974,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("8d01cb80808080808080c0808080"), &encoded[..]);
+        let encoded = &alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("8d01cb80808080808080c0808080"), encoded[..]);
         assert_eq!(MIN_LENGTH_EIP2930_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -1999,10 +1991,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("8e02cc8080808080808080c0808080"), &encoded[..]);
+        let encoded = &alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("8e02cc8080808080808080c0808080"), encoded[..]);
         assert_eq!(MIN_LENGTH_EIP1559_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -2018,10 +2008,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), &encoded[..]);
+        let encoded = alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), encoded[..]);
         assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -2041,8 +2029,7 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
+        let encoded = &alloy_rlp::encode(signed_tx);
 
         assert_eq!(b"\xb8?~\xf8<\xa0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x94\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\x80\x80\x80\x80\x80", &encoded[..]);
         assert_eq!(MIN_LENGTH_DEPOSIT_TX_ENCODED, encoded.len());

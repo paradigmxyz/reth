@@ -1,6 +1,5 @@
 //! Config traits for various node components.
 
-use alloy_rlp::Encodable;
 use reth_network::protocol::IntoRlpxSubProtocol;
 use reth_primitives::Bytes;
 use reth_rpc::{
@@ -87,11 +86,9 @@ pub trait PayloadBuilderConfig {
     /// Block extra data set by the payload builder.
     fn extradata(&self) -> Cow<'_, str>;
 
-    /// Returns the rlp-encoded extradata bytes.
-    fn extradata_rlp_bytes(&self) -> Bytes {
-        let mut extradata = Vec::with_capacity(self.extradata().as_bytes().len() + 1);
-        self.extradata().as_bytes().encode(&mut extradata);
-        extradata.into()
+    /// Returns the extradata as bytes.
+    fn extradata_bytes(&self) -> Bytes {
+        self.extradata().as_bytes().to_vec().into()
     }
 
     /// The interval at which the job should build a new payload after the last.

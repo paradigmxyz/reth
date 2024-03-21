@@ -19,6 +19,7 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
+use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -153,12 +154,12 @@ impl<DB, State> NodeBuilder<DB, State> {
         let config_path = self.config.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let mut config = confy::load_path::<reth_config::Config>(&config_path)
-            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))?;
+            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
         // Update the config with the command line arguments
-        config.peers.connect_trusted_nodes_only = self.config.network.trusted_only;
+        config.peers.trusted_nodes_only = self.config.network.trusted_only;
 
         if !self.config.network.trusted_peers.is_empty() {
             info!(target: "reth::cli", "Adding trusted nodes");
@@ -460,7 +461,7 @@ where
 
         let genesis_hash = init_genesis(provider_factory.clone())?;
 
-        info!(target: "reth::cli", "{}",config.chain.display_hardforks());
+        info!(target: "reth::cli", "\n{}", config.chain.display_hardforks());
 
         let consensus = config.consensus();
 
@@ -469,7 +470,7 @@ where
         let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
         executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
 
-        let prune_config = config.prune_config()?.or(reth_config.prune.clone());
+        let prune_config = config.prune_config()?.or_else(|| reth_config.prune.clone());
 
         let evm_config = types.evm_config();
         let tree_config = BlockchainTreeConfig::default();
@@ -512,7 +513,7 @@ where
             executor,
             data_dir,
             mut config,
-            reth_config,
+            mut reth_config,
             ..
         } = ctx;
 
@@ -547,14 +548,19 @@ where
         let max_block = config.max_block(&network_client, provider_factory.clone()).await?;
         let mut hooks = EngineHooks::new();
 
-        let mut static_file_producer = StaticFileProducer::new(
+        let static_file_producer = StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.static_file_provider(),
             prune_config.clone().unwrap_or_default().segments,
         );
-        let static_file_producer_events = static_file_producer.events();
+        let static_file_producer_events = static_file_producer.lock().events();
         hooks.add(StaticFileHook::new(static_file_producer.clone(), Box::new(executor.clone())));
         info!(target: "reth::cli", "StaticFileProducer initialized");
+
+        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
+        if reth_config.stages.etl.dir.is_none() {
+            reth_config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+        }
 
         // Configure the pipeline
         let (mut pipeline, client) = if config.dev.dev {

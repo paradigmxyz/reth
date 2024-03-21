@@ -43,7 +43,6 @@ fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> B256 {
 ///
 /// # Panics
 /// * If the `dest` is empty
-/// * If `s1` is empty
 /// * If the `dest` len is greater than or equal to the hash output len * the max counter value. In
 /// this case, the hash output len is 32 bytes, and the max counter value is 2^32 - 1. So the dest
 /// cannot have a len greater than 32 * 2^32 - 1.
@@ -637,6 +636,13 @@ impl ECIES {
     }
 
     pub fn read_header(&mut self, data: &mut [u8]) -> Result<usize, ECIESError> {
+        // If the data is not large enough to fit the header and mac bytes, return an error
+        //
+        // The header is 16 bytes, and the mac is 16 bytes, so the data must be at least 32 bytes
+        if data.len() < 32 {
+            return Err(ECIESErrorImpl::InvalidHeader.into())
+        }
+
         let (header_bytes, mac_bytes) = split_at_mut(data, 16)?;
         let header = HeaderBytes::from_mut_slice(header_bytes);
         let mac = B128::from_slice(&mac_bytes[..16]);
@@ -691,7 +697,11 @@ impl ECIES {
     }
 
     pub fn read_body<'a>(&mut self, data: &'a mut [u8]) -> Result<&'a mut [u8], ECIESError> {
-        let (body, mac_bytes) = split_at_mut(data, data.len() - 16)?;
+        // error if the data is too small to contain the tag
+        // TODO: create a custom type similar to EncryptedMessage for parsing, checking MACs, and
+        // decrypting the body
+        let mac_index = data.len().checked_sub(16).ok_or(ECIESErrorImpl::EncryptedDataTooSmall)?;
+        let (body, mac_bytes) = split_at_mut(data, mac_index)?;
         let mac = B128::from_slice(mac_bytes);
         self.ingress_mac.as_mut().unwrap().update_body(body);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();

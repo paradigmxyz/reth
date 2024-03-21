@@ -864,7 +864,7 @@ impl From<MockTransaction> for Transaction {
                 gas_limit,
                 to,
                 value,
-                input: input.clone(),
+                input,
             }),
             MockTransaction::Eip1559 {
                 hash: _,
@@ -886,8 +886,8 @@ impl From<MockTransaction> for Transaction {
                 max_priority_fee_per_gas,
                 to,
                 value,
-                access_list: accesslist.clone(),
-                input: input.clone(),
+                access_list: accesslist,
+                input,
             }),
             MockTransaction::Eip4844 {
                 hash,

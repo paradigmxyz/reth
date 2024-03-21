@@ -13,42 +13,45 @@ use reth_db::{
 };
 use reth_interfaces::{provider::ProviderResult, test_utils::generators::ChangeSet};
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader, StorageEntry,
-    TxHash, TxNumber, B256, MAINNET, U256,
+    keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader,
+    StaticFileSegment, StorageEntry, TxHash, TxNumber, B256, MAINNET, U256,
 };
 use reth_provider::{
     providers::{StaticFileProviderRWRefMut, StaticFileWriter},
     HistoryWriter, ProviderError, ProviderFactory,
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc};
+use tempfile::TempDir;
 
 /// Test database that is used for testing stage implementations.
 #[derive(Debug)]
 pub struct TestStageDB {
     pub factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
+    pub temp_static_files_dir: TempDir,
 }
 
 impl Default for TestStageDB {
     /// Create a new instance of [TestStageDB]
     fn default() -> Self {
+        let (static_dir, static_dir_path) = create_test_static_files_dir();
         Self {
-            factory: ProviderFactory::new(
-                create_test_rw_db(),
-                MAINNET.clone(),
-                create_test_static_files_dir(),
-            )
-            .unwrap(),
+            temp_static_files_dir: static_dir,
+            factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone(), static_dir_path)
+                .unwrap(),
         }
     }
 }
 
 impl TestStageDB {
     pub fn new(path: &Path) -> Self {
+        let (static_dir, static_dir_path) = create_test_static_files_dir();
+
         Self {
+            temp_static_files_dir: static_dir,
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
-                create_test_static_files_dir(),
+                static_dir_path,
             )
             .unwrap(),
         }
@@ -139,6 +142,17 @@ impl TestStageDB {
         td: U256,
     ) -> ProviderResult<()> {
         if let Some(writer) = writer {
+            // Backfill: some tests start at a forward block number, but static files require no
+            // gaps.
+            let segment_header = writer.user_header();
+            if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
+                for block_number in 0..header.number {
+                    let mut prev = header.clone().unseal();
+                    prev.number = block_number;
+                    writer.append_header(prev, U256::ZERO, B256::ZERO)?;
+                }
+            }
+
             writer.append_header(header.header().clone(), td, header.hash())?;
         } else {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
@@ -155,7 +169,7 @@ impl TestStageDB {
         I: IntoIterator<Item = &'a SealedHeader>,
     {
         let provider = self.factory.static_file_provider();
-        let mut writer = provider.latest_writer(reth_primitives::StaticFileSegment::Headers)?;
+        let mut writer = provider.latest_writer(StaticFileSegment::Headers)?;
         let tx = self.factory.provider_rw()?.into_tx();
         let mut td = U256::ZERO;
 
@@ -210,8 +224,7 @@ impl TestStageDB {
         let blocks = blocks.into_iter().collect::<Vec<_>>();
 
         {
-            let mut headers_writer =
-                provider.latest_writer(reth_primitives::StaticFileSegment::Headers)?;
+            let mut headers_writer = provider.latest_writer(StaticFileSegment::Headers)?;
 
             blocks.iter().try_for_each(|block| {
                 Self::insert_header(Some(&mut headers_writer), &tx, &block.header, U256::ZERO)
@@ -221,9 +234,9 @@ impl TestStageDB {
         }
 
         {
-            let mut txs_writer = storage_kind.is_static().then(|| {
-                provider.latest_writer(reth_primitives::StaticFileSegment::Transactions).unwrap()
-            });
+            let mut txs_writer = storage_kind
+                .is_static()
+                .then(|| provider.latest_writer(StaticFileSegment::Transactions).unwrap());
 
             blocks.into_iter().try_for_each(|block| {
                 // Insert into body tables.
@@ -251,7 +264,17 @@ impl TestStageDB {
                 });
 
                 if let Some(txs_writer) = &mut txs_writer {
-                    txs_writer.increment_block(reth_primitives::StaticFileSegment::Transactions)?;
+                    // Backfill: some tests start at a forward block number, but static files
+                    // require no gaps.
+                    let segment_header = txs_writer.user_header();
+                    if segment_header.block_end().is_none() &&
+                        segment_header.expected_block_start() == 0
+                    {
+                        for block in 0..block.number {
+                            txs_writer.increment_block(StaticFileSegment::Transactions, block)?;
+                        }
+                    }
+                    txs_writer.increment_block(StaticFileSegment::Transactions, block.number)?;
                 }
                 res
             })?;

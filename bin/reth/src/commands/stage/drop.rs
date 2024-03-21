@@ -11,8 +11,8 @@ use crate::{
 use clap::Parser;
 use itertools::Itertools;
 use reth_db::{
-    database::Database, mdbx::DatabaseArguments, open_db, static_file::iter_static_files, tables,
-    transaction::DbTxMut, DatabaseEnv,
+    database::Database, open_db, static_file::iter_static_files, tables, transaction::DbTxMut,
+    DatabaseEnv,
 };
 use reth_node_core::init::{insert_genesis_header, insert_genesis_state};
 use reth_primitives::{
@@ -60,8 +60,7 @@ impl Command {
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
 
-        let db =
-            open_db(db_path.as_ref(), DatabaseArguments::default().log_level(self.db.log_level))?;
+        let db = open_db(db_path.as_ref(), self.db.database_args())?;
         let provider_factory =
             ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
         let static_file_provider = provider_factory.static_file_provider();
