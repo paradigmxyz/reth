@@ -14,6 +14,7 @@ use crate::{
 };
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};
+use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
@@ -50,9 +51,9 @@ use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, error, info};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
-use std::{str::FromStr, sync::Arc};
+use std::{cmp::max, str::FromStr, sync::Arc, thread::available_parallelism};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
 /// The builtin provider type of the reth node.
@@ -440,6 +441,14 @@ where
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         fdlimit::raise_fd_limit()?;
+
+        // Limit the global rayon thread pool, reserving 2 cores for the rest of the system
+        let _ = ThreadPoolBuilder::new()
+            .num_threads(
+                available_parallelism().map_or(25, |cpus| max(cpus.get().saturating_sub(2), 2)),
+            )
+            .build_global()
+            .map_err(|e| error!("Failed to build global thread pool: {:?}", e));
 
         let provider_factory = ProviderFactory::new(
             database.clone(),
