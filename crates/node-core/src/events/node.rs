@@ -226,7 +226,7 @@ impl<DB> NodeState<DB> {
                         ForkchoiceStatus::Valid => "Forkchoice updated",
                         ForkchoiceStatus::Invalid => "Received invalid forkchoice updated message",
                         ForkchoiceStatus::Syncing => {
-                            "Received forkchoice updated message when syncing"
+                            "Responded Syncing to a forkchoice updated message"
                         }
                     };
                     info!(?head_block_hash, ?safe_block_hash, ?finalized_block_hash, "{}", msg);
