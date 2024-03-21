@@ -2460,7 +2460,7 @@ where
     /// Returns a new [KBucketsKeysMirror].
     pub fn new(change_tx: watch::Receiver<()>, callback: F) -> Self {
         let is_log_level_trace =
-            if let Ok(var) = env::var("RUST_LOG") { var.to_lowercase() == "trace" } else { false };
+            if let Ok(var) = env::var("RUST_LOG") { var.to_lowercase() == "trace" } else { false }; // todo: will fail if target specified
 
         Self {
             mirror: Default::default(),
