@@ -200,7 +200,7 @@ where
 
         let mut iter = chunks.into_iter().peekable();
         while let Some(chunk) = iter.next() {
-            let mut highest = *chunk.last().expect("only exist when there's an indice");
+            let mut highest = *chunk.last().expect("at least one index");
 
             if !mode.is_flush() && iter.peek().is_none() {
                 *list = chunk;
@@ -223,9 +223,9 @@ where
     Ok(())
 }
 
-/// Mode on how to load indice shards into the database.
+/// Mode on how to load index shards into the database.
 pub(crate) enum LoadMode {
-    /// Keep the last shard in memory and don't flush it to the database
+    /// Keep the last shard in memory and don't flush it to the database.
     KeepLast,
     /// Flush all shards into the database.
     Flush,
