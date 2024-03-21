@@ -22,6 +22,8 @@ alloy-rlp.workspace = true
 rlp = "0.5.2"
 discv5 = { workspace = true, features = ["libp2p"] }
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
+multiaddr = { version = "0.18", default-features = false }
+libp2p-identity = "0.2"
 
 # async/futures
 tokio.workspace = true

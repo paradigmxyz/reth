@@ -246,7 +246,7 @@ impl DiscV5 {
                 BootNode::Enode(enode) => enr_requests.push(task::spawn({
                     let discv5 = discv5.clone();
                     async move {
-                        if let Err(err) = discv5.request_enr(enode).await {
+                        if let Err(err) = discv5.request_enr(enode.clone()).await {
                             debug!(target: "net::discovery::discv5",
                                 enode,
                                 %err,

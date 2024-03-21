@@ -6033,6 +6033,8 @@ dependencies = [
  "enr",
  "futures",
  "itertools 0.12.1",
+ "libp2p-identity",
+ "multiaddr",
  "parking_lot 0.12.1",
  "pin-project",
  "rand 0.8.5",

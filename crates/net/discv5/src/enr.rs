@@ -30,12 +30,25 @@ pub fn pk_to_uncompressed_id(pk: &CombinedPublicKey) -> PeerId {
 
 /// Converts a [`PeerId`] to a [`discv5::enr::NodeId`].
 pub fn uncompressed_to_compressed_id(peer_id: PeerId) -> NodeId {
+    uncompressed_id_to_pk(peer_id).into()
+}
+
+/// Converts a [`PeerId`] to a [`PublicKey`].
+pub fn uncompressed_id_to_pk(peer_id: PeerId) -> PublicKey {
     let mut buf = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
     buf[0] = SECP256K1_SERIALIZED_UNCOMPRESSED_FLAG;
     buf[1..].copy_from_slice(peer_id.as_ref());
-    let pk = PublicKey::from_slice(&buf).unwrap();
 
-    pk.into()
+    PublicKey::from_slice(&buf).unwrap()
+}
+
+/// Converts a [`PeerId`] to a [`libp2p_identity::PeerId `].
+pub fn uncompressed_to_multiaddr_id(peer_id: PeerId) -> libp2p_identity::PeerId {
+    let pk = uncompressed_id_to_pk(peer_id).encode();
+    let pk: libp2p_identity::PublicKey =
+        libp2p_identity::secp256k1::PublicKey::try_from_bytes(&pk).unwrap().into();
+
+    pk.to_peer_id()
 }
 
 /// Wrapper around [`discv5::Enr`] ([`Enr<CombinedKey>`]).

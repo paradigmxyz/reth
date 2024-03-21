@@ -1,10 +1,16 @@
 //! Wrapper around [`discv5::Config`].
 
-use std::{collections::HashSet, net::SocketAddr};
+use std::{
+    collections::HashSet,
+    net::{IpAddr, SocketAddr},
+};
 
 use discv5::ListenConfig;
+use multiaddr::{Multiaddr, Protocol};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_primitives::{Bytes, ForkId};
+use reth_primitives::{AnyNode, Bytes, ForkId, NodeRecord};
+
+use crate::enr::uncompressed_to_multiaddr_id;
 
 /// Default interval in seconds at which to run a self-lookup up query.
 ///
@@ -87,8 +93,24 @@ impl DiscV5ConfigBuilder {
 
     /// Adds a comma-separated list of enodes, unsigned node records, to boot nodes.
     pub fn add_enode_boot_nodes(mut self, enodes: &'static str) -> Self {
-        self.bootstrap_nodes
-            .extend(enodes.split(&[',']).into_iter().map(|enode| BootNode::Enode(enode)));
+        let bootstrap_nodes = &mut self.bootstrap_nodes;
+
+        for node in enodes.split(&[',']).into_iter() {
+            if let Ok(AnyNode::NodeRecord(NodeRecord { address, udp_port, id, .. })) = node.parse()
+            {
+                let mut multi_address = Multiaddr::empty();
+                match address {
+                    IpAddr::V4(ip) => multi_address.push(Protocol::Ip4(ip)),
+                    IpAddr::V6(ip) => multi_address.push(Protocol::Ip6(ip)),
+                }
+
+                multi_address.push(Protocol::Udp(udp_port));
+                let id = uncompressed_to_multiaddr_id(id);
+                multi_address.push(Protocol::P2p(id));
+
+                bootstrap_nodes.insert(BootNode::Enode(multi_address.to_string()));
+            }
+        }
         self
     }
 
@@ -191,7 +213,7 @@ impl DiscV5Config {
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum BootNode {
     /// An unsigned node record.
-    Enode(&'static str),
+    Enode(String),
     /// A signed node record.
     Enr(discv5::Enr),
 }
@@ -223,6 +245,19 @@ mod test {
                         socket_2 == node.tcp4_socket().unwrap()
             );
             assert_eq!("84b4940500", hex::encode(node.get_raw_rlp("opstack").unwrap()));
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn parse_enodes() {
+        const OP_GETH_BOOTNODES: &str ="enode://87a32fd13bd596b2ffca97020e31aef4ddcc1bbd4b95bb633d16c1329f654f34049ed240a36b449fda5e5225d70fe40bc667f53c304b71f8e68fc9d448690b51@3.231.138.188:30301,enode://ca21ea8f176adb2e229ce2d700830c844af0ea941a1d8152a9513b966fe525e809c3a6c73a2c18a12b74ed6ec4380edf91662778fe0b79f6a591236e49e176f9@184.72.129.189:30301,enode://acf4507a211ba7c1e52cdf4eef62cdc3c32e7c9c47998954f7ba024026f9a6b2150cd3f0b734d9c78e507ab70d59ba61dfe5c45e1078c7ad0775fb251d7735a2@3.220.145.177:30301,enode://8a5a5006159bf079d06a04e5eceab2a1ce6e0f721875b2a9c96905336219dbe14203d38f70f3754686a6324f786c2f9852d8c0dd3adac2d080f4db35efc678c5@3.231.11.52:30301,enode://cdadbe835308ad3557f9a1de8db411da1a260a98f8421d62da90e71da66e55e98aaa8e90aa7ce01b408a54e4bd2253d701218081ded3dbe5efbbc7b41d7cef79@54.198.153.150:30301";
+
+        let config = DiscV5Config::builder().add_enode_boot_nodes(OP_GETH_BOOTNODES).build();
+
+        const MUTLI_ADDRESSES: &str = "/ip4/184.72.129.189/udp/30301/p2p/16Uiu2HAmSG2hdLwyQHQmG4bcJBgD64xnW63WMTLcrNq6KoZREfGb,/ip4/3.231.11.52/udp/30301/p2p/16Uiu2HAmMy4V8bi3XP7KDfSLQcLACSvTLroRRwEsTyFUKo8NCkkp,/ip4/54.198.153.150/udp/30301/p2p/16Uiu2HAmSVsb7MbRf1jg3Dvd6a3n5YNqKQwn1fqHCFgnbqCsFZKe,/ip4/3.220.145.177/udp/30301/p2p/16Uiu2HAm74pBDGdQ84XCZK27GRQbGFFwQ7RsSqsPwcGmCR3Cwn3B,/ip4/3.231.138.188/udp/30301/p2p/16Uiu2HAmMnTiJwgFtSVGV14ZNpwAvS1LUoF4pWWeNtURuV6C3zYB";
+
+        for node in MUTLI_ADDRESSES.split(&[',']) {
+            assert!(config.bootstrap_nodes.contains(&BootNode::Enode(node.to_string())));
         }
     }
 }
