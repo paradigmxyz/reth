@@ -182,7 +182,7 @@ impl TransactionBuilder {
                 gas_limit: self.gas_limit,
                 max_fee_per_gas: self.max_fee_per_gas,
                 max_priority_fee_per_gas: self.max_priority_fee_per_gas,
-                to: self.to,
+                to: self.to.to().expect("EIP4844 tx must have `to`"),
                 value: self.value,
                 access_list: self.access_list,
                 input: self.input,

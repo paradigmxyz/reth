@@ -154,7 +154,7 @@ pub enum MockTransaction {
         /// The gas limit for the transaction.
         gas_limit: u64,
         /// The transaction's destination.
-        to: TransactionKind,
+        to: Address,
         /// The value of the transaction.
         value: U256,
         /// The access list associated with the transaction.
@@ -246,7 +246,7 @@ impl MockTransaction {
             max_priority_fee_per_gas: MIN_PROTOCOL_BASE_FEE as u128,
             max_fee_per_blob_gas: DATA_GAS_PER_BLOB as u128,
             gas_limit: 0,
-            to: TransactionKind::Call(Address::random()),
+            to: Address::random(),
             value: Default::default(),
             input: Bytes::new(),
             accesslist: Default::default(),
@@ -670,12 +670,12 @@ impl PoolTransaction for MockTransaction {
     }
 
     /// Returns the transaction kind associated with the transaction.
-    fn kind(&self) -> &TransactionKind {
+    fn kind(&self) -> TransactionKind {
         match self {
             MockTransaction::Legacy { to, .. } |
             MockTransaction::Eip1559 { to, .. } |
-            MockTransaction::Eip4844 { to, .. } |
-            MockTransaction::Eip2930 { to, .. } => to,
+            MockTransaction::Eip2930 { to, .. } => *to,
+            MockTransaction::Eip4844 { to, .. } => TransactionKind::Call(*to),
         }
     }
 

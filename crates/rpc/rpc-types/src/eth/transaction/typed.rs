@@ -102,8 +102,8 @@ pub struct EIP4844TransactionRequest {
     pub max_fee_per_gas: U256,
     /// The gas limit for the transaction
     pub gas_limit: U256,
-    /// The kind of transaction (e.g., Call, Create)
-    pub kind: TransactionKind,
+    /// The 160-bit address of the message call’s recipient.
+    pub to: Address,
     /// The value of the transaction
     pub value: U256,
     /// The input data for the transaction

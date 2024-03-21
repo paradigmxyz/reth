@@ -49,7 +49,7 @@ fn fill(
 
     let to = match signed_tx.kind() {
         PrimitiveTransactionKind::Create => None,
-        PrimitiveTransactionKind::Call(to) => Some(*to),
+        PrimitiveTransactionKind::Call(to) => Some(to),
     };
 
     #[allow(unreachable_patterns)]

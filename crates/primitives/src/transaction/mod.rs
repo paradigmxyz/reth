@@ -173,14 +173,14 @@ impl Transaction {
 
     /// Gets the transaction's [`TransactionKind`], which is the address of the recipient or
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
-    pub fn kind(&self) -> &TransactionKind {
+    pub fn kind(&self) -> TransactionKind {
         match self {
             Transaction::Legacy(TxLegacy { to, .. }) |
             Transaction::Eip2930(TxEip2930 { to, .. }) |
-            Transaction::Eip1559(TxEip1559 { to, .. }) |
-            Transaction::Eip4844(TxEip4844 { to, .. }) => to,
+            Transaction::Eip1559(TxEip1559 { to, .. }) => *to,
+            Transaction::Eip4844(TxEip4844 { to, .. }) => TransactionKind::Call(*to),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(TxDeposit { to, .. }) => to,
+            Transaction::Deposit(TxDeposit { to, .. }) => *to,
         }
     }
 
