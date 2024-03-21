@@ -32,17 +32,17 @@ pub enum ExExEvent {
 #[derive(Debug)]
 pub struct ExExContext<Node: FullNodeTypes> {
     /// The current head of the blockchain at launch.
-    head: Head,
+    pub head: Head,
     /// The configured provider to interact with the blockchain.
-    provider: Node::Provider,
+    pub provider: Node::Provider,
     /// The task executor of the node.
-    task_executor: TaskExecutor,
+    pub task_executor: TaskExecutor,
     /// The data dir of the node.
-    data_dir: ChainPath<DataDirPath>,
+    pub data_dir: ChainPath<DataDirPath>,
     /// The config of the node
-    config: NodeConfig,
+    pub config: NodeConfig,
     /// The loaded node config
-    reth_config: reth_config::Config,
+    pub reth_config: reth_config::Config,
     // TODO(alexey): add pool, payload builder, anything else?
 }
 
