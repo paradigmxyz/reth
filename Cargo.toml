@@ -196,9 +196,9 @@ reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 
 # revm
-revm = { version = "7.1.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "3.0.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "f96bc1f" }
+revm = { version = "7.2.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "2b48b65" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
@@ -288,7 +288,7 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
 enr = { version = "=0.10.0", default-features = false, features = ["k256"] }
 
 # for eip-4844
-c-kzg = "0.4.2"
+c-kzg = "1.0.0"
 
 # config
 confy = "0.6"
