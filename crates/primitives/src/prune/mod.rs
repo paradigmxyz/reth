@@ -149,8 +149,8 @@ impl PruneProgress {
         Self::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached)
     }
 
-    /// Returns `true` if prune job is done.
-    pub fn is_done(&self) -> bool {
+    /// Returns `true` if prune job is finished.
+    pub fn is_finished(&self) -> bool {
         matches!(self, Self::Finished)
     }
 

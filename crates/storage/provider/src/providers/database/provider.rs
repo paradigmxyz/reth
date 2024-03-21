@@ -321,7 +321,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// Gets walker for given table.
     pub fn with_walker<T: Table, F, R>(
         &self,
-        range: RangeInclusive<<T as Table>::Key>,
+        range: impl RangeBounds<<T as Table>::Key>,
         f: F,
     ) -> Result<R, DatabaseError>
     where
@@ -836,18 +836,12 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut keys = keys.into_iter();
 
-        if !limiter.is_limit_reached() {
-            for key in &mut keys {
-                let row = cursor.seek_exact(key.clone())?;
-                if let Some(row) = row {
-                    cursor.delete_current()?;
-                    limiter.increment_deleted_entries_count();
-                    delete_callback(row);
-                }
-
-                if limiter.is_limit_reached() {
-                    break
-                }
+        while let (false, Some(key)) = (limiter.is_limit_reached(), keys.next()) {
+            let row = cursor.seek_exact(key.clone())?;
+            if let Some(row) = row {
+                cursor.delete_current()?;
+                limiter.increment_deleted_entries_count();
+                delete_callback(row);
             }
         }
 
@@ -2602,7 +2596,7 @@ fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {
 
 /// Limits on how long one prune job can run before it's forced to stop and thereby yield the
 /// [`DatabaseProviderRW`] hook. Note: one prune job can consist of pruning several segments.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PruneLimiter {
     /// Maximum entries (rows in the database) to delete from the database per block.
     deleted_entries_limit: Option<usize>,
@@ -2836,7 +2830,7 @@ pub enum PruneStepResult {
 
 impl PruneStepResult {
     /// Returns `true` if there are no more entries to prune in given range.
-    pub fn is_done(&self) -> bool {
+    pub fn is_finished(&self) -> bool {
         matches!(self, Self::Finished)
     }
 

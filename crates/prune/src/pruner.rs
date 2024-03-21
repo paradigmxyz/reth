@@ -7,7 +7,8 @@ use crate::{
 };
 use reth_db::database::Database;
 use reth_primitives::{
-    BlockNumber, PruneMode, PruneProgress, PrunePurpose, PruneSegment, StaticFileSegment,
+    BlockNumber, PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
+    StaticFileSegment,
 };
 use reth_provider::{
     DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder,
@@ -46,7 +47,7 @@ pub struct Pruner<DB> {
     /// Maximum number of blocks to be pruned per run, as an additional restriction to
     /// `previous_tip_block_number`.
     prune_max_blocks_per_run: usize,
-    /// Time a pruner job can run before timing out.
+    /// Maximum time for a one pruner run.
     timeout: Option<Duration>,
     #[doc(hidden)]
     metrics: Metrics,
@@ -134,12 +135,14 @@ impl<DB: Database> Pruner<DB> {
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        let message = if progress.is_timed_out() {
-            "Pruner interrupted by timeout"
-        } else if progress.is_entries_limit_reached() {
-            "Pruner interrupted by limit on deleted segments"
-        } else {
-            "Pruner finished"
+        let message = match progress {
+            PruneProgress::HasMoreData(PruneInterruptReason::Timeout) => {
+                "Pruner interrupted by timeout"
+            }
+            PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached) => {
+                "Pruner interrupted by limit on deleted entries"
+            }
+            PruneProgress::Finished => "Pruner finished",
         };
 
         debug!(
@@ -171,7 +174,7 @@ impl<DB: Database> Pruner<DB> {
         mut limiter: PruneLimiter,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
         let static_file_segments = self.static_file_segments();
-        let segments = static_file_segments
+        let mut segments = static_file_segments
             .iter()
             .map(|segment| (segment, PrunePurpose::StaticFile))
             .chain(self.segments.iter().map(|segment| (segment, PrunePurpose::User)));
@@ -179,74 +182,65 @@ impl<DB: Database> Pruner<DB> {
         let mut done = true;
         let mut stats = PrunerStats::new();
 
-        if !limiter.is_limit_reached() {
-            for (segment, purpose) in segments {
-                if let Some((to_block, prune_mode)) = segment
-                    .mode()
-                    .map(|mode| {
-                        mode.prune_target_block(tip_block_number, segment.segment(), purpose)
-                    })
-                    .transpose()?
-                    .flatten()
-                {
-                    debug!(
-                        target: "pruner",
-                        segment = ?segment.segment(),
-                        ?purpose,
-                        %to_block,
-                        ?prune_mode,
-                        "Segment pruning started"
-                    );
+        while let (false, Some((segment, purpose))) = (limiter.is_limit_reached(), segments.next())
+        {
+            if let Some((to_block, prune_mode)) = segment
+                .mode()
+                .map(|mode| mode.prune_target_block(tip_block_number, segment.segment(), purpose))
+                .transpose()?
+                .flatten()
+            {
+                debug!(
+                    target: "pruner",
+                    segment = ?segment.segment(),
+                    ?purpose,
+                    %to_block,
+                    ?prune_mode,
+                    "Segment pruning started"
+                );
 
-                    let segment_start = Instant::now();
-                    let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
-                    let segment_limiter = segment.new_limiter_from_parent_scope_limiter(&limiter);
-                    let output = segment.prune(
-                        provider,
-                        PruneInput { previous_checkpoint, to_block, limiter: segment_limiter },
-                    )?;
-                    if let Some(checkpoint) = output.checkpoint {
-                        segment.save_checkpoint(
-                            provider,
-                            checkpoint.as_prune_checkpoint(prune_mode),
-                        )?;
-                    }
-                    self.metrics
-                        .get_prune_segment_metrics(segment.segment())
-                        .duration_seconds
-                        .record(segment_start.elapsed());
-
-                    self.metrics
-                        .get_prune_segment_metrics(segment.segment())
-                        .highest_pruned_block
-                        .set(to_block as f64);
-
-                    done = done && output.progress.is_done();
-                    limiter.increment_deleted_entries_count_by(output.pruned);
-
-                    debug!(
-                        target: "pruner",
-                        segment = ?segment.segment(),
-                        ?purpose,
-                        %to_block,
-                        ?prune_mode,
-                        %output.pruned,
-                        "Segment pruning finished"
-                    );
-
-                    if output.pruned > 0 {
-                        // sets `is_timed_out`
-                        let _ = limiter.is_limit_reached();
-
-                        stats.insert(segment.segment(), (output.progress, output.pruned));
-                    }
-                } else {
-                    debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
+                let segment_start = Instant::now();
+                let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
+                let segment_limiter = segment.new_limiter_from_parent_scope_limiter(&limiter);
+                let output = segment.prune(
+                    provider,
+                    PruneInput { previous_checkpoint, to_block, limiter: segment_limiter },
+                )?;
+                if let Some(checkpoint) = output.checkpoint {
+                    segment
+                        .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
                 }
+                self.metrics
+                    .get_prune_segment_metrics(segment.segment())
+                    .duration_seconds
+                    .record(segment_start.elapsed());
 
-                if limiter.is_limit_reached() {
-                    break
+                self.metrics
+                    .get_prune_segment_metrics(segment.segment())
+                    .highest_pruned_block
+                    .set(to_block as f64);
+
+                done = done && output.progress.is_finished();
+                limiter.increment_deleted_entries_count_by(output.pruned);
+
+                debug!(
+                    target: "pruner",
+                    segment = ?segment.segment(),
+                    ?purpose,
+                    %to_block,
+                    ?prune_mode,
+                    %output.pruned,
+                    "Segment pruning finished"
+                );
+
+                if output.pruned > 0 {
+                    // sets `is_timed_out`
+                    let _ = limiter.is_limit_reached();
+
+                    stats.insert(segment.segment(), (output.progress, output.pruned));
                 }
+            } else {
+                debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
             }
         }
 

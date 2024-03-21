@@ -213,8 +213,8 @@ mod tests {
                 .unwrap();
             provider.commit().expect("commit");
 
-            let last_pruned_block_number =
-                last_pruned_block_number.checked_sub(if result.progress.is_done() { 0 } else { 1 });
+            let last_pruned_block_number = last_pruned_block_number
+                .checked_sub(if result.progress.is_finished() { 0 } else { 1 });
 
             assert_eq!(
                 db.table::<tables::TransactionHashNumbers>().unwrap().len(),

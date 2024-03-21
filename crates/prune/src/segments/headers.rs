@@ -64,11 +64,7 @@ impl<DB: Database> Segment<DB> for Headers {
             last_pruned_block = res?;
         }
 
-        let done = || -> bool {
-            let Some(block) = last_pruned_block else { return false };
-            block == block_range_end
-        }();
-
+        let done = last_pruned_block.map_or(false, |block| block == block_range_end);
         let progress = PruneProgress::new(done, limiter.is_timed_out());
         let pruned = limiter.deleted_entries_count();
 

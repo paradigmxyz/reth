@@ -7,54 +7,8 @@ use reth_db::{
     BlockNumberList,
 };
 use reth_interfaces::db::DatabaseError;
-use reth_provider::{DatabaseProviderRW, PruneLimiter};
+use reth_provider::PruneLimiter;
 use tracing::trace;
-
-/// Prune history indices up to the provided block, inclusive.
-///
-/// Returns total number of processed (walked) and deleted entities.
-pub(crate) fn _prune_history_indices<DB, T, SK>(
-    provider: &DatabaseProviderRW<DB>,
-    to_block: u64,
-    mut limiter: PruneLimiter,
-    key_matches: impl Fn(&T::Key, &T::Key) -> bool,
-    last_key: impl Fn(&T::Key) -> T::Key,
-) -> Result<(usize, usize), DatabaseError>
-where
-    DB: Database,
-    T: Table<Value = BlockNumberList>,
-    T::Key: AsRef<ShardedKey<SK>>,
-{
-    let mut processed = 0;
-    let mut cursor = provider.tx_ref().cursor_write::<T>()?;
-
-    // Prune history table:
-    // 1. If the shard has `highest_block_number` less than or equal to the target block number
-    // for pruning, delete the shard completely.
-    // 2. If the shard has `highest_block_number` greater than the target block number for
-    // pruning, filter block numbers inside the shard which are less than the target
-    // block number for pruning.
-    loop {
-        // check for time out must be done in this scope since it's not done in
-        // `step_prune_indices`
-        if limiter.is_limit_reached() {
-            break
-        }
-
-        match step_prune_indices::<DB, T, SK>(
-            &mut cursor,
-            to_block,
-            &mut limiter,
-            &key_matches,
-            &last_key,
-        )? {
-            PruneStepResult::Finished | PruneStepResult::ReachedDeletedEntriesLimit => break,
-            PruneStepResult::MaybeMoreData => processed += 1,
-        }
-    }
-
-    Ok((processed, limiter.deleted_entries_count()))
-}
 
 /// Steps once with given cursor.
 ///

@@ -56,7 +56,7 @@ impl<DB: Database> Segment<DB> for SenderRecovery {
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
             // If there's more transaction senders to prune, set the checkpoint block number to
             // previous, so we could finish pruning its transaction senders on the next run.
-            .checked_sub(if progress.is_done() { 0 } else { 1 });
+            .checked_sub(if progress.is_finished() { 0 } else { 1 });
 
         Ok(PruneOutput {
             progress,
@@ -185,8 +185,8 @@ mod tests {
                 .unwrap();
             provider.commit().expect("commit");
 
-            let last_pruned_block_number =
-                last_pruned_block_number.checked_sub(if result.progress.is_done() { 0 } else { 1 });
+            let last_pruned_block_number = last_pruned_block_number
+                .checked_sub(if result.progress.is_finished() { 0 } else { 1 });
 
             assert_eq!(
                 db.table::<tables::TransactionSenders>().unwrap().len(),

@@ -153,7 +153,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                 |row| last_pruned_transaction = Some(row.0),
             )?;
 
-            done = progress.is_done();
+            done = progress.is_finished();
 
             trace!(target: "pruner", %deleted, ?progress, ?block_range, "Pruned receipts");
 

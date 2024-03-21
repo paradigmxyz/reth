@@ -61,11 +61,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             last_pruned_block = res?;
         }
 
-        let done = || -> bool {
-            let Some(block) = last_pruned_block else { return false };
-            block == block_range_end
-        }();
-
+        let done = last_pruned_block.map_or(false, |block| block == block_range_end);
         let progress = PruneProgress::new(done, limiter.is_timed_out());
         let pruned = limiter.deleted_entries_count();
 
@@ -141,7 +137,7 @@ where
             },
         ) {
             Err(err) => return Some(Err(err.into())),
-            Ok(res) => if res.is_done() {
+            Ok(res) => if res.is_finished() {
                 last_pruned_block_changesets
             } else {
                 last_pruned_block_changesets.map(|block| block.saturating_sub(1))
@@ -331,7 +327,7 @@ mod tests {
         let reported_pruned = result.pruned;
 
         // verify new state of data against result
-        if expected_progress.is_done() {
+        if expected_progress.is_finished() {
             // todo: debug why `pruned`` + 1 sometimes?
             // `pruned` comes from limiter.deleted_entries_count(). how is one less entry counted
             // related to checkpoint saved at previous block if change set not completely pruned...?

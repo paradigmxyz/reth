@@ -77,28 +77,13 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
 
 /// Segment pruning input, see [Segment::prune].
 #[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
 pub struct PruneInput {
     pub(crate) previous_checkpoint: Option<PruneCheckpoint>,
     /// Target block up to which the pruning needs to be done, inclusive.
     pub(crate) to_block: BlockNumber,
     /// Limits pruning of segment in prune job.
     pub(crate) limiter: PruneLimiter,
-}
-
-impl Clone for PruneInput {
-    fn clone(&self) -> Self {
-        let Self { previous_checkpoint, to_block, limiter } = self;
-
-        let previous_checkpoint = *previous_checkpoint;
-        let to_block = *to_block;
-        let limiter = PruneLimiterBuilder::floor_deleted_entries_limit_to_multiple_of(
-            limiter,
-            NonZeroUsize::new(1).unwrap(),
-        )
-        .build();
-
-        Self { previous_checkpoint, to_block, limiter }
-    }
 }
 
 impl PruneInput {
@@ -177,10 +162,6 @@ impl PruneInput {
             .map(|block_number| block_number + 1)
             // No checkpoint exists, prune from genesis
             .unwrap_or(0)
-    }
-
-    pub(crate) fn _get_last_pruned_block(&self) -> Option<u64> {
-        self.previous_checkpoint?.block_number
     }
 }
 

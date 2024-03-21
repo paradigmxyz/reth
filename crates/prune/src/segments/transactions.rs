@@ -55,7 +55,7 @@ impl<DB: Database> Segment<DB> for Transactions {
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
             // If there's more transactions to prune, set the checkpoint block number to previous,
             // so we could finish pruning its transactions on the next run.
-            .checked_sub(if progress.is_done() { 0 } else { 1 });
+            .checked_sub(if progress.is_finished() { 0 } else { 1 });
 
         Ok(PruneOutput {
             progress,
@@ -166,7 +166,7 @@ mod tests {
                 })
                 .into_inner()
                 .0
-                .checked_sub(if result.progress.is_done() { 0 } else { 1 });
+                .checked_sub(if result.progress.is_finished() { 0 } else { 1 });
 
             assert_eq!(
                 db.table::<tables::Transactions>().unwrap().len(),

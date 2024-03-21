@@ -65,11 +65,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             last_pruned_block = res?;
         }
 
-        let done = || -> bool {
-            let Some(block) = last_pruned_block else { return false };
-            block == block_range_end
-        }();
-
+        let done = last_pruned_block.map_or(false, |block| block == block_range_end);
         let progress = PruneProgress::new(done, limiter.is_timed_out());
         let pruned = limiter.deleted_entries_count();
 
@@ -129,14 +125,13 @@ where
             return None
         }
 
-        let block_step =
-            BlockNumberAddress::range_inclusive(if let Some(block) = *last_pruned_block {
-                block + 1..=block + 2
-            } else {
-                0..=1
-            });
+        let block_step = BlockNumberAddress::range(if let Some(block) = *last_pruned_block {
+            block + 1..=block + 2
+        } else {
+            0..=1
+        });
 
-        let next_up_last_pruned_block = Some(block_step.start().block_number());
+        let next_up_last_pruned_block = Some(block_step.start.block_number());
         let mut last_pruned_block_changesets = None;
         // todo: guarantee skip filter and delete callback are same for all header table types
 
@@ -149,12 +144,12 @@ where
             },
         ) {
             Err(err) => return Some(Err(err.into())),
-            Ok(res) => if res.is_done() {
+            Ok(res) => if res.is_finished() {
                 last_pruned_block_changesets
             } else {
                 last_pruned_block_changesets.map(|block| block.saturating_sub(1))
             }
-            .unwrap_or_else(|| block_step.end().block_number()),
+            .unwrap_or_else(|| block_step.end.block_number()),
         };
 
         if let Err(err) = provider.with_cursor::<tables::StoragesHistory, _, _>(|ref mut cursor| {
@@ -341,7 +336,7 @@ mod tests {
         let reported_pruned = result.pruned;
 
         // verify new state of data against result
-        if expected_progress.is_done() {
+        if expected_progress.is_finished() {
             // todo: debug why `pruned`` + 1 sometimes?
             // `pruned` comes from limiter.deleted_entries_count(). how is one less entry counted
             // related to checkpoint saved at previous block if change set not completely pruned...?

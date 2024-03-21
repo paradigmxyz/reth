@@ -74,11 +74,6 @@ impl BlockNumberAddress {
         (*range.start(), Address::ZERO).into()..(*range.end() + 1, Address::ZERO).into()
     }
 
-    /// Create a new [`RangeInclusive`] from `start` to `end`
-    pub fn range_inclusive(range: RangeInclusive<BlockNumber>) -> RangeInclusive<Self> {
-        (*range.start(), Address::ZERO).into()..=(*range.end(), Address::ZERO).into()
-    }
-
     /// Return the block number
     pub fn block_number(&self) -> BlockNumber {
         self.0 .0
