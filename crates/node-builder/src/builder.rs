@@ -41,10 +41,7 @@ use reth_node_core::{
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
 };
-use reth_primitives::{
-    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    format_ether, ChainSpec,
-};
+use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, format_ether, ChainSpec};
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
@@ -1104,16 +1101,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.config().txpool.pool_config()
     }
 
-    /// Loads the trusted setup params from a given file path or falls back to
-    /// `MAINNET_KZG_TRUSTED_SETUP`.
+    /// Loads `MAINNET_KZG_TRUSTED_SETUP`.
     pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-        if let Some(ref trusted_setup_file) = self.config().trusted_setup_file {
-            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .map_err(LoadKzgSettingsError::KzgError)?;
-            Ok(Arc::new(trusted_setup))
-        } else {
-            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
-        }
+        Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
     }
 
     /// Returns the config for payload building.
