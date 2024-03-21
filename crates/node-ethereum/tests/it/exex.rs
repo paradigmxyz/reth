@@ -26,7 +26,7 @@ impl<N: FullNodeTypes> Stream for DummyExEx<N> {
     type Item = ExExEvent;
 
     fn poll_next(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(None)
+        Poll::Pending
     }
 }
 
