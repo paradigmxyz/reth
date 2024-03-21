@@ -35,17 +35,17 @@ pub enum Error {
     #[error("failed to decode fork id, 'eth': {0:?}")]
     ForkIdDecodeError(#[from] alloy_rlp::Error),
     /// Peer is unreachable over discovery.
-    #[error("discovery socket missing from ENR")]
-    UnreachableDiscovery,
+    #[error("discovery socket missing, ENR: {0}")]
+    UnreachableDiscovery(discv5::Enr),
     /// Peer is unreachable over mempool.
-    #[error("mempool TCP socket missing from ENR")]
-    UnreachableMempool,
+    #[error("mempool TCP socket missing, ENR: {0}")]
+    UnreachableMempool(discv5::Enr),
     /// Peer is not using same IP version as local node in discovery.
-    #[error("discovery socket on ENR is unsupported IP version")]
-    IpVersionMismatchDiscovery,
+    #[error("discovery socket is unsupported IP version, ENR: {0}, local ip mode: {1:?}")]
+    IpVersionMismatchDiscovery(discv5::Enr, IpMode),
     /// Peer is not using same IP version as local node in mempool.
-    #[error("mempool TCP socket on ENR is unsupported IP version")]
-    IpVersionMismatchMempool,
+    #[error("mempool TCP socket is unsupported IP version, ENR: {0}, local ip mode: {1:?}")]
+    IpVersionMismatchMempool(discv5::Enr, IpMode),
 }
 
 /// Use API of [`discv5::Discv5`].
@@ -73,17 +73,19 @@ pub trait HandleDiscv5 {
     fn try_into_reachable(&self, enr: discv5::Enr) -> Result<NodeRecord, Error> {
         // todo: track unreachable with metrics
         if enr.udp4_socket().is_none() && enr.udp6_socket().is_none() {
-            return Err(Error::UnreachableDiscovery)
+            return Err(Error::UnreachableDiscovery(enr))
         }
-        let udp_socket =
-            self.ip_mode().get_contactable_addr(&enr).ok_or(Error::IpVersionMismatchDiscovery)?;
+        let Some(udp_socket) = self.ip_mode().get_contactable_addr(&enr) else {
+            return Err(Error::IpVersionMismatchDiscovery(enr, self.ip_mode()))
+        };
         // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
         // too
-        let tcp_port = match self.ip_mode() {
+        let Some(tcp_port) = (match self.ip_mode() {
             IpMode::Ip4 | IpMode::DualStack => enr.tcp4(),
             IpMode::Ip6 => enr.tcp6(),
-        }
-        .ok_or(Error::IpVersionMismatchMempool)?;
+        }) else {
+            return Err(Error::IpVersionMismatchMempool(enr, self.ip_mode()))
+        };
 
         let id = uncompressed_id_from_enr_pk(&enr);
 
