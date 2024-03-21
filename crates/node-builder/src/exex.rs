@@ -35,8 +35,8 @@ pub struct ExExContext<Node: FullNodeTypes> {
     head: Head,
     /// The configured provider to interact with the blockchain.
     provider: Node::Provider,
-    /// The executor of the node.
-    executor: TaskExecutor,
+    /// The task executor of the node.
+    task_executor: TaskExecutor,
     /// The data dir of the node.
     data_dir: ChainPath<DataDirPath>,
     /// The config of the node
