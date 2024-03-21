@@ -154,7 +154,7 @@ where
             } else {
                 last_pruned_block_changesets.map(|block| block.saturating_sub(1))
             }
-            .unwrap_or(block_step.end().block_number()),
+            .unwrap_or_else(|| block_step.end().block_number()),
         };
 
         if let Err(err) = provider.with_cursor::<tables::StoragesHistory, _, _>(|ref mut cursor| {
