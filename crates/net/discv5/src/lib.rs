@@ -18,7 +18,7 @@ pub mod config;
 pub mod discv5_downgrade_v4;
 pub mod enr;
 
-pub use config::{DiscV5Config, DiscV5ConfigBuilder};
+pub use config::{BootNode, DiscV5Config, DiscV5ConfigBuilder};
 pub use discv5_downgrade_v4::{DiscV5WithV4Downgrade, MergedUpdateStream};
 pub use enr::uncompressed_id_from_enr_pk;
 

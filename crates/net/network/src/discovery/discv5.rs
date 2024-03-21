@@ -2,18 +2,19 @@
 
 use crate::error::NetworkError;
 use discv5::{enr::Enr, IpMode};
-use futures::StreamExt;
+use futures::{future::join_all, StreamExt};
+use itertools::Itertools;
 use reth_discv4::SecretKey;
 use reth_discv5::{
     enr::{uncompressed_id_from_enr_pk, EnrCombinedKeyWrapper},
-    DiscV5, DiscV5Config, HandleDiscv5,
+    BootNode, DiscV5, DiscV5Config, HandleDiscv5,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::NodeRecord;
 use tokio::{sync::mpsc, task};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 use std::{
     pin::Pin,
@@ -209,6 +210,7 @@ pub(super) async fn start_discv5(
         tcp_port,
         other_enr_data,
         _allow_no_tcp_discovered_nodes,
+        self_lookup_interval,
     ) = discv5_config.destruct();
 
     let (enr, bc_enr, ip_mode) = {
@@ -280,18 +282,68 @@ pub(super) async fn start_discv5(
     let discv5_updates =
         discv5.event_stream().await.map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
 
+    let discv5 = Arc::new(discv5);
+
     //
     // 4. add boot nodes
     //
+    let mut enr_requests = vec![];
     for node in bootstrap_nodes {
-        discv5.add_enr(node).map_err(NetworkError::custom_discovery)?;
+        match node {
+            BootNode::Enr(node) => discv5.add_enr(node).map_err(NetworkError::custom_discovery)?,
+            BootNode::Enode(enode) => enr_requests.push(task::spawn(async move {
+                let discv5 = discv5.clone();
+                if let Err(err) = discv5.request_enr(enode).await {
+                    debug!(target: "net::discovery::discv5",
+                        enode,
+                        "failed adding boot node"
+                    );
+                }
+            })),
+        }
     }
+    join_all(enr_requests);
+    debug!(target: "net::discovery::discv5",
+    connected_boot_nodes=format!("[{:#}]",discv5.with_kbuckets(|kbuckets| kbuckets.write()
+    .iter()
+    .filter(|entry| entry.status.is_connected()).map(|connected_peer| connected_peer.node_id())).format(", ")),
+            "added boot nodes"
+        );
 
-    // manually initiate first lookup, discard result
-    let discv5 = Arc::new(discv5);
+    // initiate regular lookups to populate kbuckets
     task::spawn({
         let discv5 = discv5.clone();
-        async move { discv5.find_node(discv5.local_enr().node_id()).await }
+        let local_node_id = discv5.local_enr().node_id();
+        // todo: graceful shutdown
+
+        async move {
+            loop {
+                trace!(target: "net::discovery::discv5",
+                    self_lookup_interval,
+                    "starting periodic lookup query"
+                );
+                match discv5.find_node(local_node_id).await {
+                    Err(err) => trace!(target: "net::discovery::discv5",
+                        self_lookup_interval,
+                        %err,
+                        "periodic lookup query failed"
+                    ),
+                    Ok(peers) => trace!(target: "net::discovery::discv5",
+                        self_lookup_interval,
+                        peers=format!("[{:#}]", peers.iter().map(|enr| enr.node_id()).format(", ")),
+                        "peers returned by periodic lookup query"
+                    ),
+                }
+
+                // `Discv5::connected_peers` can be subset of sessions, not all peers make it into
+                // kbuckets, e.g. incoming sessions from peers with unreachable enrs
+                debug!(target: "net::discovery::discv5",
+                    connected_peers=discv5.connected_peers(),
+                    "connected peers in routing table"
+                );
+                tokio::time::sleep(self_lookup_interval).await;
+            }
+        }
     });
 
     Ok((DiscV5::new(discv5, ip_mode), discv5_updates, bc_enr))
