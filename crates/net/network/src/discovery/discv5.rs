@@ -198,6 +198,7 @@ pub(super) async fn start_discv5(
     sk: &SecretKey,
     discv5_config: DiscV5Config,
 ) -> Result<(DiscV5, mpsc::Receiver<discv5::Event>, NodeRecord), NetworkError> {
+    trace!(target: "net::discovery::discv5", "init discv5");
     //
     // 1. make local enr from listen config
     //
@@ -241,8 +242,10 @@ pub(super) async fn start_discv5(
             }
         };
 
-        // add fork id
-        builder.add_value("eth", &alloy_rlp::encode(fork_id));
+        // add fork id if network is L1
+        if let Some(fork_id) = fork_id {
+            builder.add_value("eth", &alloy_rlp::encode(fork_id));
+        }
         // add other data
         for (key, value) in other_enr_data {
             builder.add_value(key, &alloy_rlp::encode(value));

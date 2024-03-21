@@ -4,7 +4,7 @@ use std::{collections::HashSet, net::SocketAddr};
 
 use discv5::ListenConfig;
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_primitives::{Bytes, ForkId, Hardfork, MAINNET};
+use reth_primitives::{Bytes, ForkId};
 
 /// Builds a [`DiscV5Config`].
 #[derive(Debug, Default)]
@@ -38,7 +38,7 @@ impl DiscV5ConfigBuilder {
         Self {
             discv5_config: Some(discv5_config),
             bootstrap_nodes,
-            fork_id: Some(fork_id),
+            fork_id,
             tcp_port: Some(tcp_port),
             other_enr_data,
             allow_no_tcp_discovered_nodes,
@@ -114,9 +114,6 @@ impl DiscV5ConfigBuilder {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let fork_id =
-            fork_id.unwrap_or_else(|| MAINNET.hardfork_fork_id(Hardfork::latest()).unwrap());
-
         let tcp_port = tcp_port.unwrap_or(DEFAULT_DISCOVERY_PORT);
 
         DiscV5Config {
@@ -139,7 +136,7 @@ pub struct DiscV5Config {
     /// Nodes to boot from.
     bootstrap_nodes: HashSet<discv5::Enr>,
     /// [`ForkId`] to set in local node record.
-    fork_id: ForkId,
+    fork_id: Option<ForkId>,
     /// Mempool TCP port to advertise.
     tcp_port: u16,
     /// Additional kv-pairs to include in local node record.
@@ -167,7 +164,7 @@ impl DiscV5Config {
     /// Destructs the config.
     pub fn destruct(
         self,
-    ) -> (discv5::Config, HashSet<discv5::Enr>, ForkId, u16, Vec<(&'static str, Bytes)>, bool) {
+    ) -> (discv5::Config, HashSet<discv5::Enr>, Option<ForkId>, u16, Vec<(&'static str, Bytes)>, bool) {
         let Self {
             discv5_config,
             bootstrap_nodes,
