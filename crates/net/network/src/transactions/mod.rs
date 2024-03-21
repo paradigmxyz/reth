@@ -1112,7 +1112,7 @@ where
         }
     }
 
-    /// Runs an operation to fetch hashes that are cached in in [`TransactionFetcher`].
+    /// Runs an operation to fetch hashes that are cached in [`TransactionFetcher`].
     fn on_fetch_hashes_pending_fetch(&mut self) {
         // try drain transaction hashes pending fetch
         let info = &self.pending_pool_imports_info;
