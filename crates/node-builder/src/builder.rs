@@ -8,7 +8,7 @@ use crate::{
         NodeComponentsBuilder, PoolBuilder,
     },
     hooks::NodeHooks,
-    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter, NodeTypes},
+    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter},
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     Node, NodeHandle,
 };
@@ -28,6 +28,7 @@ use reth_db::{
 };
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
+use reth_node_api::NodeTypes;
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},

@@ -24,3 +24,6 @@ pub mod evm;
 pub use evm::{ConfigureEvm, ConfigureEvmEnv};
 
 pub mod primitives;
+
+pub mod node;
+pub use node::NodeTypes;
