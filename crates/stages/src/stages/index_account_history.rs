@@ -87,7 +87,8 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         let mut range = input.next_block_range();
         let first_sync = input.checkpoint().block_number == 0;
 
-        // On first sync it's faster to rebuild the history from scratch.
+        // On first sync we might have history coming from genesis. We clear the table since it's
+        // faster to rebuild from scratch.
         if first_sync {
             provider.tx_ref().clear::<tables::AccountsHistory>()?;
             range = 0..=*input.next_block_range().end();
