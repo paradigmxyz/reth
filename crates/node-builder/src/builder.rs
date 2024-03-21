@@ -50,7 +50,7 @@ use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, error, info};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use std::{cmp::max, str::FromStr, sync::Arc, thread::available_parallelism};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
@@ -442,11 +442,12 @@ where
         fdlimit::raise_fd_limit()?;
 
         // Limit the global rayon thread pool, reserving 2 cores for the rest of the system
-        ThreadPoolBuilder::new()
+        let _ = ThreadPoolBuilder::new()
             .num_threads(
                 available_parallelism().map_or(25, |cpus| max(cpus.get().saturating_sub(2), 2)),
             )
-            .build_global()?;
+            .build_global()
+            .map_err(|e| error!("Failed to build global thread pool: {:?}", e));
 
         let provider_factory = ProviderFactory::new(
             database.clone(),
