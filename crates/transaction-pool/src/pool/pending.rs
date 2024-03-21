@@ -264,13 +264,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // the transaction already has an ancestor, so we only need to ensure that the
             // highest nonces set actually contains the highest nonce for that sender
             self.highest_nonces.remove(ancestor);
-            self.highest_nonces.insert(tx.clone());
         } else {
             // If there's __no__ ancestor in the pool, then this transaction is independent, this is
             // guaranteed because this pool is gapless.
             self.independent_transactions.insert(tx.clone());
-            self.highest_nonces.insert(tx.clone());
         }
+        self.highest_nonces.insert(tx.clone());
     }
 
     /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
@@ -447,7 +446,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Truncates the pool to the given [SubPoolLimit], removing transactions until the subpool
     /// limits are met.
     ///
-    /// This attempts to remove transactions by rougly the same amount for each sender. For more
+    /// This attempts to remove transactions by roughly the same amount for each sender. For more
     /// information on this exact process see docs for
     /// [remove_to_limit](PendingPool::remove_to_limit).
     ///

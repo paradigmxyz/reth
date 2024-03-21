@@ -5,7 +5,7 @@ use crate::{
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
-use bytes::{Buf, BytesMut};
+use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -23,7 +23,7 @@ pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 #[cfg(feature = "c-kzg")]
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-#[cfg(all(feature = "c-kzg", feature = "arbitrary"))]
+#[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
 pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
@@ -184,12 +184,15 @@ impl Transaction {
         }
     }
 
-    /// Get the transaction's nonce.
+    /// Get the transaction's address of the contract that will be called, or the address that will
+    /// receive the transfer.
+    ///
+    /// Returns `None` if this is a `CREATE` transaction.
     pub fn to(&self) -> Option<Address> {
         self.kind().to()
     }
 
-    /// Get transaction type
+    /// Get the transaction's type
     pub fn tx_type(&self) -> TxType {
         match self {
             Transaction::Legacy(legacy_tx) => legacy_tx.tx_type(),
@@ -857,8 +860,12 @@ impl TransactionSignedNoHash {
     }
 
     /// Converts into a transaction type with its hash: [`TransactionSigned`].
+    ///
+    /// Note: This will recalculate the hash of the transaction.
+    #[inline]
     pub fn with_hash(self) -> TransactionSigned {
-        self.into()
+        let Self { signature, transaction } = self;
+        TransactionSigned::from_transaction_and_signature(transaction, signature)
     }
 
     /// Recovers a list of signers from a transaction list iterator
@@ -941,7 +948,7 @@ impl Compact for TransactionSignedNoHash {
 
 impl From<TransactionSignedNoHash> for TransactionSigned {
     fn from(tx: TransactionSignedNoHash) -> Self {
-        TransactionSigned::from_transaction_and_signature(tx.transaction, tx.signature)
+        tx.with_hash()
     }
 }
 
@@ -1107,9 +1114,9 @@ impl TransactionSigned {
     ///
     /// See also [TransactionSigned::encode_enveloped]
     pub fn envelope_encoded(&self) -> Bytes {
-        let mut buf = BytesMut::new();
+        let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
-        buf.freeze().into()
+        buf.into()
     }
 
     /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).
@@ -1155,6 +1162,7 @@ impl TransactionSigned {
     }
 
     /// Create a new signed transaction from a transaction and its signature.
+    ///
     /// This will also calculate the transaction hash using its encoding.
     pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
@@ -1278,7 +1286,7 @@ impl TransactionSigned {
         let signature = Signature::decode(data)?;
 
         #[cfg(feature = "optimism")]
-        let signature = if let TxType::Deposit = tx_type {
+        let signature = if tx_type == TxType::Deposit {
             Signature::optimism_deposit_tx_signature()
         } else {
             Signature::decode(data)?
@@ -1506,7 +1514,7 @@ impl TransactionSignedEcRecovered {
         self.signed_transaction
     }
 
-    /// Desolve Self to its component
+    /// Dissolve Self to its component
     pub fn to_components(self) -> (TransactionSigned, Address) {
         (self.signed_transaction, self.signer)
     }
@@ -1635,11 +1643,7 @@ mod tests {
 
         let decoded = TransactionSigned::decode(&mut &tx_bytes[..]).unwrap();
         assert_eq!(tx_bytes.len(), decoded.length());
-
-        let mut encoded = BytesMut::new();
-        decoded.encode(&mut encoded);
-
-        assert_eq!(tx_bytes, encoded[..]);
+        assert_eq!(tx_bytes, &alloy_rlp::encode(decoded)[..]);
     }
 
     #[test]
@@ -1822,10 +1826,7 @@ mod tests {
 
         let decoded = TransactionSigned::decode(&mut &bytes[..]).unwrap();
         assert_eq!(expected, decoded);
-
-        let mut encoded = BytesMut::new();
-        expected.encode(&mut encoded);
-        assert_eq!(bytes, encoded);
+        assert_eq!(bytes, &alloy_rlp::encode(expected));
     }
 
     #[test]
@@ -1956,10 +1957,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("c98080808080801b8080"), &encoded[..]);
+        let encoded = &alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("c98080808080801b8080"), encoded[..]);
         assert_eq!(MIN_LENGTH_LEGACY_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -1975,10 +1974,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("8d01cb80808080808080c0808080"), &encoded[..]);
+        let encoded = &alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("8d01cb80808080808080c0808080"), encoded[..]);
         assert_eq!(MIN_LENGTH_EIP2930_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -1994,10 +1991,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("8e02cc8080808080808080c0808080"), &encoded[..]);
+        let encoded = &alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("8e02cc8080808080808080c0808080"), encoded[..]);
         assert_eq!(MIN_LENGTH_EIP1559_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -2013,10 +2008,8 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
-
-        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), &encoded[..]);
+        let encoded = alloy_rlp::encode(signed_tx);
+        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), encoded[..]);
         assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -2036,8 +2029,7 @@ mod tests {
             signature,
         );
 
-        let mut encoded = BytesMut::new();
-        signed_tx.encode(&mut encoded);
+        let encoded = &alloy_rlp::encode(signed_tx);
 
         assert_eq!(b"\xb8?~\xf8<\xa0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x94\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\x80\x80\x80\x80\x80", &encoded[..]);
         assert_eq!(MIN_LENGTH_DEPOSIT_TX_ENCODED, encoded.len());

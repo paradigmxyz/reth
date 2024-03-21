@@ -7,6 +7,7 @@ use reth_primitives::{
     Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
 };
 use reth_trie::updates::TrieUpdates;
+use revm::db::BundleState;
 
 /// Type alias of boxed [StateProvider].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -235,12 +236,12 @@ pub trait StateRootProvider: Send + Sync {
     /// NOTE: It is recommended to provide a different implementation from
     /// `state_root_with_updates` since it affects the memory usage during state root
     /// computation.
-    fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256>;
+    fn state_root(&self, bundle_state: &BundleState) -> ProviderResult<B256>;
 
     /// Returns the state root of the BundleState on top of the current state with trie
     /// updates to be committed to the database.
     fn state_root_with_updates(
         &self,
-        bundle_state: &BundleStateWithReceipts,
+        bundle_state: &BundleState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
 }

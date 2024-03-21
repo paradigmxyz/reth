@@ -49,4 +49,4 @@ reth-payload-builder = { workspace = true, features = ["test-utils"] }
 assert_matches.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism", "reth-rpc-types/optimism"]
+optimism = ["reth-primitives/optimism"]

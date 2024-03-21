@@ -63,7 +63,7 @@ mod invalid_headers;
 use invalid_headers::InvalidHeaderCache;
 
 mod event;
-pub use event::BeaconConsensusEngineEvent;
+pub use event::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
 
 mod handle;
 pub use handle::BeaconConsensusEngineHandle;
@@ -287,6 +287,7 @@ where
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
         let handle = BeaconConsensusEngineHandle { to_engine };
+        let listeners = EventListeners::default();
         let sync = EngineSyncController::new(
             pipeline,
             client,
@@ -294,6 +295,7 @@ where
             run_pipeline_continuously,
             max_block,
             blockchain.chain_spec(),
+            listeners.clone(),
         );
         let mut this = Self {
             sync,
@@ -304,7 +306,7 @@ where
             handle: handle.clone(),
             forkchoice_state_tracker: Default::default(),
             payload_builder,
-            listeners: EventListeners::default(),
+            listeners,
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             metrics: EngineMetrics::default(),
             pipeline_run_threshold,
@@ -427,15 +429,13 @@ where
 
                 PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
             }
-            Err(error) => {
-                if let RethError::Canonical(ref err) = error {
-                    if err.is_fatal() {
-                        tracing::error!(target: "consensus::engine", %err, "Encountered fatal error");
-                        return Err(error)
-                    }
+            Err(err) => {
+                if err.is_fatal() {
+                    error!(target: "consensus::engine", %err, "Encountered fatal error");
+                    return Err(err.into())
                 }
 
-                self.on_failed_canonical_forkchoice_update(&state, error)
+                self.on_failed_canonical_forkchoice_update(&state, err)
             }
         };
 
@@ -603,6 +603,13 @@ where
     /// [`BeaconConsensusEngine`]
     pub fn handle(&self) -> BeaconConsensusEngineHandle<EngineT> {
         self.handle.clone()
+    }
+
+    /// Pushes an [UnboundedSender] to the engine's listeners. Also pushes an [UnboundedSender] to
+    /// the sync controller's listeners.
+    pub(crate) fn push_listener(&mut self, listener: UnboundedSender<BeaconConsensusEngineEvent>) {
+        self.listeners.push_listener(listener.clone());
+        self.sync.push_listener(listener);
     }
 
     /// Returns true if the distance from the local tip to the block is greater than the configured
@@ -788,11 +795,11 @@ where
     /// Record latency metrics for one call to make a block canonical
     /// Takes start time of the call and result of the make canonical call
     ///
-    /// Handles cases for error, already canonical and commmitted blocks
+    /// Handles cases for error, already canonical and committed blocks
     fn record_make_canonical_latency(
         &self,
         start: Instant,
-        outcome: &Result<CanonicalOutcome, RethError>,
+        outcome: &Result<CanonicalOutcome, CanonicalError>,
     ) -> Duration {
         let elapsed = start.elapsed();
         self.metrics.make_canonical_latency.record(elapsed);
@@ -915,7 +922,7 @@ where
             total_difficulty: Default::default(),
         };
 
-        // we update the the tracked header first
+        // we update the tracked header first
         self.blockchain.set_canonical_head(head);
 
         head_block.total_difficulty =
@@ -980,7 +987,7 @@ where
     fn on_failed_canonical_forkchoice_update(
         &mut self,
         state: &ForkchoiceState,
-        error: RethError,
+        error: CanonicalError,
     ) -> PayloadStatus {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
@@ -993,18 +1000,16 @@ where
         }
 
         match &error {
-            RethError::Canonical(
-                error @ CanonicalError::Validation(BlockValidationError::BlockPreMerge { .. }),
-            ) => {
+            CanonicalError::Validation(BlockValidationError::BlockPreMerge { .. }) => {
                 warn!(target: "consensus::engine", %error, ?state, "Failed to canonicalize the head hash");
                 return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
                 .with_latest_valid_hash(B256::ZERO)
             }
-            RethError::Canonical(CanonicalError::BlockchainTree(
-                BlockchainTreeError::BlockHashNotFoundInChain { .. },
-            )) => {
+            CanonicalError::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain {
+                ..
+            }) => {
                 // This just means we couldn't find the block when attempting to make it canonical,
                 // so we should not warn the user, since this will result in us attempting to sync
                 // to a new target and is considered normal operation during sync
@@ -1080,7 +1085,7 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
-    #[instrument(level = "trace", skip(self, payload, cancun_fields), fields(block_hash= ?payload.block_hash(), block_number = %payload.block_number(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
+    #[instrument(level = "trace", skip(self, payload, cancun_fields), fields(block_hash = ?payload.block_hash(), block_number = %payload.block_number(), is_pipeline_idle = %self.sync.is_pipeline_idle()), target = "consensus::engine")]
     fn on_new_payload(
         &mut self,
         payload: ExecutionPayload,
@@ -1120,7 +1125,26 @@ where
                         // if we're currently syncing and the inserted block is the targeted FCU
                         // head block, we can try to make it canonical.
                         if block_hash == target.head_block_hash {
-                            self.try_make_sync_target_canonical(block_num_hash);
+                            if let Err((_hash, error)) =
+                                self.try_make_sync_target_canonical(block_num_hash)
+                            {
+                                if error.is_fatal() {
+                                    error!(target: "consensus::engine", %error, "Encountered fatal error");
+                                    return Err(BeaconOnNewPayloadError::Internal(Box::new(error)))
+                                } else {
+                                    // If we could not make the sync target block canonical, we
+                                    // should return the error as an invalid payload status.
+                                    return Ok(PayloadStatus::new(
+                                        PayloadStatusEnum::Invalid {
+                                            validation_error: error.to_string(),
+                                        },
+                                        // TODO: return a proper latest valid hash
+                                        //
+                                        // See: <https://github.com/paradigmxyz/reth/issues/7146>
+                                        self.forkchoice_state_tracker.last_valid_head(),
+                                    ))
+                                }
+                            }
                         }
                     }
                     // block was successfully inserted, so we can cancel the full block request, if
@@ -1148,21 +1172,22 @@ where
     ///    - the versioned hashes passed with the payload do not exactly match transaction
     ///    versioned hashes
     ///    - the block does not contain blob transactions if it is pre-cancun
-    // This validates the following engine API rule:
-    //
-    // 3. Given the expected array of blob versioned hashes client software **MUST** run its
-    //    validation by taking the following steps:
-    //
-    //   1. Obtain the actual array by concatenating blob versioned hashes lists
-    //      (`tx.blob_versioned_hashes`) of each [blob
-    //      transaction](https://eips.ethereum.org/EIPS/eip-4844#new-transaction-type) included
-    //      in the payload, respecting the order of inclusion. If the payload has no blob
-    //      transactions the expected array **MUST** be `[]`.
-    //
-    //   2. Return `{status: INVALID, latestValidHash: null, validationError: errorMessage | null}`
-    //      if the expected and the actual arrays don't match.
-    //
-    // This validation **MUST** be instantly run in all cases even during active sync process.
+    ///
+    /// This validates the following engine API rule:
+    ///
+    /// 3. Given the expected array of blob versioned hashes client software **MUST** run its
+    ///    validation by taking the following steps:
+    ///
+    ///   1. Obtain the actual array by concatenating blob versioned hashes lists
+    ///      (`tx.blob_versioned_hashes`) of each [blob
+    ///      transaction](https://eips.ethereum.org/EIPS/eip-4844#new-transaction-type) included
+    ///      in the payload, respecting the order of inclusion. If the payload has no blob
+    ///      transactions the expected array **MUST** be `[]`.
+    ///
+    ///   2. Return `{status: INVALID, latestValidHash: null, validationError: errorMessage | null}`
+    ///      if the expected and the actual arrays don't match.
+    ///
+    /// This validation **MUST** be instantly run in all cases even during active sync process.
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionPayload,
@@ -1277,6 +1302,7 @@ where
         let status = self
             .blockchain
             .insert_block_without_senders(block.clone(), BlockValidationKind::Exhaustive)?;
+
         let elapsed = start.elapsed();
         let mut latest_valid_hash = None;
         let block = Arc::new(block);
@@ -1402,7 +1428,16 @@ where
                         // block is connected to the canonical chain and is valid.
                         // if it's not connected to current canonical head, the state root
                         // has not been validated.
-                        self.try_make_sync_target_canonical(downloaded_num_hash);
+                        if let Err((hash, error)) =
+                            self.try_make_sync_target_canonical(downloaded_num_hash)
+                        {
+                            tracing::error!(
+                                target: "consensus::engine",
+                                "Unexpected error while making sync target canonical: {:?}, {:?}",
+                                error,
+                                hash
+                            )
+                        }
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected {
                         missing_ancestor: missing_parent,
@@ -1484,7 +1519,10 @@ where
     /// Note: This will not succeed if the sync target has changed since the block download request
     /// was issued and the new target is still disconnected and additional missing blocks are
     /// downloaded
-    fn try_make_sync_target_canonical(&mut self, inserted: BlockNumHash) {
+    fn try_make_sync_target_canonical(
+        &mut self,
+        inserted: BlockNumHash,
+    ) -> Result<(), (B256, CanonicalError)> {
         if let Some(target) = self.forkchoice_state_tracker.sync_target_state() {
             // optimistically try to make the head of the current FCU target canonical, the sync
             // target might have changed since the block download request was issued
@@ -1514,6 +1552,7 @@ where
 
                     // clear any active block requests
                     self.sync.clear_block_download_requests();
+                    Ok(())
                 }
                 Err(err) => {
                     // if we failed to make the FCU's head canonical, because we don't have that
@@ -1521,9 +1560,9 @@ where
                     // it's part of the canonical chain: if it's the safe or the finalized block
                     if matches!(
                         err,
-                        RethError::Canonical(CanonicalError::BlockchainTree(
+                        CanonicalError::BlockchainTree(
                             BlockchainTreeError::BlockHashNotFoundInChain { .. }
-                        ))
+                        )
                     ) {
                         // if the inserted block is the currently targeted `finalized` or `safe`
                         // block, we will attempt to make them canonical,
@@ -1532,11 +1571,16 @@ where
                         if let Some(target_hash) = ForkchoiceStateHash::find(&target, inserted.hash)
                             .filter(|h| !h.is_head())
                         {
+                            // TODO: do not ignore this
                             let _ = self.blockchain.make_canonical(target_hash.as_ref());
                         }
                     }
+
+                    Err((target.head_block_hash, err))
                 }
             }
+        } else {
+            Ok(())
         }
     }
 
@@ -1824,9 +1868,7 @@ where
                         BeaconEngineMessage::TransitionConfigurationExchanged => {
                             this.blockchain.on_transition_configuration_exchanged();
                         }
-                        BeaconEngineMessage::EventListener(tx) => {
-                            this.listeners.push_listener(tx);
-                        }
+                        BeaconEngineMessage::EventListener(tx) => this.push_listener(tx),
                     }
                     continue
                 }
@@ -2150,13 +2192,11 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
             env.db
@@ -2208,13 +2248,12 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2230,15 +2269,12 @@ mod tests {
             // if we `await` in the assert, the forkchoice will poll after we've inserted the block,
             // and it will return VALID instead of SYNCING
             let invalid_rx = env.send_forkchoice_updated(next_forkchoice_state).await;
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             // Insert next head immediately after sending forkchoice update
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&next_head].into_iter(),
             );
 
@@ -2274,13 +2310,12 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
+
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2329,13 +2364,10 @@ mod tests {
             let mut block3 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
             block3.header.set_difficulty(U256::from(1));
 
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1, &block2, &block3].into_iter(),
             );
 
@@ -2377,13 +2409,11 @@ mod tests {
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
 
+            let (_temp_dir, temp_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), temp_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2481,13 +2511,11 @@ mod tests {
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
             let block2 = random_block(&mut rng, 2, Some(block1.hash()), None, Some(0));
+
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1, &block2].into_iter(),
             );
 
@@ -2552,13 +2580,11 @@ mod tests {
             // TODO: add transactions that transfer from the alloc accounts, generating the new
             // block tx and state root
 
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2598,13 +2624,11 @@ mod tests {
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
 
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&genesis].into_iter(),
             );
 
@@ -2664,13 +2688,11 @@ mod tests {
                 .with_executor_results(Vec::from([exec_result2]))
                 .build();
 
+            let (_static_dir, static_dir_path) = create_test_static_files_dir();
+
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
-                    chain_spec.clone(),
-                    create_test_static_files_dir(),
-                )
-                .expect("create provider factory with static_files"),
+                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
+                    .expect("create provider factory with static_files"),
                 [&data.genesis, &block1].into_iter(),
             );
 

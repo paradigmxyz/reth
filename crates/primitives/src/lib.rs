@@ -72,7 +72,7 @@ pub use net::{
     goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
     GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,
 };
-pub use peer::{PeerId, WithPeerId};
+pub use peer::{AnyNode, PeerId, WithPeerId};
 pub use prune::{
     PruneCheckpoint, PruneMode, PruneModes, PruneProgress, PrunePurpose, PruneSegment,
     PruneSegmentError, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
@@ -137,7 +137,7 @@ pub use c_kzg as kzg;
 #[cfg(feature = "optimism")]
 mod optimism {
     pub use crate::{
-        chain::{BASE_MAINNET, BASE_SEPOLIA},
+        chain::{BASE_MAINNET, BASE_SEPOLIA, OP_SEPOLIA},
         transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
     };
 }

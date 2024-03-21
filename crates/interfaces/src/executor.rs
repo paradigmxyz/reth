@@ -1,4 +1,4 @@
-use crate::provider::ProviderError;
+use crate::{provider::ProviderError, trie::StateRootError};
 use reth_primitives::{
     revm_primitives::EVMError, BlockNumHash, Bloom, GotExpected, GotExpectedBoxed,
     PruneSegmentError, B256,
@@ -29,6 +29,9 @@ pub enum BlockValidationError {
     /// Error when header bloom filter doesn't match expected value
     #[error("header bloom filter mismatch: {0}")]
     BloomLogDiff(GotExpectedBoxed<Bloom>),
+    /// Error when the state root does not match the expected value.
+    #[error(transparent)]
+    StateRoot(#[from] StateRootError),
     /// Error when transaction gas limit exceeds available block gas
     #[error("transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}")]
     TransactionGasLimitMoreThanAvailableBlockGas {

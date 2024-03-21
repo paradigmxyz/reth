@@ -64,7 +64,11 @@ impl StaticFileProviderRW {
             block_range.start(),
             None,
         ) {
-            Ok(provider) => (NippyJar::load(provider.data_path())?, provider.data_path().into()),
+            Ok(provider) => (
+                NippyJar::load(provider.data_path())
+                    .map_err(|e| ProviderError::NippyJar(e.to_string()))?,
+                provider.data_path().into(),
+            ),
             Err(ProviderError::MissingStaticFileBlock(_, _)) => {
                 let path = static_file_provider.directory().join(segment.filename(&block_range));
                 (create_jar(segment, &path, block_range), path)
@@ -78,7 +82,7 @@ impl StaticFileProviderRW {
                 // This static file has been frozen, so we should
                 Err(ProviderError::FinalizedStaticFile(segment, block))
             }
-            Err(e) => Err(e.into()),
+            Err(e) => Err(ProviderError::NippyJar(e.to_string())),
         }?;
 
         if let Some(metrics) = &metrics {
@@ -97,7 +101,40 @@ impl StaticFileProviderRW {
         let start = Instant::now();
 
         // Commits offsets and new user_header to disk
-        self.writer.commit()?;
+        self.writer.commit().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                self.writer.user_header().segment(),
+                StaticFileProviderOperation::CommitWriter,
+                Some(start.elapsed()),
+            );
+        }
+
+        debug!(
+            target: "provider::static_file",
+            segment = ?self.writer.user_header().segment(),
+            path = ?self.data_path,
+            duration = ?start.elapsed(),
+            "Commit"
+        );
+
+        self.update_index()?;
+
+        Ok(())
+    }
+
+    /// Commits configuration changes to disk and updates the reader index with the new changes.
+    ///
+    /// CAUTION: does not call `sync_all` on the files.
+    #[cfg(feature = "test-utils")]
+    pub fn commit_without_sync_all(&mut self) -> ProviderResult<()> {
+        let start = Instant::now();
+
+        // Commits offsets and new user_header to disk
+        self.writer
+            .commit_without_sync_all()
+            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -125,7 +162,7 @@ impl StaticFileProviderRW {
         // We find the maximum block of the segment by checking this writer's last block.
         //
         // However if there's no block range (because there's no data), we try to calculate it by
-        // substracting 1 from the expected block start, resulting on the last block of the
+        // subtracting 1 from the expected block start, resulting on the last block of the
         // previous file.
         //
         // If that expected block start is 0, then it means that there's no actual block data, and
@@ -148,7 +185,13 @@ impl StaticFileProviderRW {
     /// and create the next one if we are past the end range.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
-    pub fn increment_block(&mut self, segment: StaticFileSegment) -> ProviderResult<BlockNumber> {
+    pub fn increment_block(
+        &mut self,
+        segment: StaticFileSegment,
+        expected_block_number: BlockNumber,
+    ) -> ProviderResult<BlockNumber> {
+        self.check_next_block_number(expected_block_number, segment)?;
+
         let start = Instant::now();
         if let Some(last_block) = self.writer.user_header().block_end() {
             // We have finished the previous static file and must freeze it
@@ -177,6 +220,33 @@ impl StaticFileProviderRW {
         }
 
         Ok(block)
+    }
+
+    /// Verifies if the incoming block number matches the next expected block number
+    /// for a static file. This ensures data continuity when adding new blocks.
+    fn check_next_block_number(
+        &mut self,
+        expected_block_number: u64,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<()> {
+        // The next static file block number can be found by checking the one after block_end.
+        // However if it's a new file that hasn't been added any data, its block range will actually
+        // be None. In that case, the next block will be found on `expected_block_start`.
+        let next_static_file_block = self
+            .writer
+            .user_header()
+            .block_end()
+            .map(|b| b + 1)
+            .unwrap_or_else(|| self.writer.user_header().expected_block_start());
+
+        if expected_block_number != next_static_file_block {
+            return Err(ProviderError::UnexpectedStaticFileBlockNumber(
+                segment,
+                expected_block_number,
+                next_static_file_block,
+            ))
+        }
+        Ok(())
     }
 
     /// Truncates a number of rows from disk. It deletes and loads an older static file if block
@@ -218,11 +288,16 @@ impl StaticFileProviderRW {
                     self.writer = writer;
                     self.data_path = data_path;
 
-                    NippyJar::<SegmentHeader>::load(&previous_snap)?.delete()?;
+                    NippyJar::<SegmentHeader>::load(&previous_snap)
+                        .map_err(|e| ProviderError::NippyJar(e.to_string()))?
+                        .delete()
+                        .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
                 } else {
                     // Update `SegmentHeader`
                     self.writer.user_header_mut().prune(len);
-                    self.writer.prune_rows(len as usize)?;
+                    self.writer
+                        .prune_rows(len as usize)
+                        .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
                     break
                 }
 
@@ -232,7 +307,9 @@ impl StaticFileProviderRW {
                 self.writer.user_header_mut().prune(num_rows);
 
                 // Truncate data
-                self.writer.prune_rows(num_rows as usize)?;
+                self.writer
+                    .prune_rows(num_rows as usize)
+                    .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
                 num_rows = 0;
             }
         }
@@ -254,7 +331,9 @@ impl StaticFileProviderRW {
         self.buf.clear();
         column.to_compact(&mut self.buf);
 
-        self.writer.append_column(Some(Ok(&self.buf)))?;
+        self.writer
+            .append_column(Some(Ok(&self.buf)))
+            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
         Ok(())
     }
 
@@ -296,7 +375,7 @@ impl StaticFileProviderRW {
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        let block_number = self.increment_block(StaticFileSegment::Headers)?;
+        let block_number = self.increment_block(StaticFileSegment::Headers, header.number)?;
 
         self.append_column(header)?;
         self.append_column(CompactU256::from(terminal_difficulty))?;
@@ -464,6 +543,12 @@ impl StaticFileProviderRW {
     /// Helper function to override block range for testing.
     pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
         self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Helper function to access [`SegmentHeader`].
+    pub fn user_header(&self) -> &SegmentHeader {
+        self.writer.user_header()
     }
 }
 

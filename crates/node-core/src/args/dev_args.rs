@@ -6,7 +6,7 @@ use clap::Args;
 use humantime::parse_duration;
 
 /// Parameters for Dev testnet configuration
-#[derive(Debug, Args, PartialEq, Default, Clone, Copy)]
+#[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
 #[command(next_help_heading = "Dev testnet")]
 pub struct DevArgs {
     /// Start the node in dev mode

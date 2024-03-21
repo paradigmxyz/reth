@@ -74,7 +74,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// Post Cancun forkchoice update handler
     ///
     /// This is the same as `forkchoiceUpdatedV2`, but expects an additional
-    /// `parentBeaconBlockRoot` field in the the `payloadAttributes`, if payload attributes
+    /// `parentBeaconBlockRoot` field in the `payloadAttributes`, if payload attributes
     /// are provided.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>

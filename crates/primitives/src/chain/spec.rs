@@ -216,7 +216,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        fork_timestamps: ForkTimestamps::default().shanghai(0),
+        fork_timestamps: ForkTimestamps::default().shanghai(0).cancun(0),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
             (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -235,9 +235,64 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(0)),
         ]),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         deposit_contract: None, // TODO: do we even have?
+        ..Default::default()
+    }
+    .into()
+});
+
+/// The OP Sepolia spec
+#[cfg(feature = "optimism")]
+pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::from_named(NamedChain::OptimismSepolia),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia_op.json"))
+            .expect("Can't deserialize OP Sepolia genesis json"),
+        genesis_hash: Some(b256!(
+            "102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d"
+        )),
+        fork_timestamps: ForkTimestamps::default()
+            .shanghai(1699981200)
+            .canyon(1699981200)
+            .cancun(1708534800)
+            .ecotone(1708534800),
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Bedrock, ForkCondition::Block(0)),
+            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1708534800)),
+            (Hardfork::Ecotone, ForkCondition::Timestamp(1708534800)),
+        ]),
+        base_fee_params: BaseFeeParamsKind::Variable(
+            vec![
+                (Hardfork::London, BaseFeeParams::optimism_sepolia()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_sepolia_canyon()),
+            ]
+            .into(),
+        ),
+        prune_delete_limit: 1700,
         ..Default::default()
     }
     .into()
@@ -616,11 +671,7 @@ impl ChainSpec {
 
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> B256 {
-        if let Some(hash) = self.genesis_hash {
-            hash
-        } else {
-            self.genesis_header().hash_slow()
-        }
+        self.genesis_hash.unwrap_or_else(|| self.genesis_header().hash_slow())
     }
 
     /// Get the timestamp of the genesis block.
@@ -742,7 +793,7 @@ impl ChainSpec {
         ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
 
-    /// Compute the [`ForkId`] for the given [`Head`] folowing eip-6122 spec
+    /// Compute the [`ForkId`] for the given [`Head`] following eip-6122 spec
     pub fn fork_id(&self, head: &Head) -> ForkId {
         let mut forkhash = ForkHash::from(self.genesis_hash());
         let mut current_applied = 0;
@@ -817,8 +868,8 @@ impl ChainSpec {
         let mut hardforks_iter = self.forks_iter().peekable();
         while let Some((_, curr_cond)) = hardforks_iter.next() {
             if let Some((_, next_cond)) = hardforks_iter.peek() {
-                // peek and find the first occurence of ForkCondition::TTD (merge) , or in
-                // custom ChainSpecs, the first occurence of
+                // peek and find the first occurrence of ForkCondition::TTD (merge) , or in
+                // custom ChainSpecs, the first occurrence of
                 // ForkCondition::Timestamp. If curr_cond is ForkCondition::Block at
                 // this point, which it should be in most "normal" ChainSpecs,
                 // return its block_num
@@ -889,15 +940,20 @@ impl From<Genesis> for ChainSpec {
             .collect::<BTreeMap<_, _>>();
 
         // Paris
-        if let Some(ttd) = genesis.config.terminal_total_difficulty {
-            hardforks.insert(
-                Hardfork::Paris,
-                ForkCondition::TTD {
-                    total_difficulty: ttd,
-                    fork_block: genesis.config.merge_netsplit_block,
-                },
-            );
-        }
+        let paris_block_and_final_difficulty =
+            if let Some(ttd) = genesis.config.terminal_total_difficulty {
+                hardforks.insert(
+                    Hardfork::Paris,
+                    ForkCondition::TTD {
+                        total_difficulty: ttd,
+                        fork_block: genesis.config.merge_netsplit_block,
+                    },
+                );
+
+                genesis.config.merge_netsplit_block.map(|block| (block, ttd))
+            } else {
+                None
+            };
 
         // Time-based hardforks
         let time_hardfork_opts = [
@@ -920,7 +976,7 @@ impl From<Genesis> for ChainSpec {
             genesis_hash: None,
             fork_timestamps: ForkTimestamps::from_hardforks(&hardforks),
             hardforks,
-            paris_block_and_final_difficulty: None,
+            paris_block_and_final_difficulty,
             deposit_contract: None,
             ..Default::default()
         }
@@ -946,7 +1002,7 @@ pub struct ForkTimestamps {
 }
 
 impl ForkTimestamps {
-    /// Creates a new [`ForkTimestamps`] from the given hardforks by extracing the timestamps
+    /// Creates a new [`ForkTimestamps`] from the given hardforks by extracting the timestamps
     fn from_hardforks(forks: &BTreeMap<Hardfork, ForkCondition>) -> Self {
         let mut timestamps = ForkTimestamps::default();
         if let Some(shanghai) = forks.get(&Hardfork::Shanghai).and_then(|f| f.as_timestamp()) {
@@ -1228,13 +1284,22 @@ impl ChainSpecBuilder {
     /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
     /// [`Self::genesis`])
     pub fn build(self) -> ChainSpec {
+        let paris_block_and_final_difficulty = {
+            self.hardforks.get(&Hardfork::Paris).and_then(|cond| {
+                if let ForkCondition::TTD { fork_block, total_difficulty } = cond {
+                    fork_block.map(|fork_block| (fork_block, *total_difficulty))
+                } else {
+                    None
+                }
+            })
+        };
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
             genesis_hash: None,
             fork_timestamps: ForkTimestamps::from_hardforks(&self.hardforks),
             hardforks: self.hardforks,
-            paris_block_and_final_difficulty: None,
+            paris_block_and_final_difficulty,
             deposit_contract: None,
             ..Default::default()
         }
@@ -1382,10 +1447,10 @@ impl Display for DisplayFork {
 
         match self.activated_at {
             ForkCondition::Block(at) | ForkCondition::Timestamp(at) => {
-                write!(f, "{:32} @{}", name_with_eip, at)?;
+                write!(f, "{name_with_eip:32} @{at}")?;
             }
             ForkCondition::TTD { fork_block, total_difficulty } => {
-                writeln!(
+                write!(
                     f,
                     "{:32} @{} ({})",
                     name_with_eip,
@@ -1433,7 +1498,6 @@ impl Display for DisplayFork {
 // - GrayGlacier                      @15050000
 // Merge hard forks:
 // - Paris                            @58750000000000000000000 (network is known to be merged)
-//
 // Post-merge hard forks (timestamp based):
 // - Shanghai                         @1681338455
 /// ```
@@ -1449,23 +1513,36 @@ pub struct DisplayHardforks {
 
 impl Display for DisplayHardforks {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Pre-merge hard forks (block based):")?;
-        for fork in self.pre_merge.iter() {
-            writeln!(f, "- {fork}")?;
+        fn format(
+            header: &str,
+            forks: &[DisplayFork],
+            next_is_empty: bool,
+            f: &mut Formatter<'_>,
+        ) -> std::fmt::Result {
+            writeln!(f, "{header}:")?;
+            let mut iter = forks.iter().peekable();
+            while let Some(fork) = iter.next() {
+                write!(f, "- {fork}")?;
+                if !next_is_empty || iter.peek().is_some() {
+                    writeln!(f)?;
+                }
+            }
+            Ok(())
         }
 
+        format(
+            "Pre-merge hard forks (block based)",
+            &self.pre_merge,
+            self.with_merge.is_empty(),
+            f,
+        )?;
+
         if !self.with_merge.is_empty() {
-            writeln!(f, "Merge hard forks:")?;
-            for fork in self.with_merge.iter() {
-                writeln!(f, "- {fork}")?;
-            }
+            format("Merge hard forks", &self.with_merge, self.post_merge.is_empty(), f)?;
         }
 
         if !self.post_merge.is_empty() {
-            writeln!(f, "Post-merge hard forks (timestamp based):")?;
-            for fork in self.post_merge.iter() {
-                writeln!(f, "- {fork}")?;
-            }
+            format("Post-merge hard forks (timestamp based)", &self.post_merge, true, f)?;
         }
 
         Ok(())
@@ -1529,8 +1606,6 @@ impl DepositContract {
 mod tests {
     use super::*;
     use crate::{b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount};
-    use alloy_rlp::Encodable;
-    use bytes::BytesMut;
     use std::{collections::HashMap, str::FromStr};
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
@@ -1549,15 +1624,13 @@ mod tests {
             if let Some(computed_id) = spec.hardfork_fork_id(*hardfork) {
                 assert_eq!(
                     expected_id, &computed_id,
-                    "Expected fork ID {:?}, computed fork ID {:?} for hardfork {}",
-                    expected_id, computed_id, hardfork
+                    "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for hardfork {hardfork}"
                 );
-                if let Hardfork::Shanghai = hardfork {
+                if matches!(hardfork, Hardfork::Shanghai) {
                     if let Some(shangai_id) = spec.shanghai_fork_id() {
                         assert_eq!(
                             expected_id, &shangai_id,
-                            "Expected fork ID {:?}, computed fork ID {:?} for Shanghai hardfork",
-                            expected_id, computed_id
+                            "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for Shanghai hardfork"
                         );
                     } else {
                         panic!("Expected ForkCondition to return Some for Hardfork::Shanghai");
@@ -1588,11 +1661,9 @@ mod tests {
 - GrayGlacier                      @15050000
 Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
-
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-- Cancun                           @1710338135
-"
+- Cancun                           @1710338135"
         );
     }
 
@@ -1607,8 +1678,7 @@ Post-merge hard forks (timestamp based):
         assert_eq!(
             spec.display_hardforks().to_string(),
             "Pre-merge hard forks (block based):
-- Frontier                         @0
-"
+- Frontier                         @0"
         );
     }
 
@@ -1710,8 +1780,7 @@ Post-merge hard forks (timestamp based):
         let happy_path_expected = Head { number: 73, timestamp: 11313123, ..Default::default() };
         assert_eq!(
             happy_path_head, happy_path_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            happy_path_expected, happy_path_head
+            "expected satisfy() to return {happy_path_expected:#?}, but got {happy_path_head:#?} "
         );
         // multiple timestamp test case (i.e Shanghai -> Cancun)
         let multiple_timestamp_fork_case = ChainSpec::builder()
@@ -1728,8 +1797,7 @@ Post-merge hard forks (timestamp based):
             Head { number: 73, timestamp: 11313398, ..Default::default() };
         assert_eq!(
             multi_timestamp_head, mult_timestamp_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            mult_timestamp_expected, multi_timestamp_head
+            "expected satisfy() to return {mult_timestamp_expected:#?}, but got {multi_timestamp_head:#?} "
         );
         // no ForkCondition::Block test case
         let no_block_fork_case = ChainSpec::builder()
@@ -1741,8 +1809,7 @@ Post-merge hard forks (timestamp based):
         let no_block_fork_expected = Head { number: 0, timestamp: 11313123, ..Default::default() };
         assert_eq!(
             no_block_fork_head, no_block_fork_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            no_block_fork_expected, no_block_fork_head
+            "expected satisfy() to return {no_block_fork_expected:#?}, but got {no_block_fork_head:#?} ",
         );
         // spec w/ ForkCondition::TTD with block_num test case (Sepolia merge netsplit edge case)
         let fork_cond_ttd_blocknum_case = ChainSpec::builder()
@@ -1765,13 +1832,12 @@ Post-merge hard forks (timestamp based):
             Head { number: 101, timestamp: 11313123, ..Default::default() };
         assert_eq!(
             fork_cond_ttd_blocknum_head, fork_cond_ttd_blocknum_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            fork_cond_ttd_blocknum_expected, fork_cond_ttd_blocknum_head
+            "expected satisfy() to return {fork_cond_ttd_blocknum_expected:#?}, but got {fork_cond_ttd_blocknum_expected:#?} ",
         );
 
         // spec w/ only ForkCondition::Block - test the match arm for ForkCondition::Block to ensure
         // no regressions, for these ForkConditions(Block/TTD) - a separate chain spec definition is
-        // technically unecessary - but we include it here for thoroughness
+        // technically unnecessary - but we include it here for thoroughness
         let fork_cond_block_only_case = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis)
@@ -1782,8 +1848,7 @@ Post-merge hard forks (timestamp based):
         let fork_cond_block_only_expected = Head { number: 73, ..Default::default() };
         assert_eq!(
             fork_cond_block_only_head, fork_cond_block_only_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            fork_cond_block_only_expected, fork_cond_block_only_head
+            "expected satisfy() to return {fork_cond_block_only_expected:#?}, but got {fork_cond_block_only_head:#?} ",
         );
         // Fork::ConditionTTD test case without a new chain spec to demonstrate ChainSpec::satisfy
         // is independent of ChainSpec for this(these - including ForkCondition::Block) match arm(s)
@@ -1795,8 +1860,7 @@ Post-merge hard forks (timestamp based):
             Head { total_difficulty: U256::from(10_790_000), ..Default::default() };
         assert_eq!(
             fork_cond_ttd_no_new_spec, fork_cond_ttd_no_new_spec_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            fork_cond_ttd_no_new_spec_expected, fork_cond_ttd_no_new_spec
+            "expected satisfy() to return {fork_cond_ttd_blocknum_expected:#?}, but got {fork_cond_ttd_blocknum_expected:#?} ",
         );
     }
 
@@ -2222,6 +2286,36 @@ Post-merge hard forks (timestamp based):
 
     #[cfg(feature = "optimism")]
     #[test]
+    fn op_sepolia_forkids() {
+        test_fork_ids(
+            &OP_SEPOLIA,
+            &[
+                (
+                    Head { number: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x67, 0xa4, 0x03, 0x28]), next: 1699981200 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1699981199, ..Default::default() },
+                    ForkId { hash: ForkHash([0x67, 0xa4, 0x03, 0x28]), next: 1699981200 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1699981200, ..Default::default() },
+                    ForkId { hash: ForkHash([0xa4, 0x8d, 0x6a, 0x00]), next: 1708534800 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1708534799, ..Default::default() },
+                    ForkId { hash: ForkHash([0xa4, 0x8d, 0x6a, 0x00]), next: 1708534800 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1708534800, ..Default::default() },
+                    ForkId { hash: ForkHash([0xcc, 0x17, 0xc7, 0xeb]), next: 0 },
+                ),
+            ],
+        );
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
     fn base_sepolia_forkids() {
         test_fork_ids(
             &BASE_SEPOLIA,
@@ -2601,9 +2695,7 @@ Post-merge hard forks (timestamp based):
 
         for (key, expected_rlp) in key_rlp {
             let account = chainspec.genesis.alloc.get(&key).expect("account should exist");
-            let mut account_rlp = BytesMut::new();
-            TrieAccount::from(account.clone()).encode(&mut account_rlp);
-            assert_eq!(account_rlp, expected_rlp)
+            assert_eq!(&alloy_rlp::encode(TrieAccount::from(account.clone())), expected_rlp)
         }
 
         assert_eq!(chainspec.genesis_hash, None);
@@ -2833,6 +2925,8 @@ Post-merge hard forks (timestamp based):
 
         // check that they're the same
         assert_eq!(got_forkid, expected_forkid);
+        // Check that paris block and final difficulty are set correctly
+        assert_eq!(chainspec.paris_block_and_final_difficulty, Some((72, U256::from(9454784))));
     }
 
     #[test]
@@ -2879,6 +2973,17 @@ Post-merge hard forks (timestamp based):
         assert_eq!(acc.balance, U256::from(1));
         // assert that the cancun time was picked up
         assert_eq!(genesis.config.cancun_time, Some(4661));
+    }
+
+    #[test]
+    fn test_paris_block_and_total_difficulty() {
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
+        let paris_chainspec = ChainSpecBuilder::default()
+            .chain(Chain::from_id(1337))
+            .genesis(genesis)
+            .paris_activated()
+            .build();
+        assert_eq!(paris_chainspec.paris_block_and_final_difficulty, Some((0, U256::ZERO)));
     }
 
     #[test]
@@ -3031,13 +3136,25 @@ Post-merge hard forks (timestamp based):
         let genesis = BASE_SEPOLIA.genesis_header();
         assert_eq!(
             genesis.hash_slow(),
-            "0x0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
-                .parse::<B256>()
-                .unwrap()
+            b256!("0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4")
         );
         let base_fee =
             genesis.next_block_base_fee(BASE_SEPOLIA.base_fee_params(genesis.timestamp)).unwrap();
         // <https://base-sepolia.blockscout.com/block/1>
+        assert_eq!(base_fee, 980000000);
+    }
+
+    #[test]
+    #[cfg(feature = "optimism")]
+    fn op_sepolia_genesis() {
+        let genesis = OP_SEPOLIA.genesis_header();
+        assert_eq!(
+            genesis.hash_slow(),
+            b256!("102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d")
+        );
+        let base_fee =
+            genesis.next_block_base_fee(OP_SEPOLIA.base_fee_params(genesis.timestamp)).unwrap();
+        // <https://optimism-sepolia.blockscout.com/block/1>
         assert_eq!(base_fee, 980000000);
     }
 }

@@ -41,7 +41,6 @@ criterion_main!(benches);
 mod implementations {
     use super::*;
     use alloy_rlp::Encodable;
-    use bytes::BytesMut;
     use reth_primitives::{
         proofs::adjust_index_for_rlp,
         trie::{HashBuilder, Nibbles},
@@ -56,8 +55,8 @@ mod implementations {
     }
 
     pub fn hash_builder_root(receipts: &[ReceiptWithBloom]) -> B256 {
-        let mut index_buffer = BytesMut::new();
-        let mut value_buffer = BytesMut::new();
+        let mut index_buffer = Vec::new();
+        let mut value_buffer = Vec::new();
 
         let mut hb = HashBuilder::default();
         let receipts_len = receipts.len();

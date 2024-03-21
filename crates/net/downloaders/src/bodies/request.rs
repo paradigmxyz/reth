@@ -127,7 +127,7 @@ where
         self.metrics.total_downloaded.increment(response_len as u64);
 
         // TODO: Malicious peers often return a single block even if it does not exceed the soft
-        // response limit (2MB).  this could be penalized by checking if this block and the
+        // response limit (2MB). This could be penalized by checking if this block and the
         // next one exceed the soft response limit, if not then peer either does not have the next
         // block or deliberately sent a single block.
         if bodies.is_empty() {
@@ -155,7 +155,7 @@ where
     }
 
     /// Attempt to buffer body responses. Returns an error if body response fails validation.
-    /// Every body preceeding the failed one will be buffered.
+    /// Every body preceding the failed one will be buffered.
     ///
     /// This method removes headers from the internal collection.
     /// If the response fails validation, then the header will be put back.
@@ -254,7 +254,7 @@ mod tests {
     };
     use reth_interfaces::test_utils::{generators, generators::random_header_range, TestConsensus};
 
-    /// Check if future returns empty bodies without dispathing any requests.
+    /// Check if future returns empty bodies without dispatching any requests.
     #[tokio::test]
     async fn request_returns_empty_bodies() {
         let mut rng = generators::rng();

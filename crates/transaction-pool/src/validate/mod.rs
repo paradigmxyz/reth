@@ -126,8 +126,7 @@ impl<T: PoolTransaction> ValidTransaction<T> {
     /// Consumes the wrapper and returns the transaction.
     pub fn into_transaction(self) -> T {
         match self {
-            Self::Valid(transaction) => transaction,
-            Self::ValidWithSidecar { transaction, .. } => transaction,
+            Self::Valid(transaction) | Self::ValidWithSidecar { transaction, .. } => transaction,
         }
     }
 

@@ -26,3 +26,7 @@ pub mod node;
 pub use node::OptimismNode;
 
 pub mod txpool;
+
+pub use reth_optimism_payload_builder::{
+    OptimismBuiltPayload, OptimismPayloadBuilder, OptimismPayloadBuilderAttributes,
+};

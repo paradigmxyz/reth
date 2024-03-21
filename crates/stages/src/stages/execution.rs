@@ -126,10 +126,13 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let static_file_provider = provider.static_file_provider();
 
         // We only use static files for Receipts, if there is no receipt pruning of any kind.
-        let mut static_file_producer = None;
-        if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
-            static_file_producer = Some(prepare_static_file_producer(provider, start_block)?);
-        }
+        let static_file_producer = if self.prune_modes.receipts.is_none() &&
+            self.prune_modes.receipts_log_filter.is_empty()
+        {
+            Some(prepare_static_file_producer(provider, start_block)?)
+        } else {
+            None
+        };
 
         // Build executor
         let mut executor = self.executor_factory.with_state(LatestStateProviderRef::new(
@@ -217,7 +220,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             target: "sync::stages::execution",
             block_fetch = ?fetch_block_duration,
             execution = ?execution_duration,
-            write_preperation = ?write_preparation_duration,
+            write_preparation = ?write_preparation_duration,
             write = ?db_write_duration,
             "Execution time"
         );
@@ -458,7 +461,8 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
                 }
             }
         } else {
-            // We database for Receipts, if there is any kind of receipt pruning/filtering.
+            // We use database for Receipts, if there is any kind of receipt pruning/filtering,
+            // since it is not supported by static files.
             let mut cursor = tx.cursor_write::<tables::Receipts>()?;
             let mut reverse_walker = cursor.walk_back(None)?;
 
@@ -802,6 +806,12 @@ mod tests {
             .unwrap()
             .commit()
             .unwrap();
+        {
+            let mut receipts_writer =
+                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+            receipts_writer.commit().unwrap();
+        }
         provider.commit().unwrap();
 
         // insert pre state
@@ -947,6 +957,12 @@ mod tests {
             .unwrap()
             .commit()
             .unwrap();
+        {
+            let mut receipts_writer =
+                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+            receipts_writer.commit().unwrap();
+        }
         provider.commit().unwrap();
 
         // variables
@@ -1060,6 +1076,12 @@ mod tests {
             .unwrap()
             .commit()
             .unwrap();
+        {
+            let mut receipts_writer =
+                provider.static_file_provider().latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+            receipts_writer.commit().unwrap();
+        }
         provider.commit().unwrap();
 
         // variables

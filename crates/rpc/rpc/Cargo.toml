@@ -54,9 +54,10 @@ reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"
 # async
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-tower = "0.4"
+tower.workspace = true
 tokio-stream = { workspace = true, features = ["sync"] }
 pin-project.workspace = true
+parking_lot.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -74,6 +75,7 @@ tracing-futures = "0.2"
 schnellru.workspace = true
 futures.workspace = true
 derive_more.workspace = true
+dyn-clone.workspace = true
 
 [dev-dependencies]
 jsonrpsee = { workspace = true, features = ["client"] }
@@ -91,5 +93,4 @@ optimism = [
     "reth-network-api/optimism",
     "reth-network/optimism",
     "reth-provider/optimism",
-    "reth-transaction-pool/optimism",
 ]

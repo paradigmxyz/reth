@@ -142,10 +142,10 @@ impl Compact for TxType {
                         EIP4844_TX_TYPE_ID => TxType::Eip4844,
                         #[cfg(feature = "optimism")]
                         DEPOSIT_TX_TYPE_ID => TxType::Deposit,
-                        _ => panic!("Unsupported TxType identifier: {}", extended_identifier),
+                        _ => panic!("Unsupported TxType identifier: {extended_identifier}"),
                     }
                 }
-                _ => panic!("Unknown identifier for TxType: {}", identifier),
+                _ => panic!("Unknown identifier for TxType: {identifier}"),
             },
             buf,
         )
@@ -172,10 +172,9 @@ mod tests {
             let identifier = tx_type.to_compact(&mut buf);
             assert_eq!(
                 identifier, expected_identifier,
-                "Unexpected identifier for TxType {:?}",
-                tx_type
+                "Unexpected identifier for TxType {tx_type:?}",
             );
-            assert_eq!(buf, expected_buf, "Unexpected buffer for TxType {:?}", tx_type);
+            assert_eq!(buf, expected_buf, "Unexpected buffer for TxType {tx_type:?}");
         }
     }
 
@@ -192,15 +191,10 @@ mod tests {
 
         for (expected_type, identifier, buf) in cases {
             let (actual_type, remaining_buf) = TxType::from_compact(&buf, identifier);
-            assert_eq!(
-                actual_type, expected_type,
-                "Unexpected TxType for identifier {}",
-                identifier
-            );
+            assert_eq!(actual_type, expected_type, "Unexpected TxType for identifier {identifier}",);
             assert!(
                 remaining_buf.is_empty(),
-                "Buffer not fully consumed for identifier {}",
-                identifier
+                "Buffer not fully consumed for identifier {identifier}",
             );
         }
     }

@@ -5,8 +5,9 @@ use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
-        error::InsertBlockError, BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer,
-        CanonicalOutcome, InsertPayloadOk,
+        error::{CanonicalError, InsertBlockError},
+        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+        InsertPayloadOk,
     },
     RethResult,
 };
@@ -16,7 +17,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateSubscriptions,
-    ExecutorFactory,
+    ExecutorFactory, ProviderError,
 };
 use std::{
     collections::{BTreeMap, HashSet},
@@ -85,7 +86,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTreeEngine for ShareableBlockc
         res
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
+    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         trace!(target: "blockchain_tree", ?block_hash, "Making block canonical");
         let mut tree = self.tree.write();
         let res = tree.make_canonical(block_hash);
@@ -151,7 +152,7 @@ impl<DB: Database, EF: ExecutorFactory> BlockchainTreeViewer for ShareableBlockc
         None
     }
 
-    fn is_canonical(&self, hash: BlockHash) -> RethResult<bool> {
+    fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
         trace!(target: "blockchain_tree", ?hash, "Checking if block is canonical");
         self.tree.read().is_block_hash_canonical(&hash)
     }

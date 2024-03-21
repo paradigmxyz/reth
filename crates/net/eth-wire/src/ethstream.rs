@@ -4,7 +4,6 @@ use crate::{
     types::{EthMessage, ProtocolMessage, Status},
     CanDisconnect, DisconnectReason, EthVersion,
 };
-use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::{
@@ -63,10 +62,9 @@ where
 
         // we need to encode and decode here on our own because we don't have an `EthStream` yet
         // The max length for a status with TTD is: <msg id = 1 byte> + <rlp(status) = 88 byte>
-        let mut our_status_bytes = BytesMut::with_capacity(1 + 88);
-        ProtocolMessage::from(EthMessage::Status(status)).encode(&mut our_status_bytes);
-        let our_status_bytes = our_status_bytes.freeze();
-        self.inner.send(our_status_bytes).await?;
+        self.inner
+            .send(alloy_rlp::encode(ProtocolMessage::from(EthMessage::Status(status))).into())
+            .await?;
 
         let their_msg_res = self.inner.next().await;
 
@@ -215,11 +213,9 @@ where
         &mut self,
         item: EthBroadcastMessage,
     ) -> Result<(), EthStreamError> {
-        let mut bytes = BytesMut::new();
-        ProtocolBroadcastMessage::from(item).encode(&mut bytes);
-        let bytes = bytes.freeze();
-
-        self.inner.start_send_unpin(bytes)?;
+        self.inner.start_send_unpin(Bytes::from(alloy_rlp::encode(
+            ProtocolBroadcastMessage::from(item),
+        )))?;
 
         Ok(())
     }
@@ -251,7 +247,7 @@ where
                 let msg = if bytes.len() > 50 {
                     format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
                 } else {
-                    format!("{:02x?}", bytes)
+                    format!("{bytes:02x?}")
                 };
                 debug!(
                     version=?this.version,
@@ -297,11 +293,9 @@ where
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
         }
 
-        let mut bytes = BytesMut::new();
-        ProtocolMessage::from(item).encode(&mut bytes);
-        let bytes = bytes.freeze();
-
-        self.project().inner.start_send(bytes)?;
+        self.project()
+            .inner
+            .start_send(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(item))))?;
 
         Ok(())
     }

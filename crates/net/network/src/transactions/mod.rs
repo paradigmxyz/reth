@@ -649,7 +649,7 @@ where
         let (validation_outcome, mut partially_valid_msg) =
             self.transaction_fetcher.filter_valid_message.partially_filter_valid_entries(msg);
 
-        if let FilterOutcome::ReportPeer = validation_outcome {
+        if validation_outcome == FilterOutcome::ReportPeer {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
@@ -698,7 +698,7 @@ where
                 .filter_valid_entries_66(partially_valid_msg)
         };
 
-        if let FilterOutcome::ReportPeer = validation_outcome {
+        if validation_outcome == FilterOutcome::ReportPeer {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
@@ -1079,11 +1079,12 @@ where
                     self.on_good_import(hash);
                 }
                 Err(err) => {
-                    // if we're _currently_ syncing and the transaction is bad we
+                    // If we're _currently_ syncing and the transaction is bad we
                     // ignore it, otherwise we penalize the peer that sent the bad
                     // transaction with the assumption that the peer should have
-                    // known that this transaction is bad. (e.g. consensus
-                    // rules)
+                    // known that this transaction is bad. (e.g. consensus rules).
+                    // Note: nonce gaps are not considered bad transactions.
+                    //
                     if err.is_bad_transaction() && !self.network.is_syncing() {
                         debug!(target: "net::tx", %err, "bad pool transaction import");
                         self.on_bad_import(err.hash);
@@ -2005,7 +2006,7 @@ mod tests {
                 assert_eq!(transactions.len(), 1);
             }
             Err(e) => {
-                panic!("error: {:?}", e);
+                panic!("error: {e:?}");
             }
         }
     }

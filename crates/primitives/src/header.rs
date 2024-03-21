@@ -12,7 +12,7 @@ use crate::{
     ChainSpec, GotExpected, GotExpectedBoxed, Hardfork, B256, B64, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
-use bytes::{BufMut, BytesMut};
+use bytes::BufMut;
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 
 /// Errors that can occur during header sanity checks.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum HeaderError {
     /// Represents an error when the block difficulty is too large.
     LargeDifficulty,
@@ -206,9 +206,7 @@ impl Header {
     /// Heavy function that will calculate hash of data and will *not* save the change to metadata.
     /// Use [`Header::seal`], [`SealedHeader`] and unlock if you need hash to be persistent.
     pub fn hash_slow(&self) -> B256 {
-        let mut out = BytesMut::new();
-        self.encode(&mut out);
-        keccak256(&out)
+        keccak256(alloy_rlp::encode(self))
     }
 
     /// Checks if the header is empty - has no transactions and no ommers
@@ -654,11 +652,12 @@ impl SealedHeader {
         chain_spec: &ChainSpec,
     ) -> Result<(), HeaderValidationError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
-        let mut parent_gas_limit = parent.gas_limit;
-        if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
-            parent_gas_limit =
-                parent.gas_limit * chain_spec.base_fee_params(self.timestamp).elasticity_multiplier;
-        }
+        let parent_gas_limit =
+            if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
+                parent.gas_limit * chain_spec.base_fee_params(self.timestamp).elasticity_multiplier
+            } else {
+                parent.gas_limit
+            };
 
         // Check for an increase in gas limit beyond the allowed threshold.
         if self.gas_limit > parent_gas_limit {

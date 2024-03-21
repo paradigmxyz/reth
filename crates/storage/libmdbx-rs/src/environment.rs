@@ -112,7 +112,7 @@ impl Environment {
                 sender: tx,
             });
             let res = rx.recv().unwrap();
-            if let Err(Error::Busy) = &res {
+            if matches!(&res, Err(Error::Busy)) {
                 if !warned {
                     warned = true;
                     warn!(target: "libmdbx", "Process stalled, awaiting read-write transaction lock.");

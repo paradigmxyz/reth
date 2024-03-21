@@ -27,6 +27,7 @@
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;
+//! # use reth_config::config::EtlConfig;
 //! #
 //! # let chain_spec = MAINNET.clone();
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
@@ -59,6 +60,7 @@
 //!             headers_downloader,
 //!             bodies_downloader,
 //!             executor_factory,
+//!             EtlConfig::default(),
 //!         )
 //!     )
 //!     .build(provider_factory, static_file_producer);
