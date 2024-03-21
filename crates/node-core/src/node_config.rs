@@ -41,9 +41,7 @@ use reth_network::{
 };
 use reth_node_api::ConfigureEvm;
 use reth_primitives::{
-    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    kzg::KzgSettings,
-    stage::StageId,
+    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
     BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256, MAINNET,
 };
 use reth_provider::{
@@ -169,9 +167,6 @@ pub struct NodeConfig {
     /// - WS_RPC_PORT: default + `instance` * 2 - 2
     pub instance: u16,
 
-    /// Overrides the KZG trusted setup by reading from the supplied file.
-    pub trusted_setup_file: Option<PathBuf>,
-
     /// All networking related arguments
     pub network: NetworkArgs,
 
@@ -232,12 +227,6 @@ impl NodeConfig {
     /// Set the instance for the node
     pub fn with_instance(mut self, instance: u16) -> Self {
         self.instance = instance;
-        self
-    }
-
-    /// Set the trusted setup file for the node
-    pub fn with_trusted_setup_file(mut self, trusted_setup_file: impl Into<PathBuf>) -> Self {
-        self.trusted_setup_file = Some(trusted_setup_file.into());
         self
     }
 
@@ -594,16 +583,9 @@ impl NodeConfig {
         Ok(pipeline)
     }
 
-    /// Loads the trusted setup params from a given file path or falls back to
-    /// `MAINNET_KZG_TRUSTED_SETUP`.
+    /// Loads 'MAINNET_KZG_TRUSTED_SETUP'
     pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .map_err(LoadKzgSettingsError::KzgError)?;
-            Ok(Arc::new(trusted_setup))
-        } else {
-            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
-        }
+        Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
     }
 
     /// Installs the prometheus recorder.
@@ -729,7 +711,7 @@ impl NodeConfig {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.number)
+            return Ok(header.number);
         }
 
         Ok(self.fetch_tip_from_network(client, tip.into()).await?.number)
@@ -751,7 +733,7 @@ impl NodeConfig {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
@@ -924,7 +906,6 @@ impl Default for NodeConfig {
             chain: MAINNET.clone(),
             metrics: None,
             instance: 1,
-            trusted_setup_file: None,
             network: NetworkArgs::default(),
             rpc: RpcServerArgs::default(),
             txpool: TxPoolArgs::default(),
