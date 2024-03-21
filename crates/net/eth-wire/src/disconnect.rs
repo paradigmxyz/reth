@@ -129,7 +129,7 @@ impl Decodable for DisconnectReason {
             // this should be a list, so decode the list header. this should advance the buffer so
             // buf[0] is the first (and only) element of the list.
             let header = Header::decode(buf)?;
-            if !header.list {
+            if !header.list || header.payload_length != 1 {
                 return Err(RlpError::UnexpectedString)
             }
         }
@@ -230,6 +230,12 @@ mod tests {
     #[test]
     fn test_reason_too_long() {
         assert!(DisconnectReason::decode(&mut &[0u8; 3][..]).is_err())
+    }
+
+    #[test]
+    fn test_reason_zero_length_list() {
+        let list_with_zero_length = hex::decode("c000").unwrap();
+        assert!(DisconnectReason::decode(&mut &list_with_zero_length[..]).is_err())
     }
 
     #[test]
