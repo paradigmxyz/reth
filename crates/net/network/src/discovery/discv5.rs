@@ -1,6 +1,11 @@
 //! Discovery support for the network using [`discv5::Discv5`].
 
-use crate::error::NetworkError;
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+
 use discv5::{enr::Enr, IpMode};
 use futures::{future::join_all, StreamExt};
 use itertools::Itertools;
@@ -16,11 +21,7 @@ use tokio::{sync::mpsc, task};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tracing::{debug, error, trace};
 
-use std::{
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use crate::error::NetworkError;
 
 use super::{Discovery, DiscoveryEvent};
 
@@ -38,6 +39,10 @@ impl Discovery<DiscV5, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
         discv5_config: Option<DiscV5Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
+        trace!(target: "net::discovery::discv5",
+            "starting discovery .."
+        );
+
         let (disc, disc_updates, bc_local_enr) = match discv5_config {
             Some(config) => {
                 let (disc, disc_updates, bc_local_enr) = start_discv5(&sk, config).await?;

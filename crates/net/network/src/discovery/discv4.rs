@@ -1,19 +1,19 @@
 //! Discovery support using [`Discv4`].
-
-use crate::error::{NetworkError, ServiceKind};
-use futures::StreamExt;
-use reth_discv4::{Discv4, Discv4Config, SecretKey};
-use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
-use reth_net_common::discovery::NodeFromExternalSource;
-use reth_primitives::NodeRecord;
-
-use tokio_stream::Stream;
-
 use std::{
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
+
+use futures::StreamExt;
+use reth_discv4::{Discv4, Discv4Config, SecretKey};
+use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
+use reth_net_common::discovery::NodeFromExternalSource;
+use reth_primitives::NodeRecord;
+use tokio_stream::Stream;
+use tracing::trace;
+
+use crate::error::{NetworkError, ServiceKind};
 
 use super::{Discovery, DiscoveryEvent};
 
@@ -28,6 +28,10 @@ impl Discovery {
         discv4_config: Option<Discv4Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
+        trace!(target: "net::discovery::discv4",
+            "starting discovery .."
+        );
+
         // setup discv4
         let local_enr = NodeRecord::from_secret_key(discovery_addr, &sk);
         let (discv4, discv4_updates, _discv4_service) = if let Some(disc_config) = discv4_config {
