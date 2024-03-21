@@ -1,20 +1,6 @@
 //! Discovery support for the network using [`discv5::Discv5`], with support for downgraded
 //! [`Discv4`] connections.
 
-use crate::error::{NetworkError, ServiceKind};
-use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey};
-use futures::StreamExt;
-use reth_discv4::{Discv4, Discv4Config, PublicKey, SecretKey};
-use reth_discv5::{
-    discv5_downgrade_v4::DiscoveryUpdateV5, DiscV5Config, DiscV5WithV4Downgrade, MergedUpdateStream,
-};
-use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
-use reth_net_common::discovery::NodeFromExternalSource;
-use reth_primitives::{NodeRecord, PeerId};
-use tokio::sync::watch;
-use tokio_stream::Stream;
-use tracing::{error, info};
-
 use std::{
     collections::HashSet,
     net::SocketAddr,
@@ -22,6 +8,23 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+
+use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey};
+use futures::StreamExt;
+
+use reth_discv4::{Discv4, Discv4Config, PublicKey, SecretKey};
+use reth_discv5::{
+    discv5_downgrade_v4::DiscoveryUpdateV5, DiscV5Config, DiscV5WithV4Downgrade, MergedUpdateStream,
+};
+use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
+use reth_net_common::discovery::NodeFromExternalSource;
+use reth_primitives::{NodeRecord, PeerId};
+
+use tokio::sync::watch;
+use tokio_stream::Stream;
+use tracing::{error, info, trace};
+
+use crate::error::{NetworkError, ServiceKind};
 
 use super::{discv5::start_discv5, Discovery, DiscoveryEvent};
 
@@ -42,6 +45,7 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
         discv5_config: Option<DiscV5Config>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
+        trace!(target: "net::discovery::discv5_downgrade_v4", "init discv5 with v4 downgrade");
         let (disc, disc_updates, bc_local_discv5_enr) = match (discv4_config, discv5_config) {
             (Some(discv4_config), Some(discv5_config)) => {
                 // todo: verify not same socket discv4 and 5
