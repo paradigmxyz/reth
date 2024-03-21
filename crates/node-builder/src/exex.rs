@@ -41,7 +41,7 @@ pub struct ExExContext<Node: FullNodeTypes> {
     data_dir: ChainPath<DataDirPath>,
     /// The config of the node
     config: NodeConfig,
-    /// loaded config
+    /// The loaded node config
     reth_config: reth_config::Config,
     // TODO(alexey): add pool, payload builder, anything else?
 }
