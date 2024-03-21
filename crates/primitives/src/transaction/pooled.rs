@@ -340,7 +340,7 @@ impl PooledTransactionsElement {
         }
     }
 
-    /// Retruns true if the transaction is an EIP-4844 transaction.
+    /// Returns true if the transaction is an EIP-4844 transaction.
     #[inline]
     pub const fn is_eip4844(&self) -> bool {
         matches!(self, Self::BlobTransaction(_))

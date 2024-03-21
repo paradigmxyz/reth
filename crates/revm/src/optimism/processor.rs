@@ -389,7 +389,7 @@ mod tests {
         let tx_receipt = executor.receipts[0][0].as_ref().unwrap();
         let deposit_receipt = executor.receipts[0][1].as_ref().unwrap();
 
-        // deposit_receipt_version is set to 1 for post canyon deposit transations
+        // deposit_receipt_version is set to 1 for post canyon deposit transactions
         assert_eq!(deposit_receipt.deposit_receipt_version, Some(1));
         assert!(tx_receipt.deposit_receipt_version.is_none());
 
