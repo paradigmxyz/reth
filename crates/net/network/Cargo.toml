@@ -31,7 +31,6 @@ reth-tokio-util.workspace = true
 
 # ethereum
 enr = { workspace = true, features = ["rust-secp256k1"], optional = true }
-discv5 = { workspace = true, features = ["libp2p"] }
 rlp = "0.5.2"
 alloy-rlp.workspace = true
 

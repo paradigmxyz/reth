@@ -2,29 +2,27 @@
 //! [`Discv4`] connections.
 
 use std::{
-    collections::HashSet,
     net::SocketAddr,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
-use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey};
 use futures::StreamExt;
-use reth_discv4::{Discv4, Discv4Config, PublicKey, SecretKey};
+use reth_discv4::{secp256k1::SecretKey, Discv4Config};
 use reth_discv5::{
-    v4_downgradable::DiscoveryUpdateV5, DiscV5Config, DiscV5WithV4Downgrade, MergedUpdateStream,
+    discv5::enr::Enr, downgrade_v4::DiscoveryUpdateV5, DiscV5Config, DiscV5WithV4Downgrade,
+    MergedUpdateStream,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::NodeFromExternalSource;
-use reth_primitives::{NodeRecord, PeerId};
-use tokio::sync::watch;
+use reth_primitives::NodeRecord;
+
 use tokio_stream::Stream;
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 
-use crate::error::{NetworkError, ServiceKind};
+use crate::error::NetworkError;
 
-use super::{discv5::start_discv5, Discovery, DiscoveryEvent};
+use super::{Discovery, DiscoveryEvent};
 
 /// [`Discovery`] type that uses [`discv5::Discv5`], with support for downgraded [`Discv4`]
 /// connections.
@@ -49,98 +47,17 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
 
         let (disc, disc_updates, bc_local_discv5_enr) = match (discv4_config, discv5_config) {
             (Some(discv4_config), Some(discv5_config)) => {
-                // todo: verify not same socket discv4 and 5
+                let (disc, disc_updates, bc_discv5_enr) =
+                    DiscV5WithV4Downgrade::start(discv4_addr, sk, discv4_config, discv5_config)
+                        .await
+                        .map_err(|err| NetworkError::custom_discovery(&err.to_string()))?;
 
-                //
-                // 1. start discv5
-                //
-                let (discv5, discv5_updates, bc_local_discv5_enr) =
-                    start_discv5(&sk, discv5_config).await?;
-
-                //
-                // 2. types needed for interfacing with discv4
-                //
-                let discv5 = Arc::new(discv5);
-                let discv5_ref = discv5.clone();
-                // todo: store peer ids as node ids also in discv4 + pass mutual ref to mirror as
-                // param to filter out removed nodes and only get peer ids of additions.
-                let read_kbuckets_callback =
-                    move || -> Result<HashSet<PeerId>, secp256k1::Error> {
-                        let keys = discv5_ref.with_kbuckets(|kbuckets| {
-                            kbuckets
-                                .read()
-                                .iter_ref()
-                                .map(|node| {
-                                    let enr = node.node.value;
-                                    let pk = enr.public_key();
-                                    debug_assert!(
-                                        matches!(pk, CombinedPublicKey::Secp256k1(_)),
-                                        "discv5 using different key type than discv4"
-                                    );
-                                    pk.encode()
-                                })
-                                .collect::<Vec<_>>()
-                        });
-
-                        let mut discv5_kbucket_keys = HashSet::with_capacity(keys.len());
-
-                        for pk_bytes in keys {
-                            let pk = PublicKey::from_slice(&pk_bytes)?;
-                            let peer_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
-                            discv5_kbucket_keys.insert(peer_id);
-                        }
-
-                        Ok(discv5_kbucket_keys)
-                    };
-                // channel which will tell discv4 that discv5 has updated its kbuckets
-                let (discv5_kbuckets_change_tx, discv5_kbuckets_change_rx) = watch::channel(());
-
-                //
-                // 4. start discv4 as discv5 fallback, maintains a mirror of discv5 kbuckets
-                //
-                let local_enr_discv4 = NodeRecord::from_secret_key(discv4_addr, &sk);
-
-                let (discv4, mut discv4_service) = Discv4::bind_as_secondary_disc_node(
-                    discv4_addr,
-                    local_enr_discv4,
-                    sk,
-                    discv4_config,
-                    discv5_kbuckets_change_rx,
-                    read_kbuckets_callback,
-                )
-                .await
-                .map_err(|err| {
-                    NetworkError::from_io_error(err, ServiceKind::Discovery(discv4_addr))
-                })?;
-
-                // start an update stream
-                let discv4_updates = discv4_service.update_stream();
-
-                // spawn the service
-                let _discv4_service = discv4_service.spawn();
-
-                info!("Discv4 listening on {discv4_addr}");
-
-                //
-                // 5. merge both discovery nodes
-                //
-                // combined handle
-                let disc = DiscV5WithV4Downgrade::new(discv5, discv4);
-
-                // combined update stream
-                let disc_updates = MergedUpdateStream::merge_discovery_streams(
-                    discv5_updates,
-                    discv4_updates,
-                    discv5_kbuckets_change_tx,
-                );
-
-                // discv5 and discv4 are running like usual, only that discv4 will filter out
-                // nodes already connected over discv5 identified by their public key
-                (Some(disc), Some(disc_updates), bc_local_discv5_enr)
+                (Some(disc), Some(disc_updates), bc_discv5_enr)
             }
             _ => {
                 // make enr for discv4 not to break existing api, possibly used in tests
                 let local_enr_discv4 = NodeRecord::from_secret_key(discv4_addr, &sk);
+
                 (None, None, local_enr_discv4)
             }
         };
@@ -241,7 +158,7 @@ where
 mod tests {
     use rand::thread_rng;
     use reth_discv4::{DiscoveryUpdate, Discv4ConfigBuilder};
-    use reth_discv5::{enr::EnrCombinedKeyWrapper, HandleDiscv5};
+    use reth_discv5::{discv5, enr::EnrCombinedKeyWrapper, HandleDiscv5};
     use reth_net_common::discovery::HandleDiscovery;
     use tracing::trace;
 

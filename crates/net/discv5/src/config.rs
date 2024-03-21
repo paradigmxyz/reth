@@ -153,20 +153,20 @@ impl DiscV5ConfigBuilder {
 pub struct DiscV5Config {
     /// Config used by [`discv5::Discv5`]. Contains the [`ListenConfig`], with the discovery listen
     /// socket.
-    discv5_config: discv5::Config,
+    pub(super) discv5_config: discv5::Config,
     /// Nodes to boot from.
-    bootstrap_nodes: HashSet<BootNode>,
+    pub(super) bootstrap_nodes: HashSet<BootNode>,
     /// [`ForkId`] to set in local node record.
-    fork_id: Option<ForkId>,
+    pub(super) fork_id: Option<ForkId>,
     /// Mempool TCP port to advertise.
-    tcp_port: u16,
+    pub(super) tcp_port: u16,
     /// Additional kv-pairs to include in local node record.
-    other_enr_data: Vec<(&'static str, Bytes)>,
+    pub(super) other_enr_data: Vec<(&'static str, Bytes)>,
     /// Allow no TCP port advertised by discovered nodes. Disallowed by default.
-    allow_no_tcp_discovered_nodes: bool,
+    pub(super) allow_no_tcp_discovered_nodes: bool,
     /// Interval in seconds at which to run a lookup up query with local node ID as target, to
     /// populate kbuckets.
-    self_lookup_interval: u64,
+    pub(super) self_lookup_interval: u64,
 }
 
 impl DiscV5Config {
@@ -183,30 +183,6 @@ impl DiscV5Config {
             ListenConfig::Ipv6 { ip, port } => (ip, port).into(),
             ListenConfig::DualStack { ipv6, ipv6_port, .. } => (ipv6, ipv6_port).into(),
         }
-    }
-
-    /// Destructs the config.
-    pub fn destruct(
-        self,
-    ) -> (discv5::Config, HashSet<BootNode>, Option<ForkId>, u16, Vec<(&'static str, Bytes)>, bool)
-    {
-        let Self {
-            discv5_config,
-            bootstrap_nodes,
-            fork_id,
-            tcp_port,
-            other_enr_data,
-            allow_no_tcp_discovered_nodes,
-        } = self;
-
-        (
-            discv5_config,
-            bootstrap_nodes,
-            fork_id,
-            tcp_port,
-            other_enr_data,
-            allow_no_tcp_discovered_nodes,
-        )
     }
 }
 

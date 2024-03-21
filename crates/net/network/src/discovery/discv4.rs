@@ -6,7 +6,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use reth_discv4::{Discv4, Discv4Config, SecretKey};
+use reth_discv4::{secp256k1::SecretKey, Discv4, Discv4Config};
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::NodeFromExternalSource;
 use reth_primitives::NodeRecord;

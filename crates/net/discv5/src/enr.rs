@@ -2,8 +2,8 @@
 //! [`discv5::enr::NodeId`] and [`PeerId`].
 
 use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey, NodeId};
+use reth_discv4::secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
 use reth_primitives::PeerId;
-use secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
 
 const SECP256K1_SERIALIZED_UNCOMPRESSED_FLAG: u8 = 4;
 

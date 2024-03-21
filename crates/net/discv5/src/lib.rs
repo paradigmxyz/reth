@@ -1,25 +1,30 @@
 //! Wrapper around [`discv5::Discv5`].
 
-use std::{fmt, net::IpAddr, sync::Arc};
+use std::{fmt, net::IpAddr, sync::Arc, time::Duration};
 
 use ::enr::Enr;
 use alloy_rlp::Decodable;
 use derive_more::{Constructor, Deref, DerefMut};
-use discv5::IpMode;
 use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
+use futures::future::join_all;
+use itertools::Itertools;
+use reth_discv4::secp256k1::SecretKey;
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     ForkId, NodeRecord, PeerId,
 };
-use tracing::error;
+use tokio::{sync::mpsc, task};
+use tracing::{debug, error, trace};
 
 pub mod config;
-pub mod v4_downgradeable;
+pub mod downgrade_v4;
 pub mod enr;
 
+pub use discv5::{self, IpMode};
+
 pub use config::{BootNode, DiscV5Config, DiscV5ConfigBuilder};
-pub use v4_downgradeable::{DiscV5WithV4Downgrade, MergedUpdateStream};
+pub use downgrade_v4::{DiscV5WithV4Downgrade, MergedUpdateStream};
 pub use enr::uncompressed_id_from_enr_pk;
 
 /// Errors from using [`discv5::Discv5`] handle.
@@ -46,6 +51,15 @@ pub enum Error {
     /// Peer is not using same IP version as local node in mempool.
     #[error("mempool TCP socket is unsupported IP version, ENR: {0}, local ip mode: {1:?}")]
     IpVersionMismatchMempool(discv5::Enr, IpMode),
+    /// Failed to initialize [`discv5::Discv5`].
+    #[error("init failed, {0}")]
+    InitFailure(&'static str),
+    /// An error from underlying [`discv5::Discv5`] node.
+    #[error("{0}")]
+    Discv5Error(discv5::Error),
+    /// An error from underlying [`discv5::Discv5`] node.
+    #[error("{0}")]
+    Discv5ErrorStr(&'static str),
 }
 
 /// Use API of [`discv5::Discv5`].
@@ -128,6 +142,174 @@ impl DiscV5 {
                 "failed to update local enr"
             );
         }
+    }
+
+    /// Spawns [`discv5::Discv5`].
+    pub async fn start(
+        sk: &SecretKey,
+        discv5_config: DiscV5Config,
+    ) -> Result<(Self, mpsc::Receiver<discv5::Event>, NodeRecord), Error> {
+        //
+        // 1. make local enr from listen config
+        //
+        let DiscV5Config {
+            discv5_config,
+            bootstrap_nodes,
+            fork_id,
+            tcp_port,
+            other_enr_data,
+            allow_no_tcp_discovered_nodes: _,
+            self_lookup_interval,
+        } = discv5_config;
+
+        let (enr, bc_enr, ip_mode) = {
+            let mut builder = discv5::enr::Enr::builder();
+
+            use discv5::ListenConfig::*;
+            let ip_mode = match discv5_config.listen_config {
+                Ipv4 { ip, port } => {
+                    builder.ip4(ip);
+                    builder.udp4(port);
+                    builder.tcp4(tcp_port);
+
+                    IpMode::Ip4
+                }
+                Ipv6 { ip, port } => {
+                    builder.ip6(ip);
+                    builder.udp6(port);
+                    builder.tcp6(tcp_port);
+
+                    IpMode::Ip6
+                }
+                DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
+                    builder.ip4(ipv4);
+                    builder.udp4(ipv4_port);
+                    builder.tcp4(tcp_port);
+
+                    builder.ip6(ipv6);
+                    builder.udp6(ipv6_port);
+
+                    IpMode::DualStack
+                }
+            };
+
+            // add fork id if network is L1
+            if let Some(fork_id) = fork_id {
+                builder.add_value("eth", &alloy_rlp::encode(fork_id));
+            }
+            // add other data
+            for (key, value) in other_enr_data {
+                builder.add_value(key, &alloy_rlp::encode(value));
+            }
+
+            // enr v4 not to get confused with discv4, independent versioning enr and
+            // discovery
+            let enr = builder.build(sk).expect("should build enr v4");
+            let EnrCombinedKeyWrapper(enr) = enr.into();
+
+            // backwards compatible enr
+            let socket = ip_mode.get_contactable_addr(&enr).unwrap();
+            let bc_enr = NodeRecord::from_secret_key(socket, sk);
+
+            (enr, bc_enr, ip_mode)
+        };
+
+        //
+        // 3. start discv5
+        //
+        let sk = {
+            let mut sk = *sk.as_ref();
+            discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk).unwrap()
+        };
+        let mut discv5 = match discv5::Discv5::new(enr, sk, discv5_config) {
+            Ok(discv5) => discv5,
+            Err(err) => return Err(Error::InitFailure(err)),
+        };
+        discv5.start().await.map_err(Error::Discv5Error)?;
+
+        // start discv5 updates stream
+        let discv5_updates = discv5.event_stream().await.map_err(Error::Discv5Error)?;
+
+        let discv5 = Arc::new(discv5);
+
+        //
+        // 4. add boot nodes
+        //
+        let mut enr_requests = vec![];
+        for node in bootstrap_nodes {
+            match node {
+                BootNode::Enr(node) => {
+                    if let Err(err) = discv5.add_enr(node) {
+                        return Err(Error::Discv5ErrorStr(err))
+                    }
+                }
+                BootNode::Enode(enode) => enr_requests.push(task::spawn({
+                    let discv5 = discv5.clone();
+                    async move {
+                        if let Err(err) = discv5.request_enr(enode).await {
+                            debug!(target: "net::discovery::discv5",
+                                enode,
+                                %err,
+                                "failed adding boot node"
+                            );
+                        }
+                    }
+                })),
+            }
+        }
+        _ = join_all(enr_requests);
+
+        debug!(target: "net::discovery::discv5",
+            connected_boot_nodes=format!("[{:#}]", discv5.with_kbuckets(|kbuckets| kbuckets
+                .write()
+                .iter()
+                .filter(|entry| entry.status.is_connected())
+                .map(|connected_peer| connected_peer.node.key.preimage()).copied().collect::<Vec<_>>()
+            ).into_iter().format(", ")),
+            "added boot nodes"
+        );
+
+        // initiate regular lookups to populate kbuckets
+        task::spawn({
+            let discv5 = discv5.clone();
+            let local_node_id = discv5.local_enr().node_id();
+            let self_lookup_interval = Duration::from_secs(self_lookup_interval);
+            // todo: graceful shutdown
+
+            async move {
+                loop {
+                    trace!(target: "net::discovery::discv5",
+                        self_lookup_interval=format!("{:#?}", self_lookup_interval),
+                        "starting periodic lookup query"
+                    );
+                    match discv5.find_node(local_node_id).await {
+                        Err(err) => trace!(target: "net::discovery::discv5",
+                            self_lookup_interval=format!("{:#?}", self_lookup_interval),
+                            %err,
+                            "periodic lookup query failed"
+                        ),
+                        Ok(peers) => trace!(target: "net::discovery::discv5",
+                            self_lookup_interval=format!("{:#?}", self_lookup_interval),
+                            peers=format!("[{:#}]", peers.iter()
+                                .map(|enr| enr.node_id()
+                            ).format(", ")),
+                            "peers returned by periodic lookup query"
+                        ),
+                    }
+
+                    // `Discv5::connected_peers` can be subset of sessions, not all peers make it
+                    // into kbuckets, e.g. incoming sessions from peers with
+                    // unreachable enrs
+                    debug!(target: "net::discovery::discv5",
+                        connected_peers=discv5.connected_peers(),
+                        "connected peers in routing table"
+                    );
+                    tokio::time::sleep(self_lookup_interval).await;
+                }
+            }
+        });
+
+        Ok((DiscV5::new(discv5, ip_mode), discv5_updates, bc_enr))
     }
 }
 

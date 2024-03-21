@@ -1,19 +1,25 @@
 //! Wrapper around [`discv5::Discv5`] that supports downgrade to [`Discv4`].
 
 use std::{
-    net::IpAddr,
+    collections::HashSet,
+    io,
+    net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
 };
 
 use derive_more::From;
-use discv5::IpMode;
+use discv5::{enr::EnrPublicKey, IpMode};
 use futures::{
     stream::{select, Select},
     Stream, StreamExt,
 };
-use reth_discv4::{DiscoveryUpdate, Discv4};
+use reth_discv4::{
+    error::Discv4Error,
+    secp256k1::{self, PublicKey, SecretKey},
+    DiscoveryUpdate, Discv4, Discv4Config,
+};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
@@ -23,7 +29,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
-use crate::{DiscV5, HandleDiscv5};
+use crate::{DiscV5, DiscV5Config, HandleDiscv5};
 
 /// Errors interfacing between [`discv5::Discv5`] and [`Discv4`].
 #[derive(Debug, thiserror::Error)]
@@ -33,7 +39,13 @@ pub enum Error {
     NotifyKBucketsUpdateFailed(watch::error::SendError<()>),
     /// Error interfacing with [`discv5::Discv5`].
     #[error(transparent)]
-    DiscV5Error(super::Error),
+    DiscV5Error(#[from] super::Error),
+    /// Failed to initialize [`Discv4`].
+    #[error("init failed, {0}")]
+    Discv4InitFailure(io::Error),
+    /// Error interfacing with [`Discv4`].
+    #[error(transparent)]
+    Discv4Error(#[from] Discv4Error),
 }
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
@@ -63,6 +75,101 @@ impl DiscV5WithV4Downgrade {
         F: FnOnce(&mut Discv4) -> R,
     {
         f(&mut self.discv4)
+    }
+
+    /// Starts [`discv5::Discv5`] as primary service, and [`Discv4`] as downgraded service.
+    pub async fn start(
+        discv4_addr: SocketAddr, // discv5 addr in config
+        sk: SecretKey,
+        discv4_config: Discv4Config,
+        discv5_config: DiscV5Config,
+    ) -> Result<(Self, MergedUpdateStream, NodeRecord), Error> {
+        // todo: verify not same socket discv4 and 5
+
+        //
+        // 1. start discv5
+        //
+        let (discv5, discv5_updates, bc_local_discv5_enr) =
+            DiscV5::start(&sk, discv5_config).await?;
+
+        //
+        // 2. types needed for interfacing with discv4
+        //
+        let discv5 = Arc::new(discv5);
+        let discv5_ref = discv5.clone();
+        // todo: store peer ids as node ids also in discv4 + pass mutual ref to mirror as
+        // param to filter out removed nodes and only get peer ids of additions.
+        let read_kbuckets_callback = move || -> Result<HashSet<PeerId>, secp256k1::Error> {
+            let keys = discv5_ref.with_kbuckets(|kbuckets| {
+                kbuckets
+                    .read()
+                    .iter_ref()
+                    .map(|node| {
+                        let enr = node.node.value;
+                        let pk = enr.public_key();
+                        debug_assert!(
+                            matches!(pk, discv5::enr::CombinedPublicKey::Secp256k1(_)),
+                            "discv5 using different key type than discv4"
+                        );
+                        pk.encode()
+                    })
+                    .collect::<Vec<_>>()
+            });
+
+            let mut discv5_kbucket_keys = HashSet::with_capacity(keys.len());
+
+            for pk_bytes in keys {
+                let pk = PublicKey::from_slice(&pk_bytes)?;
+                let peer_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+                discv5_kbucket_keys.insert(peer_id);
+            }
+
+            Ok(discv5_kbucket_keys)
+        };
+        // channel which will tell discv4 that discv5 has updated its kbuckets
+        let (discv5_kbuckets_change_tx, discv5_kbuckets_change_rx) = watch::channel(());
+
+        //
+        // 4. start discv4 as discv5 fallback, maintains a mirror of discv5 kbuckets
+        //
+        let local_enr_discv4 = NodeRecord::from_secret_key(discv4_addr, &sk);
+
+        let (discv4, mut discv4_service) = match Discv4::bind_as_secondary_disc_node(
+            discv4_addr,
+            local_enr_discv4,
+            sk,
+            discv4_config,
+            discv5_kbuckets_change_rx,
+            read_kbuckets_callback,
+        )
+        .await
+        {
+            Ok(discv4) => discv4,
+            Err(err) => return Err(Error::Discv4InitFailure(err)),
+        };
+
+        // start an update stream
+        let discv4_updates = discv4_service.update_stream();
+
+        // spawn the service
+        let _discv4_service = discv4_service.spawn();
+
+        //
+        // 5. merge both discovery nodes
+        //
+        // combined handle
+        let disc = DiscV5WithV4Downgrade::new(discv5, discv4);
+
+        // combined update stream
+        let disc_updates = MergedUpdateStream::merge_discovery_streams(
+            discv5_updates,
+            discv4_updates,
+            discv5_kbuckets_change_tx,
+        );
+
+        // discv5 and discv4 are running like usual, only that discv4 will filter out
+        // nodes already connected over discv5 identified by their public key
+        Ok((disc, disc_updates, bc_local_discv5_enr))
     }
 }
 

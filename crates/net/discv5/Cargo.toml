@@ -20,8 +20,7 @@ reth-net-common.workspace = true
 # ethereum
 alloy-rlp.workspace = true
 rlp = "0.5.2"
-discv5.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
+discv5 = { workspace = true, features = ["libp2p"] }
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
 
 # async/futures
@@ -35,3 +34,4 @@ parking_lot.workspace = true
 derive_more.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+itertools.workspace = true
