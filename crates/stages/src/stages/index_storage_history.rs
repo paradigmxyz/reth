@@ -1,5 +1,6 @@
 use super::{collect_history_indices, load_history_indices};
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database,
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
@@ -27,18 +28,20 @@ pub struct IndexStorageHistoryStage {
     pub commit_threshold: u64,
     /// Pruning configuration.
     pub prune_mode: Option<PruneMode>,
+    /// ETL configuration
+    pub etl_config: EtlConfig,
 }
 
 impl IndexStorageHistoryStage {
     /// Create new instance of [IndexStorageHistoryStage].
-    pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>) -> Self {
-        Self { commit_threshold, prune_mode }
+    pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>, etl_config: EtlConfig) -> Self {
+        Self { commit_threshold, prune_mode, etl_config }
     }
 }
 
 impl Default for IndexStorageHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000, prune_mode: None }
+        Self { commit_threshold: 100_000, prune_mode: None, etl_config: EtlConfig::default() }
     }
 }
 
@@ -107,6 +110,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
                     StorageShardedKey::new(address, storage_key, highest_block_number)
                 },
                 |(key, value)| (key.block_number(), AddressStorageKey((key.address(), value.key))),
+                &self.etl_config
             )?;
 
         info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
@@ -532,7 +536,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S { commit_threshold: self.commit_threshold, prune_mode: self.prune_mode }
+            Self::S { commit_threshold: self.commit_threshold, prune_mode: self.prune_mode, etl_config: EtlConfig::default() }
         }
     }
 

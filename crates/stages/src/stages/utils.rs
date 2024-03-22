@@ -1,5 +1,6 @@
 //! Utils for `stages`.
 use crate::StageError;
+use reth_config::config::EtlConfig;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     models::sharded_key::NUM_OF_INDICES_IN_SHARD,
@@ -37,6 +38,7 @@ pub(crate) fn collect_history_indices<TX, CS, H, P>(
     range: impl RangeBounds<CS::Key>,
     sharded_key_factory: impl Fn(P, BlockNumber) -> H::Key,
     partial_key_factory: impl Fn((CS::Key, CS::Value)) -> (u64, P),
+    etl_config: &EtlConfig
 ) -> Result<Collector<H::Key, H::Value>, StageError>
 where
     TX: DbTxMut + DbTx,
@@ -46,7 +48,7 @@ where
 {
     let mut changeset_cursor = tx.cursor_read::<CS>()?;
 
-    let mut collector = Collector::new(500 * 1024 * 1024, None);
+    let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
     let mut cache: HashMap<P, Vec<u64>> = HashMap::new();
     let mut entries = 0;
 
