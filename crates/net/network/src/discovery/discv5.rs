@@ -245,6 +245,7 @@ mod tests {
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
         let discv5_config = DiscV5Config::builder()
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .filter(NoopFilter)
             .build();
 
         Discovery::start_discv5(secret_key, Some(discv5_config), None)

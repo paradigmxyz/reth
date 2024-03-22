@@ -30,7 +30,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
 use crate::{
-    filter::{FilterDiscovered, FilterOutcome},
+    filter::{FilterDiscovered, FilterOutcome, MustIncludeChain},
     DiscV5, DiscV5Config, HandleDiscv5,
 };
 
@@ -53,7 +53,7 @@ pub enum Error {
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
 #[derive(Debug, Clone)]
-pub struct DiscV5WithV4Downgrade<T> {
+pub struct DiscV5WithV4Downgrade<T = MustIncludeChain> {
     discv5: Arc<DiscV5<T>>,
     discv4: Discv4,
 }
@@ -360,6 +360,7 @@ mod tests {
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
         let discv5_config = DiscV5Config::builder()
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .filter(NoopFilter)
             .build();
 
         DiscV5WithV4Downgrade::start(discv4_addr, secret_key, discv4_config, discv5_config)

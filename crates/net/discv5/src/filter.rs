@@ -47,7 +47,7 @@ impl FilterOutcome {
 }
 
 /// Filter requiring that peers advertise that they belong to some fork of a certain chain.
-#[derive(Debug, Constructor, Clone, Copy)]
+#[derive(Debug, Constructor, Clone, Copy, Default)]
 pub struct MustIncludeChain {
     /// Chain which node record must advertise.
     chain: &'static [u8],
@@ -67,7 +67,7 @@ impl FilterDiscovered for MustIncludeChain {
 }
 
 /// Filter requiring that peers advertise belonging to a certain fork.
-#[derive(Debug, Constructor, Clone, Copy)]
+#[derive(Debug, Constructor, Clone, Copy, Default)]
 pub struct MustIncludeFork {
     /// Filters chain which node record must advertise.
     chain: MustIncludeChain,
