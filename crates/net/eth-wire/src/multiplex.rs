@@ -301,10 +301,6 @@ impl ProtocolProxy {
     }
 
     /// Masks the message ID of a message to be sent on the wire.
-    ///
-    /// # Panics
-    ///
-    /// If the message is empty.
     #[inline]
     fn mask_msg_id(&self, msg: Bytes) -> Result<Bytes, io::Error> {
         if msg.is_empty() {
@@ -322,10 +318,6 @@ impl ProtocolProxy {
     }
 
     /// Unmasks the message ID of a message received from the wire.
-    ///
-    /// # Panics
-    ///
-    /// If the message is empty.
     #[inline]
     fn unmask_id(&self, mut msg: BytesMut) -> Result<BytesMut, io::Error> {
         if msg.is_empty() {
@@ -608,10 +600,6 @@ struct ProtocolStream {
 
 impl ProtocolStream {
     /// Masks the message ID of a message to be sent on the wire.
-    ///
-    /// # Panics
-    ///
-    /// If the message is empty.
     #[inline]
     fn mask_msg_id(&self, mut msg: BytesMut) -> Result<Bytes, io::Error> {
         if msg.is_empty() {
@@ -625,10 +613,6 @@ impl ProtocolStream {
     }
 
     /// Unmasks the message ID of a message received from the wire.
-    ///
-    /// # Panics
-    ///
-    /// If the message is empty.
     #[inline]
     fn unmask_id(&self, mut msg: BytesMut) -> Result<BytesMut, io::Error> {
         if msg.is_empty() {
