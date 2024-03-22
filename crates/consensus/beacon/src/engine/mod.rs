@@ -664,6 +664,24 @@ where
         // pipeline
         if exceeds_pipeline_run_threshold {
             if let Some(state) = sync_target_state {
+                if state.finalized_block_hash == B256::ZERO {
+                    // this is likely the first FCU ever for this node, which means we do not
+                    // actually have a finalized block to go off of, other than the genesis.
+                    //
+                    // in this case, the zero finalized block is also not a valid target to sync to
+                    //
+                    // to ensure we do not get stuck in a loop, or attempt to download a massive
+                    // range of blocks, we should run the pipeline to the safe block.
+                    tracing::debug!(
+                        target: "consensus::engine",
+                        head=?state.head_block_hash,
+                        safe=?state.safe_block_hash,
+                        finalized=?state.finalized_block_hash,
+                        "Exceeds pipeline run threshold, syncing to safe block"
+                    );
+                    return Some(state.safe_block_hash)
+                }
+
                 // if we have already canonicalized the finalized block, we should
                 // skip the pipeline run
                 match self.blockchain.header_by_hash_or_number(state.finalized_block_hash.into()) {
