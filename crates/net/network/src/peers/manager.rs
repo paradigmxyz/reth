@@ -438,7 +438,7 @@ impl PeersManager {
                     }
                 }
 
-                trace!(target: "net::peers", reputation=%peer.reputation, banned=%peer.is_banned(), peer_id=?peer.socket_addr, peer_addr=?peer.socket_addr, rep_change_kind=?rep, "applying reputation change");
+                trace!(target: "net::peers", reputation=%peer.reputation, banned=%peer.is_banned(), ?peer_id, peer_addr=?peer.addr, rep_change_kind=?rep, "applying reputation change");
                 peer.apply_reputation(reputation_change)
             }
         } else {
@@ -1066,7 +1066,7 @@ impl Peer {
         self.reputation = previous.saturating_add(reputation);
 
         if self.state.is_connected() && self.is_banned() {
-            trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), peer_addr=?self.socket_addr, "Banning connected peer");
+            trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), peer_addr=?self.addr, "Banning connected peer");
             self.state.disconnect();
             return ReputationChangeOutcome::DisconnectAndBan
         }
