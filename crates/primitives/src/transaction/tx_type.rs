@@ -103,12 +103,20 @@ impl TryFrom<u8> for TxType {
     }
 }
 
+impl TryFrom<u64> for TxType {
+    type Error = &'static str;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        let value: u8 = value.try_into().map_err(|_| "invalid tx type")?;
+        Self::try_from(value)
+    }
+}
+
 impl TryFrom<U64> for TxType {
     type Error = &'static str;
 
     fn try_from(value: U64) -> Result<Self, Self::Error> {
-        let value_u8: u8 = value.try_into().map_err(|_| "invalid tx type")?;
-        Self::try_from(value_u8)
+        value.to::<u64>().try_into()
     }
 }
 
