@@ -23,7 +23,7 @@ impl<Node: FullNodeTypes> ExEx for DummyExEx<Node> {
 }
 
 impl<N: FullNodeTypes> Stream for DummyExEx<N> {
-    type Item = ExExEvent;
+    type Item = eyre::Result<ExExEvent>;
 
     fn poll_next(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Poll::Pending

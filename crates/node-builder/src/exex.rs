@@ -11,7 +11,7 @@ use reth_tasks::TaskExecutor;
 use std::{borrow::Cow, pin::Pin};
 
 /// An ExEx (Execution Extension) that processes new blocks and emits events on a stream.
-pub trait ExEx: Stream<Item = ExExEvent> + Send + 'static {
+pub trait ExEx: Stream<Item = eyre::Result<ExExEvent>> + Send + 'static {
     /// Returns the name of the ExEx. It will appear in logs and metrics.
     fn name(&self) -> Cow<'static, str>;
 }
