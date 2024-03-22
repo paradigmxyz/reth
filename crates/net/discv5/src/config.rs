@@ -8,9 +8,12 @@ use std::{
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_primitives::{AnyNode, Bytes, ForkId, NodeRecord};
+use reth_primitives::{AnyNode, Bytes, ForkId, NodeRecord, MAINNET};
 
-use crate::enr::uncompressed_to_multiaddr_id;
+use crate::{
+    enr::uncompressed_to_multiaddr_id,
+    filter::{DefaultFilter, FilterDiscovered},
+};
 
 /// Default interval in seconds at which to run a self-lookup up query.
 ///
@@ -19,13 +22,13 @@ const DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL: u64 = 60;
 
 /// Builds a [`DiscV5Config`].
 #[derive(Debug, Default)]
-pub struct DiscV5ConfigBuilder {
+pub struct DiscV5ConfigBuilder<Filter = DefaultFilter> {
     /// Config used by [`discv5::Discv5`]. Contains the discovery listen socket.
     discv5_config: Option<discv5::Config>,
     /// Nodes to boot from.
     bootstrap_nodes: HashSet<BootNode>,
     /// [`ForkId`] to set in local node record.
-    fork_id: Option<ForkId>,
+    fork_id: Option<(&'static [u8], ForkId)>,
     /// Mempool TCP port to advertise.
     tcp_port: Option<u16>,
     /// Additional kv-pairs that should be advertised to peers by including in local node record.
@@ -35,11 +38,14 @@ pub struct DiscV5ConfigBuilder {
     /// Interval in seconds at which to run a lookup up query with local node ID as target, to
     /// populate kbuckets.
     self_lookup_interval: Option<u64>,
+    /// Optional filter rules to apply to a discovered peer in order to determine if it should be
+    /// passed up to mempool or dropped.
+    filter_discovered_peer: Filter,
 }
 
-impl DiscV5ConfigBuilder {
+impl<T> DiscV5ConfigBuilder<T> {
     /// Returns a new builder, with all fields set like given instance.
-    pub fn new_from(discv5_config: DiscV5Config) -> Self {
+    pub fn new_from(discv5_config: DiscV5Config<T>) -> Self {
         let DiscV5Config {
             discv5_config,
             bootstrap_nodes,
@@ -47,17 +53,19 @@ impl DiscV5ConfigBuilder {
             tcp_port,
             other_enr_data,
             allow_no_tcp_discovered_nodes,
-            self_lookup_interval: lookup_interval,
+            self_lookup_interval,
+            filter_discovered_peer,
         } = discv5_config;
 
         Self {
             discv5_config: Some(discv5_config),
             bootstrap_nodes,
-            fork_id,
+            fork_id: Some(fork_id),
             tcp_port: Some(tcp_port),
             other_enr_data,
             allow_no_tcp_discovered_nodes,
-            self_lookup_interval: Some(lookup_interval),
+            self_lookup_interval: Some(self_lookup_interval),
+            filter_discovered_peer,
         }
     }
 
@@ -75,7 +83,7 @@ impl DiscV5ConfigBuilder {
 
     /// Adds multiple boot nodes.
     pub fn add_boot_nodes(mut self, nodes: impl IntoIterator<Item = discv5::Enr>) -> Self {
-        self.bootstrap_nodes.extend(nodes.into_iter().map(|node| BootNode::Enr(node)));
+        self.bootstrap_nodes.extend(nodes.into_iter().map(BootNode::Enr));
         self
     }
 
@@ -83,10 +91,9 @@ impl DiscV5ConfigBuilder {
     /// adds any successfully deserialized records to boot nodes.
     pub fn add_serialized_boot_nodes(mut self, enrs: &str) -> Self {
         let bootstrap_nodes = &mut self.bootstrap_nodes;
-        for res in enrs.split(&[',']).map(|record| record.trim().parse::<discv5::Enr>()) {
-            if let Ok(node) = res {
-                bootstrap_nodes.insert(BootNode::Enr(node));
-            }
+        for node in enrs.split(&[',']).map(|record| record.trim().parse::<discv5::Enr>()).flatten()
+        {
+            bootstrap_nodes.insert(BootNode::Enr(node));
         }
         self
     }
@@ -95,7 +102,7 @@ impl DiscV5ConfigBuilder {
     pub fn add_enode_boot_nodes(mut self, enodes: &'static str) -> Self {
         let bootstrap_nodes = &mut self.bootstrap_nodes;
 
-        for node in enodes.split(&[',']).into_iter() {
+        for node in enodes.split(&[',']) {
             if let Ok(AnyNode::NodeRecord(NodeRecord { address, udp_port, id, .. })) = node.parse()
             {
                 let mut multi_address = Multiaddr::empty();
@@ -114,9 +121,9 @@ impl DiscV5ConfigBuilder {
         self
     }
 
-    /// Set [`ForkId`] to include in the local [`Enr`](discv5::enr::Enr).
-    pub fn fork_id(mut self, fork_id: ForkId) -> Self {
-        self.fork_id = Some(fork_id);
+    /// Set [`ForkId`], and key used to identify it, to set in local [`Enr`](discv5::enr::Enr).
+    pub fn fork_id(mut self, key: &'static [u8], value: ForkId) -> Self {
+        self.fork_id = Some((key, value));
         self
     }
 
@@ -139,8 +146,12 @@ impl DiscV5ConfigBuilder {
         self
     }
 
-    /// Returns a new [`DiscV5Config`].
-    pub fn build(self) -> DiscV5Config {
+    /// Adds filter rules to apply to discovered peer to determine whether or not it should be
+    /// passed to the mempool.
+    pub fn filter<F>(self, f: F) -> DiscV5ConfigBuilder<F>
+    where
+        F: FilterDiscovered,
+    {
         let Self {
             discv5_config,
             bootstrap_nodes,
@@ -148,15 +159,44 @@ impl DiscV5ConfigBuilder {
             tcp_port,
             other_enr_data,
             allow_no_tcp_discovered_nodes,
-            self_lookup_interval: lookup_interval,
+            self_lookup_interval,
+            ..
+        } = self;
+
+        DiscV5ConfigBuilder {
+            discv5_config,
+            bootstrap_nodes,
+            fork_id,
+            tcp_port,
+            other_enr_data,
+            allow_no_tcp_discovered_nodes,
+            self_lookup_interval,
+            filter_discovered_peer: f,
+        }
+    }
+
+    /// Returns a new [`DiscV5Config`].
+    pub fn build(self) -> DiscV5Config<T> {
+        let Self {
+            discv5_config,
+            bootstrap_nodes,
+            fork_id,
+            tcp_port,
+            other_enr_data,
+            allow_no_tcp_discovered_nodes,
+            self_lookup_interval,
+            filter_discovered_peer,
         } = self;
 
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
+        let fork_id = fork_id.unwrap_or((b"eth", MAINNET.latest_fork_id()));
+
         let tcp_port = tcp_port.unwrap_or(DEFAULT_DISCOVERY_PORT);
 
-        let lookup_interval = lookup_interval.unwrap_or(DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL);
+        let self_lookup_interval =
+            self_lookup_interval.unwrap_or(DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL);
 
         DiscV5Config {
             discv5_config,
@@ -165,21 +205,22 @@ impl DiscV5ConfigBuilder {
             tcp_port,
             other_enr_data,
             allow_no_tcp_discovered_nodes,
-            self_lookup_interval: lookup_interval,
+            self_lookup_interval,
+            filter_discovered_peer,
         }
     }
 }
 
 /// Config used to bootstrap [`discv5::Discv5`].
 #[derive(Debug)]
-pub struct DiscV5Config {
+pub struct DiscV5Config<Filter = DefaultFilter> {
     /// Config used by [`discv5::Discv5`]. Contains the [`ListenConfig`], with the discovery listen
     /// socket.
     pub(super) discv5_config: discv5::Config,
     /// Nodes to boot from.
     pub(super) bootstrap_nodes: HashSet<BootNode>,
     /// [`ForkId`] to set in local node record.
-    pub(super) fork_id: Option<ForkId>,
+    pub(super) fork_id: (&'static [u8], ForkId),
     /// Mempool TCP port to advertise.
     pub(super) tcp_port: u16,
     /// Additional kv-pairs to include in local node record.
@@ -189,6 +230,9 @@ pub struct DiscV5Config {
     /// Interval in seconds at which to run a lookup up query with local node ID as target, to
     /// populate kbuckets.
     pub(super) self_lookup_interval: u64,
+    /// Optional filter rules to apply to a discovered peer in order to determine if it should be
+    /// passed up to mempool or dropped.
+    pub(super) filter_discovered_peer: Filter,
 }
 
 impl DiscV5Config {
@@ -196,7 +240,9 @@ impl DiscV5Config {
     pub fn builder() -> DiscV5ConfigBuilder {
         DiscV5ConfigBuilder::default()
     }
+}
 
+impl<T> DiscV5Config<T> {
     /// Returns the socket contained in the [`discv5::Config`]. Returns the IPv6 socket, if both
     /// IPv4 and v6 are configured.
     pub fn socket(&self) -> SocketAddr {
@@ -228,11 +274,10 @@ mod test {
 
     #[test]
     fn parse_boot_nodes() {
-        const OP_SEPOLIA_CL_BOOTNODES: &'static str ="enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg,enr:-J64QFa3qMsONLGphfjEkeYyF6Jkil_jCuJmm7_a42ckZeUQGLVzrzstZNb1dgBp1GGx9bzImq5VxJLP-BaptZThGiWGAYrTytOvgmlkgnY0gmlwhGsV-zeHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDahfSECTIS_cXyZ8IyNf4leANlZnrsMEWTkEYxf4GMCmDdGNwgiQGg3VkcIIkBg";
+        const OP_SEPOLIA_CL_BOOTNODES: &str ="enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg,enr:-J64QFa3qMsONLGphfjEkeYyF6Jkil_jCuJmm7_a42ckZeUQGLVzrzstZNb1dgBp1GGx9bzImq5VxJLP-BaptZThGiWGAYrTytOvgmlkgnY0gmlwhGsV-zeHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDahfSECTIS_cXyZ8IyNf4leANlZnrsMEWTkEYxf4GMCmDdGNwgiQGg3VkcIIkBg";
 
-        let config = DiscV5Config::builder()
-            .add_serialized_boot_nodes(OP_SEPOLIA_CL_BOOTNODES)
-            .build();
+        let config =
+            DiscV5Config::builder().add_serialized_boot_nodes(OP_SEPOLIA_CL_BOOTNODES).build();
 
         let socket_1 = "18.210.176.114:9222".parse::<SocketAddrV4>().unwrap();
         let socket_2 = "107.21.251.55:9222".parse::<SocketAddrV4>().unwrap();

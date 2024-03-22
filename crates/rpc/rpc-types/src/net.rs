@@ -245,6 +245,7 @@ impl TryFrom<Enr<SecretKey>> for NodeRecordWithForkId<Enr<SecretKey>> {
 }
 
 /// Tries to read the [`ForkId`] from given [`Enr`].
+// todo: enable for all chains not only "eth"
 pub fn get_fork_id(enr: &Enr<SecretKey>) -> Result<ForkId, NodeRecordWithForkIdParseError> {
     let Some(mut maybe_fork_id) = enr.get(b"eth") else {
         return Err(NodeRecordWithForkIdParseError::ForkIdMissing)

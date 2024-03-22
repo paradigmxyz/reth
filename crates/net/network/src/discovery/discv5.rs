@@ -10,6 +10,7 @@ use reth_discv4::secp256k1::SecretKey;
 use reth_discv5::{
     discv5::{self, enr::Enr},
     enr::uncompressed_id_from_enr_pk,
+    filter::FilterOutcome,
     DiscV5, DiscV5Config, HandleDiscv5,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
@@ -146,17 +147,33 @@ where
 
     fn on_discovered_peer(&mut self, enr: discv5::Enr) {
         let Some(ref discv5) = self.disc else { return };
+
+        if let FilterOutcome::Ignore { reason } = discv5.filter_discovered_peer(&enr) {
+            trace!(target: "net::discovery::discv5",
+                ?enr,
+                reason,
+                "filtered out discovered peer"
+            );
+        }
+
         let fork_id = discv5.get_fork_id(&enr).ok();
-        match discv5.try_into_reachable(enr) {
+
+        match discv5.try_into_reachable(enr.clone()) {
             Ok(enr_bc) => self.on_node_record_update(enr_bc, fork_id),
             Err(err) => {
                 trace!(target: "net::discovery::discv5",
-                    ?fork_id,
-                    %err,
-                    "discovered unreachable peer"
-                )
+                        ?fork_id,
+                        %err,
+                        "discovered unreachable peer"
+                );
+                return
             }
         }
+        trace!(target: "net::discovery::discv5",
+                ?fork_id,
+                ?enr,
+                "discovered peer on opstack"
+        );
     }
 }
 

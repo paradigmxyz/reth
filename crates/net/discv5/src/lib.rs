@@ -6,6 +6,7 @@ use ::enr::Enr;
 use alloy_rlp::Decodable;
 use derive_more::{Constructor, Deref, DerefMut};
 use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
+use filter::{DefaultFilter, FilterDiscovered, FilterOutcome};
 use futures::future::join_all;
 use itertools::Itertools;
 use reth_discv4::secp256k1::SecretKey;
@@ -20,6 +21,7 @@ use tracing::{debug, error, trace};
 pub mod config;
 pub mod downgrade_v4;
 pub mod enr;
+pub mod filter;
 
 pub use discv5::{self, IpMode};
 
@@ -64,20 +66,26 @@ pub enum Error {
 
 /// Use API of [`discv5::Discv5`].
 pub trait HandleDiscv5 {
+    /// Filter type is constrained by [`DiscV5Config`].
+    type Filter;
+
     /// Exposes API of [`discv5::Discv5`].
     fn with_discv5<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&DiscV5) -> R;
+        F: FnOnce(&DiscV5<Self::Filter>) -> R;
 
     /// Returns the [`IpMode`] of the local node.
     fn ip_mode(&self) -> IpMode;
+
+    /// Returns the key to use to identify the [`ForkId`] kv-pair on the [`Enr`](discv5::Enr).
+    fn fork_id_key(&self) -> &[u8];
 
     /// Returns the [`ForkId`] of the given [`Enr`](discv5::Enr), if field is set.
     fn get_fork_id<K: discv5::enr::EnrKey>(
         &self,
         enr: &discv5::enr::Enr<K>,
     ) -> Result<ForkId, Error> {
-        let mut fork_id_bytes = enr.get(b"eth").ok_or(Error::ForkIdMissing)?;
+        let mut fork_id_bytes = enr.get(self.fork_id_key()).ok_or(Error::ForkIdMissing)?;
 
         Ok(ForkId::decode(&mut fork_id_bytes)?)
     }
@@ -105,20 +113,27 @@ pub trait HandleDiscv5 {
 
         Ok(NodeRecord { address: udp_socket.ip(), tcp_port, udp_port: udp_socket.port(), id })
     }
+
+    /// Applies filtering rules on an ENR. Returns [`Ok`](FilterOutcome::Ok) if peer should be
+    /// passed up to app, and [`Ignore`](FilterOutcome::Ignore) if peer should instead be dropped.
+    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome;
 }
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Deref, DerefMut, Clone, Constructor)]
-pub struct DiscV5 {
+pub struct DiscV5<T = DefaultFilter> {
     #[deref]
     #[deref_mut]
     discv5: Arc<discv5::Discv5>,
     ip_mode: IpMode,
     // Notify app of discovered nodes that don't have a TCP port set in their ENR. These nodes are
     // filtered out by default. allow_no_tcp_discovered_nodes: bool,
+    fork_id_key: &'static [u8],
+    /// Optionally filter discovered peers before passing up to app.
+    filter_discovered_peer: T,
 }
 
-impl DiscV5 {
+impl<T> DiscV5<T> {
     fn add_node(&self, node_record: NodeFromExternalSource) -> Result<(), Error> {
         let NodeFromExternalSource::Enr(enr) = node_record else {
             unreachable!("cannot convert `NodeRecord` type to `Enr` type")
@@ -144,11 +159,17 @@ impl DiscV5 {
         }
     }
 
-    /// Spawns [`discv5::Discv5`].
+    /// Spawns [`discv5::Discv5`]. Returns [`discv5::Discv5`] handle in reth compatible wrapper type
+    /// [`DiscV5`], a receiver of [`discv5::Event`]s from the underlying node, and the local
+    /// [`Enr`](discv5::Enr) converted into the reth compatible [`NodeRecord`] type (used in
+    /// [`Discv4`](reth_discv4::Discv4)).
     pub async fn start(
         sk: &SecretKey,
-        discv5_config: DiscV5Config,
-    ) -> Result<(Self, mpsc::Receiver<discv5::Event>, NodeRecord), Error> {
+        discv5_config: DiscV5Config<T>,
+    ) -> Result<(Self, mpsc::Receiver<discv5::Event>, NodeRecord), Error>
+    where
+        T: FilterDiscovered + Clone + Send + 'static,
+    {
         //
         // 1. make local enr from listen config
         //
@@ -160,9 +181,10 @@ impl DiscV5 {
             other_enr_data,
             allow_no_tcp_discovered_nodes: _,
             self_lookup_interval,
+            filter_discovered_peer,
         } = discv5_config;
 
-        let (enr, bc_enr, ip_mode) = {
+        let (enr, bc_enr, ip_mode, chain) = {
             let mut builder = discv5::enr::Enr::builder();
 
             use discv5::ListenConfig::*;
@@ -193,10 +215,10 @@ impl DiscV5 {
                 }
             };
 
-            // add fork id if network is L1
-            if let Some(fork_id) = fork_id {
-                builder.add_value("eth", &alloy_rlp::encode(fork_id));
-            }
+            // add fork id
+            let (chain, fork) = fork_id;
+            builder.add_value(chain, &alloy_rlp::encode(fork));
+
             // add other data
             for (key, value) in other_enr_data {
                 builder.add_value(key, &alloy_rlp::encode(value));
@@ -211,7 +233,7 @@ impl DiscV5 {
             let socket = ip_mode.get_contactable_addr(&enr).unwrap();
             let bc_enr = NodeRecord::from_secret_key(socket, sk);
 
-            (enr, bc_enr, ip_mode)
+            (enr, bc_enr, ip_mode, chain)
         };
 
         //
@@ -272,8 +294,25 @@ impl DiscV5 {
         // initiate regular lookups to populate kbuckets
         task::spawn({
             let discv5 = discv5.clone();
+
             let local_node_id = discv5.local_enr().node_id();
             let self_lookup_interval = Duration::from_secs(self_lookup_interval);
+
+            let filter = filter_discovered_peer.clone();
+            let predicate = Box::new(move |enr: &discv5::Enr| -> bool {
+                match filter.filter_discovered_peer(enr) {
+                    FilterOutcome::Ok => true,
+                    FilterOutcome::Ignore { reason } => {
+                        trace!(target: "net::discv5",
+                            ?enr,
+                            reason,
+                            "filtered out peer from lookup query"
+                        );
+
+                        false
+                    }
+                }
+            });
             // todo: graceful shutdown
 
             async move {
@@ -282,7 +321,14 @@ impl DiscV5 {
                         self_lookup_interval=format!("{:#?}", self_lookup_interval),
                         "starting periodic lookup query"
                     );
-                    match discv5.find_node(local_node_id).await {
+                    match discv5
+                        .find_node_predicate(
+                            local_node_id,
+                            predicate.clone() as Box<dyn Fn(&discv5::Enr) -> bool + Send>,
+                            discv5::kbucket::MAX_NODES_PER_BUCKET,
+                        )
+                        .await
+                    {
                         Err(err) => trace!(target: "net::discv5",
                             self_lookup_interval=format!("{:#?}", self_lookup_interval),
                             %err,
@@ -310,17 +356,17 @@ impl DiscV5 {
             }
         });
 
-        Ok((DiscV5::new(discv5, ip_mode), discv5_updates, bc_enr))
+        Ok((DiscV5::new(discv5, ip_mode, chain, filter_discovered_peer), discv5_updates, bc_enr))
     }
 }
 
-impl fmt::Debug for DiscV5 {
+impl<T> fmt::Debug for DiscV5<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         "{ .. }".fmt(f)
     }
 }
 
-impl HandleDiscovery for DiscV5 {
+impl<T> HandleDiscovery for DiscV5<T> {
     fn add_node_to_routing_table(
         &self,
         node_record: NodeFromExternalSource,
@@ -354,16 +400,29 @@ impl HandleDiscovery for DiscV5 {
     }
 }
 
-impl HandleDiscv5 for DiscV5 {
+impl<T> HandleDiscv5 for DiscV5<T>
+where
+    T: FilterDiscovered,
+{
+    type Filter = T;
+
     fn with_discv5<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&DiscV5) -> R,
+        F: FnOnce(&Self) -> R,
     {
         f(self)
     }
 
     fn ip_mode(&self) -> IpMode {
         self.ip_mode
+    }
+
+    fn fork_id_key(&self) -> &[u8] {
+        self.fork_id_key
+    }
+
+    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome {
+        T::filter_discovered_peer(&self.filter_discovered_peer, enr)
     }
 }
 

@@ -29,7 +29,10 @@ use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
-use crate::{DiscV5, DiscV5Config, HandleDiscv5};
+use crate::{
+    filter::{DefaultFilter, FilterDiscovered, FilterOutcome},
+    DiscV5, DiscV5Config, HandleDiscv5,
+};
 
 /// Errors interfacing between [`discv5::Discv5`] and [`Discv4`].
 #[derive(Debug, thiserror::Error)]
@@ -50,14 +53,14 @@ pub enum Error {
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
 #[derive(Debug, Clone)]
-pub struct DiscV5WithV4Downgrade {
-    discv5: Arc<DiscV5>,
+pub struct DiscV5WithV4Downgrade<T = DefaultFilter> {
+    discv5: Arc<DiscV5<T>>,
     discv4: Discv4,
 }
 
-impl DiscV5WithV4Downgrade {
+impl<T> DiscV5WithV4Downgrade<T> {
     /// Returns a new combined handle.
-    pub fn new(discv5: Arc<DiscV5>, discv4: Discv4) -> Self {
+    pub fn new(discv5: Arc<DiscV5<T>>, discv4: Discv4) -> Self {
         Self { discv5, discv4 }
     }
 
@@ -82,8 +85,11 @@ impl DiscV5WithV4Downgrade {
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
         discv4_config: Discv4Config,
-        discv5_config: DiscV5Config,
-    ) -> Result<(Self, MergedUpdateStream, NodeRecord), Error> {
+        discv5_config: DiscV5Config<T>,
+    ) -> Result<(Self, MergedUpdateStream, NodeRecord), Error>
+    where
+        T: FilterDiscovered + Send + Sync + Clone + 'static,
+    {
         // todo: verify not same socket discv4 and 5
 
         //
@@ -173,7 +179,7 @@ impl DiscV5WithV4Downgrade {
     }
 }
 
-impl HandleDiscovery for DiscV5WithV4Downgrade {
+impl<T> HandleDiscovery for DiscV5WithV4Downgrade<T> {
     fn add_node_to_routing_table(
         &self,
         node_record: NodeFromExternalSource,
@@ -207,17 +213,29 @@ impl HandleDiscovery for DiscV5WithV4Downgrade {
     }
 }
 
-impl HandleDiscv5 for DiscV5WithV4Downgrade {
+impl<T> HandleDiscv5 for DiscV5WithV4Downgrade<T>
+where
+    T: FilterDiscovered,
+{
+    type Filter = T;
+
     fn with_discv5<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&DiscV5) -> R,
+        F: FnOnce(&DiscV5<Self::Filter>) -> R,
     {
         f(&self.discv5)
     }
 
-    /// Returns the [`IpMode`] of the local node.
     fn ip_mode(&self) -> IpMode {
         self.discv5.ip_mode()
+    }
+
+    fn fork_id_key(&self) -> &[u8] {
+        self.discv5.fork_id_key()
+    }
+
+    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome {
+        self.discv5.filter_discovered_peer(enr)
     }
 }
 
@@ -317,7 +335,7 @@ impl Stream for MergedUpdateStream {
 mod tests {
     use discv5::enr::Enr;
     use rand::thread_rng;
-    use reth_discv4::{DiscoveryUpdate, Discv4ConfigBuilder};
+    use reth_discv4::Discv4ConfigBuilder;
     use tracing::trace;
 
     use crate::enr::EnrCombinedKeyWrapper;
