@@ -469,10 +469,6 @@ where
 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let header = Header::decode(buf)?;
-        // Check that the buffer is large enough for the payload length
-        if buf.len() < header.payload_length {
-            return Err(alloy_rlp::Error::InputTooShort)
-        }
 
         let initial_length = buf.len();
         let request_id = u64::decode(buf)?;
