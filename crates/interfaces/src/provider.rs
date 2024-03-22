@@ -164,7 +164,7 @@ pub enum ConsistentViewError {
     #[error("inconsistent database state: {tip:?}")]
     Inconsistent {
         /// The tip diff.
-        tip: GotExpected<Option<B256>>,
+        tip: GotExpected<Option<(u64, B256)>>,
     },
 }
 

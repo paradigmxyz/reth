@@ -25,7 +25,7 @@ pub use reth_interfaces::provider::ConsistentViewError;
 pub struct ConsistentDbView<DB, Provider> {
     database: PhantomData<DB>,
     provider: Provider,
-    tip: Option<B256>,
+    tip: Option<(u64, B256)>,
 }
 
 impl<DB, Provider> ConsistentDbView<DB, Provider>
@@ -34,7 +34,7 @@ where
     Provider: DatabaseProviderFactory<DB>,
 {
     /// Creates new consistent database view.
-    pub fn new(provider: Provider, tip: Option<B256>) -> Self {
+    pub fn new(provider: Provider, tip: Option<(u64, B256)>) -> Self {
         Self { database: PhantomData, provider, tip }
     }
 
@@ -45,7 +45,7 @@ where
             .tx_ref()
             .cursor_read::<tables::CanonicalHeaders>()?
             .last()?;
-        Ok(Self::new(provider, tip.map(|(_, hash)| hash)))
+        Ok(Self::new(provider, tip))
     }
 
     /// Creates new read-only provider and performs consistency checks on the current tip.
@@ -57,7 +57,7 @@ where
             .and_then(|mut cursor| cursor.last())
             .map_err(ProviderError::Database)?;
 
-        let tip = last_entry.map(|(_, hash)| hash);
+        let tip = last_entry;
         if self.tip != tip {
             return Err(ConsistentViewError::Inconsistent {
                 tip: GotExpected { got: tip, expected: self.tip },
@@ -65,9 +65,11 @@ where
             .into())
         }
 
-        let best_block_number = provider_ro.best_block_number()?;
-        if last_entry.map(|(number, _)| number).unwrap_or_default() != best_block_number {
-            return Err(ConsistentViewError::Syncing(best_block_number).into())
+        if let Some((num, _)) = last_entry {
+            let best_block_number = provider_ro.best_block_number()?;
+            if num != best_block_number {
+                return Err(ConsistentViewError::Syncing(best_block_number).into())
+            }
         }
 
         Ok(provider_ro)
