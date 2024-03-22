@@ -663,7 +663,7 @@ where
             } => {
                 let total_active = self.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                 self.metrics.connected_peers.set(total_active as f64);
-                trace!(
+                debug!(
                     target: "net",
                     ?remote_addr,
                     %client_version,
