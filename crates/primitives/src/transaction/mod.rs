@@ -1,8 +1,6 @@
-use crate::{
-    keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256,
-};
-#[cfg(any(feature = "arbitrary", feature ="zstd-codec"))]
+#[cfg(any(feature = "arbitrary", feature = "zstd-codec"))]
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
+use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256};
 
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -54,6 +52,7 @@ mod variant;
 
 #[cfg(feature = "optimism")]
 mod optimism;
+
 #[cfg(feature = "optimism")]
 pub use optimism::TxDeposit;
 #[cfg(feature = "optimism")]
@@ -388,7 +387,7 @@ impl Transaction {
 
         // Check if max_fee_per_gas is less than base_fee
         if max_fee_per_gas < base_fee {
-            return None
+            return None;
         }
 
         // Calculate the difference between max_fee_per_gas and base_fee
@@ -617,8 +616,8 @@ impl Compact for Transaction {
     // Serializes the TxType to the buffer if necessary, returning 2 bits of the type as an
     // identifier instead of the length.
     fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
+        where
+            B: bytes::BufMut + AsMut<[u8]>,
     {
         let identifier = self.tx_type().to_compact(buf);
         match self {
@@ -767,8 +766,8 @@ impl TransactionKind {
 
 impl Compact for TransactionKind {
     fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
+        where
+            B: bytes::BufMut + AsMut<[u8]>,
     {
         match self {
             TransactionKind::Create => 0,
@@ -875,8 +874,8 @@ impl TransactionSignedNoHash {
     /// Returns `None`, if some transaction's signature is invalid, see also
     /// [Self::recover_signer].
     pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
-    where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
+        where
+            T: IntoParallelIterator<Item=&'a Self> + IntoIterator<Item=&'a Self> + Send,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer()).collect()
@@ -889,8 +888,8 @@ impl TransactionSignedNoHash {
 #[cfg(feature = "zstd-codec")]
 impl Compact for TransactionSignedNoHash {
     fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
+        where
+            B: bytes::BufMut + AsMut<[u8]>,
     {
         let start = buf.as_mut().len();
 
@@ -955,40 +954,58 @@ impl Compact for TransactionSignedNoHash {
         where
             B: bytes::BufMut + AsMut<[u8]>,
     {
-        let start = buf.as_mut().len();
-
-        // Placeholder for bitflags.
-        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
-        buf.put_u8(0);
-
-        let sig_bit = self.signature.to_compact(buf) as u8;
-        let zstd_bit = false;
-        let tx_bits =  self.transaction.to_compact(buf) as u8;
-
-        // Replace bitflags with the actual values
-        buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
-
-        buf.as_mut().len() - start
+        to_compact_ztd_unaware(self, buf)
     }
 
     fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
-        let bitflags = buf.get_u8() as usize;
-
-        let sig_bit = bitflags & 1;
-        let (signature, buf) = Signature::from_compact(buf, sig_bit);
-
-        let zstd_bit = bitflags >> 3;
-        if zstd_bit != 0 {
-            panic!("zstd-coded is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag")
-        }
-
-        let transaction_type = bitflags >> 1;
-        let (transaction, buf) = Transaction::from_compact(buf, transaction_type);
-
-        (TransactionSignedNoHash { signature, transaction }, buf)
+        from_compact_zstd_unaware(buf, _len)
     }
 }
+
+// Allowing dead code, as this function is extracted from behind feature, so it can be tested
+#[allow(dead_code)]
+fn to_compact_ztd_unaware<B>(transaction: TransactionSignedNoHash, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>
+{
+    let start = buf.as_mut().len();
+
+    // Placeholder for bitflags.
+    // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
+    buf.put_u8(0);
+
+    let sig_bit = transaction.signature.to_compact(buf) as u8;
+    let zstd_bit = false;
+    let tx_bits = transaction.transaction.to_compact(buf) as u8;
+
+    // Replace bitflags with the actual values
+    buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
+
+    buf.as_mut().len() - start
+}
+
+// Allowing dead code, as this function is extracted from behind feature, so it can be tested
+#[allow(dead_code)]
+fn from_compact_zstd_unaware(mut buf: &[u8], _len: usize) -> (TransactionSignedNoHash, &[u8]) {
+    // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
+    let bitflags = buf.get_u8() as usize;
+
+    let sig_bit = bitflags & 1;
+    let (signature, buf) = Signature::from_compact(buf, sig_bit);
+
+    let zstd_bit = bitflags >> 3;
+    if zstd_bit != 0 {
+        panic!(
+            "zstd-codec feature is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
+        )
+    }
+
+    let transaction_type = bitflags >> 1;
+    let (transaction, buf) = Transaction::from_compact(buf, transaction_type);
+
+    (TransactionSignedNoHash { signature, transaction }, buf)
+}
+
 
 impl From<TransactionSignedNoHash> for TransactionSigned {
     fn from(tx: TransactionSignedNoHash) -> Self {
@@ -1048,7 +1065,7 @@ impl TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Some(from);
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
@@ -1064,7 +1081,7 @@ impl TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Some(from);
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer_unchecked(signature_hash)
@@ -1075,8 +1092,8 @@ impl TransactionSigned {
     /// Returns `None`, if some transaction's signature is invalid, see also
     /// [Self::recover_signer].
     pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
-    where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
+        where
+            T: IntoParallelIterator<Item=&'a Self> + IntoIterator<Item=&'a Self> + Send,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer()).collect()
@@ -1091,8 +1108,8 @@ impl TransactionSigned {
     /// Returns `None`, if some transaction's signature is invalid, see also
     /// [Self::recover_signer_unchecked].
     pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
-    where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self>,
+        where
+            T: IntoParallelIterator<Item=&'a Self> + IntoIterator<Item=&'a Self>,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
@@ -1238,7 +1255,7 @@ impl TransactionSigned {
         let transaction_payload_len = header.payload_length;
 
         if transaction_payload_len > remaining_len {
-            return Err(RlpError::InputTooShort)
+            return Err(RlpError::InputTooShort);
         }
 
         let mut transaction = TxLegacy {
@@ -1256,7 +1273,7 @@ impl TransactionSigned {
         // check the new length, compared to the original length and the header length
         let decoded = remaining_len - data.len();
         if decoded != transaction_payload_len {
-            return Err(RlpError::UnexpectedLength)
+            return Err(RlpError::UnexpectedLength);
         }
 
         let tx_length = header.payload_length + header.length();
@@ -1305,7 +1322,7 @@ impl TransactionSigned {
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
-            return Err(RlpError::Custom("typed tx fields must be encoded as a list"))
+            return Err(RlpError::Custom("typed tx fields must be encoded as a list"));
         }
 
         let remaining_len = data.len();
@@ -1315,7 +1332,7 @@ impl TransactionSigned {
 
         // decode common fields
         let Ok(tx_type) = TxType::try_from(tx_type) else {
-            return Err(RlpError::Custom("unsupported typed transaction type"))
+            return Err(RlpError::Custom("unsupported typed transaction type"));
         };
         let transaction = match tx_type {
             TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
@@ -1327,10 +1344,10 @@ impl TransactionSigned {
         };
 
         #[cfg(not(feature = "optimism"))]
-        let signature = Signature::decode(data)?;
+            let signature = Signature::decode(data)?;
 
         #[cfg(feature = "optimism")]
-        let signature = if tx_type == TxType::Deposit {
+            let signature = if tx_type == TxType::Deposit {
             Signature::optimism_deposit_tx_signature()
         } else {
             Signature::decode(data)?
@@ -1338,7 +1355,7 @@ impl TransactionSigned {
 
         let bytes_consumed = remaining_len - data.len();
         if bytes_consumed != header.payload_length {
-            return Err(RlpError::UnexpectedLength)
+            return Err(RlpError::UnexpectedLength);
         }
 
         let hash = keccak256(&original_encoding_without_header[..tx_length]);
@@ -1365,7 +1382,7 @@ impl TransactionSigned {
     /// [PooledTransactionsElement::decode_enveloped].
     pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if data.is_empty() {
-            return Err(RlpError::InputTooShort)
+            return Err(RlpError::InputTooShort);
         }
 
         // Check if the tx is a list
@@ -1449,7 +1466,7 @@ impl Decodable for TransactionSigned {
     /// header if the first byte is less than `0xf7`.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
-            return Err(RlpError::InputTooShort)
+            return Err(RlpError::InputTooShort);
         }
 
         // decode header
@@ -1467,7 +1484,7 @@ impl Decodable for TransactionSigned {
             // string Header with payload_length of 1, we need to make sure this check is only
             // performed for transactions with a string header
             if bytes_consumed != header.payload_length && original_encoding[0] > EMPTY_STRING_CODE {
-                return Err(RlpError::UnexpectedLength)
+                return Err(RlpError::UnexpectedLength);
             }
 
             Ok(tx)
@@ -1496,7 +1513,7 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
                 }
 
                 #[cfg(feature = "optimism")]
-                let sig = transaction
+                    let sig = transaction
                     .is_deposit()
                     .then(Signature::optimism_deposit_tx_signature)
                     .unwrap_or(sig);
@@ -1524,7 +1541,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         let signature = Signature::arbitrary(u)?;
 
         #[cfg(feature = "optimism")]
-        let signature = if transaction.is_deposit() {
+            let signature = if transaction.is_deposit() {
             Signature::optimism_deposit_tx_signature()
         } else {
             signature
@@ -1643,22 +1660,19 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        hex, sign_message,
-        transaction::{
-            signature::Signature, TransactionKind, TxEip1559, TxLegacy,
-            MIN_LENGTH_EIP1559_TX_ENCODED, MIN_LENGTH_EIP2930_TX_ENCODED,
-            MIN_LENGTH_EIP4844_TX_ENCODED, MIN_LENGTH_LEGACY_TX_ENCODED,
-            PARALLEL_SENDER_RECOVERY_THRESHOLD,
-        },
-        Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip2930,
-        TxEip4844, B256, U256,
-    };
+    use crate::{hex, sign_message, transaction::{
+        signature::Signature, TransactionKind, TxEip1559, TxLegacy,
+        MIN_LENGTH_EIP1559_TX_ENCODED, MIN_LENGTH_EIP2930_TX_ENCODED,
+        MIN_LENGTH_EIP4844_TX_ENCODED, MIN_LENGTH_LEGACY_TX_ENCODED,
+        PARALLEL_SENDER_RECOVERY_THRESHOLD,
+    }, Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip2930, TxEip4844, B256, U256, TransactionSignedNoHash};
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use bytes::BytesMut;
     use secp256k1::{KeyPair, Secp256k1};
     use std::str::FromStr;
+    use reth_codecs::Compact;
+    use crate::transaction::{from_compact_zstd_unaware, to_compact_ztd_unaware};
 
     #[test]
     fn test_decode_empty_typed_tx() {
@@ -1728,7 +1742,7 @@ mod tests {
                 b256!("0152d8e24762ff22b1cfd9f8c0683786a7ca63ba49973818b3d1e9512cd2cec4"),
                 b256!("013b98c6c83e066d5b14af2b85199e3d4fc7d1e778dd53130d180f5077e2d1c7"),
                 b256!("01148b495d6e859114e670ca54fb6e2657f0cbae5b08063605093a4b3dc9f8f1"),
-                b256!("011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e6549")
+                b256!("011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e6549"),
             ])
         );
     }
@@ -1881,7 +1895,7 @@ mod tests {
         let hash: B256 =
             hex!("559fb34c4a7f115db26cbf8505389475caaab3df45f5c7a0faa4abfa3835306c").into();
         let signer: Address = hex!("641c5d790f862a58ec7abcfd644c0442e9c201b3").into();
-        let raw =hex!("f88b8212b085028fa6ae00830f424094aad593da0c8116ef7d2d594dd6a63241bccfc26c80a48318b64b000000000000000000000000641c5d790f862a58ec7abcfd644c0442e9c201b32aa0a6ef9e170bca5ffb7ac05433b13b7043de667fbb0b4a5e45d3b54fb2d6efcc63a0037ec2c05c3d60c5f5f78244ce0a3859e3a18a36c61efb061b383507d3ce19d2");
+        let raw = hex!("f88b8212b085028fa6ae00830f424094aad593da0c8116ef7d2d594dd6a63241bccfc26c80a48318b64b000000000000000000000000641c5d790f862a58ec7abcfd644c0442e9c201b32aa0a6ef9e170bca5ffb7ac05433b13b7043de667fbb0b4a5e45d3b54fb2d6efcc63a0037ec2c05c3d60c5f5f78244ce0a3859e3a18a36c61efb061b383507d3ce19d2");
 
         let mut pointer = raw.as_ref();
         let tx = TransactionSigned::decode(&mut pointer).unwrap();
@@ -2079,5 +2093,101 @@ mod tests {
         assert_eq!(MIN_LENGTH_DEPOSIT_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
+    }
+
+    #[test]
+    fn transaction_signed_no_hash_zstd_codec() {
+        // will use same signature everywhere.
+        // We don't need signature to match tx, just decoded to the same signature
+        let signature = Signature {
+            odd_y_parity: false,
+            r: U256::from_str("0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
+                .unwrap(),
+            s: U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
+                .unwrap(),
+        };
+
+        let inputs: Vec<Vec<u8>> = vec![
+            vec![],
+            vec![0],
+            vec![255],
+            vec![1u8; 31],
+            vec![255u8; 31],
+            vec![1u8; 32],
+            vec![255u8; 32],
+            vec![1u8; 64],
+            vec![255u8; 64],
+        ];
+
+        for input in inputs {
+            let transaction = Transaction::Legacy(TxLegacy {
+                chain_id: Some(4u64),
+                nonce: 2,
+                gas_price: 1000000000,
+                gas_limit: 100000,
+                to: TransactionKind::Call(
+                    Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
+                ),
+                value: U256::from(1000000000000000u64),
+                input: Bytes::from(input),
+            });
+
+            let tx_signed_no_hash = TransactionSignedNoHash {
+                signature,
+                transaction,
+            };
+            test_transaction_signed_to_from_compact(tx_signed_no_hash);
+        }
+    }
+
+    fn test_transaction_signed_to_from_compact(tx_signed_no_hash: TransactionSignedNoHash) {
+        // zstd aware `to_compact`
+        let mut buff: Vec<u8> = Vec::new();
+        let written_bytes = tx_signed_no_hash.clone().to_compact(&mut buff);
+        let (decoded, _) = TransactionSignedNoHash::from_compact(&buff, written_bytes);
+        assert_eq!(tx_signed_no_hash, decoded);
+
+        // zstd unaware `to_compact`/`from_compact`
+        let mut buff: Vec<u8> = Vec::new();
+        let written_bytes = to_compact_ztd_unaware(tx_signed_no_hash.clone(), &mut buff);
+        let (decoded_no_zstd, _something) = from_compact_zstd_unaware(&buff, written_bytes);
+        assert_eq!(tx_signed_no_hash, decoded_no_zstd);
+
+        // zstd unaware `to_compact`, but decode with zstd awareness
+        let mut buff: Vec<u8> = Vec::new();
+        let written_bytes = to_compact_ztd_unaware(tx_signed_no_hash.clone(), &mut buff);
+        let (decoded, _) = TransactionSignedNoHash::from_compact(&buff, written_bytes);
+        assert_eq!(tx_signed_no_hash, decoded);
+    }
+
+    #[test]
+    #[should_panic(expected = "zstd-codec feature is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag")]
+    fn transaction_signed_zstd_encoded_no_zstd_decode() {
+        let signature = Signature {
+            odd_y_parity: false,
+            r: U256::from_str("0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
+                .unwrap(),
+            s: U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
+                .unwrap(),
+        };
+        let transaction = Transaction::Legacy(TxLegacy {
+            chain_id: Some(4u64),
+            nonce: 2,
+            gas_price: 1000000000,
+            gas_limit: 100000,
+            to: TransactionKind::Call(
+                Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
+            ),
+            value: U256::from(1000000000000000u64),
+            input: Bytes::from(vec![3u8; 64]),
+        });
+        let tx_signed_no_hash = TransactionSignedNoHash {
+            signature,
+            transaction,
+        };
+
+        let mut buff: Vec<u8> = Vec::new();
+        let written_bytes = tx_signed_no_hash.to_compact(&mut buff);
+        from_compact_zstd_unaware(&buff, written_bytes);
     }
 }
