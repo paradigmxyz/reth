@@ -302,8 +302,9 @@ impl Stream for MergedUpdateStream {
             // todo: upstream discovered discv4 peers to ping from discv5?
 
             if let Err(err) = self.notify_discv4_of_kbuckets_update() {
-                error!(target: "net::discovery",
-                    "failed to notify discv4 of discv5 kbuckets update, {err}",
+                error!(target: "net::discv5::downgrade_v4",
+                    %err,
+                    "failed to notify discv4 of discv5 kbuckets update",
                 );
             }
         }

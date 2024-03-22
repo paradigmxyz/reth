@@ -247,7 +247,7 @@ impl DiscV5 {
                     let discv5 = discv5.clone();
                     async move {
                         if let Err(err) = discv5.request_enr(enode.clone()).await {
-                            debug!(target: "net::discovery::discv5",
+                            debug!(target: "net::discv5",
                                 enode,
                                 %err,
                                 "failed adding boot node"
@@ -259,7 +259,7 @@ impl DiscV5 {
         }
         _ = join_all(enr_requests);
 
-        debug!(target: "net::discovery::discv5",
+        debug!(target: "net::discv5",
             connected_boot_nodes=format!("[{:#}]", discv5.with_kbuckets(|kbuckets| kbuckets
                 .write()
                 .iter()
@@ -278,17 +278,17 @@ impl DiscV5 {
 
             async move {
                 loop {
-                    trace!(target: "net::discovery::discv5",
+                    trace!(target: "net::discv5",
                         self_lookup_interval=format!("{:#?}", self_lookup_interval),
                         "starting periodic lookup query"
                     );
                     match discv5.find_node(local_node_id).await {
-                        Err(err) => trace!(target: "net::discovery::discv5",
+                        Err(err) => trace!(target: "net::discv5",
                             self_lookup_interval=format!("{:#?}", self_lookup_interval),
                             %err,
                             "periodic lookup query failed"
                         ),
-                        Ok(peers) => trace!(target: "net::discovery::discv5",
+                        Ok(peers) => trace!(target: "net::discv5",
                             self_lookup_interval=format!("{:#?}", self_lookup_interval),
                             peers_count=peers.len(),
                             peers=format!("[{:#}]", peers.iter()
@@ -301,7 +301,7 @@ impl DiscV5 {
                     // `Discv5::connected_peers` can be subset of sessions, not all peers make it
                     // into kbuckets, e.g. incoming sessions from peers with
                     // unreachable enrs
-                    debug!(target: "net::discovery::discv5",
+                    debug!(target: "net::discv5",
                         connected_peers=discv5.connected_peers(),
                         "connected peers in routing table"
                     );
