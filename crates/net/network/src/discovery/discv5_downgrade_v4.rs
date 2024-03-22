@@ -10,8 +10,8 @@ use std::{
 use futures::StreamExt;
 use reth_discv4::{secp256k1::SecretKey, Discv4Config};
 use reth_discv5::{
-    discv5::enr::Enr, downgrade_v4::DiscoveryUpdateV5, DiscV5Config, DiscV5WithV4Downgrade,
-    MergedUpdateStream,
+    discv5::enr::Enr, downgrade_v4::DiscoveryUpdateV5, filter::FilterDiscovered, DiscV5Config,
+    DiscV5WithV4Downgrade, MergedUpdateStream,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::NodeFromExternalSource;
@@ -27,9 +27,9 @@ use super::{Discovery, DiscoveryEvent};
 /// [`Discovery`] type that uses [`discv5::Discv5`], with support for downgraded [`Discv4`]
 /// connections.
 #[cfg(feature = "discv5-downgrade-v4")]
-pub type DiscoveryV5V4 = Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>>;
+pub type DiscoveryV5V4<T> = Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>>;
 
-impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
+impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> {
     /// Spawns the discovery service.
     ///
     /// This will spawn [`discv5::Discv5`] and [`Discv4`] each onto their own new task and
@@ -38,9 +38,12 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
         discv4_config: Option<Discv4Config>,
-        discv5_config: Option<DiscV5Config>,
+        discv5_config: Option<DiscV5Config<T>>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
-    ) -> Result<Self, NetworkError> {
+    ) -> Result<Self, NetworkError>
+    where
+        T: FilterDiscovered + Clone + Send + Sync + 'static,
+    {
         trace!(target: "net::discovery::discv5_downgrade_v4",
             "starting discovery .."
         );
@@ -86,12 +89,12 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
 }
 
 #[cfg(feature = "discv5-downgrade-v4")]
-impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
+impl Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> {
     pub async fn start(
         discv4_addr: SocketAddr,
         sk: SecretKey,
         discv4_config: Option<reth_discv4::Discv4Config>,
-        discv5_config: Option<DiscV5Config>,
+        discv5_config: Option<DiscV5Config<T>>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         Discovery::start_discv5_with_v4_downgrade(
@@ -110,9 +113,10 @@ impl Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, Enr<SecretKey>> {
     }
 }
 
-impl<S> Stream for Discovery<DiscV5WithV4Downgrade, S, Enr<SecretKey>>
+impl<S, T> Stream for Discovery<DiscV5WithV4Downgrade<T>, S, Enr<SecretKey>>
 where
     S: Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static,
+    T: FilterDiscovered,
 {
     type Item = DiscoveryEvent;
 
@@ -158,7 +162,7 @@ where
 mod tests {
     use rand::thread_rng;
     use reth_discv4::{DiscoveryUpdate, Discv4ConfigBuilder};
-    use reth_discv5::{discv5, enr::EnrCombinedKeyWrapper, HandleDiscv5};
+    use reth_discv5::{discv5, enr::EnrCombinedKeyWrapper, filter::NoopFilter, HandleDiscv5};
     use reth_net_common::discovery::HandleDiscovery;
     use tracing::trace;
 
@@ -167,7 +171,11 @@ mod tests {
     async fn start_discovery_node(
         udp_port_discv4: u16,
         udp_port_discv5: u16,
-    ) -> Discovery<DiscV5WithV4Downgrade, MergedUpdateStream, enr::Enr<secp256k1::SecretKey>> {
+    ) -> Discovery<
+        DiscV5WithV4Downgrade<NoopFilter>,
+        MergedUpdateStream,
+        enr::Enr<secp256k1::SecretKey>,
+    > {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv4_addr = format!("127.0.0.1:{udp_port_discv4}").parse().unwrap();

@@ -6,7 +6,7 @@ use ::enr::Enr;
 use alloy_rlp::Decodable;
 use derive_more::{Constructor, Deref, DerefMut};
 use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
-use filter::{DefaultFilter, FilterDiscovered, FilterOutcome};
+use filter::{FilterDiscovered, FilterOutcome};
 use futures::future::join_all;
 use itertools::Itertools;
 use reth_discv4::secp256k1::SecretKey;
@@ -116,12 +116,14 @@ pub trait HandleDiscv5 {
 
     /// Applies filtering rules on an ENR. Returns [`Ok`](FilterOutcome::Ok) if peer should be
     /// passed up to app, and [`Ignore`](FilterOutcome::Ignore) if peer should instead be dropped.
-    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome;
+    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome
+    where
+        Self::Filter: FilterDiscovered;
 }
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Deref, DerefMut, Clone, Constructor)]
-pub struct DiscV5<T = DefaultFilter> {
+pub struct DiscV5<T> {
     #[deref]
     #[deref_mut]
     discv5: Arc<discv5::Discv5>,
@@ -400,10 +402,7 @@ impl<T> HandleDiscovery for DiscV5<T> {
     }
 }
 
-impl<T> HandleDiscv5 for DiscV5<T>
-where
-    T: FilterDiscovered,
-{
+impl<T> HandleDiscv5 for DiscV5<T> {
     type Filter = T;
 
     fn with_discv5<F, R>(&self, f: F) -> R
@@ -421,7 +420,10 @@ where
         self.fork_id_key
     }
 
-    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome {
+    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome
+    where
+        Self::Filter: FilterDiscovered,
+    {
         T::filter_discovered_peer(&self.filter_discovered_peer, enr)
     }
 }
@@ -433,11 +435,13 @@ mod tests {
     use rand::thread_rng;
     use tracing::trace;
 
+    use crate::filter::NoopFilter;
+
     use super::*;
 
     async fn start_discovery_node(
         udp_port_discv5: u16,
-    ) -> (DiscV5, mpsc::Receiver<discv5::Event>, NodeRecord) {
+    ) -> (DiscV5<NoopFilter>, mpsc::Receiver<discv5::Event>, NodeRecord) {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();

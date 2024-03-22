@@ -6,9 +6,7 @@ use derive_more::Constructor;
 pub trait FilterDiscovered {
     /// Applies filtering rules on [`Enr`](discv5::Enr) data. Returns [`Ok`](FilterOutcome::Ok) if
     /// peer should be included, otherwise [`Ignore`](FilterOutcome::Ignore).
-    fn filter_discovered_peer(&self, _enr: &discv5::Enr) -> FilterOutcome {
-        FilterOutcome::Ok
-    }
+    fn filter_discovered_peer(&self, _enr: &discv5::Enr) -> FilterOutcome;
 
     /// Message for [`FilterOutcome::Ignore`] should specify the reason for filtering out a node
     /// record.
@@ -17,9 +15,13 @@ pub trait FilterDiscovered {
 
 /// Filter that lets all [`Enr`](discv5::Enr)s pass through.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct DefaultFilter;
+pub struct NoopFilter;
 
-impl FilterDiscovered for DefaultFilter {
+impl FilterDiscovered for NoopFilter {
+    fn filter_discovered_peer(&self, _enr: &discv5::Enr) -> FilterOutcome {
+        FilterOutcome::Ok
+    }
+
     fn ignore_reason(&self) -> String {
         unreachable!()
     }

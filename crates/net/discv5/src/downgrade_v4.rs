@@ -30,7 +30,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
 use crate::{
-    filter::{DefaultFilter, FilterDiscovered, FilterOutcome},
+    filter::{FilterDiscovered, FilterOutcome},
     DiscV5, DiscV5Config, HandleDiscv5,
 };
 
@@ -53,7 +53,7 @@ pub enum Error {
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
 #[derive(Debug, Clone)]
-pub struct DiscV5WithV4Downgrade<T = DefaultFilter> {
+pub struct DiscV5WithV4Downgrade<T> {
     discv5: Arc<DiscV5<T>>,
     discv4: Discv4,
 }
@@ -234,7 +234,10 @@ where
         self.discv5.fork_id_key()
     }
 
-    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome {
+    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome
+    where
+        Self::Filter: FilterDiscovered,
+    {
         self.discv5.filter_discovered_peer(enr)
     }
 }
@@ -338,14 +341,14 @@ mod tests {
     use reth_discv4::Discv4ConfigBuilder;
     use tracing::trace;
 
-    use crate::enr::EnrCombinedKeyWrapper;
+    use crate::{enr::EnrCombinedKeyWrapper, filter::NoopFilter};
 
     use super::*;
 
     async fn start_discovery_node(
         udp_port_discv4: u16,
         udp_port_discv5: u16,
-    ) -> (DiscV5WithV4Downgrade, MergedUpdateStream, NodeRecord) {
+    ) -> (DiscV5WithV4Downgrade<NoopFilter>, MergedUpdateStream, NodeRecord) {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv4_addr = format!("127.0.0.1:{udp_port_discv4}").parse().unwrap();

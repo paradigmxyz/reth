@@ -10,7 +10,7 @@ use reth_discv4::secp256k1::SecretKey;
 use reth_discv5::{
     discv5::{self, enr::Enr},
     enr::uncompressed_id_from_enr_pk,
-    filter::FilterOutcome,
+    filter::{FilterDiscovered, FilterOutcome},
     DiscV5, DiscV5Config, HandleDiscv5,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
@@ -26,16 +26,19 @@ use super::{Discovery, DiscoveryEvent};
 
 /// [`Discovery`] type that uses [`discv5::Discv5`].
 #[cfg(feature = "discv5")]
-pub type DiscoveryV5 = Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>;
+pub type DiscoveryV5<T> = Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>;
 
-impl Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
+impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>
+where
+    T: FilterDiscovered + Clone + Send + 'static,
+{
     /// Spawns the discovery service.
     ///
     /// This will spawn [`discv5::Discv5`] and establish a listener channel to receive all /
     /// discovered nodes.
     pub async fn start_discv5(
         sk: SecretKey,
-        discv5_config: Option<DiscV5Config>,
+        discv5_config: Option<DiscV5Config<T>>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         trace!(target: "net::discovery::discv5",
@@ -85,8 +88,6 @@ impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
         discv5_config: Option<DiscV5Config<T>>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
-        let discv5_config = Some(DiscV5ConfigBuilder::new_from(discv5_config).filter(MustIncludeChain::new(b"opstack")).add_enode_boot_nodes("enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305,enode://dd751a9ef8912be1bfa7a5e34e2c3785cc5253110bd929f385e07ba7ac19929fb0e0c5d93f77827291f4da02b2232240fbc47ea7ce04c46e333e452f8656b667@34.65.107.0:30305,enode://c5d289b56a77b6a2342ca29956dfd07aadf45364dde8ab20d1dc4efd4d1bc6b4655d902501daea308f4d8950737a4e93a4dfedd17b49cd5760ffd127837ca965@34.65.202.239:30305,enode://87a32fd13bd596b2ffca97020e31aef4ddcc1bbd4b95bb633d16c1329f654f34049ed240a36b449fda5e5225d70fe40bc667f53c304b71f8e68fc9d448690b51@3.231.138.188:30301,enode://ca21ea8f176adb2e229ce2d700830c844af0ea941a1d8152a9513b966fe525e809c3a6c73a2c18a12b74ed6ec4380edf91662778fe0b79f6a591236e49e176f9@184.72.129.189:30301,enode://acf4507a211ba7c1e52cdf4eef62cdc3c32e7c9c47998954f7ba024026f9a6b2150cd3f0b734d9c78e507ab70d59ba61dfe5c45e1078c7ad0775fb251d7735a2@3.220.145.177:30301,enode://8a5a5006159bf079d06a04e5eceab2a1ce6e0f721875b2a9c96905336219dbe14203d38f70f3754686a6324f786c2f9852d8c0dd3adac2d080f4db35efc678c5@3.231.11.52:30301,enode://cdadbe835308ad3557f9a1de8db411da1a260a98f8421d62da90e71da66e55e98aaa8e90aa7ce01b408a54e4bd2253d701218081ded3dbe5efbbc7b41d7cef79@54.198.153.150:30301").fork_id(b"opstack", ForkId { hash: reth_primitives::ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 0 }).build());
-
         Discovery::start_discv5(sk, discv5_config, dns_discovery_config).await
     }
 
@@ -96,9 +97,10 @@ impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
     }
 }
 
-impl<D, S, N> Discovery<D, S, N>
+impl<D, S, N, T> Discovery<D, S, N>
 where
-    D: HandleDiscovery + HandleDiscv5,
+    D: HandleDiscovery + HandleDiscv5<Filter = T>,
+    T: FilterDiscovered,
 {
     pub fn on_discv5_update(&mut self, update: discv5::Event) -> Result<(), NetworkError> {
         match update {
@@ -179,9 +181,10 @@ where
     }
 }
 
-impl<S> Stream for Discovery<DiscV5<T>, S, Enr<SecretKey>>
+impl<S, T> Stream for Discovery<DiscV5<T>, S, Enr<SecretKey>>
 where
     S: Stream<Item = discv5::Event> + Unpin + Send + 'static,
+    T: FilterDiscovered + Unpin,
 {
     type Item = DiscoveryEvent;
 
@@ -223,14 +226,15 @@ mod tests {
     use std::net::SocketAddr;
 
     use rand::thread_rng;
-    use reth_discv5::enr::EnrCombinedKeyWrapper;
+    use reth_discv5::{enr::EnrCombinedKeyWrapper, filter::NoopFilter};
     use tracing::trace;
 
     use super::*;
 
     async fn start_discovery_node(
         udp_port_discv5: u16,
-    ) -> Discovery<DiscV5, ReceiverStream<discv5::Event>, enr::Enr<secp256k1::SecretKey>> {
+    ) -> Discovery<DiscV5<NoopFilter>, ReceiverStream<discv5::Event>, enr::Enr<secp256k1::SecretKey>>
+    {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
