@@ -1729,6 +1729,8 @@ where
                         .and_then(|h| self.blockchain.buffered_header_by_hash(h))
                         .map(|header| header.number);
 
+                    tracing::warn!(target: "consensus::engine", head=%sync_target_state.head_block_hash, safe=%sync_target_state.safe_block_hash, finalized=%sync_target_state.finalized_block_hash, ?newest_finalized, "Checking if we need to run another pipeline");
+
                     // The block number that the pipeline finished at - if the progress or newest
                     // finalized is None then we can't check the distance anyways.
                     //
@@ -1744,22 +1746,32 @@ where
                         None
                     };
 
+                    tracing::warn!(target: "consensus::engine", ?pipeline_target, "checking the pipeline target");
+
                     // If the distance is large enough, we should run the pipeline again to prevent
                     // the tree update from executing too many blocks and blocking.
                     if let Some(target) = pipeline_target {
+                        tracing::warn!(target: "consensus::engine", ?target, "setting the pipeline target");
                         // run the pipeline to the target since the distance is sufficient
                         self.sync.set_pipeline_sync_target(target);
                     } else {
+                        let to_update = if sync_target_state.finalized_block_hash == B256::ZERO {
+                            sync_target_state.safe_block_hash
+                        } else {
+                            sync_target_state.finalized_block_hash
+                        };
+
                         // Update the state and hashes of the blockchain tree if possible.
                         match self.update_tree_on_finished_pipeline(
-                            sync_target_state.finalized_block_hash,
+                            to_update,
                         ) {
                             Ok(synced) => {
                                 if !synced {
+                                    tracing::warn!(target: "consensus::engine", ?to_update, "finally setting the pipeline target");
                                     // We don't have the finalized block in the database, so
                                     // we need to run another pipeline.
                                     self.sync.set_pipeline_sync_target(
-                                        sync_target_state.finalized_block_hash,
+                                        to_update,
                                     );
                                 }
                             }
