@@ -11,11 +11,11 @@ use reth_primitives::{
     bytes::{Bytes, BytesMut},
     ForkFilter, GotExpected,
 };
-use tokio::time::timeout;
 use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use tokio::time::timeout;
 use tokio_stream::Stream;
 use tracing::{debug, trace};
 
@@ -470,8 +470,9 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
-            let handshake_res =
-                UnauthedEthStream::new(stream).handshake_with_timeout(status_clone, fork_filter_clone).await;
+            let handshake_res = UnauthedEthStream::new(stream)
+                .handshake_with_timeout(status_clone, fork_filter_clone)
+                .await;
 
             // make sure the handshake fails due to td too high
             assert!(matches!(
@@ -486,7 +487,8 @@ mod tests {
         let sink = PassthroughCodec::default().framed(outgoing);
 
         // try to connect
-        let handshake_res = UnauthedEthStream::new(sink).handshake_with_timeout(status, fork_filter).await;
+        let handshake_res =
+            UnauthedEthStream::new(sink).handshake_with_timeout(status, fork_filter).await;
 
         // this handshake should also fail due to td too high
         assert!(matches!(
@@ -651,8 +653,10 @@ mod tests {
         let unauthed_stream = UnauthedP2PStream::new(sink);
         let (p2p_stream, _) = unauthed_stream.handshake(client_hello).await.unwrap();
 
-        let (mut client_stream, _) =
-            UnauthedEthStream::new(p2p_stream).handshake_with_timeout(status, fork_filter).await.unwrap();
+        let (mut client_stream, _) = UnauthedEthStream::new(p2p_stream)
+            .handshake_with_timeout(status, fork_filter)
+            .await
+            .unwrap();
 
         client_stream.send(test_msg).await.unwrap();
 
@@ -706,6 +710,5 @@ mod tests {
         assert!(
             matches!(handshake_result, Err(e) if e.to_string() == EthStreamError::StreamTimeout.to_string())
         );
-
     }
 }
