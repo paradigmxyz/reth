@@ -1003,7 +1003,7 @@ async fn authenticate_stream(
         // Before trying status handshake, set up the version to negotiated shared version
         status.set_eth_version(eth_version);
         let eth_unauthed = UnauthedEthStream::new(p2p_stream);
-        let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
+        let (eth_stream, their_status) = match eth_unauthed.handshake_with_timeout(status, fork_filter).await {
             Ok(stream_res) => stream_res,
             Err(err) => {
                 return PendingSessionEvent::Disconnected {

@@ -107,7 +107,7 @@ async fn handshake_eth(p2p_stream: AuthedP2PStream) -> eyre::Result<(AuthedEthSt
 
     let status = Status { version: p2p_stream.shared_capabilities().eth()?.version(), ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
-    Ok(eth_unauthed.handshake(status, fork_filter).await?)
+    Ok(eth_unauthed.handshake_with_timeout(status, fork_filter).await?)
 }
 
 // Snoop by greedily capturing all broadcasts that the peer emits

@@ -212,7 +212,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         self.into_satellite_stream_with_tuple_handshake(
             &Capability::eth(eth_cap),
             move |proxy| async move {
-                UnauthedEthStream::new(proxy).handshake(status, fork_filter).await
+                UnauthedEthStream::new(proxy).handshake_with_timeout(status, fork_filter).await
             },
         )
         .await
@@ -663,7 +663,7 @@ mod tests {
                 UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
             let (_eth_stream, _) = UnauthedEthStream::new(p2p_stream)
-                .handshake(other_status, other_fork_filter)
+                .handshake_with_timeout(other_status, other_fork_filter)
                 .await
                 .unwrap();
 
@@ -678,7 +678,7 @@ mod tests {
             .into_satellite_stream_with_handshake(
                 eth.capability().as_ref(),
                 move |proxy| async move {
-                    UnauthedEthStream::new(proxy).handshake(status, fork_filter).await
+                    UnauthedEthStream::new(proxy).handshake_with_timeout(status, fork_filter).await
                 },
             )
             .await

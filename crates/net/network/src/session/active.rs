@@ -827,7 +827,7 @@ mod tests {
                 let (p2p_stream, _) = UnauthedP2PStream::new(sink).handshake(hello).await.unwrap();
 
                 let (client_stream, _) = UnauthedEthStream::new(p2p_stream)
-                    .handshake(status, fork_filter)
+                    .handshake_with_timeout(status, fork_filter)
                     .await
                     .unwrap();
                 f(client_stream).await

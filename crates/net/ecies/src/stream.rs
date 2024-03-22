@@ -42,7 +42,7 @@ where
 {
     /// Connect to an `ECIES` server
     #[instrument(skip(transport, secret_key), fields(peer=&*format!("{:?}", transport.remote_addr())))]
-    pub async fn connect(
+    async fn connect(
         transport: Io,
         secret_key: SecretKey,
         remote_id: PeerId,

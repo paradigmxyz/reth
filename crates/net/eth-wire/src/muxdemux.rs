@@ -495,7 +495,7 @@ mod tests {
                 .expect("should start mxdmx stream");
 
         let (mut main_stream, _) =
-            UnauthedEthStream::new(proxy_server).handshake(status, fork_filter).await.unwrap();
+            UnauthedEthStream::new(proxy_server).handshake_with_timeout(status, fork_filter).await.unwrap();
 
         let protocol_proxy =
             main_stream.inner_mut().try_clone_stream(&CUSTOM_CAP).expect("should clone stream");
