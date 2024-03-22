@@ -34,7 +34,11 @@ pub struct IndexStorageHistoryStage {
 
 impl IndexStorageHistoryStage {
     /// Create new instance of [IndexStorageHistoryStage].
-    pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>, etl_config: EtlConfig) -> Self {
+    pub fn new(
+        commit_threshold: u64,
+        prune_mode: Option<PruneMode>,
+        etl_config: EtlConfig,
+    ) -> Self {
         Self { commit_threshold, prune_mode, etl_config }
     }
 }
@@ -110,7 +114,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
                     StorageShardedKey::new(address, storage_key, highest_block_number)
                 },
                 |(key, value)| (key.block_number(), AddressStorageKey((key.address(), value.key))),
-                &self.etl_config
+                &self.etl_config,
             )?;
 
         info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
@@ -536,7 +540,11 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S { commit_threshold: self.commit_threshold, prune_mode: self.prune_mode, etl_config: EtlConfig::default() }
+            Self::S {
+                commit_threshold: self.commit_threshold,
+                prune_mode: self.prune_mode,
+                etl_config: EtlConfig::default(),
+            }
         }
     }
 

@@ -38,7 +38,7 @@ pub(crate) fn collect_history_indices<TX, CS, H, P>(
     range: impl RangeBounds<CS::Key>,
     sharded_key_factory: impl Fn(P, BlockNumber) -> H::Key,
     partial_key_factory: impl Fn((CS::Key, CS::Value)) -> (u64, P),
-    etl_config: &EtlConfig
+    etl_config: &EtlConfig,
 ) -> Result<Collector<H::Key, H::Value>, StageError>
 where
     TX: DbTxMut + DbTx,
