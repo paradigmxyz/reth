@@ -581,6 +581,11 @@ where
             })
         }
 
+        if item.is_empty() {
+            // empty messages are not allowed
+            return Err(P2PStreamError::EmptyProtocolMessage)
+        }
+
         // ensure we have free capacity
         if !self.has_outgoing_capacity() {
             return Err(P2PStreamError::SendBufferFull)
