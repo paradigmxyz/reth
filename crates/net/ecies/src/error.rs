@@ -81,7 +81,7 @@ pub enum ECIESErrorImpl {
     /// a message from the (partially filled) buffer.
     #[error("stream closed due to not being readable")]
     UnreadableStream,
-
+    // Error when data is not recieved from peer for a prolonged period.
     #[error("never recieved data from remote peer")]
     StreamTimeout,
 }

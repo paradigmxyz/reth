@@ -69,7 +69,7 @@ where
 
         let their_msg_res = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
             .await
-            .map_err(|_| EthStreamError::EthHandshakeError(EthHandshakeError::NoResponse))?;
+            .map_err(|_| EthStreamError::StreamTimeout)?;
 
         let their_msg = match their_msg_res {
             Some(msg) => msg,
