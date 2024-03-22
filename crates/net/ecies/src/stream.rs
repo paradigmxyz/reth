@@ -15,11 +15,14 @@ use std::{
     io,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::codec::{Decoder, Framed};
 use tracing::{instrument, trace};
+
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// `ECIES` stream over TCP exchanging raw bytes
 #[derive(Debug)]
@@ -51,7 +54,9 @@ where
 
         trace!("waiting for ecies ack ...");
 
-        let msg = transport.try_next().await?;
+        let msg = tokio::time::timeout(HANDSHAKE_TIMEOUT, transport.try_next())
+            .await
+            .map_err(|_| ECIESErrorImpl::StreamTimeout)??;
 
         // `Framed` returns `None` if the underlying stream is no longer readable, and the codec is
         // unable to decode another message from the (partially filled) buffer. This usually happens
@@ -77,7 +82,9 @@ where
 
         trace!("incoming ecies stream");
         let mut transport = ecies.framed(transport);
-        let msg = transport.try_next().await?;
+        let msg = tokio::time::timeout(HANDSHAKE_TIMEOUT, transport.try_next())
+            .await
+            .map_err(|_| ECIESErrorImpl::StreamTimeout)??;
 
         trace!("receiving ecies auth");
         let remote_id = match &msg {
