@@ -1718,7 +1718,14 @@ where
                     let newest_finalized = self
                         .forkchoice_state_tracker
                         .sync_target_state()
-                        .map(|s| s.finalized_block_hash)
+                        .map(|s| {
+                            if s.finalized_block_hash == B256::ZERO {
+                                tracing::warn!(target: "consensus::engine", head=?s.head_block_hash, safe=?s.safe_block_hash, finalized=?s.finalized_block_hash, "Finalized block hash is zero");
+                                s.safe_block_hash
+                            } else {
+                                s.finalized_block_hash
+                            }
+                        })
                         .and_then(|h| self.blockchain.buffered_header_by_hash(h))
                         .map(|header| header.number);
 
