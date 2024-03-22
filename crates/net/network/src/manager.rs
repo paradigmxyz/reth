@@ -626,6 +626,11 @@ where
     }
 
     fn on_swarm_event(&mut self, event: SwarmEvent) {
+        println!(
+            "num pending out: {:?}; pending sessions: {}",
+            self.swarm.state().peers().num_pending_outbound_connections(),
+            self.swarm.sessions().num_pending_connections()
+        );
         // handle event
         match event {
             SwarmEvent::ValidMessage { peer_id, message } => self.on_peer_message(peer_id, message),
