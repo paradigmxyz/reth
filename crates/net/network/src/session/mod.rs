@@ -945,7 +945,7 @@ async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr>(
     match direction {
         Direction::Incoming => ECIESStream::incoming(stream, secret_key).await,
         Direction::Outgoing(remote_peer_id) => {
-            ECIESStream::connect(stream, secret_key, remote_peer_id).await
+            ECIESStream::connect_with_timeout(stream, secret_key, remote_peer_id).await
         }
     }
 }

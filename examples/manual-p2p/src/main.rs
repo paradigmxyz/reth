@@ -84,7 +84,7 @@ async fn handshake_p2p(
     key: SecretKey,
 ) -> eyre::Result<(AuthedP2PStream, HelloMessage)> {
     let outgoing = TcpStream::connect((peer.address, peer.tcp_port)).await?;
-    let ecies_stream = ECIESStream::connect(outgoing, key, peer.id).await?;
+    let ecies_stream = ECIESStream::connect_with_timeout(outgoing, key, peer.id).await?;
 
     let our_peer_id = pk2id(&key.public_key(SECP256K1));
     let our_hello = HelloMessage::builder(our_peer_id).build();

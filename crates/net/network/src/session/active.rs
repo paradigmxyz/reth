@@ -821,7 +821,8 @@ mod tests {
             hello.id = pk2id(&key.public_key(SECP256K1));
             Box::pin(async move {
                 let outgoing = TcpStream::connect(local_addr).await.unwrap();
-                let sink = ECIESStream::connect(outgoing, key, local_peer_id).await.unwrap();
+                let sink =
+                    ECIESStream::connect_with_timeout(outgoing, key, local_peer_id).await.unwrap();
 
                 let (p2p_stream, _) = UnauthedP2PStream::new(sink).handshake(hello).await.unwrap();
 

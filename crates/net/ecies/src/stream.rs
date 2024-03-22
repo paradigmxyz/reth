@@ -17,7 +17,10 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    time::timeout,
+};
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::codec::{Decoder, Framed};
 use tracing::{instrument, trace};
@@ -54,9 +57,7 @@ where
 
         trace!("waiting for ecies ack ...");
 
-        let msg = tokio::time::timeout(HANDSHAKE_TIMEOUT, transport.try_next())
-            .await
-            .map_err(|_| ECIESErrorImpl::StreamTimeout)??;
+        let msg = transport.try_next().await?;
 
         // `Framed` returns `None` if the underlying stream is no longer readable, and the codec is
         // unable to decode another message from the (partially filled) buffer. This usually happens
@@ -82,9 +83,7 @@ where
 
         trace!("incoming ecies stream");
         let mut transport = ecies.framed(transport);
-        let msg = tokio::time::timeout(HANDSHAKE_TIMEOUT, transport.try_next())
-            .await
-            .map_err(|_| ECIESErrorImpl::StreamTimeout)??;
+        let msg = transport.try_next().await?;
 
         trace!("receiving ecies auth");
         let remote_id = match &msg {
@@ -102,6 +101,17 @@ where
         transport.send(EgressECIESValue::Ack).await?;
 
         Ok(Self { stream: transport, remote_id })
+    }
+
+    /// Wrapper around connect which enforces a timeout.
+    pub async fn connect_with_timeout(
+        transport: Io,
+        secret_key: SecretKey,
+        remote_id: PeerId,
+    ) -> Result<Self, ECIESError> {
+        timeout(HANDSHAKE_TIMEOUT, Self::connect(transport, secret_key, remote_id))
+            .await
+            .map_err(|_| ECIESError::from(ECIESErrorImpl::StreamTimeout))?
     }
 
     /// Get the remote id
@@ -181,10 +191,43 @@ mod tests {
         let client_key = SecretKey::new(&mut rand::thread_rng());
         let outgoing = TcpStream::connect(addr).await.unwrap();
         let mut client_stream =
-            ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+            ECIESStream::connect_with_timeout(outgoing, client_key, server_id).await.unwrap();
         client_stream.send(Bytes::from("hello")).await.unwrap();
 
         // make sure the server receives the message and asserts before ending the test
         handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn connection_should_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_key = SecretKey::new(&mut rand::thread_rng());
+
+        let _handle = tokio::spawn(async move {
+            // Delay accepting the connection for longer than the client's timeout period
+            tokio::time::sleep(Duration::from_secs(11)).await;
+            let (incoming, _) = listener.accept().await.unwrap();
+            let mut stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
+
+            // use the stream to get the next message
+            let message = stream.next().await.unwrap().unwrap();
+            assert_eq!(message, Bytes::from("hello"));
+        });
+
+        // create the server pubkey
+        let server_id = pk2id(&server_key.public_key(SECP256K1));
+
+        let client_key = SecretKey::new(&mut rand::thread_rng());
+        let outgoing = TcpStream::connect(addr).await.unwrap();
+
+        // Attempt to connect, expecting a timeout due to the server's delayed response or unavailability
+        let connect_result =
+            ECIESStream::connect_with_timeout(outgoing, client_key, server_id).await;
+
+        // Assert that a timeout error occurred
+        assert!(
+            matches!(connect_result, Err(e) if e.to_string() == ECIESErrorImpl::StreamTimeout.to_string())
+        );
     }
 }
