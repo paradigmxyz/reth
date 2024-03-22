@@ -2299,6 +2299,15 @@ Post-merge hard forks (timestamp based):
 
     #[cfg(feature = "optimism")]
     #[test]
+    fn latest_op_fork_id() {
+        assert_eq!(
+            ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 0 },
+            BASE_MAINNET.op_latest_fork_id()
+        )
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
     fn op_sepolia_forkids() {
         test_fork_ids(
             &OP_SEPOLIA,
