@@ -221,7 +221,7 @@ mod tests {
         let client_key = SecretKey::new(&mut rand::thread_rng());
         let outgoing = TcpStream::connect(addr).await.unwrap();
 
-        // Attempt to connect, expecting a timeout due to the server's delayed response or unavailability
+        // Attempt to connect, expecting a timeout due to the server's delayed response
         let connect_result =
             ECIESStream::connect_with_timeout(outgoing, client_key, server_id).await;
 
