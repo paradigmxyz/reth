@@ -96,7 +96,10 @@ impl Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> {
         discv4_config: Option<reth_discv4::Discv4Config>,
         discv5_config: Option<DiscV5Config<T>>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
-    ) -> Result<Self, NetworkError> {
+    ) -> Result<Self, NetworkError>
+    where
+        T: FilterDiscovered + Send + Sync + Clone + 'static,
+    {
         Discovery::start_discv5_with_v4_downgrade(
             discv4_addr,
             sk,

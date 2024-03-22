@@ -87,7 +87,10 @@ impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
         _discv4_config: Option<reth_discv4::Discv4Config>,
         discv5_config: Option<DiscV5Config<T>>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
-    ) -> Result<Self, NetworkError> {
+    ) -> Result<Self, NetworkError>
+    where
+        T: FilterDiscovered + Send + Sync + Clone + 'static,
+    {
         Discovery::start_discv5(sk, discv5_config, dns_discovery_config).await
     }
 
