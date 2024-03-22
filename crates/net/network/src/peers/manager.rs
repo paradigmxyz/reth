@@ -437,6 +437,8 @@ impl PeersManager {
                         reputation_change = MAX_TRUSTED_PEER_REPUTATION_CHANGE;
                     }
                 }
+
+                trace!(target: "net::peers", reputation=%peer.reputation, banned=%peer.is_banned(), peer_id=?peer.socket_addr, peer_addr=?peer.socket_addr, rep_change_kind=?rep, "applying reputation change");
                 peer.apply_reputation(reputation_change)
             }
         } else {
@@ -1063,9 +1065,8 @@ impl Peer {
         // we add reputation since negative reputation change decrease total reputation
         self.reputation = previous.saturating_add(reputation);
 
-        trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), "applied reputation change");
-
         if self.state.is_connected() && self.is_banned() {
+            trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), peer_addr=?self.socket_addr, "Banning connected peer");
             self.state.disconnect();
             return ReputationChangeOutcome::DisconnectAndBan
         }
