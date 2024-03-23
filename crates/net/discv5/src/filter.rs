@@ -4,8 +4,7 @@ use alloy_rlp::Decodable;
 use derive_more::Constructor;
 use reth_primitives::{ForkId, MAINNET};
 
-/// Identifies an [`Enr`](discv5::enr::Enr) belonging to L1 EL mainnet.
-pub const ENR_KEY_FORK_ID_ETH: &'static [u8] = b"eth";
+use crate::{ChainRef, IdentifyForkIdKVPair};
 
 /// Allows users to inject custom filtering rules on which peers to discover.
 pub trait FilterDiscovered {
@@ -76,7 +75,7 @@ impl FilterDiscovered for MustIncludeChain {
 
 impl Default for MustIncludeChain {
     fn default() -> Self {
-        Self { chain: ENR_KEY_FORK_ID_ETH }
+        Self { chain: ChainRef::ETH }
     }
 }
 
@@ -118,16 +117,15 @@ impl FilterDiscovered for MustIncludeFork {
 
 impl Default for MustIncludeFork {
     fn default() -> Self {
-        Self {
-            chain: MustIncludeChain::new(ENR_KEY_FORK_ID_ETH),
-            fork_id: MAINNET.latest_fork_id(),
-        }
+        Self { chain: MustIncludeChain::new(ChainRef::ETH), fork_id: MAINNET.latest_fork_id() }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use discv5::enr::{CombinedKey, Enr};
+
+    use crate::IdentifyForkIdKVPair;
 
     use super::*;
 
@@ -136,12 +134,12 @@ mod tests {
         // rig test
 
         let fork = MAINNET.cancun_fork_id().unwrap();
-        let filter = MustIncludeFork::new(ENR_KEY_FORK_ID_ETH, fork);
+        let filter = MustIncludeFork::new(b"eth", fork);
 
         // enr_1 advertises fork configured in filter
         let sk = CombinedKey::generate_secp256k1();
         let enr_1 = Enr::builder()
-            .add_value_rlp(ENR_KEY_FORK_ID_ETH, alloy_rlp::encode(fork).into())
+            .add_value_rlp(ChainRef::ETH as &[u8], alloy_rlp::encode(fork).into())
             .build(&sk)
             .unwrap();
 
@@ -149,7 +147,7 @@ mod tests {
         let sk = CombinedKey::generate_secp256k1();
         let enr_2 = Enr::builder()
             .add_value_rlp(
-                ENR_KEY_FORK_ID_ETH,
+                ChainRef::ETH,
                 alloy_rlp::encode(MAINNET.shanghai_fork_id().unwrap()).into(),
             )
             .build(&sk)

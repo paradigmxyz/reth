@@ -6,7 +6,6 @@ use ::enr::Enr;
 use alloy_rlp::Decodable;
 use derive_more::{Constructor, Deref, DerefMut};
 use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
-use filter::{FilterDiscovered, FilterOutcome, MustIncludeChain};
 use futures::future::join_all;
 use itertools::Itertools;
 use reth_discv4::secp256k1::SecretKey;
@@ -22,12 +21,15 @@ pub mod config;
 pub mod downgrade_v4;
 pub mod enr;
 pub mod filter;
+pub mod metrics;
 
 pub use discv5::{self, IpMode};
 
-pub use config::{BootNode, DiscV5Config, DiscV5ConfigBuilder};
+pub use config::{BootNode, ChainRef, DiscV5Config, DiscV5ConfigBuilder, IdentifyForkIdKVPair};
 pub use downgrade_v4::{DiscV5WithV4Downgrade, MergedUpdateStream};
 pub use enr::uncompressed_id_from_enr_pk;
+use filter::{FilterDiscovered, FilterOutcome, MustIncludeChain};
+use metrics::{Metrics, UpdateMetrics};
 
 /// Errors from using [`discv5::Discv5`] handle.
 #[derive(thiserror::Error, Debug)]
@@ -133,6 +135,8 @@ pub struct DiscV5<T = MustIncludeChain> {
     fork_id_key: &'static [u8],
     /// Optionally filter discovered peers before passing up to app.
     filter_discovered_peer: T,
+    #[doc(hidden)]
+    metrics: Metrics,
 }
 
 impl<T> DiscV5<T> {
@@ -368,7 +372,11 @@ impl<T> DiscV5<T> {
             }
         });
 
-        Ok((DiscV5::new(discv5, ip_mode, chain, filter_discovered_peer), discv5_updates, bc_enr))
+        Ok((
+            DiscV5::new(discv5, ip_mode, chain, filter_discovered_peer, Metrics::default()),
+            discv5_updates,
+            bc_enr,
+        ))
     }
 }
 
@@ -435,6 +443,15 @@ impl<T> HandleDiscv5 for DiscV5<T> {
         Self::Filter: FilterDiscovered,
     {
         T::filter(&self.filter_discovered_peer, enr)
+    }
+}
+
+impl<T> UpdateMetrics for DiscV5<T> {
+    fn with_metrics<R, F>(&mut self, f: F) -> R
+    where
+        F: Fn(&mut Metrics) -> R,
+    {
+        f(&mut self.metrics)
     }
 }
 

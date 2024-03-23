@@ -8,19 +8,19 @@ use std::{
 };
 
 use futures::StreamExt;
-use reth_discv4::{secp256k1::SecretKey, Discv4Config};
+use reth_discv4::{secp256k1::SecretKey, DiscoveryUpdate, Discv4Config};
 #[cfg(feature = "discv5-downgrade-v4")]
 use reth_discv5::filter::MustIncludeChain;
 use reth_discv5::{
-    discv5::enr::Enr, downgrade_v4::DiscoveryUpdateV5, filter::FilterDiscovered, DiscV5Config,
-    DiscV5WithV4Downgrade, MergedUpdateStream,
+    discv5::enr::Enr, downgrade_v4::DiscoveryUpdateV5, filter::FilterDiscovered,
+    metrics::UpdateMetrics, DiscV5Config, DiscV5WithV4Downgrade, MergedUpdateStream,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::NodeFromExternalSource;
 use reth_primitives::NodeRecord;
 
 use tokio_stream::Stream;
-use tracing::{error, trace};
+use tracing::trace;
 
 use crate::error::NetworkError;
 
@@ -142,12 +142,37 @@ where
             self.disc_updates.as_mut().map(|ref mut updates| updates.poll_next_unpin(cx))
         {
             match update {
-                DiscoveryUpdateV5::V4(update) => self.on_discv4_update(update),
-                DiscoveryUpdateV5::V5(update) => {
-                    if let Err(err) = self.on_discv5_update(update) {
-                        error!(target: "net::discovery::discv5_downgrade_v4", %err, "failed to process update");
+                DiscoveryUpdateV5::V4(update) => {
+                    let mut count_discovered = 0;
+                    match &update {
+                        DiscoveryUpdate::Added(_) | DiscoveryUpdate::DiscoveredAtCapacity(_) => {
+                            count_discovered += 1
+                        }
+                        DiscoveryUpdate::Batch(updates) => {
+                            for update in updates {
+                                match update {
+                                    DiscoveryUpdate::Added(_) |
+                                    DiscoveryUpdate::DiscoveredAtCapacity(_) => {
+                                        count_discovered += 1
+                                    }
+                                    _ => (),
+                                }
+                            }
+                        }
+                        _ => (),
                     }
+
+                    self.disc.as_mut().map(|discv5| {
+                        discv5.with_metrics(|metrics| {
+                            metrics
+                                .discovered_peers_by_protocol
+                                .increment_discovered_v4_as_downgrade(count_discovered)
+                        })
+                    });
+
+                    self.on_discv4_update(update)
                 }
+                DiscoveryUpdateV5::V5(update) => self.on_discv5_update(update),
             }
         }
 

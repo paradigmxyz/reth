@@ -13,6 +13,7 @@ use reth_discv5::{
     discv5::{self, enr::Enr},
     enr::uncompressed_id_from_enr_pk,
     filter::{FilterDiscovered, FilterOutcome},
+    metrics::{AdvertisedChainCounter, UpdateMetrics},
     DiscV5, DiscV5Config, HandleDiscv5,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
@@ -20,7 +21,7 @@ use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::NodeRecord;
 
 use tokio_stream::{wrappers::ReceiverStream, Stream};
-use tracing::{error, trace};
+use tracing::trace;
 
 use crate::error::NetworkError;
 
@@ -108,10 +109,10 @@ impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
 
 impl<D, S, N, T> Discovery<D, S, N>
 where
-    D: HandleDiscovery + HandleDiscv5<Filter = T>,
+    D: HandleDiscovery + HandleDiscv5<Filter = T> + UpdateMetrics,
     T: FilterDiscovered,
 {
-    pub fn on_discv5_update(&mut self, update: discv5::Event) -> Result<(), NetworkError> {
+    pub fn on_discv5_update(&mut self, update: discv5::Event) {
         match update {
             discv5::Event::Discovered(enr) => {
                 // covers DiscoveryUpdate::Added(_) and DiscoveryUpdate::DiscoveredAtCapacity(_)
@@ -119,7 +120,17 @@ where
                 // node has been discovered as part of a query. discv5::Config sets
                 // `report_discovered_peers` to true by default.
 
-                self.on_discovered_peer(enr);
+                self.disc.as_mut().unwrap().with_metrics(|metrics| {
+                    let mut counter = AdvertisedChainCounter::default();
+                    counter.increment_once_by_chain_type(&enr);
+                    metrics.discovered_peers_chain_type.increment_once_by_chain_type(counter);
+                });
+
+                if let ProcessPeerResult::Unreachable = self.on_discovered_peer(enr) {
+                    self.disc.as_mut().unwrap().with_metrics(|metrics| {
+                        metrics.discovered_peers_by_protocol.increment_discovered_unreachable_v5(1);
+                    });
+                }
             }
             discv5::Event::EnrAdded { .. } => {
                 // not used in discv5 codebase
@@ -149,17 +160,26 @@ where
                 // node has been discovered unrelated to a query, e.g. an incoming connection to
                 // discv5
 
-                self.on_discovered_peer(enr);
+                self.disc.as_mut().map(|discv5| {
+                    discv5.with_metrics(|metrics| {
+                        metrics.discovered_peers_by_protocol.increment_discovered_v5(1);
+                    })
+                });
+
+                if let ProcessPeerResult::Unreachable = self.on_discovered_peer(enr) {
+                    self.disc.as_mut().unwrap().with_metrics(|metrics| {
+                        metrics.discovered_peers_by_protocol.increment_discovered_unreachable_v5(1);
+                    });
+                }
             }
             discv5::Event::SocketUpdated(_socket_addr) => {}
             discv5::Event::TalkRequest(_talk_req) => {}
         }
-
-        Ok(())
     }
 
-    fn on_discovered_peer(&mut self, enr: discv5::Enr) {
-        let Some(ref discv5) = self.disc else { return };
+    /// Processes a discovered peer. Returns `true` if peer is added to
+    fn on_discovered_peer(&mut self, enr: discv5::Enr) -> ProcessPeerResult {
+        let discv5 = self.disc.as_mut().unwrap();
 
         let fork_id = match discv5.filter_discovered_peer(&enr) {
             FilterOutcome::Ok => discv5.get_fork_id(&enr).ok(),
@@ -171,26 +191,30 @@ where
                     "filtered out discovered peer"
                 );
 
-                return
+                return ProcessPeerResult::FailCustomFilter
             }
         };
 
-        match discv5.try_into_reachable(enr.clone()) {
+        trace!(target: "net::discovery::discv5",
+            ?fork_id,
+            ?enr,
+            "discovered peer"
+        );
+
+        match discv5.try_into_reachable(enr) {
             Ok(enr_bc) => self.on_node_record_update(enr_bc, fork_id),
             Err(err) => {
                 trace!(target: "net::discovery::discv5",
-                        ?fork_id,
-                        %err,
-                        "discovered unreachable peer"
+                    ?fork_id,
+                    %err,
+                    "discovered peer is unreachable"
                 );
-                return
+
+                return ProcessPeerResult::Unreachable
             }
         }
-        trace!(target: "net::discovery::discv5",
-                ?fork_id,
-                ?enr,
-                "discovered peer on opstack"
-        );
+
+        ProcessPeerResult::Ok
     }
 }
 
@@ -212,9 +236,7 @@ where
         while let Some(Poll::Ready(Some(update))) =
             self.disc_updates.as_mut().map(|ref mut updates| updates.poll_next_unpin(cx))
         {
-            if let Err(err) = self.on_discv5_update(update) {
-                error!(target: "net::discovery::discv5", %err, "failed to process update");
-            }
+            self.on_discv5_update(update);
         }
 
         while let Some(Poll::Ready(Some(update))) =
@@ -232,6 +254,13 @@ where
 
         Poll::Pending
     }
+}
+
+/// Result of processing a discovered peer.
+enum ProcessPeerResult {
+    Ok,
+    FailCustomFilter,
+    Unreachable,
 }
 
 #[cfg(test)]

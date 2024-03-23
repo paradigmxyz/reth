@@ -30,6 +30,7 @@ use tracing::error;
 
 use crate::{
     filter::{FilterDiscovered, FilterOutcome, MustIncludeChain},
+    metrics::{Metrics, UpdateMetrics},
     DiscV5, DiscV5Config, HandleDiscv5,
 };
 
@@ -329,6 +330,15 @@ impl Stream for MergedUpdateStream {
         }
 
         Poll::Ready(update)
+    }
+}
+
+impl<T> UpdateMetrics for DiscV5WithV4Downgrade<T> {
+    fn with_metrics<R, F>(&mut self, f: F) -> R
+    where
+        F: Fn(&mut Metrics) -> R,
+    {
+        self.discv5.with_metrics(|metrics| f(metrics))
     }
 }
 

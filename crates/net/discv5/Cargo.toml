@@ -16,6 +16,7 @@ workspace = true
 reth-discv4.workspace = true
 reth-primitives.workspace = true
 reth-net-common.workspace = true
+reth-metrics.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
@@ -37,6 +38,7 @@ derive_more.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 itertools.workspace = true
+metrics.workspace = true
 
 [dev-dependencies]
 rand.workspace = true
