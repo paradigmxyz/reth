@@ -6,7 +6,7 @@ use ::enr::Enr;
 use alloy_rlp::Decodable;
 use derive_more::{Constructor, Deref, DerefMut};
 use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
-use filter::{FilterDiscovered, FilterOutcome, MustIncludeFork};
+use filter::{FilterDiscovered, FilterOutcome, MustIncludeChain};
 use futures::future::join_all;
 use itertools::Itertools;
 use reth_discv4::secp256k1::SecretKey;
@@ -123,7 +123,7 @@ pub trait HandleDiscv5 {
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Deref, DerefMut, Clone, Constructor)]
-pub struct DiscV5<T = MustIncludeFork> {
+pub struct DiscV5<T = MustIncludeChain> {
     #[deref]
     #[deref_mut]
     discv5: Arc<discv5::Discv5>,

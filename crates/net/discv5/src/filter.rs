@@ -92,7 +92,7 @@ pub struct MustIncludeFork {
 impl MustIncludeFork {
     /// Returns a new instance.
     pub fn new(chain: &'static [u8], fork_id: ForkId) -> Self {
-        Self { chain: MustIncludeChain::new(chain), fork_id}
+        Self { chain: MustIncludeChain::new(chain), fork_id }
     }
 }
 
@@ -136,7 +136,7 @@ mod tests {
         // rig test
 
         let fork = MAINNET.cancun_fork_id().unwrap();
-        let filter = MustIncludeFork::new(ENR_KEY_FORK_ID_ETH, fork);
+        let filter = MustIncludeChain::new(ENR_KEY_FORK_ID_ETH, fork);
 
         // enr_1 advertises fork configured in filter
         let sk = CombinedKey::generate_secp256k1();
