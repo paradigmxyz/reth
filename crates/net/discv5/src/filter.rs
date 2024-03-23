@@ -67,12 +67,19 @@ impl FilterDiscovered for MustIncludeChain {
 }
 
 /// Filter requiring that peers advertise belonging to a certain fork.
-#[derive(Debug, Constructor, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MustIncludeFork {
     /// Filters chain which node record must advertise.
     chain: MustIncludeChain,
     /// Fork which node record must advertise.
     fork: &'static [u8],
+}
+
+impl MustIncludeFork {
+    /// Returns a new instance.
+    pub fn new(chain: &'static [u8], fork: &'static [u8]) -> Self {
+        Self { chain: MustIncludeChain::new(chain), fork }
+    }
 }
 
 impl FilterDiscovered for MustIncludeFork {
