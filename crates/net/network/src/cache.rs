@@ -1,6 +1,5 @@
 use core::hash::BuildHasher;
 use std::{
-    borrow::Borrow,
     collections::HashMap,
     fmt,
     fmt::Debug,
@@ -60,14 +59,17 @@ impl Nodes {
         self.nodes.len() - 1 + OFFSET
     }
 
+    #[allow(dead_code)]
     fn len(&self) -> usize {
         self.nodes.len()
     }
 
+    #[allow(dead_code)]
     fn tail(&self) -> &Node {
         &self.tail
     }
 
+    #[allow(dead_code)]
     fn head(&self) -> &Node {
         &self.head
     }
@@ -165,20 +167,22 @@ impl LinkedList {
         self.nodes[index].next
     }
 
+    #[allow(dead_code)]
     fn prev(&self, index: Index) -> Index {
         self.nodes[index].prev
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct LruNode<T> {
+pub struct LruNode<T> {
     data: T,
+    #[allow(dead_code)]
     list_index: usize,
 }
 
 // notice: least recently used is at the tail
 #[derive(Debug, Clone)]
-pub(crate) struct LruCache<T>
+pub struct LruCache<T>
 where
     T: Hash,
 {
@@ -412,12 +416,12 @@ mod tests {
     fn test_sanity() {
         let mut cache = LruCache::with_capacity(8);
         assert_eq!(cache.lookup_table.len(), 0);
-        assert_eq!(cache.is_empty(), true);
+        assert!(cache.is_empty());
 
         cache.insert("hash");
         assert_eq!(cache.lookup_table.len(), 1);
-        assert_eq!(cache.contains(&"hash"), true);
-        assert_eq!(cache.is_empty(), false);
+        assert!(cache.contains(&"hash"));
+        assert!(!cache.is_empty());
         assert_eq!(cache.len(), 1);
     }
 
@@ -439,7 +443,7 @@ mod tests {
         assert_eq!(cache.lookup_table.len(), 1);
 
         let (success, evicted) = cache.insert_and_get_evicted("hash");
-        assert_eq!(success, false);
+        assert!(!success);
         assert_eq!(evicted, None);
     }
 
@@ -452,7 +456,7 @@ mod tests {
         assert_eq!(cache.lookup_table.len(), 1);
 
         let contains = cache.contains(&"hash");
-        assert_eq!(contains, true);
+        assert!(contains);
     }
 
     #[test]
