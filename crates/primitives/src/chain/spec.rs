@@ -737,17 +737,10 @@ impl ChainSpec {
         self.hardfork_fork_id(Hardfork::Cancun)
     }
 
-    /// Convenience method to get the fork id for latest OP hardfork from a given chainspec.
+    /// Convenience method to get the latest fork id from the chainspec.
     #[inline]
     pub fn latest_fork_id(&self) -> ForkId {
-        self.hardfork_fork_id(Hardfork::latest()).unwrap()
-    }
-
-    /// Convenience method to get the fork id for latest OP hardfork from a given chainspec.
-    #[cfg(feature = "optimism")]
-    #[inline]
-    pub fn op_latest_fork_id(&self) -> ForkId {
-        self.hardfork_fork_id(Hardfork::latest()).unwrap()
+        self.hardfork_fork_id(*self.hardforks().last_key_value().unwrap().0).unwrap()
     }
 
     /// Get the fork condition for the given fork.
@@ -2133,6 +2126,14 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
+    fn latest_eth_mainnet_fork_id() {
+        assert_eq!(
+            ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+            MAINNET.latest_fork_id()
+        )
+    }
+
+    #[test]
     fn holesky_forkids() {
         test_fork_ids(
             &HOLESKY,
@@ -2299,10 +2300,10 @@ Post-merge hard forks (timestamp based):
 
     #[cfg(feature = "optimism")]
     #[test]
-    fn latest_op_fork_id() {
+    fn latest_op_mainnet_fork_id() {
         assert_eq!(
             ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 0 },
-            BASE_MAINNET.op_latest_fork_id()
+            BASE_MAINNET.latest_fork_id()
         )
     }
 
