@@ -37,7 +37,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 
     // setup engine api events and payload service events
     let mut notifications = node.provider.canonical_state_stream();
-    let payload_events = node.payload_builder.subscribe().await.unwrap();
+    let payload_events = node.payload_builder.subscribe().await?;
 
     // push tx into pool via RPC server
     let eth_api = node.rpc_registry.eth_api();
@@ -94,6 +94,8 @@ async fn can_run_eth_node() -> eyre::Result<()> {
         // RPC call
         let latest_block = node.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap();
         assert_eq!(latest_block.hash_slow(), hash);
+    } else {
+        panic!("Expect a built payload event.");
     }
 
     Ok(())
