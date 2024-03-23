@@ -8,7 +8,7 @@ use std::{
 use futures::StreamExt;
 use reth_discv4::secp256k1::SecretKey;
 #[cfg(feature = "discv5")]
-use reth_discv5::filter::MustIncludeFork;
+use reth_discv5::filter::MustIncludeChain;
 use reth_discv5::{
     discv5::{self, enr::Enr},
     enr::uncompressed_id_from_enr_pk,
@@ -28,7 +28,7 @@ use super::{Discovery, DiscoveryEvent};
 
 /// [`Discovery`] type that uses [`discv5::Discv5`].
 #[cfg(feature = "discv5")]
-pub type DiscoveryV5<T = MustIncludeFork> =
+pub type DiscoveryV5<T = MustIncludeChain> =
     Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>;
 
 impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>
@@ -167,6 +167,8 @@ where
                 reason,
                 "filtered out discovered peer"
             );
+
+            return
         }
 
         let fork_id = discv5.get_fork_id(&enr).ok();

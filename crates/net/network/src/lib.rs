@@ -147,7 +147,7 @@ pub use peers::PeersConfig;
 pub use reth_discv4::Discv4;
 pub use reth_discv5::{
     downgrade_v4::DiscoveryUpdateV5,
-    filter::{FilterDiscovered, FilterOutcome, MustIncludeChain, MustIncludeFork},
+    filter::{FilterDiscovered, FilterOutcome, MustIncludeChain},
     DiscV5, DiscV5Config, DiscV5WithV4Downgrade, MergedUpdateStream,
 };
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
