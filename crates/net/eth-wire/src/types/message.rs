@@ -237,6 +237,138 @@ impl EthMessage {
     }
 }
 
+/// `EncodableExt` is an extension trait for types that are encodable, providing methods
+/// to encode data with size constraints. It is primarily designed for collections of encodable
+/// items or individual encodable items that can be serialized into a byte sequence.
+///
+/// Implementors should ensure that encoding respects the specified size limits, either by
+/// returning an error when the limit is exceeded (`encode_max`) or by producing a truncated
+/// encoding that fits within the limit (`encode_truncate`).
+pub trait EncodableExt {
+    /// Encodes the data, ensuring that the encoded message does not exceed the specified size
+    /// limit. If the encoded size exceeds the limit, an error is returned, indicating the failure
+    /// to comply with the size constraint.
+    ///
+    /// This method is suitable for scenarios where it's critical to avoid exceeding a size limit,
+    /// such as in network communications where payload sizes are restricted.
+    ///
+    /// # Arguments
+    ///
+    /// * `approx` - The approximate size to allocate in memory for the encoding process. This is
+    ///   used to pre-allocate memory for efficiency.
+    /// * `limit` - The maximum allowed size of the encoded data.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<u8>)` - A vector containing the encoded data if it is within the size limit.
+    /// * `Err(alloy_rlp::Error)` - An error if the encoded data exceeds the size limit.
+    fn encode_max(
+        &self,
+        approx: usize,
+        size: usize,
+    ) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error>;
+
+    /// Encodes the data, truncating the encoded message if it exceeds the specified size limit.
+    /// The resulting data will fit within the limit but may be incomplete if truncation occurs.
+    ///
+    /// When using this method with collections or "vec-like" structures, implementors should take
+    /// care to ensure the truncated encoding remains valid and interpretable, albeit potentially
+    /// incomplete. For example, truncating a list of items might result in the list containing
+    /// fewer items than intended, but each item in the list should remain individually intact
+    /// and decodable.
+    ///
+    /// # Arguments
+    ///
+    /// * `approx` - The approximate size to allocate in memory for the encoding process. This is
+    ///   used to pre-allocate memory for efficiency.
+    /// * `limit` - The maximum allowed size of the encoded data.
+    ///
+    /// # Returns
+    ///
+    /// A vector containing the encoded data, truncated to fit within the size limit if necessary.
+    /// Users of this method should be aware that the truncated data may not represent the complete
+    /// original dataset.
+    fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8>;
+
+    /// Encodes the data up to the specified size limit, returning the encoded data along with
+    /// a flag indicating whether the limit was exceeded.
+    ///
+    /// # Arguments
+    ///
+    /// * `approx` - The approximate size to allocate in memory for the encoding process. This is
+    ///   used to pre-allocate memory for efficiency.
+    /// * `limit` - The maximum allowed size of the encoded data.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// * The encoded data as `Vec<u8>`.
+    /// * The length of the data at the point just before reaching the limit, or 0 if the limit was
+    ///   not exceeded.
+    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize);
+}
+
+impl<T: Encodable> EncodableExt for Vec<T> {
+    fn encode_max(
+        &self,
+        approx: usize,
+        limit: usize,
+    ) -> alloy_rlp::Result<Vec<u8>, alloy_rlp::Error> {
+        let (mut buf, current_len) = self.encode_until_limit(approx, limit);
+
+        if current_len != 0 {
+            // Don't shrink if limit_exceeded since we return Error anyway
+            return Err(alloy_rlp::Error::Custom("Size limit exceeded"));
+        }
+
+        buf.shrink_to_fit();
+        Ok(buf)
+    }
+
+    fn encode_until_limit(&self, approx: usize, limit: usize) -> (Vec<u8>, usize) {
+        let mut buffer = Vec::with_capacity(approx);
+        let mut actual_payload_length = 0;
+        let mut current_len = 0;
+        let mut header = Header { list: true, payload_length: 0 };
+        for item in self {
+            item.encode(&mut buffer);
+            actual_payload_length += item.length();
+            if (buffer.len() +
+                Header { list: true, payload_length: actual_payload_length }.length()) >
+                limit
+            {
+                let mut head: Vec<u8> = Vec::new();
+                header.payload_length = actual_payload_length - item.length();
+                header.encode(&mut head);
+                current_len += head.len();
+                head.append(&mut buffer);
+                return (head.clone(), current_len);
+            }
+
+            current_len = buffer.len();
+        }
+        let mut head: Vec<u8> = Vec::new();
+        header.payload_length = actual_payload_length;
+        header.encode(&mut head);
+        head.append(&mut buffer);
+        // Return current_len as 0
+        (head, 0)
+    }
+
+    fn encode_truncate(&self, approx: usize, limit: usize) -> Vec<u8> {
+        let (mut buf, current_len) = self.encode_until_limit(approx, limit);
+
+        if current_len != 0 {
+            buf.truncate(current_len);
+            buf.shrink_to_fit(); // shrink buffer to catch cases where approx > limit
+            return buf;
+        }
+
+        buf.shrink_to_fit();
+        buf
+    }
+}
+
 impl Encodable for EthMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
@@ -258,6 +390,7 @@ impl Encodable for EthMessage {
             EthMessage::Receipts(receipts) => receipts.encode(out),
         }
     }
+
     fn length(&self) -> usize {
         match self {
             EthMessage::Status(status) => status.length(),
@@ -476,11 +609,12 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        errors::EthStreamError, types::message::RequestPair, EthMessage, EthMessageID, GetNodeData,
-        NodeData, ProtocolMessage,
+        errors::EthStreamError, message::EncodableExt, types::message::RequestPair, EthMessage,
+        EthMessageID, GetNodeData, NodeData, ProtocolMessage,
     };
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::hex;
+    use reth_primitives::{hex, Address, Bytes, Header, B256, U256};
+    use std::str::FromStr;
 
     fn encode<T: Encodable>(value: T) -> Vec<u8> {
         let mut buf = vec![];
@@ -531,5 +665,172 @@ mod tests {
         let got = RequestPair::<Vec<u8>>::decode(&mut &*raw_pair).unwrap();
         assert_eq!(expected.length(), raw_pair.len());
         assert_eq!(expected, got);
+    }
+
+    // Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
+    fn encode_max_header_decode() {
+        let mut headers: Vec<Header> = Vec::new();
+        // list header : f901fc
+        let expected =
+    hex!("f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
+    );
+
+        headers.push(Header {
+            difficulty: U256::from(0x8ae_u64),
+            number: 0xd05_u64,
+            gas_limit: 0x115c_u64,
+            gas_used: 0x15b3_u64,
+            timestamp: 0x1a0a_u64,
+            extra_data: Bytes::from_str("7788").unwrap(),
+            ommers_hash: B256::ZERO,
+            state_root: B256::ZERO,
+            transactions_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            ..Default::default()
+        });
+
+        let res = headers.encode_max(300, 511).unwrap();
+        assert_eq!(res, expected);
+
+        let fail_res = headers.encode_max(300, 510);
+        assert!(
+            matches!(fail_res, Err(alloy_rlp::Error::Custom(msg)) if msg.contains("Size limit exceeded")),
+            "Expected 'Size limit exceeded' error"
+        );
+    }
+
+    //Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
+    fn encode_max_header_decode_round_trip() {
+        let mut headers = Vec::new();
+        // list header : f901fc
+        let expected =
+    hex!("f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
+    );
+        let header1 = Header {
+            difficulty: U256::from(0x8ae_u64),
+            number: 0xd05_u64,
+            gas_limit: 0x115c_u64,
+            gas_used: 0x15b3_u64,
+            timestamp: 0x1a0a_u64,
+            extra_data: Bytes::from_str("7788").unwrap(),
+            ommers_hash: B256::ZERO,
+            state_root: B256::ZERO,
+            transactions_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            ..Default::default()
+        };
+        headers.push(header1.clone());
+
+        let res = headers.encode_max(300, 511).unwrap();
+        assert_eq!(res, expected);
+        let b = &mut &*res;
+        let s = Vec::<Header>::decode(b).unwrap();
+        assert_eq!(s[0], header1);
+    }
+
+    // Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481 and https://github.com/ethereum/tests/blob/970503935aeb76f59adfa3b3224aabf25e77b83d/BlockchainTests/ValidBlocks/bcExample/shanghaiExample.json#L15-L34
+    #[test]
+    fn encode_max_header_decode_round_trip_vec() {
+        let mut headers = Vec::new();
+        // list header : f9041b + header1 + header2
+        let expected = hex!("f9041bf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f9021ca018db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa095efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5a071e515dd89e8a7973402c2e11646081b4e2209b2d3a1550df5095289dabcb3fba0ed9c51ea52c968e552e370a77a41dac98606e98b915092fb5f949d6452fce1c4b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff830125b882079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a027f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973");
+        let header1 = Header {
+            difficulty: U256::from(0x8ae_u64),
+            number: 0xd05_u64,
+            gas_limit: 0x115c_u64,
+            gas_used: 0x15b3_u64,
+            timestamp: 0x1a0a_u64,
+            extra_data: Bytes::from_str("7788").unwrap(),
+            ommers_hash: B256::ZERO,
+            state_root: B256::ZERO,
+            transactions_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            ..Default::default()
+        };
+        // header2
+        let _data2 = hex!("f9021ca018db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa095efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5a071e515dd89e8a7973402c2e11646081b4e2209b2d3a1550df5095289dabcb3fba0ed9c51ea52c968e552e370a77a41dac98606e98b915092fb5f949d6452fce1c4b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff830125b882079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a027f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973");
+        let header2 = Header {
+            parent_hash: B256::from_str(
+                "18db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17",
+            )
+            .unwrap(),
+            beneficiary: Address::from_str("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").unwrap(),
+            state_root: B256::from_str(
+                "95efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5",
+            )
+            .unwrap(),
+            transactions_root: B256::from_str(
+                "71e515dd89e8a7973402c2e11646081b4e2209b2d3a1550df5095289dabcb3fb",
+            )
+            .unwrap(),
+            receipts_root: B256::from_str(
+                "ed9c51ea52c968e552e370a77a41dac98606e98b915092fb5f949d6452fce1c4",
+            )
+            .unwrap(),
+            number: 0x01,
+            gas_limit: 0x7fffffffffffffff,
+            gas_used: 0x0125b8,
+            timestamp: 0x079e,
+            extra_data: Bytes::from_str("42").unwrap(),
+            mix_hash: B256::from_str(
+                "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            )
+            .unwrap(),
+            base_fee_per_gas: Some(0x09),
+            withdrawals_root: Some(
+                B256::from_str("27f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973")
+                    .unwrap(),
+            ),
+            ..Default::default()
+        };
+        headers.push(header1.clone());
+        headers.push(header2.clone());
+        let res = headers.encode_max(300, 1400).unwrap();
+        assert_eq!(res, expected);
+        let b = &mut &*res;
+        let s = Vec::<Header>::decode(b).unwrap();
+        assert_eq!(s[0], header1);
+        // payload length is 1051 + list header of 3(placeholder) . So 1053 will throw error
+        let fail_res = headers.encode_max(300, 1053);
+        assert!(
+            matches!(fail_res, Err(alloy_rlp::Error::Custom(msg)) if msg.contains("Size limit exceeded")),
+            "Expected 'Size limit exceeded' error"
+        );
+    }
+
+    //Test vector for header from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
+    fn test_encode_truncate() {
+        let mut headers: Vec<Header> = Vec::new();
+        // list header : f901fc + header
+        let expected = hex!("f901fcf901f9a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008208ae820d0582115c8215b3821a0a827788a00000000000000000000000000000000000000000000000000000000000000000880000000000000000");
+
+        // buffer will be truncated back to last item , i.e list header in our case. Since we had
+        // list_header + 1 Header in the vec in our test
+        // list header will be
+        // let header = Header { list: true, payload_length: 0 }; which is 192 i.e c0
+        let truncated_expected = hex!("c0");
+
+        headers.push(Header {
+            difficulty: U256::from(0x8ae_u64),
+            number: 0xd05_u64,
+            gas_limit: 0x115c_u64,
+            gas_used: 0x15b3_u64,
+            timestamp: 0x1a0a_u64,
+            extra_data: Bytes::from_str("7788").unwrap(),
+            ommers_hash: B256::ZERO,
+            state_root: B256::ZERO,
+            transactions_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            ..Default::default()
+        });
+
+        let res = headers.encode_truncate(300, 511);
+        assert_eq!(res, expected);
+
+        let truncated_res = headers.encode_truncate(300, 509);
+        assert_eq!(truncated_res, truncated_expected);
     }
 }
