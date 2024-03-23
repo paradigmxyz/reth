@@ -271,6 +271,55 @@ maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus t
 fmt:
 	cargo +nightly fmt
 
+fix-lint-reth:
+	cargo +nightly clippy \
+	--workspace \
+	--bin "reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "ethereum $(BIN_OTHER_FEATURES)" \
+	--fix \
+	--allow-staged \
+	--allow-dirty \
+	-- -D warnings
+
+# will check discv5 feature
+fix-lint-op-reth:
+	cargo +nightly clippy \
+	--workspace \
+	--bin "op-reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "optimism $(BIN_OTHER_FEATURES)" \
+	--fix \
+	--allow-staged \
+	--allow-dirty \
+	-- -D warnings
+
+fix-lint-other-targets:
+	cargo +nightly clippy \
+	--workspace \
+	--exclude reth-network \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--all-features \
+	--fix \
+	--allow-staged \
+	--allow-dirty \
+	-- -D warnings
+
+fix-lint:
+	make lint-reth && \
+	make lint-op-reth && \
+	make lint-other-targets && \
+	make fmt
+
 lint-reth:
 	cargo +nightly clippy \
 	--workspace \
@@ -325,12 +374,12 @@ lint-discv5-downgrade-v4:
 	-- -D warnings
 
 lint:
-	make fmt && \
 	make lint-reth && \
 	make lint-op-reth && \
 	make lint-other-targets && \
 	make lint-network && \
-	make lint-discv5-downgrade-v4
+	make lint-discv5-downgrade-v4 && \
+	make fmt
 
 rustdocs-other-targets:
 	RUSTDOCFLAGS="\
