@@ -89,8 +89,10 @@ serial_test.workspace = true
 tempfile.workspace = true
 
 ## Benchmarks
-pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
+
+[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
+pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 
 [features]
 default = ["serde"]

@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 use criterion::*;
 use futures::StreamExt;
+#[cfg(not(target_os = "windows"))]
 use pprof::criterion::{Output, PProfProfiler};
 use rand::thread_rng;
 use reth_network::{test_utils::Testnet, NetworkEvents};
@@ -11,9 +12,17 @@ use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction};
 use std::sync::Arc;
 use tokio::{runtime::Runtime as TokioRuntime, sync::mpsc::unbounded_channel};
 
+#[cfg(not(target_os = "windows"))]
 criterion_group!(
     name = broadcast_benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = broadcast_ingress_bench
+);
+
+#[cfg(target_os = "windows")]
+criterion_group!(
+    name = broadcast_benches;
+    config = Criterion::default();
     targets = broadcast_ingress_bench
 );
 
