@@ -231,6 +231,11 @@ impl<T> DiscV5<T> {
             let enr = builder.build(sk).expect("should build enr v4");
             let EnrCombinedKeyWrapper(enr) = enr.into();
 
+            trace!(target: "net::discv5",
+                ?enr,
+                "local ENR"
+            );
+
             // backwards compatible enr
             let socket = ip_mode.get_contactable_addr(&enr).unwrap();
             let bc_enr = NodeRecord::from_secret_key(socket, sk);
@@ -259,6 +264,11 @@ impl<T> DiscV5<T> {
         //
         // 4. add boot nodes
         //
+        trace!(target: "net::discv5",
+            ?bootstrap_nodes,
+            "adding bootstrap nodes .."
+        );
+
         let mut enr_requests = vec![];
         for node in bootstrap_nodes {
             match node {
