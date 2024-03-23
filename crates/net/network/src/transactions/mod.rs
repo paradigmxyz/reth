@@ -285,7 +285,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             ),
             bad_imports: LruCache::new(
-                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS).unwrap(),
+                DEFAULT_CAPACITY_CACHE_BAD_IMPORTS
             ),
             peers: Default::default(),
             command_tx,
@@ -1495,7 +1495,7 @@ impl PeerMetadata {
     fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
         Self {
             seen_transactions: LruCache::new(
-                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER).expect("infallible"),
+                DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER
             ),
             request_tx,
             version,
@@ -1637,8 +1637,7 @@ mod tests {
     }
 
     pub(super) fn default_cache<T: hash::Hash + Eq>() -> LruCache<T> {
-        let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into()).unwrap();
-        LruCache::new(limit)
+        LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into())
     }
 
     // Returns (peer, channel-to-send-get-pooled-tx-response-on).
