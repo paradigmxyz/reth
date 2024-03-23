@@ -126,7 +126,7 @@ impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> 
 impl<S, T> Stream for Discovery<DiscV5WithV4Downgrade<T>, S, Enr<SecretKey>>
 where
     S: Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static,
-    T: FilterDiscovered,
+    T: FilterDiscovered + Unpin,
 {
     type Item = DiscoveryEvent;
 
@@ -215,14 +215,14 @@ mod tests {
     async fn discv5_with_discv4_downgrade() {
         reth_tracing::init_test_tracing();
 
-        let mut node_1 = start_discovery_node(31314, 31324).await;
+        let mut node_1 = start_discovery_node(40014, 40015).await;
         let discv4_enr_1 = node_1.disc.as_ref().unwrap().with_discv4(|discv4| discv4.node_record());
         let discv5_enr_node_1 =
             node_1.disc.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
         let discv4_id_1 = discv4_enr_1.id;
         let discv5_id_1 = discv5_enr_node_1.node_id();
 
-        let mut node_2 = start_discovery_node(32324, 32325).await;
+        let mut node_2 = start_discovery_node(40024, 40025).await;
         let discv4_enr_2 = node_2.disc.as_ref().unwrap().with_discv4(|discv4| discv4.node_record());
         let discv5_enr_node_2 =
             node_2.disc.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
