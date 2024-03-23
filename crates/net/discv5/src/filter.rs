@@ -1,6 +1,7 @@
 //! Predicates to constraint peer lookups.
 
 use derive_more::Constructor;
+use reth_primitives::{hex, ForkHash};
 
 /// Allows users to inject custom filtering rules on which peers to discover.
 pub trait FilterDiscovered {
@@ -67,18 +68,18 @@ impl FilterDiscovered for MustIncludeChain {
 }
 
 /// Filter requiring that peers advertise belonging to a certain fork.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct MustIncludeFork {
     /// Filters chain which node record must advertise.
     chain: MustIncludeChain,
     /// Fork which node record must advertise.
-    fork: &'static [u8],
+    fork: String,
 }
 
 impl MustIncludeFork {
     /// Returns a new instance.
-    pub fn new(chain: &'static [u8], fork: &'static [u8]) -> Self {
-        Self { chain: MustIncludeChain::new(chain), fork }
+    pub fn new(chain: &'static [u8], fork: ForkHash) -> Self {
+        Self { chain: MustIncludeChain::new(chain), fork: hex::encode(fork.0) }
     }
 }
 
@@ -88,7 +89,7 @@ impl FilterDiscovered for MustIncludeFork {
             return FilterOutcome::Ignore { reason: self.chain.ignore_reason() }
         };
 
-        if fork != self.fork {
+        if fork != self.fork.as_bytes() {
             return FilterOutcome::Ignore { reason: self.ignore_reason() }
         }
 
@@ -96,10 +97,6 @@ impl FilterDiscovered for MustIncludeFork {
     }
 
     fn ignore_reason(&self) -> String {
-        format!(
-            "{} fork {} required",
-            String::from_utf8_lossy(self.chain.chain),
-            String::from_utf8_lossy(self.fork)
-        )
+        format!("{} fork {:?} required", String::from_utf8_lossy(self.chain.chain), self.fork,)
     }
 }

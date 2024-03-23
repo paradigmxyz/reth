@@ -8,7 +8,7 @@ use std::{
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_primitives::{AnyNode, Bytes, ForkId, NodeRecord, MAINNET};
+use reth_primitives::{AnyNode, Bytes, ForkHash, NodeRecord, MAINNET};
 
 use crate::{
     enr::uncompressed_to_multiaddr_id,
@@ -27,8 +27,8 @@ pub struct DiscV5ConfigBuilder<Filter = MustIncludeFork> {
     discv5_config: Option<discv5::Config>,
     /// Nodes to boot from.
     bootstrap_nodes: HashSet<BootNode>,
-    /// [`ForkId`] to set in local node record.
-    fork_id: Option<(&'static [u8], ForkId)>,
+    /// [`ForkHash`] to set in local node record.
+    fork: Option<(&'static [u8], ForkHash)>,
     /// Mempool TCP port to advertise.
     tcp_port: Option<u16>,
     /// Additional kv-pairs that should be advertised to peers by including in local node record.
@@ -49,7 +49,7 @@ impl<T> DiscV5ConfigBuilder<T> {
         let DiscV5Config {
             discv5_config,
             bootstrap_nodes,
-            fork_id,
+            fork: fork_id,
             tcp_port,
             other_enr_data,
             allow_no_tcp_discovered_nodes,
@@ -60,7 +60,7 @@ impl<T> DiscV5ConfigBuilder<T> {
         Self {
             discv5_config: Some(discv5_config),
             bootstrap_nodes,
-            fork_id: Some(fork_id),
+            fork: Some(fork_id),
             tcp_port: Some(tcp_port),
             other_enr_data,
             allow_no_tcp_discovered_nodes,
@@ -120,9 +120,9 @@ impl<T> DiscV5ConfigBuilder<T> {
         self
     }
 
-    /// Set [`ForkId`], and key used to identify it, to set in local [`Enr`](discv5::enr::Enr).
-    pub fn fork_id(mut self, key: &'static [u8], value: ForkId) -> Self {
-        self.fork_id = Some((key, value));
+    /// Set [`ForkHash`], and key used to identify it, to set in local [`Enr`](discv5::enr::Enr).
+    pub fn fork(mut self, key: &'static [u8], value: ForkHash) -> Self {
+        self.fork = Some((key, value));
         self
     }
 
@@ -154,7 +154,7 @@ impl<T> DiscV5ConfigBuilder<T> {
         let Self {
             discv5_config,
             bootstrap_nodes,
-            fork_id,
+            fork,
             tcp_port,
             other_enr_data,
             allow_no_tcp_discovered_nodes,
@@ -165,7 +165,7 @@ impl<T> DiscV5ConfigBuilder<T> {
         DiscV5ConfigBuilder {
             discv5_config,
             bootstrap_nodes,
-            fork_id,
+            fork,
             tcp_port,
             other_enr_data,
             allow_no_tcp_discovered_nodes,
@@ -179,7 +179,7 @@ impl<T> DiscV5ConfigBuilder<T> {
         let Self {
             discv5_config,
             bootstrap_nodes,
-            fork_id,
+            fork,
             tcp_port,
             other_enr_data,
             allow_no_tcp_discovered_nodes,
@@ -190,7 +190,7 @@ impl<T> DiscV5ConfigBuilder<T> {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let fork_id = fork_id.unwrap_or((b"eth", MAINNET.latest_fork_id()));
+        let fork = fork.unwrap_or((b"eth", MAINNET.latest_fork_id().hash));
 
         let tcp_port = tcp_port.unwrap_or(DEFAULT_DISCOVERY_PORT);
 
@@ -200,7 +200,7 @@ impl<T> DiscV5ConfigBuilder<T> {
         DiscV5Config {
             discv5_config,
             bootstrap_nodes,
-            fork_id,
+            fork,
             tcp_port,
             other_enr_data,
             allow_no_tcp_discovered_nodes,
@@ -218,8 +218,8 @@ pub struct DiscV5Config<Filter = MustIncludeFork> {
     pub(super) discv5_config: discv5::Config,
     /// Nodes to boot from.
     pub(super) bootstrap_nodes: HashSet<BootNode>,
-    /// [`ForkId`] to set in local node record.
-    pub(super) fork_id: (&'static [u8], ForkId),
+    /// [`ForkHash`] to set in local node record.
+    pub(super) fork: (&'static [u8], ForkHash),
     /// Mempool TCP port to advertise.
     pub(super) tcp_port: u16,
     /// Additional kv-pairs to include in local node record.
@@ -267,7 +267,7 @@ pub enum BootNode {
 mod test {
     use std::net::SocketAddrV4;
 
-    use reth_primitives::hex;
+    use reth_primitives::{hex, Hardfork};
 
     use super::*;
 
@@ -292,16 +292,23 @@ mod test {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn parse_enodes() {
+    #[test]
+    fn parse_enodes() {
         const OP_MAINNET_EL_BOOTNODES: &str = "enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305,enode://dd751a9ef8912be1bfa7a5e34e2c3785cc5253110bd929f385e07ba7ac19929fb0e0c5d93f77827291f4da02b2232240fbc47ea7ce04c46e333e452f8656b667@34.65.107.0:30305,enode://c5d289b56a77b6a2342ca29956dfd07aadf45364dde8ab20d1dc4efd4d1bc6b4655d902501daea308f4d8950737a4e93a4dfedd17b49cd5760ffd127837ca965@34.65.202.239:30305,enode://87a32fd13bd596b2ffca97020e31aef4ddcc1bbd4b95bb633d16c1329f654f34049ed240a36b449fda5e5225d70fe40bc667f53c304b71f8e68fc9d448690b51@3.231.138.188:30301,enode://ca21ea8f176adb2e229ce2d700830c844af0ea941a1d8152a9513b966fe525e809c3a6c73a2c18a12b74ed6ec4380edf91662778fe0b79f6a591236e49e176f9@184.72.129.189:30301,enode://acf4507a211ba7c1e52cdf4eef62cdc3c32e7c9c47998954f7ba024026f9a6b2150cd3f0b734d9c78e507ab70d59ba61dfe5c45e1078c7ad0775fb251d7735a2@3.220.145.177:30301,enode://8a5a5006159bf079d06a04e5eceab2a1ce6e0f721875b2a9c96905336219dbe14203d38f70f3754686a6324f786c2f9852d8c0dd3adac2d080f4db35efc678c5@3.231.11.52:30301,enode://cdadbe835308ad3557f9a1de8db411da1a260a98f8421d62da90e71da66e55e98aaa8e90aa7ce01b408a54e4bd2253d701218081ded3dbe5efbbc7b41d7cef79@54.198.153.150:30301";
 
         let config = DiscV5Config::builder().add_enode_boot_nodes(OP_MAINNET_EL_BOOTNODES).build();
 
-        const MUTLI_ADDRESSES: &str = "/ip4/184.72.129.189/udp/30301/p2p/16Uiu2HAmSG2hdLwyQHQmG4bcJBgD64xnW63WMTLcrNq6KoZREfGb,/ip4/3.231.11.52/udp/30301/p2p/16Uiu2HAmMy4V8bi3XP7KDfSLQcLACSvTLroRRwEsTyFUKo8NCkkp,/ip4/54.198.153.150/udp/30301/p2p/16Uiu2HAmSVsb7MbRf1jg3Dvd6a3n5YNqKQwn1fqHCFgnbqCsFZKe,/ip4/3.220.145.177/udp/30301/p2p/16Uiu2HAm74pBDGdQ84XCZK27GRQbGFFwQ7RsSqsPwcGmCR3Cwn3B,/ip4/3.231.138.188/udp/30301/p2p/16Uiu2HAmMnTiJwgFtSVGV14ZNpwAvS1LUoF4pWWeNtURuV6C3zYB";
+        const MULTI_ADDRESSES: &str = "/ip4/184.72.129.189/udp/30301/p2p/16Uiu2HAmSG2hdLwyQHQmG4bcJBgD64xnW63WMTLcrNq6KoZREfGb,/ip4/3.231.11.52/udp/30301/p2p/16Uiu2HAmMy4V8bi3XP7KDfSLQcLACSvTLroRRwEsTyFUKo8NCkkp,/ip4/54.198.153.150/udp/30301/p2p/16Uiu2HAmSVsb7MbRf1jg3Dvd6a3n5YNqKQwn1fqHCFgnbqCsFZKe,/ip4/3.220.145.177/udp/30301/p2p/16Uiu2HAm74pBDGdQ84XCZK27GRQbGFFwQ7RsSqsPwcGmCR3Cwn3B,/ip4/3.231.138.188/udp/30301/p2p/16Uiu2HAmMnTiJwgFtSVGV14ZNpwAvS1LUoF4pWWeNtURuV6C3zYB";
 
-        for node in MUTLI_ADDRESSES.split(&[',']) {
+        for node in MULTI_ADDRESSES.split(&[',']) {
             assert!(config.bootstrap_nodes.contains(&BootNode::Enode(node.to_string())));
         }
+    }
+
+    #[test]
+    fn fork() {
+        let config = DiscV5Config::builder().fork(b"eth", Hardfork::Cancun.fork_hash()).build();
+
+        assert_eq!("9f3d2254", hex::encode(config.fork.1 .0))
     }
 }

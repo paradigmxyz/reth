@@ -3,6 +3,8 @@ use alloy_chains::Chain;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, str::FromStr};
 
+use crate::ForkHash;
+
 /// Represents the consensus type of a blockchain fork.
 ///
 /// This enum defines two variants: `ProofOfWork` for hardforks that use a proof-of-work consensus
@@ -406,6 +408,37 @@ impl Hardfork {
             Hardfork::Cancun => Some(1710374401),
             Hardfork::Ecotone => Some(1710374401),
             _ => None,
+        }
+    }
+
+    /// Returns the [`ForkHash`].
+    pub fn fork_hash(&self) -> ForkHash {
+        match self {
+            Hardfork::Frontier => ForkHash([0xfc, 0x64, 0xec, 0x04]),
+            Hardfork::Homestead => ForkHash([0x97, 0xc2, 0xc3, 0x4c]),
+            Hardfork::Dao => ForkHash([0x91, 0xd1, 0xf9, 0x48]),
+            Hardfork::Tangerine => ForkHash([0x7a, 0x64, 0xda, 0x13]),
+            Hardfork::SpuriousDragon => ForkHash([0x3e, 0xdd, 0x5b, 0x10]),
+            Hardfork::Byzantium => ForkHash([0xa0, 0x0b, 0xc3, 0x24]),
+            Hardfork::Constantinople => ForkHash([0x66, 0x8d, 0xb0, 0xaf]),
+            Hardfork::Petersburg => ForkHash([0x66, 0x8d, 0xb0, 0xaf]),
+            Hardfork::Istanbul => ForkHash([0x87, 0x9d, 0x6e, 0x30]),
+            Hardfork::MuirGlacier => ForkHash([0xe0, 0x29, 0xe9, 0x91]),
+            Hardfork::Berlin => ForkHash([0x0e, 0xb4, 0x40, 0xf6]),
+            Hardfork::London => ForkHash([0xb7, 0x15, 0x07, 0x7d]),
+            Hardfork::ArrowGlacier => ForkHash([0x20, 0xc3, 0x27, 0xfc]),
+            Hardfork::GrayGlacier => ForkHash([0xf0, 0xaf, 0xd0, 0xe3]),
+            Hardfork::Paris => ForkHash([0xb9, 0x6c, 0xbd, 0x13]),
+            #[cfg(feature = "optimism")]
+            Hardfork::Bedrock => ForkHash([0x67, 0xda, 0x02, 0x60]),
+            #[cfg(feature = "optimism")]
+            Hardfork::Regolith => ForkHash([0x3c, 0x28, 0x3c, 0xb3]),
+            Hardfork::Shanghai => ForkHash([0xdc, 0xe9, 0x6c, 0x2d]),
+            #[cfg(feature = "optimism")]
+            Hardfork::Canyon => ForkHash([0x3c, 0x28, 0x3c, 0xb3]),
+            Hardfork::Cancun => ForkHash([0x9f, 0x3d, 0x22, 0x54]),
+            #[cfg(feature = "optimism")]
+            Hardfork::Ecotone => ForkHash([0x51, 0xcc, 0x98, 0xb3]),
         }
     }
 }

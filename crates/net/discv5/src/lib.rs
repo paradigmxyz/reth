@@ -178,7 +178,7 @@ impl<T> DiscV5<T> {
         let DiscV5Config {
             discv5_config,
             bootstrap_nodes,
-            fork_id,
+            fork,
             tcp_port,
             other_enr_data,
             allow_no_tcp_discovered_nodes: _,
@@ -218,8 +218,8 @@ impl<T> DiscV5<T> {
             };
 
             // add fork id
-            let (chain, fork) = fork_id;
-            builder.add_value(chain, &alloy_rlp::encode(fork));
+            let (chain, fork) = fork;
+            builder.add_value(chain, &Bytes::copy_from_slice(&fork.0[..]));
 
             // add other data
             for (key, value) in other_enr_data {

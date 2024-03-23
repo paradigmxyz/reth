@@ -129,7 +129,7 @@ impl<C> NetworkConfig<C> {
     /// let network_config = NetworkConfigBuilder::new(sk).build(());
     /// let fork_id = network_config.status.forkid;
     /// let network_config = network_config
-    ///     .set_discovery_v5_with_config_builder(|builder| builder.fork_id(fork_id).build());
+    ///     .set_discovery_v5_with_config_builder(|builder| builder.fork_id(fork_id.).build());
     /// ```
     #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
     pub fn set_discovery_v5_with_config_builder(

@@ -1898,7 +1898,7 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Hardfork::Constantinople,
-                    ForkId { hash: ForkHash([0x66, 0x8d, 0xb0, 0xaf]), next: 9069000 },
+                    ForkId { hash: ForkHash([0x66, 0x8d, 0xb0, 0xaf]), next: 9069000 }, /* todo: are these really the same constantinople and petersburg? */
                 ),
                 (
                     Hardfork::Petersburg,
@@ -1926,7 +1926,7 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Hardfork::GrayGlacier,
-                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 }, /* todo: what about paris? */
                 ),
                 (
                     Hardfork::Shanghai,
