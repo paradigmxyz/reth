@@ -22,7 +22,7 @@ impl JwtAuthValidator {
 }
 
 impl AuthValidator for JwtAuthValidator {
-    type ResponseBody = hyper::Body;
+    type ResponseBody = String;
 
     fn validate(&self, headers: &HeaderMap) -> Result<(), Response<Self::ResponseBody>> {
         match get_bearer(headers) {
@@ -55,14 +55,13 @@ fn get_bearer(headers: &HeaderMap) -> Option<String> {
     Some(token.into())
 }
 
-fn err_response(err: JwtError) -> Response<hyper::Body> {
-    let body = hyper::Body::from(err.to_string());
+fn err_response(err: JwtError) -> Response<String> {
     // We build a response from an error message.
     // We don't cope with headers or other structured fields.
     // Then we are safe to "expect" on the result.
     Response::builder()
         .status(StatusCode::UNAUTHORIZED)
-        .body(body)
+        .body(err.to_string())
         .expect("This should never happen")
 }
 

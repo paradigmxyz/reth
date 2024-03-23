@@ -266,9 +266,9 @@ async-trait = "0.1.68"
 futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"
-hyper = "0.14.25"
+hyper = "1.2"
 tower = "0.4"
-tower-http = "0.4"
+tower-http = "0.5"
 
 # p2p
 discv5 = "0.4"
@@ -278,6 +278,10 @@ igd-next = "0.14.3"
 jsonrpsee = "0.20"
 jsonrpsee-core = "0.20"
 jsonrpsee-types = "0.20"
+
+# http
+http = "1.0"
+http-body = "1.0"
 
 # crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [

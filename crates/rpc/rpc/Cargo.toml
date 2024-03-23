@@ -43,15 +43,13 @@ revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
 jsonrpsee.workspace = true
-http = "0.2.8"
-http-body = "0.4.5"
+http.workspace = true
+http-body.workspace = true
 hyper.workspace = true
 jsonwebtoken = "8"
 
 ## required for optimism sequencer delegation
-reqwest = { version = "0.11", default-features = false, features = [
-    "rustls-tls",
-], optional = true }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"], optional = true }
 
 # async
 async-trait.workspace = true
@@ -67,11 +65,7 @@ metrics.workspace = true
 
 # misc
 bytes.workspace = true
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
@@ -81,7 +75,7 @@ tracing-futures = "0.2"
 schnellru.workspace = true
 futures.workspace = true
 derive_more.workspace = true
-dyn-clone.workspace = true 
+dyn-clone.workspace = true
 
 [dev-dependencies]
 jsonrpsee = { workspace = true, features = ["client"] }

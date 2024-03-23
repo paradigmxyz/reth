@@ -11,7 +11,7 @@ pub use jwt_validator::JwtAuthValidator;
 /// a validator trait into an [`AuthLayer`].
 pub trait AuthValidator {
     /// Body type of the error response
-    type ResponseBody;
+    type ResponseBody: hyper::body::Body;
 
     /// This function is invoked by the [`AuthLayer`] to perform validation on Http headers.
     /// The result conveys validation errors in the form of an Http response.
