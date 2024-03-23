@@ -29,7 +29,9 @@ pub struct DiscV5ConfigBuilder<Filter = MustIncludeChain> {
     bootstrap_nodes: HashSet<BootNode>,
     /// [`ForkId`] to set in local node record.
     fork: Option<(&'static [u8], ForkId)>,
-    /// Mempool TCP port to advertise.
+    /// Mempool TCP port to advertise. Note: so long as `reth_network` handles [`NodeRecord`]s as
+    /// opposed to [`Enr`](enr::Enr)s, TCP is limited to same IP address as UDP, since
+    /// [`NodeRecord`] doesn't supply an extra field for and alternative TCP address.
     tcp_port: Option<u16>,
     /// Additional kv-pairs that should be advertised to peers by including in local node record.
     other_enr_data: Vec<(&'static str, Bytes)>,
@@ -242,13 +244,25 @@ impl DiscV5Config {
 }
 
 impl<T> DiscV5Config<T> {
-    /// Returns the socket contained in the [`discv5::Config`]. Returns the IPv6 socket, if both
-    /// IPv4 and v6 are configured.
-    pub fn socket(&self) -> SocketAddr {
+    /// Returns the discovery (UDP) socket contained in the [`discv5::Config`]. Returns the IPv6
+    /// socket, if both IPv4 and v6 are configured. This socket will be advertised to peers in the
+    /// local [`Enr`](discv5::enr::Enr).
+    pub fn discovery_socket(&self) -> SocketAddr {
         match self.discv5_config.listen_config {
             ListenConfig::Ipv4 { ip, port } => (ip, port).into(),
             ListenConfig::Ipv6 { ip, port } => (ip, port).into(),
             ListenConfig::DualStack { ipv6, ipv6_port, .. } => (ipv6, ipv6_port).into(),
+        }
+    }
+
+    /// Returns the mempool (TCP) socket contained in the [`discv5::Config`]. This socket will be
+    /// advertised to peers in the local [`Enr`](discv5::enr::Enr).
+    pub fn mempool_socket(&self) -> SocketAddr {
+        let port = self.tcp_port;
+        match self.discv5_config.listen_config {
+            ListenConfig::Ipv4 { ip, .. } => (ip, port).into(),
+            ListenConfig::Ipv6 { ip, .. } => (ip, port).into(),
+            ListenConfig::DualStack { ipv4, .. } => (ipv4, port).into(),
         }
     }
 }

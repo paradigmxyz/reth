@@ -18,10 +18,11 @@
 use crate::{
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
+    discovery,
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
-    listener::ConnectionListener,
+    listener::{self, ConnectionListener},
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     network::{NetworkHandle, NetworkHandleMessage},
@@ -206,6 +207,11 @@ where
             NetworkError::from_io_error(err, ServiceKind::Listener(listener_addr))
         })?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
+
+        #[cfg(any(feature = "discv5-downgrade-v4", feature = "discv5"))]
+        assert!(
+            discovery_v5_config.map(|config| config.mempool_socket() == listener_address.lock())
+        );
 
         let discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
             // merge configured boot nodes
