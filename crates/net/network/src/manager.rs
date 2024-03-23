@@ -218,6 +218,7 @@ where
                 .await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
+        let discv4 = discovery.discv4();
 
         let num_active_peers = Arc::new(AtomicUsize::new(0));
         let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
@@ -253,6 +254,7 @@ where
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
+            discv4,
         );
 
         Ok(Self {
@@ -357,6 +359,7 @@ where
                 head: status.blockhash,
                 network: status.chain.id(),
                 genesis: status.genesis,
+                config: Default::default(),
             },
         }
     }
@@ -646,9 +649,7 @@ where
             SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id } => {
                 trace!(target: "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
                 self.metrics.total_outgoing_connections.increment(1);
-                self.metrics
-                    .outgoing_connections
-                    .set(self.swarm.state().peers().num_outbound_connections() as f64);
+                self.update_pending_connection_metrics()
             }
             SwarmEvent::SessionEstablished {
                 peer_id,
@@ -662,7 +663,7 @@ where
             } => {
                 let total_active = self.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                 self.metrics.connected_peers.set(total_active as f64);
-                trace!(
+                debug!(
                     target: "net",
                     ?remote_addr,
                     %client_version,
@@ -683,6 +684,8 @@ where
                 if direction.is_outgoing() {
                     self.swarm.state_mut().peers_mut().on_active_outgoing_established(peer_id);
                 }
+
+                self.update_active_connection_metrics();
 
                 self.event_listeners.notify(NetworkEvent::SessionEstablished {
                     peer_id,
@@ -731,15 +734,8 @@ where
                     self.swarm.state_mut().peers_mut().on_active_session_gracefully_closed(peer_id);
                 }
                 self.metrics.closed_sessions.increment(1);
-                // This can either be an incoming or outgoing connection which
-                // was closed. So we update
-                // both metrics
-                self.metrics
-                    .incoming_connections
-                    .set(self.swarm.state().peers().num_inbound_connections() as f64);
-                self.metrics
-                    .outgoing_connections
-                    .set(self.swarm.state().peers().num_outbound_connections() as f64);
+                self.update_active_connection_metrics();
+
                 if let Some(reason) = reason {
                     self.disconnect_metrics.increment(reason);
                 }
@@ -815,9 +811,8 @@ where
                         .on_outgoing_pending_session_gracefully_closed(&peer_id);
                 }
                 self.metrics.closed_sessions.increment(1);
-                self.metrics
-                    .outgoing_connections
-                    .set(self.swarm.state().peers().num_outbound_connections() as f64);
+                self.update_pending_connection_metrics();
+
                 self.metrics.backed_off_peers.set(
                         self.swarm
                             .state()
@@ -842,9 +837,6 @@ where
                     &error,
                 );
 
-                self.metrics
-                    .outgoing_connections
-                    .set(self.swarm.state().peers().num_outbound_connections() as f64);
                 self.metrics.backed_off_peers.set(
                         self.swarm
                             .state()
@@ -853,6 +845,7 @@ where
                             .saturating_sub(1)
                             as f64,
                     );
+                self.update_pending_connection_metrics();
             }
             SwarmEvent::BadMessage { peer_id } => {
                 self.swarm
@@ -868,6 +861,28 @@ where
                     .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
             }
         }
+    }
+
+    /// Updates the metrics for active,established connections
+    #[inline]
+    fn update_active_connection_metrics(&self) {
+        self.metrics
+            .incoming_connections
+            .set(self.swarm.state().peers().num_inbound_connections() as f64);
+        self.metrics
+            .outgoing_connections
+            .set(self.swarm.state().peers().num_outbound_connections() as f64);
+    }
+
+    /// Updates the metrics for pending connections
+    #[inline]
+    fn update_pending_connection_metrics(&self) {
+        self.metrics
+            .pending_outgoing_connections
+            .set(self.swarm.state().peers().num_pending_outbound_connections() as f64);
+        self.metrics
+            .total_pending_connections
+            .set(self.swarm.sessions().num_pending_connections() as f64);
     }
 }
 

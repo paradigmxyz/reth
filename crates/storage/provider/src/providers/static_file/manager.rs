@@ -385,7 +385,7 @@ impl StaticFileProvider {
                             })
                             .or_insert_with(|| BTreeMap::from([(tx_end, current_block_range)]));
                     }
-                } else if let Some(1) = tx_index.get(&segment).map(|index| index.len()) {
+                } else if tx_index.get(&segment).map(|index| index.len()) == Some(1) {
                     // Only happens if we unwind all the txs/receipts from the first static file.
                     // Should only happen in test scenarios.
                     if jar.user_header().expected_block_start() == 0 &&

@@ -18,6 +18,7 @@ reth-db.workspace = true
 reth-provider.workspace = true
 reth-stages.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
+reth-trie-parallel = { workspace = true, features = ["parallel"] }
 
 # common
 parking_lot.workspace = true
@@ -40,7 +41,6 @@ reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm.workspace = true
 reth-node-ethereum.workspace = true
-reth-node-optimism.workspace = true
 parking_lot.workspace = true
 assert_matches.workspace = true
 

@@ -52,6 +52,7 @@ fn fill(
         PrimitiveTransactionKind::Call(to) => Some(*to),
     };
 
+    #[allow(unreachable_patterns)]
     let (gas_price, max_fee_per_gas) = match signed_tx.tx_type() {
         TxType::Legacy => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
         TxType::Eip2930 => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
@@ -68,13 +69,16 @@ fn fill(
 
             (Some(U128::from(gas_price)), Some(U128::from(signed_tx.max_fee_per_gas())))
         }
-        #[cfg(feature = "optimism")]
-        TxType::Deposit => (None, None),
+        _ => {
+            // OP-deposit
+            (None, None)
+        }
     };
 
     let chain_id = signed_tx.chain_id().map(U64::from);
     let mut blob_versioned_hashes = Vec::new();
 
+    #[allow(unreachable_patterns)]
     let access_list = match &mut signed_tx.transaction {
         PrimitiveTransaction::Legacy(_) => None,
         PrimitiveTransaction::Eip2930(tx) => Some(
@@ -112,8 +116,10 @@ fn fill(
                     .collect(),
             )
         }
-        #[cfg(feature = "optimism")]
-        PrimitiveTransaction::Deposit(_) => None,
+        _ => {
+            // OP deposit tx
+            None
+        }
     };
 
     let signature =

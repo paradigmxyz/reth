@@ -108,7 +108,6 @@ impl From<ForkFilterKey> for u64 {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(PropTestArbitrary, Arbitrary))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable, RlpMaxEncodedLen)]
-
 pub struct ForkId {
     /// CRC32 checksum of the all fork blocks and timestamps from genesis.
     pub hash: ForkHash,

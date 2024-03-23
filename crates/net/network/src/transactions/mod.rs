@@ -649,7 +649,7 @@ where
         let (validation_outcome, mut partially_valid_msg) =
             self.transaction_fetcher.filter_valid_message.partially_filter_valid_entries(msg);
 
-        if let FilterOutcome::ReportPeer = validation_outcome {
+        if validation_outcome == FilterOutcome::ReportPeer {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
@@ -698,7 +698,7 @@ where
                 .filter_valid_entries_66(partially_valid_msg)
         };
 
-        if let FilterOutcome::ReportPeer = validation_outcome {
+        if validation_outcome == FilterOutcome::ReportPeer {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
@@ -1112,7 +1112,7 @@ where
         }
     }
 
-    /// Runs an operation to fetch hashes that are cached in in [`TransactionFetcher`].
+    /// Runs an operation to fetch hashes that are cached in [`TransactionFetcher`].
     fn on_fetch_hashes_pending_fetch(&mut self) {
         // try drain transaction hashes pending fetch
         let info = &self.pending_pool_imports_info;
@@ -2006,7 +2006,7 @@ mod tests {
                 assert_eq!(transactions.len(), 1);
             }
             Err(e) => {
-                panic!("error: {:?}", e);
+                panic!("error: {e:?}");
             }
         }
     }

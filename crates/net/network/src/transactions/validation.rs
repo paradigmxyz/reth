@@ -244,11 +244,11 @@ impl ValidateTx68 for EthMessageFilter {
     fn max_encoded_tx_length(&self, ty: TxType) -> Option<usize> {
         // the biggest transaction so far is a blob transaction, which is currently max 2^17,
         // encoded length, nonetheless, the blob tx may become bigger in the future.
+        #[allow(unreachable_patterns)]
         match ty {
             TxType::Legacy | TxType::Eip2930 | TxType::Eip1559 => Some(MAX_MESSAGE_SIZE),
             TxType::Eip4844 => None,
-            #[cfg(feature = "optimism")]
-            TxType::Deposit => None,
+            _ => None,
         }
     }
 

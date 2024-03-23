@@ -664,7 +664,6 @@ pub async fn backup_local_transactions_task<P>(
     drop(graceful_guard)
 }
 
-#[cfg(not(feature = "optimism"))]
 #[cfg(test)]
 mod tests {
     use super::*;

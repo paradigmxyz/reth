@@ -131,6 +131,9 @@ pub enum ProviderError {
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]
     BlockNumberOverflow(U256),
+    /// Consistent view error.
+    #[error("failed to initialize consistent view: {0}")]
+    ConsistentView(Box<ConsistentViewError>),
 }
 
 impl From<reth_primitives::fs::FsPathError> for ProviderError {
@@ -152,7 +155,7 @@ pub struct RootMismatch {
 }
 
 /// Consistent database view error.
-#[derive(Error, Debug)]
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ConsistentViewError {
     /// Error thrown on attempt to initialize provider while node is still syncing.
     #[error("node is syncing. best block: {0}")]
@@ -163,7 +166,10 @@ pub enum ConsistentViewError {
         /// The tip diff.
         tip: GotExpected<Option<B256>>,
     },
-    /// Underlying provider error.
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
+}
+
+impl From<ConsistentViewError> for ProviderError {
+    fn from(value: ConsistentViewError) -> Self {
+        Self::ConsistentView(Box::new(value))
+    }
 }

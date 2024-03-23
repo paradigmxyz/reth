@@ -46,7 +46,7 @@ use reth_primitives::{
 use std::fmt;
 
 /// Enum for the types of tables present in libmdbx.
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum TableType {
     /// key value table
     Table,
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn parse_table_from_str() {
         for table in Tables::ALL {
-            assert_eq!(format!("{:?}", table), table.name());
+            assert_eq!(format!("{table:?}"), table.name());
             assert_eq!(table.to_string(), table.name());
             assert_eq!(Tables::from_str(table.name()).unwrap(), *table);
         }

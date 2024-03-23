@@ -34,26 +34,22 @@ where
     Provider: DatabaseProviderFactory<DB>,
 {
     /// Creates new consistent database view.
-    pub fn new(provider: Provider) -> Self {
-        Self { database: PhantomData, provider, tip: None }
+    pub fn new(provider: Provider, tip: Option<B256>) -> Self {
+        Self { database: PhantomData, provider, tip }
     }
 
-    /// Initializes the view with provided tip.
-    pub fn with_tip(mut self, tip: B256) -> Self {
-        self.tip = Some(tip);
-        self
-    }
-
-    /// Initializes the view with latest tip.
-    pub fn with_latest_tip(mut self) -> ProviderResult<Self> {
-        let provider = self.provider.database_provider_ro()?;
-        let tip = provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?.last()?;
-        self.tip = tip.map(|(_, hash)| hash);
-        Ok(self)
+    /// Creates new consistent database view with latest tip.
+    pub fn new_with_latest_tip(provider: Provider) -> ProviderResult<Self> {
+        let tip = provider
+            .database_provider_ro()?
+            .tx_ref()
+            .cursor_read::<tables::CanonicalHeaders>()?
+            .last()?;
+        Ok(Self::new(provider, tip.map(|(_, hash)| hash)))
     }
 
     /// Creates new read-only provider and performs consistency checks on the current tip.
-    pub fn provider_ro(&self) -> Result<DatabaseProviderRO<DB>, ConsistentViewError> {
+    pub fn provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         let provider_ro = self.provider.database_provider_ro()?;
         let last_entry = provider_ro
             .tx_ref()
@@ -65,12 +61,13 @@ where
         if self.tip != tip {
             return Err(ConsistentViewError::Inconsistent {
                 tip: GotExpected { got: tip, expected: self.tip },
-            })
+            }
+            .into())
         }
 
         let best_block_number = provider_ro.best_block_number()?;
         if last_entry.map(|(number, _)| number).unwrap_or_default() != best_block_number {
-            return Err(ConsistentViewError::Syncing(best_block_number))
+            return Err(ConsistentViewError::Syncing(best_block_number).into())
         }
 
         Ok(provider_ro)

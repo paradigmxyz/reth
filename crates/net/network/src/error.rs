@@ -9,7 +9,7 @@ use reth_eth_wire::{
 use std::{fmt, io, io::ErrorKind, net::SocketAddr};
 
 /// Service kind.
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum ServiceKind {
     /// Listener service.
     Listener(SocketAddr),
@@ -234,6 +234,7 @@ impl SessionError for PendingSessionHandshakeError {
         match self {
             PendingSessionHandshakeError::Eth(eth) => eth.merits_discovery_ban(),
             PendingSessionHandshakeError::Ecies(_) => true,
+            PendingSessionHandshakeError::Timeout => false,
         }
     }
 
@@ -241,6 +242,7 @@ impl SessionError for PendingSessionHandshakeError {
         match self {
             PendingSessionHandshakeError::Eth(eth) => eth.is_fatal_protocol_error(),
             PendingSessionHandshakeError::Ecies(_) => true,
+            PendingSessionHandshakeError::Timeout => false,
         }
     }
 
@@ -248,6 +250,7 @@ impl SessionError for PendingSessionHandshakeError {
         match self {
             PendingSessionHandshakeError::Eth(eth) => eth.should_backoff(),
             PendingSessionHandshakeError::Ecies(_) => Some(BackoffKind::Low),
+            PendingSessionHandshakeError::Timeout => Some(BackoffKind::Medium),
         }
     }
 }
