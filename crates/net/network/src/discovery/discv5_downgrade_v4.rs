@@ -10,7 +10,7 @@ use std::{
 use futures::StreamExt;
 use reth_discv4::{secp256k1::SecretKey, Discv4Config};
 #[cfg(feature = "discv5-downgrade-v4")]
-use reth_discv5::filter::MustIncludeFork;
+use reth_discv5::filter::MustIncludeChain;
 use reth_discv5::{
     discv5::enr::Enr, downgrade_v4::DiscoveryUpdateV5, filter::FilterDiscovered, DiscV5Config,
     DiscV5WithV4Downgrade, MergedUpdateStream,
