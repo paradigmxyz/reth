@@ -18,6 +18,8 @@ use reth_node_builder::{InitState, WithLaunchContext};
 use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
+use crossterm::ExecutableCommand;
+use crate::commands::import_op;
 
 /// Re-export of the `reth_node_core` types specifically in the `cli` module.
 ///
@@ -146,6 +148,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             }
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
@@ -202,6 +205,9 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command),
+    /// Imports the data for running OP Goerli and OP Mainnet
+    #[command(name = "import_op")]
+    ImportOp(import_op::ImportOpCommand),
 }
 
 #[cfg(test)]
