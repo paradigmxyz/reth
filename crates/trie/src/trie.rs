@@ -1083,9 +1083,9 @@ mod tests {
         assert_eq!(nibbles2b[..], [0xB, 0x0]);
         assert_eq!(node2a, node2b);
         tx.commit().unwrap();
-        let tx = factory.provider_rw().unwrap();
 
         {
+            let tx = factory.provider_rw().unwrap();
             let mut hashed_account_cursor =
                 tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 
@@ -1140,8 +1140,8 @@ mod tests {
             assert_eq!(node1c.hashes[2], node1b.hashes[2]);
         }
 
-        let tx = factory.provider_rw().unwrap();
         {
+            let tx = factory.provider_rw().unwrap();
             let mut hashed_account_cursor =
                 tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 
