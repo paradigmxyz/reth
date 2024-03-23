@@ -91,8 +91,7 @@ impl<T> DiscV5ConfigBuilder<T> {
     /// adds any successfully deserialized records to boot nodes.
     pub fn add_serialized_boot_nodes(mut self, enrs: &str) -> Self {
         let bootstrap_nodes = &mut self.bootstrap_nodes;
-        for node in enrs.split(&[',']).map(|record| record.trim().parse::<discv5::Enr>()).flatten()
-        {
+        for node in enrs.split(&[',']).flat_map(|record| record.trim().parse::<discv5::Enr>()) {
             bootstrap_nodes.insert(BootNode::Enr(node));
         }
         self
