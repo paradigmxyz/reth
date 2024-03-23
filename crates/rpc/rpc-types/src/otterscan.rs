@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use crate::{Block, BlockTransactions, Rich, Transaction, TransactionReceipt};
 use alloy_primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
