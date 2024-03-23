@@ -209,9 +209,10 @@ where
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
         #[cfg(any(feature = "discv5-downgrade-v4", feature = "discv5"))]
-        assert!(
-            discovery_v5_config.map(|config| config.mempool_socket() == listener_address.lock())
-        );
+        assert!(discovery_v5_config
+            .as_ref()
+            .map(|config| config.mempool_socket() == *listener_address.lock())
+            .unwrap_or(true));
 
         let discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
             // merge configured boot nodes

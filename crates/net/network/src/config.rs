@@ -143,7 +143,7 @@ impl<C> NetworkConfig<C> {
     #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
     pub fn set_discovery_v5(mut self, discv5_config: DiscV5Config) -> Self {
         self.discovery_v5_config = Some(discv5_config);
-        self.discovery_addr = self.discovery_v5_config.as_ref().unwrap().socket();
+        self.discovery_addr = self.discovery_v5_config.as_ref().unwrap().discovery_socket();
         self
     }
 
