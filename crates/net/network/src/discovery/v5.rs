@@ -8,28 +8,29 @@ use std::{
 use discv5::enr::Enr;
 use futures::StreamExt;
 use reth_discv4::secp256k1::SecretKey;
-#[cfg(feature = "discv5")]
-use reth_discv5::filter::MustIncludeChain;
+
 use reth_discv5::{
     enr::uncompressed_id_from_enr_pk,
-    filter::{FilterDiscovered, FilterOutcome},
+    filter::{FilterDiscovered, FilterOutcome, MustIncludeChain},
     metrics::{AdvertisedChainCounter, UpdateMetrics},
     Config as DiscV5Config, Discv5, HandleDiscv5,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
-use reth_primitives::NodeRecord;
 
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tracing::trace;
 
 use crate::error::NetworkError;
 
-use super::{Discovery, DiscoveryEvent};
+use super::{
+    version::{CloneDiscoveryHandle, DiscoveryHandle},
+    Discovery, DiscoveryEvent,
+};
 
 /// [`Discovery`] type that uses [`discv5::Discv5`].
-#[cfg(feature = "discv5")]
-pub type DiscoveryV5<T = MustIncludeChain> =
+
+pub type Discovery5<T = MustIncludeChain> =
     Discovery<Discv5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>;
 
 impl<T> Discovery<Discv5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>
@@ -42,23 +43,16 @@ where
     /// discovered nodes.
     pub async fn start_discv5(
         sk: SecretKey,
-        discv5_config: Option<DiscV5Config<T>>,
+        config: DiscV5Config<T>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         trace!(target: "net::discovery::discv5",
             "starting discovery .."
         );
 
-        let (disc, disc_updates, bc_local_enr) = match discv5_config {
-            Some(config) => {
-                let (disc, disc_updates, bc_local_enr) = Discv5::start(&sk, config)
-                    .await
-                    .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
-
-                (Some(disc), Some(disc_updates.into()), bc_local_enr)
-            }
-            None => (None, None, NodeRecord::from_secret_key("0.0.0.0:0".parse().unwrap(), &sk)),
-        };
+        let (disc, disc_updates, bc_local_enr) = Discv5::start(&sk, config)
+            .await
+            .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
 
         // setup DNS discovery.
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
@@ -71,8 +65,8 @@ where
         Ok(Discovery {
             discovery_listeners: Default::default(),
             local_enr: bc_local_enr,
-            disc,
-            disc_updates,
+            disc: Some(disc),
+            disc_updates: Some(disc_updates.into()),
             _disc_service: None,
             discovered_nodes: Default::default(),
             queued_events: Default::default(),
@@ -80,30 +74,6 @@ where
             _dns_discovery,
             dns_discovery_updates,
         })
-    }
-}
-
-#[cfg(feature = "discv5")]
-impl<T> Discovery<Discv5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
-    pub async fn start(
-        _discv4_addr: std::net::SocketAddr,
-        sk: SecretKey,
-        _discv4_config: Option<reth_discv4::Discv4Config>,
-        discv5_config: Option<DiscV5Config<T>>,
-        dns_discovery_config: Option<DnsDiscoveryConfig>,
-    ) -> Result<Self, NetworkError>
-    where
-        T: FilterDiscovered + Send + Sync + Clone + 'static,
-    {
-        Discovery::start_discv5(sk, discv5_config, dns_discovery_config).await
-    }
-
-    /// Returns a shared reference to the [`Discv5`] handle.
-    pub fn discv5(&self) -> Option<Discv5<T>>
-    where
-        T: Clone,
-    {
-        Some(self.disc.as_ref()?.clone())
     }
 }
 
@@ -215,6 +185,12 @@ where
         }
 
         ProcessPeerResult::Ok
+    }
+}
+
+impl<S, N> CloneDiscoveryHandle for Discovery<Discv5, S, N> {
+    fn handle(&self) -> Option<DiscoveryHandle> {
+        Some(DiscoveryHandle::V5(self.disc.as_ref()?.clone()))
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::{
-    config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    peers::PeersHandle, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
-    transactions::TransactionsHandle, DiscoveryHandle, FetchClient,
+    config::NetworkMode, manager::NetworkEvent, message::PeerRequest, peers::PeersHandle,
+    protocol::RlpxSubProtocol, swarm::NetworkConnectionState, transactions::TransactionsHandle,
+    DiscoveryEvent, DiscoveryHandle, FetchClient,
 };
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};

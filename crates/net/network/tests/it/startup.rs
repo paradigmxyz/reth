@@ -46,7 +46,6 @@ async fn test_listener_addr_in_use() {
     assert!(is_addr_in_use_kind(&err, ServiceKind::Listener(addr)), "{err:?}");
 }
 
-#[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
 mod discv4_tests {
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 

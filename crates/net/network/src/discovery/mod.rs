@@ -14,14 +14,43 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
-pub mod discv4;
-pub mod discv5;
-pub mod discv5_downgrade_v4;
+pub mod v4;
+pub mod v5;
+pub mod v5_downgrade_v4;
+pub mod version;
 
-#[cfg(feature = "discv5")]
-pub use discv5::DiscoveryV5;
-#[cfg(feature = "discv5-downgrade-v4")]
-pub use discv5_downgrade_v4::DiscoveryV5V4;
+use version::ProxyHandleDiscovery;
+
+impl<D, S, N> ProxyHandleDiscovery for Discovery<D, S, N>
+where
+    D: HandleDiscovery,
+{
+    fn update_fork_id(&self, fork_id: ForkId) {
+        if let Some(disc) = &self.disc {
+            // use forward-compatible forkid entry
+            disc.encode_and_set_eip868_in_local_enr(
+                "eth".as_bytes().to_vec(),
+                EnrForkIdEntry::from(fork_id),
+            )
+        }
+    }
+
+    fn ban_ip(&self, ip: IpAddr) {
+        if let Some(disc) = &self.disc {
+            disc.ban_peer_by_ip(ip)
+        }
+    }
+
+    fn ban(&self, peer_id: PeerId, ip: IpAddr) {
+        if let Some(disc) = &self.disc {
+            disc.ban_peer_by_ip_and_node_id(peer_id, ip)
+        }
+    }
+
+    fn local_id(&self) -> PeerId {
+        self.local_enr.id
+    }
+}
 
 /// An abstraction over the configured discovery protocol.
 ///
@@ -65,36 +94,6 @@ where
     #[inline]
     fn notify_listeners(&mut self, event: &DiscoveryEvent) {
         self.discovery_listeners.retain_mut(|listener| listener.send(event.clone()).is_ok());
-    }
-
-    /// Updates the `eth:ForkId` field in discv4.
-    pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
-        if let Some(disc) = &self.disc {
-            // use forward-compatible forkid entry
-            disc.encode_and_set_eip868_in_local_enr(
-                "eth".as_bytes().to_vec(),
-                EnrForkIdEntry::from(fork_id),
-            )
-        }
-    }
-
-    /// Bans the [`IpAddr`] in the discovery service.
-    pub(crate) fn ban_ip(&self, ip: IpAddr) {
-        if let Some(disc) = &self.disc {
-            disc.ban_peer_by_ip(ip)
-        }
-    }
-
-    /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
-    pub(crate) fn ban(&self, peer_id: PeerId, ip: IpAddr) {
-        if let Some(disc) = &self.disc {
-            disc.ban_peer_by_ip_and_node_id(peer_id, ip)
-        }
-    }
-
-    /// Returns the id with which the local identifies itself in the network
-    pub(crate) fn local_id(&self) -> PeerId {
-        self.local_enr.id
     }
 
     /// Add a node to the discovery routing table table.
@@ -200,7 +199,7 @@ impl<D, S, N> Discovery<D, S, N> {
 }
 
 #[cfg(test)]
-#[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
+
 mod discv4_tests {
     use super::*;
     use rand::thread_rng;
@@ -209,7 +208,7 @@ mod discv4_tests {
     use std::net::{Ipv4Addr, SocketAddrV4};
 
     #[tokio::test(flavor = "multi_thread")]
-    #[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
+
     async fn test_discovery_setup() {
         let mut rng = thread_rng();
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);

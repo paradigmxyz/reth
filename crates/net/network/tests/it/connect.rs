@@ -187,7 +187,6 @@ async fn test_get_peer_by_id() {
     assert!(peer.is_none());
 }
 
-#[cfg(not(feature = "discv5"))]
 mod discv4_tests {
     use reth_discv4::Discv4Config;
     use reth_interfaces::{

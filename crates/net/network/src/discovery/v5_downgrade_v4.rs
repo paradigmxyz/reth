@@ -8,28 +8,28 @@ use std::{
 };
 
 use discv5::enr::Enr;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use reth_discv4::{secp256k1::SecretKey, Discv4Config};
-#[cfg(feature = "discv5-downgrade-v4")]
-use reth_discv5::filter::MustIncludeChain;
 use reth_discv5::{
-    filter::FilterDiscovered, metrics::UpdateMetrics, Discv5BCv4, MergedUpdateStream,
+    filter::{FilterDiscovered, MustIncludeChain},
+    metrics::UpdateMetrics,
+    Discv5BCv4, MergedUpdateStream,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::NodeFromExternalSource;
-use reth_primitives::NodeRecord;
-
-use tokio_stream::Stream;
 use tracing::trace;
 
 use crate::error::NetworkError;
 
-use super::{Discovery, DiscoveryEvent};
+use super::{
+    version::{CloneDiscoveryHandle, DiscoveryHandle},
+    Discovery, DiscoveryEvent,
+};
 
 /// [`Discovery`] type that uses [`discv5::Discv5`](reth_discv5::discv5), with support for
 /// downgraded [`Discv4`](reth_discv4::Discv4) connections.
-#[cfg(feature = "discv5-downgrade-v4")]
-pub type DiscoveryV5V4<T = MustIncludeChain> =
+
+pub type Discovery5BC<T = MustIncludeChain> =
     Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>>;
 
 impl<T> Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>> {
@@ -41,8 +41,8 @@ impl<T> Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>> {
     pub async fn start_discv5_with_v4_downgrade(
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
-        discv4_config: Option<Discv4Config>,
-        discv5_config: Option<reth_discv5::Config<T>>,
+        discv4_config: Discv4Config,
+        discv5_config: reth_discv5::Config<T>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError>
     where
@@ -52,22 +52,10 @@ impl<T> Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>> {
             "starting discovery .."
         );
 
-        let (disc, disc_updates, bc_local_discv5_enr) = match (discv4_config, discv5_config) {
-            (Some(discv4_config), Some(discv5_config)) => {
-                let (disc, disc_updates, bc_discv5_enr) =
-                    Discv5BCv4::start(discv4_addr, sk, discv4_config, discv5_config)
-                        .await
-                        .map_err(|err| NetworkError::custom_discovery(&err.to_string()))?;
-
-                (Some(disc), Some(disc_updates), bc_discv5_enr)
-            }
-            _ => {
-                // make enr for discv4 not to break existing api, possibly used in tests
-                let local_enr_discv4 = NodeRecord::from_secret_key(discv4_addr, &sk);
-
-                (None, None, local_enr_discv4)
-            }
-        };
+        let (disc, disc_updates, bc_local_discv5_enr) =
+            Discv5BCv4::start(discv4_addr, sk, discv4_config, discv5_config)
+                .await
+                .map_err(|err| NetworkError::custom_discovery(&err.to_string()))?;
 
         // setup DNS discovery.
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
@@ -80,8 +68,8 @@ impl<T> Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>> {
         Ok(Discovery {
             discovery_listeners: Default::default(),
             local_enr: bc_local_discv5_enr,
-            disc,
-            disc_updates,
+            disc: Some(disc),
+            disc_updates: Some(disc_updates),
             _disc_service: None,
             discovered_nodes: Default::default(),
             queued_events: Default::default(),
@@ -92,34 +80,9 @@ impl<T> Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>> {
     }
 }
 
-#[cfg(feature = "discv5-downgrade-v4")]
-impl<T> Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>> {
-    pub async fn start(
-        discv4_addr: SocketAddr,
-        sk: SecretKey,
-        discv4_config: Option<reth_discv4::Discv4Config>,
-        discv5_config: Option<DiscV5Config<T>>,
-        dns_discovery_config: Option<DnsDiscoveryConfig>,
-    ) -> Result<Self, NetworkError>
-    where
-        T: FilterDiscovered + Send + Sync + Clone + 'static,
-    {
-        Discovery::start_discv5_with_v4_downgrade(
-            discv4_addr,
-            sk,
-            discv4_config,
-            discv5_config,
-            dns_discovery_config,
-        )
-        .await
-    }
-
-    /// Returns a shared reference to the [`Discv5BCv4`] handle.
-    pub fn discv5(&self) -> Option<Discv5BCv4<T>>
-    where
-        T: Clone,
-    {
-        Some(self.disc.as_ref()?.clone())
+impl<S, N> CloneDiscoveryHandle for Discovery<Discv5BCv4, S, N> {
+    fn handle(&self) -> Option<DiscoveryHandle> {
+        Some(DiscoveryHandle::V5BCv4(self.disc.as_ref()?.clone()))
     }
 }
 

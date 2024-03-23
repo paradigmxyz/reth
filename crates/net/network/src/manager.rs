@@ -18,6 +18,7 @@
 use crate::{
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
+    discovery::version::{CloneDiscoveryHandle, ProxyHandleDiscovery},
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
@@ -177,7 +178,7 @@ where
             client,
             secret_key,
             discovery_v4_config,
-            #[cfg(any(feature = "discv5", feature = "discv5-downgrade-v4"))]
+
             discovery_v5_config,
             discovery_addr,
             listener_addr,
@@ -207,7 +208,6 @@ where
         })?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
-        #[cfg(any(feature = "discv5-downgrade-v4", feature = "discv5"))]
         if let Some(config) = discovery_v5_config.as_ref() {
             let advertised_mempool_socket = config.mempool_socket();
             let mempool_socket = *listener_address.lock();
@@ -227,12 +227,6 @@ where
             disc_config
         });
 
-        #[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
-        let discovery =
-            Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
-                .await?;
-
-        #[cfg(any(feature = "discv5-downgrade-v4", feature = "discv5"))]
         let discovery = Discovery::start(
             discovery_addr,
             secret_key,
@@ -244,10 +238,8 @@ where
 
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
-        #[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
-        let discv4 = discovery.discv4();
-        #[cfg(any(feature = "discv5-downgrade-v4", feature = "discv5"))]
-        let discv5 = discovery.discv5();
+
+        let discovery_handle = discovery.handle();
 
         let num_active_peers = Arc::new(AtomicUsize::new(0));
         let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
@@ -283,10 +275,7 @@ where
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
             sequencer_endpoint,
-            #[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
-            discv4,
-            #[cfg(any(feature = "discv5-downgrade-v4", feature = "discv5"))]
-            discv5,
+            discovery_handle,
         );
 
         Ok(Self {

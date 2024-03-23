@@ -5,17 +5,19 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use reth_discv4::{secp256k1::SecretKey, Discv4, Discv4Config};
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::NodeFromExternalSource;
 use reth_primitives::NodeRecord;
-use tokio_stream::Stream;
 use tracing::trace;
 
 use crate::error::{NetworkError, ServiceKind};
 
-use super::{Discovery, DiscoveryEvent};
+use super::{
+    version::{CloneDiscoveryHandle, DiscoveryHandle},
+    Discovery, DiscoveryEvent,
+};
 
 impl Discovery {
     /// Spawns the discovery service.
@@ -68,10 +70,11 @@ impl Discovery {
             dns_discovery_updates,
         })
     }
+}
 
-    /// Returns a shared reference to the [`Discv4`] handle.
-    pub fn discv4(&self) -> Option<Discv4> {
-        self.disc.clone()
+impl CloneDiscoveryHandle for Discovery {
+    fn handle(&self) -> Option<DiscoveryHandle> {
+        Some(DiscoveryHandle::V4(self.disc.as_ref()?.clone()))
     }
 }
 

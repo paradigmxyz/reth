@@ -2,6 +2,7 @@
 
 use crate::{
     cache::LruCache,
+    discovery::ProxyHandleDiscovery,
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     manager::DiscoveredEvent,
     message::{
@@ -9,7 +10,7 @@ use crate::{
         PeerResponseResult,
     },
     peers::{PeerAction, PeersManager},
-    Discovery, DiscoveryEvent, FetchClient,
+    Discovery, DiscoveryEvent, FetchClient, ProxyHandleDiscovery,
 };
 use futures::StreamExt;
 use rand::seq::SliceRandom;

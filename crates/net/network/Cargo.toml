@@ -108,11 +108,7 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-network-api/optimism",
-    "discv5"
 ]
-
-discv5 = [] # for use on rollups
-discv5-downgrade-v4 = [] # for use on L1 ethereum
 
 [[bench]]
 name = "bench"

@@ -138,7 +138,10 @@ pub mod transactions;
 
 pub use builder::NetworkBuilder;
 pub use config::{NetworkConfig, NetworkConfigBuilder};
-pub use discovery::DiscoveryEvent;
+pub use discovery::{
+    version::{Discovery, DiscoveryHandle},
+    DiscoveryEvent,
+};
 pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
@@ -153,24 +156,3 @@ pub use session::{
     SessionLimits, SessionManager, SessionsConfig,
 };
 pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
-
-/// Devp2p peer discovery version 4.
-#[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
-pub type Discovery = discovery::Discovery;
-/// Handle to interact with peer discovery node using [`Discv4`].
-#[cfg(not(any(feature = "discv5-downgrade-v4", feature = "discv5")))]
-pub type DiscoveryHandle = Discv4;
-
-/// Devp2p peer discovery version 5, with support for downgraded version 4 connections.
-#[cfg(feature = "discv5-downgrade-v4")]
-pub type Discovery = discovery::DiscoveryV5V4;
-/// Handle to interact with peer discovery node using [`Discv5BCv4`].
-#[cfg(feature = "discv5-downgrade-v4")]
-pub type DiscoveryHandle = Discv5BCv4;
-
-/// Devp2p peer discovery version 5.
-#[cfg(feature = "discv5")]
-pub type Discovery = discovery::DiscoveryV5;
-/// Handle to interact with peer discovery node using [`Discv5`].
-#[cfg(feature = "discv5")]
-pub type DiscoveryHandle = Discv5;
