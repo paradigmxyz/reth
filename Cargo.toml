@@ -218,10 +218,6 @@ alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
 ethers-core = { version = "2.0.14", default-features = false }
 ethers-providers = { version = "2.0.14", default-features = false }
 
-# js
-boa_engine = "0.17"
-boa_gc = "0.17"
-
 # misc
 aquamarine = "0.5"
 bytes = "1.5"

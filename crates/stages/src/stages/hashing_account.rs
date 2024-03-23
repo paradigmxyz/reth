@@ -115,7 +115,7 @@ impl AccountHashingStage {
 
             let mut acc_changeset_cursor =
                 provider.tx_ref().cursor_write::<tables::AccountChangeSets>()?;
-            for (t, (addr, acc)) in (opts.blocks).zip(&accounts) {
+            for (t, (addr, acc)) in opts.blocks.zip(&accounts) {
                 let Account { nonce, balance, .. } = acc;
                 let prev_acc = Account {
                     nonce: nonce - 1,

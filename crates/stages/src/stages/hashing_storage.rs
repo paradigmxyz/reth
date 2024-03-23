@@ -287,7 +287,7 @@ mod tests {
                     input.checkpoint = Some(checkpoint);
                     continue
                 } else {
-                    assert!(checkpoint.block_number == previous_stage);
+                    assert_eq!(checkpoint.block_number, previous_stage);
                     assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
                         progress: EntitiesCheckpoint {
                             processed,

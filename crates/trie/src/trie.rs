@@ -1138,7 +1138,6 @@ mod tests {
             assert_ne!(node1c.hashes[0], node1b.hashes[0]);
             assert_eq!(node1c.hashes[1], node1b.hashes[1]);
             assert_eq!(node1c.hashes[2], node1b.hashes[2]);
-            drop(tx);
         }
 
         let tx = factory.provider_rw().unwrap();
