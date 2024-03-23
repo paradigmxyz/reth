@@ -91,8 +91,8 @@ pub struct MustIncludeFork {
 
 impl MustIncludeFork {
     /// Returns a new instance.
-    pub fn new(chain: &'static [u8], fork: ForkId) -> Self {
-        Self { chain: MustIncludeChain::new(chain), fork_id: fork }
+    pub fn new(chain: &'static [u8], fork_id: ForkId) -> Self {
+        Self { chain: MustIncludeChain::new(chain), fork_id}
     }
 }
 
@@ -157,7 +157,7 @@ mod tests {
 
         // test
 
-        assert_eq!(FilterOutcome::Ok, filter.filter(&enr_1));
+        assert!(matches!(filter.filter(&enr_1), FilterOutcome::OkReturnForkId(_)));
         assert!(matches!(filter.filter(&enr_2), FilterOutcome::Ignore { .. }));
     }
 }
