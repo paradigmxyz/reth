@@ -95,7 +95,10 @@ impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
     }
 
     /// Returns a shared reference to the [`DiscV5`] handle.
-    pub fn discv5(&self) -> Option<DiscV5<T>> {
+    pub fn discv5(&self) -> Option<DiscV5<T>>
+    where
+        T: Clone,
+    {
         Some(self.disc.as_ref()?.clone())
     }
 }

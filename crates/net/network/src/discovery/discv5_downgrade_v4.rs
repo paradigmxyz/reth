@@ -111,7 +111,10 @@ impl Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> {
     }
 
     /// Returns a shared reference to the [`DiscV5WithV4Downgrade`] handle.
-    pub fn discv5(&self) -> Option<DiscV5WithV4Downgrade<T>> {
+    pub fn discv5(&self) -> Option<DiscV5WithV4Downgrade<T>>
+    where
+        T: Clone,
+    {
         Some(self.disc.as_ref()?.clone())
     }
 }
