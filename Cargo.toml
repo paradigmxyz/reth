@@ -129,6 +129,8 @@ strip = "debuginfo"
 inherits = "release"
 strip = "none"
 debug = true
+debug-assertions = true
+overflow-checks = true
 
 [profile.maxperf]
 inherits = "release"
