@@ -18,11 +18,10 @@
 use crate::{
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
-    discovery,
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
-    listener::{self, ConnectionListener},
+    listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     network::{NetworkHandle, NetworkHandleMessage},
@@ -209,10 +208,17 @@ where
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
         #[cfg(any(feature = "discv5-downgrade-v4", feature = "discv5"))]
-        assert!(discovery_v5_config
-            .as_ref()
-            .map(|config| config.mempool_socket() == *listener_address.lock())
-            .unwrap_or(true));
+        if let Some(config) = discovery_v5_config.as_ref() {
+            let advertised_mempool_socket = config.mempool_socket();
+            let mempool_socket = *listener_address.lock();
+            if advertised_mempool_socket != mempool_socket {
+                warn!(target: "net::manager",
+                    %mempool_socket,
+                    %advertised_mempool_socket,
+                    "discovery configured to advertise different mempool socket, overwriting value in discovery config"
+                )
+            }
+        }
 
         let discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
             // merge configured boot nodes
