@@ -2,30 +2,31 @@ use crate::test_suite::TestSuite;
 use futures_util::StreamExt;
 use reth::{
     builder::{NodeBuilder, NodeHandle},
-    payload::EthPayloadBuilderAttributes,
+    payload::{EthPayloadBuilderAttributes, Events},
     providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
         api::EngineApiClient,
         compat::engine::payload::convert_payload_field_v2_to_payload,
         eth::EthTransactions,
-        types::engine::{ExecutionPayloadInputV2, ForkchoiceState, PayloadAttributes},
+        types::engine::{
+            ExecutionPayloadEnvelopeV2, ExecutionPayloadInputV2, ForkchoiceState, PayloadAttributes,
+        },
     },
     tasks::TaskManager,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use reth_primitives::{Address, BlockNumberOrTag, B256};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(not(feature = "optimism"))]
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {
     let tasks = TaskManager::current();
     let test_suite = TestSuite::new();
-    let transfer_tx = test_suite.transfer_tx();
 
+    // Node setup
     let node_config = NodeConfig::test()
-        .with_chain(test_suite.chain_spec)
+        .with_chain(test_suite.chain_spec.clone())
         .with_rpc(RpcServerArgs::default().with_http());
 
     let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
@@ -34,48 +35,66 @@ async fn can_run_eth_node() -> eyre::Result<()> {
         .launch()
         .await?;
 
+    // setup engine api events and payload service events
     let mut notifications = node.provider.canonical_state_stream();
+    let payload_events = node.payload_builder.subscribe().await.unwrap();
 
+    // push tx into pool via RPC server
     let eth_api = node.rpc_registry.eth_api();
+    let transfer_tx = test_suite.transfer_tx();
     eth_api.send_raw_transaction(transfer_tx.envelope_encoded()).await?;
 
+    // trigger new payload building draining the pool
     let eth_attr = eth_payload_attributes();
     let payload_id = node.payload_builder.new_payload(eth_attr).await?;
-    // give it some time to build
-    tokio::time::sleep(Duration::from_millis(10)).await;
 
+    // resolve best payload via engine api
     let client = node.auth_server_handle().http_client();
+    EngineApiClient::<EthEngineTypes>::get_payload_v2(&client, payload_id).await?;
 
-    let payload = EngineApiClient::<EthEngineTypes>::get_payload_v2(&client, payload_id).await?;
-    let exec_payload = convert_payload_field_v2_to_payload(payload.execution_payload);
-    let payload_input = ExecutionPayloadInputV2 {
-        execution_payload: exec_payload.as_v1().clone(),
-        withdrawals: Some(vec![]),
-    };
+    // get the best payload built via payload events
+    let payload: Events<EthEngineTypes> = payload_events.recv().await.unwrap()?;
+    if let reth::payload::Events::BuiltPayload(payload) = payload {
+        // setup payload for submission
+        let envelope_v2 = ExecutionPayloadEnvelopeV2::from(payload);
+        let exec_payload = convert_payload_field_v2_to_payload(envelope_v2.execution_payload);
+        let payload_input = ExecutionPayloadInputV2 {
+            execution_payload: exec_payload.as_v1().clone(),
+            withdrawals: Some(vec![]),
+        };
 
-    let submission =
-        EngineApiClient::<EthEngineTypes>::new_payload_v2(&client, payload_input).await?;
-    assert!(submission.is_valid());
+        // submit payload to engine api
+        let submission =
+            EngineApiClient::<EthEngineTypes>::new_payload_v2(&client, payload_input).await?;
+        assert!(submission.is_valid());
 
-    let hash = submission.latest_valid_hash.unwrap();
-    let fcu = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v2(
-        &client,
-        ForkchoiceState {
-            head_block_hash: hash,
-            safe_block_hash: hash,
-            finalized_block_hash: hash,
-        },
-        None,
-    )
-    .await?;
-    assert!(fcu.is_valid());
+        // get latest valid hash from blockchaint tree
+        let hash = submission.latest_valid_hash.unwrap();
 
-    let head = notifications.next().await.unwrap();
-    let tx = head.tip().transactions().next().unwrap();
-    assert_eq!(tx.hash(), transfer_tx.hash);
+        // trigger forkchoice update via engine api to commit the block to the blockchain
+        let fcu = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v2(
+            &client,
+            ForkchoiceState {
+                head_block_hash: hash,
+                safe_block_hash: hash,
+                finalized_block_hash: hash,
+            },
+            None,
+        )
+        .await?;
+        assert!(fcu.is_valid());
 
-    let latest_block = node.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap();
-    assert_eq!(latest_block.hash_slow(), hash);
+        // get head block from notifications stream and verify the tx has been pushed to the pool is
+        // actually present in the canonical block
+        let head = notifications.next().await.unwrap();
+        let tx = head.tip().transactions().next().unwrap();
+        assert_eq!(tx.hash(), transfer_tx.hash);
+
+        // make sure the block hash we submitted via FCU engine api is the new latest block using an
+        // RPC call
+        let latest_block = node.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap();
+        assert_eq!(latest_block.hash_slow(), hash);
+    }
 
     Ok(())
 }
