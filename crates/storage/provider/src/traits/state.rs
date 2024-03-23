@@ -1,12 +1,11 @@
 use super::AccountReader;
-use crate::{BlockHashReader, BlockIdReader, BundleStateWithReceipts};
+use crate::{BlockHashReader, BlockIdReader, BundleStateWithReceipts, StateRootProvider};
 use auto_impl::auto_impl;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     trie::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
     Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
 };
-use reth_trie::updates::TrieUpdates;
 
 /// Type alias of boxed [StateProvider].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -215,7 +214,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
 /// * [`BundleStateWithReceipts`] contains all changed of accounts and storage of pending chain
 /// * block hashes of pending chain and canonical blocks.
 /// * canonical fork, the block on what pending chain was forked from.
-#[auto_impl[Box,&]]
+#[auto_impl(&, Box)]
 pub trait BundleStateDataProvider: Send + Sync {
     /// Return post state
     fn state(&self) -> &BundleStateWithReceipts;
@@ -225,22 +224,4 @@ pub trait BundleStateDataProvider: Send + Sync {
     ///
     /// Needed to create state provider.
     fn canonical_fork(&self) -> BlockNumHash;
-}
-
-/// A type that can compute the state root of a given post state.
-#[auto_impl[Box,&, Arc]]
-pub trait StateRootProvider: Send + Sync {
-    /// Returns the state root of the `BundleState` on top of the current state.
-    ///
-    /// NOTE: It is recommended to provide a different implementation from
-    /// `state_root_with_updates` since it affects the memory usage during state root
-    /// computation.
-    fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256>;
-
-    /// Returns the state root of the BundleState on top of the current state with trie
-    /// updates to be committed to the database.
-    fn state_root_with_updates(
-        &self,
-        bundle_state: &BundleStateWithReceipts,
-    ) -> ProviderResult<(B256, TrieUpdates)>;
 }

@@ -478,7 +478,7 @@ mod tests {
             testing_pool(),
             NoopNetwork::default(),
             cache.clone(),
-            GasPriceOracle::new(provider.clone(), Default::default(), cache.clone()),
+            GasPriceOracle::new(provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
@@ -613,7 +613,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// Invalid block range (request is in in the future)
+    /// Invalid block range (request is in the future)
     async fn test_fee_history_invalid_block_range_in_future() {
         let block_count = 10;
         let newest_block = 1337;

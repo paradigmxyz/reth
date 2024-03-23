@@ -64,7 +64,5 @@ optimism = [
     "reth-primitives/optimism",
     "reth-interfaces/optimism",
     "reth-provider/optimism",
-    "reth-rpc-types/optimism",
-    "reth-payload-builder/optimism",
     "reth-blockchain-tree/optimism",
 ]

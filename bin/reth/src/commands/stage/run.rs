@@ -126,7 +126,7 @@ impl Command {
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let config: Config = confy::load_path(config_path).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", SHORT_VERSION, self.stage);
@@ -172,7 +172,7 @@ impl Command {
                     let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
                     let mut config = config;
-                    config.peers.connect_trusted_nodes_only = self.network.trusted_only;
+                    config.peers.trusted_nodes_only = self.network.trusted_only;
                     if !self.network.trusted_peers.is_empty() {
                         self.network.trusted_peers.iter().for_each(|peer| {
                             config.peers.trusted_nodes.insert(*peer);

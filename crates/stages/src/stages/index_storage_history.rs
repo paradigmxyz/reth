@@ -416,7 +416,7 @@ mod tests {
             table,
             BTreeMap::from([
                 (shard(1), full_list.clone()),
-                (shard(2), full_list.clone()),
+                (shard(2), full_list),
                 (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1])
             ])
         );

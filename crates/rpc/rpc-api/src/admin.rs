@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::NodeRecord;
+use reth_primitives::{AnyNode, NodeRecord};
 use reth_rpc_types::{NodeInfo, PeerInfo};
 
 /// Admin namespace rpc interface that gives access to several non-standard RPC methods.
@@ -14,18 +14,18 @@ pub trait AdminApi {
     ///
     /// Returns true if the peer was successfully removed.
     #[method(name = "removePeer")]
-    fn remove_peer(&self, record: NodeRecord) -> RpcResult<bool>;
+    fn remove_peer(&self, record: AnyNode) -> RpcResult<bool>;
 
     /// Adds the given node record to the trusted peerset.
     #[method(name = "addTrustedPeer")]
-    fn add_trusted_peer(&self, record: NodeRecord) -> RpcResult<bool>;
+    fn add_trusted_peer(&self, record: AnyNode) -> RpcResult<bool>;
 
     /// Removes a remote node from the trusted peer set, but it does not disconnect it
     /// automatically.
     ///
     /// Returns true if the peer was successfully removed.
     #[method(name = "removeTrustedPeer")]
-    fn remove_trusted_peer(&self, record: NodeRecord) -> RpcResult<bool>;
+    fn remove_trusted_peer(&self, record: AnyNode) -> RpcResult<bool>;
 
     /// The peers administrative property can be queried for all the information known about the
     /// connected remote nodes at the networking granularity. These include general information

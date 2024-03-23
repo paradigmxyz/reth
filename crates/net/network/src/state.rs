@@ -319,6 +319,10 @@ where
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
             }
+            PeerAction::DisconnectUntrustedIncoming { peer_id } => {
+                self.state_fetcher.on_pending_disconnect(&peer_id);
+                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
+            }
             PeerAction::DiscoveryBanPeerId { peer_id, ip_addr } => {
                 self.ban_discovery(peer_id, ip_addr)
             }

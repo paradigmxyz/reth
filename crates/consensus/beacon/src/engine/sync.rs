@@ -1,6 +1,9 @@
 //! Sync management for the engine implementation.
 
-use crate::{engine::metrics::EngineSyncMetrics, BeaconConsensus};
+use crate::{
+    engine::metrics::EngineSyncMetrics, BeaconConsensus, BeaconConsensusEngineEvent,
+    ConsensusEngineLiveSyncProgress,
+};
 use futures::FutureExt;
 use reth_db::database::Database;
 use reth_interfaces::p2p::{
@@ -11,13 +14,14 @@ use reth_interfaces::p2p::{
 use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, B256};
 use reth_stages::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
+use reth_tokio_util::EventListeners;
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tracing::trace;
 
 /// Manages syncing under the control of the engine.
@@ -45,6 +49,8 @@ where
     inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
     /// In-flight full block _range_ requests in progress.
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
+    /// Listeners for engine events.
+    listeners: EventListeners<BeaconConsensusEngineEvent>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
     range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock>>,
@@ -70,6 +76,7 @@ where
         run_pipeline_continuously: bool,
         max_block: Option<BlockNumber>,
         chain_spec: Arc<ChainSpec>,
+        listeners: EventListeners<BeaconConsensusEngineEvent>,
     ) -> Self {
         Self {
             full_block_client: FullBlockClient::new(
@@ -83,6 +90,7 @@ where
             inflight_block_range_requests: Vec::new(),
             range_buffered_blocks: BinaryHeap::new(),
             run_pipeline_continuously,
+            listeners,
             max_block,
             metrics: EngineSyncMetrics::default(),
         }
@@ -119,6 +127,11 @@ where
         self.run_pipeline_continuously
     }
 
+    /// Pushes an [UnboundedSender] to the sync controller's listeners.
+    pub(crate) fn push_listener(&mut self, listener: UnboundedSender<BeaconConsensusEngineEvent>) {
+        self.listeners.push_listener(listener);
+    }
+
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
     #[allow(dead_code)]
     pub(crate) fn is_pipeline_sync_pending(&self) -> bool {
@@ -145,6 +158,14 @@ where
     /// If the `count` is 1, this will use the `download_full_block` method instead, because it
     /// downloads headers and bodies for the block concurrently.
     pub(crate) fn download_block_range(&mut self, hash: B256, count: u64) {
+        // notify listeners that we're downloading a block
+        self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
+            ConsensusEngineLiveSyncProgress::DownloadingBlocks {
+                remaining_blocks: count,
+                target: hash,
+            },
+        ));
+
         if count == 1 {
             self.download_full_block(hash);
         } else {
@@ -176,6 +197,15 @@ where
             ?hash,
             "Start downloading full block"
         );
+
+        // notify listeners that we're downloading a block
+        self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
+            ConsensusEngineLiveSyncProgress::DownloadingBlocks {
+                remaining_blocks: 1,
+                target: hash,
+            },
+        ));
+
         let request = self.full_block_client.get_full_block(hash);
         self.inflight_full_block_requests.push(request);
 
@@ -525,6 +555,7 @@ mod tests {
                 false,
                 self.max_block,
                 chain_spec,
+                Default::default(),
             )
         }
     }

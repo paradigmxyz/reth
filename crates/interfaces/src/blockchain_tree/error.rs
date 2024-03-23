@@ -4,6 +4,7 @@ use crate::{
     consensus::ConsensusError,
     executor::{BlockExecutionError, BlockValidationError},
     provider::ProviderError,
+    RethError,
 };
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 
@@ -48,9 +49,6 @@ pub enum BlockchainTreeError {
     },
 }
 
-/// Result alias for `CanonicalError`
-pub type CanonicalResult<T> = Result<T, CanonicalError>;
-
 /// Canonical Errors
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalError {
@@ -60,6 +58,9 @@ pub enum CanonicalError {
     /// Error originating from blockchain tree operations.
     #[error(transparent)]
     BlockchainTree(#[from] BlockchainTreeError),
+    /// Error originating from a provider operation.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
     /// Error indicating a transaction reverted during execution.
     #[error("transaction error on revert: {0}")]
     CanonicalRevert(String),
@@ -108,6 +109,11 @@ impl InsertBlockError {
     /// Create a new InsertInvalidBlockError from an execution error
     pub fn execution_error(error: BlockExecutionError, block: SealedBlock) -> Self {
         Self::new(block, InsertBlockErrorKind::Execution(error))
+    }
+
+    /// Create a new InsertBlockError from a RethError and block.
+    pub fn from_reth_error(error: RethError, block: SealedBlock) -> Self {
+        Self::new(block, error.into())
     }
 
     /// Consumes the error and returns the block that resulted in the error
@@ -274,6 +280,7 @@ impl InsertBlockErrorKind {
                 CanonicalError::CanonicalCommit(_) |
                 CanonicalError::CanonicalRevert(_) => false,
                 CanonicalError::Validation(_) => true,
+                CanonicalError::Provider(_) => false,
             },
             InsertBlockErrorKind::BlockchainTree(_) => false,
         }
@@ -324,11 +331,9 @@ impl InsertBlockErrorKind {
     }
 }
 
-// This is a convenience impl to convert from crate::Error to InsertBlockErrorKind, most
-impl From<crate::RethError> for InsertBlockErrorKind {
-    fn from(err: crate::RethError) -> Self {
-        use crate::RethError;
-
+// This is a convenience impl to convert from crate::Error to InsertBlockErrorKind
+impl From<RethError> for InsertBlockErrorKind {
+    fn from(err: RethError) -> Self {
         match err {
             RethError::Execution(err) => InsertBlockErrorKind::Execution(err),
             RethError::Consensus(err) => InsertBlockErrorKind::Consensus(err),

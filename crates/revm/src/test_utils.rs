@@ -7,6 +7,13 @@ use reth_primitives::{
 
 #[cfg(not(feature = "optimism"))]
 use reth_primitives::revm::env::fill_tx_env;
+use reth_provider::{AccountReader, BlockHashReader, StateProvider, StateRootProvider};
+use reth_trie::updates::TrieUpdates;
+use revm::{
+    db::BundleState,
+    primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+};
+use std::collections::HashMap;
 #[cfg(feature = "optimism")]
 use {
     reth_primitives::revm::env::fill_op_tx_env,
@@ -15,13 +22,6 @@ use {
         Database, Evm, EvmBuilder,
     },
 };
-
-use reth_provider::{
-    AccountReader, BlockHashReader, BundleStateWithReceipts, StateProvider, StateRootProvider,
-};
-use reth_trie::updates::TrieUpdates;
-use revm::primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv};
-use std::collections::HashMap;
 
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct StateProviderTest {
@@ -74,13 +74,13 @@ impl BlockHashReader for StateProviderTest {
 }
 
 impl StateRootProvider for StateProviderTest {
-    fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+    fn state_root(&self, _bundle_state: &BundleState) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
     fn state_root_with_updates(
         &self,
-        _bundle_state: &BundleStateWithReceipts,
+        _bundle_state: &BundleState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }

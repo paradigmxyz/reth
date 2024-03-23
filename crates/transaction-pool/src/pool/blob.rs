@@ -433,18 +433,19 @@ impl PartialOrd<Self> for BlobOrd {
 }
 
 impl Ord for BlobOrd {
+    /// Compares two `BlobOrd` instances.
+    ///
+    /// The comparison is performed in reverse order based on the priority field. This is
+    /// because transactions with larger negative values in the priority field will take more fee
+    /// jumps, making them take longer to become executable. Therefore, transactions with lower
+    /// ordering should return `Greater`, ensuring they are evicted first.
+    ///
+    /// If the priority values are equal, the submission ID is used to break ties.
     fn cmp(&self, other: &Self) -> Ordering {
-        // order in reverse, so transactions with a lower ordering return Greater - this is
-        // important because transactions with larger negative values will take more fee jumps and
-        // it will take longer to become executable, so those should be evicted first
-        let ord = other.priority.cmp(&self.priority);
-
-        // use submission_id to break ties
-        if ord == Ordering::Equal {
-            self.submission_id.cmp(&other.submission_id)
-        } else {
-            ord
-        }
+        other
+            .priority
+            .cmp(&self.priority)
+            .then_with(|| self.submission_id.cmp(&other.submission_id))
     }
 }
 
@@ -689,8 +690,7 @@ mod tests {
             let actual = fee_delta(tx_fee, base_fee);
             assert_eq!(
                 actual, expected,
-                "fee_delta({}, {}) = {}, expected: {}",
-                tx_fee, base_fee, actual, expected
+                "fee_delta({tx_fee}, {base_fee}) = {actual}, expected: {expected}"
             );
         }
     }

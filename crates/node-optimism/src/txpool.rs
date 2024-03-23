@@ -108,13 +108,13 @@ where
                 )
             };
 
-            let mut encoded = reth_primitives::bytes::BytesMut::default();
+            let mut encoded = Vec::new();
             valid_tx.transaction().to_recovered_transaction().encode_enveloped(&mut encoded);
 
             let cost_addition = match l1_block_info.l1_tx_data_fee(
                 &self.chain_spec(),
                 self.block_timestamp(),
-                encoded.as_ref(),
+                &encoded,
                 false,
             ) {
                 Ok(cost) => cost,

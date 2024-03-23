@@ -11,17 +11,17 @@ use reth_network::{
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
-    HelloMessageWithProtocols, NetworkConfigBuilder,
+    HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
-use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
+use std::{net::IpAddr, path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "Networking")]
 pub struct NetworkArgs {
-    /// Disable the discovery service.
+    /// Arguments to setup discovery service.
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
@@ -67,7 +67,7 @@ pub struct NetworkArgs {
 
     /// Network listening address
     #[arg(long = "addr", value_name = "ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
-    pub addr: Ipv4Addr,
+    pub addr: IpAddr,
 
     /// Network listening port
     #[arg(long = "port", value_name = "PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
@@ -114,7 +114,7 @@ impl NetworkArgs {
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
-        let peer_config = config
+        let peers_config = config
             .peers
             .clone()
             .with_max_inbound_opt(self.max_inbound_peers)
@@ -131,7 +131,10 @@ impl NetworkArgs {
         // Configure basic network stack
         let mut network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
-            .peer_config(peer_config)
+            .sessions_config(
+                SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
+            )
+            .peer_config(peers_config)
             .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
             .chain_spec(chain_spec)
             .transactions_manager_config(transactions_manager_config);
@@ -210,7 +213,7 @@ pub struct DiscoveryArgs {
 
     /// The UDP address to use for P2P discovery/networking
     #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
-    pub addr: Ipv4Addr,
+    pub addr: IpAddr,
 
     /// The UDP port to use for P2P discovery/networking
     #[arg(id = "discovery.port", long = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]

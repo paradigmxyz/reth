@@ -22,8 +22,6 @@ use reth_network_api::NetworkInfo;
 use reth_node_core::engine_api_store::{EngineApiStore, StoredEngineApiMessage};
 #[cfg(not(feature = "optimism"))]
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
-#[cfg(feature = "optimism")]
-use reth_node_optimism::{OptimismEngineTypes, OptimismEvmConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{fs, ChainSpec, PruneModes};
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory};
@@ -32,12 +30,7 @@ use reth_stages::Pipeline;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::noop::NoopTransactionPool;
-use std::{
-    net::{SocketAddr, SocketAddrV4},
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 use tracing::*;
 
@@ -97,11 +90,11 @@ impl Command {
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(self.network.addr, self.network.port)))
-            .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
+            .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
+            .discovery_addr(SocketAddr::new(
                 self.network.discovery.addr,
                 self.network.discovery.port,
-            )))
+            ))
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
@@ -134,7 +127,7 @@ impl Command {
         let evm_config = EthEvmConfig::default();
 
         #[cfg(feature = "optimism")]
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = reth_node_optimism::OptimismEvmConfig::default();
 
         // Configure blockchain tree
         let tree_externals = TreeExternals::new(
@@ -168,8 +161,7 @@ impl Command {
 
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
-        let payload_builder =
-            reth_optimism_payload_builder::OptimismPayloadBuilder::new(self.chain.clone());
+        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(self.chain.clone());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             blockchain_db.clone(),
@@ -183,7 +175,7 @@ impl Command {
         #[cfg(feature = "optimism")]
         let (payload_service, payload_builder): (
             _,
-            PayloadBuilderHandle<OptimismEngineTypes>,
+            PayloadBuilderHandle<reth_node_optimism::OptimismEngineTypes>,
         ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
 
         #[cfg(not(feature = "optimism"))]
