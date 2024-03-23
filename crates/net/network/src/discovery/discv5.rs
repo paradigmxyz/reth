@@ -28,7 +28,7 @@ use super::{Discovery, DiscoveryEvent};
 
 /// [`Discovery`] type that uses [`discv5::Discv5`].
 #[cfg(feature = "discv5")]
-pub type DiscoveryV5<T = MustIncludeFork> =
+pub type DiscoveryV5<T = MustIncludeChain> =
     Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>;
 
 impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>

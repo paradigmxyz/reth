@@ -29,7 +29,7 @@ use super::{Discovery, DiscoveryEvent};
 /// [`Discovery`] type that uses [`discv5::Discv5`](reth_discv5::discv5), with support for
 /// downgraded [`Discv4`](reth_discv4::Discv4) connections.
 #[cfg(feature = "discv5-downgrade-v4")]
-pub type DiscoveryV5V4<T = MustIncludeFork> =
+pub type DiscoveryV5V4<T = MustIncludeChain> =
     Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>>;
 
 impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> {
