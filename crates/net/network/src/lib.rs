@@ -167,7 +167,7 @@ pub type DiscoveryHandle = Discv4;
 
 /// Devp2p peer discovery version 5, with support for downgraded version 4 connections.
 #[cfg(feature = "discv5-downgrade-v4")]
-pub type Discovery<T> = discovery::DiscoveryV5V4;
+pub type Discovery = discovery::DiscoveryV5V4;
 /// Handle to interact with peer discovery node using [`DiscV5WithV4Downgrade`].
 #[cfg(feature = "discv5-downgrade-v4")]
 pub type DiscoveryHandle = DiscV5WithV4Downgrade;

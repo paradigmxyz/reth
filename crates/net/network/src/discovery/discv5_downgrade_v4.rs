@@ -1,5 +1,5 @@
-//! Discovery support for the network using [`discv5::Discv5`], with support for downgraded
-//! [`Discv4`] connections.
+//! Discovery support for the network using [`discv5::Discv5`](reth_discv5::discv5), with support
+//! for downgraded [`Discv4`](reth_discv4::Discv4) connections.
 
 use std::{
     net::SocketAddr,
@@ -26,8 +26,8 @@ use crate::error::NetworkError;
 
 use super::{Discovery, DiscoveryEvent};
 
-/// [`Discovery`] type that uses [`discv5::Discv5`], with support for downgraded [`Discv4`]
-/// connections.
+/// [`Discovery`] type that uses [`discv5::Discv5`](reth_discv5::discv5), with support for
+/// downgraded [`Discv4`](reth_discv4::Discv4) connections.
 #[cfg(feature = "discv5-downgrade-v4")]
 pub type DiscoveryV5V4<T = MustIncludeFork> =
     Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>>;
@@ -35,8 +35,9 @@ pub type DiscoveryV5V4<T = MustIncludeFork> =
 impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> {
     /// Spawns the discovery service.
     ///
-    /// This will spawn [`discv5::Discv5`] and [`Discv4`] each onto their own new task and
-    /// establish a merged listener channel to receive all discovered nodes.
+    /// This will spawn [`discv5::Discv5`](reth_discv5::discv5) and [`Discv4`](reth_discv4::Discv4)
+    /// each onto their own new task and establish a merged listener channel to receive all
+    /// discovered nodes.
     pub async fn start_discv5_with_v4_downgrade(
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
@@ -92,7 +93,7 @@ impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> 
 }
 
 #[cfg(feature = "discv5-downgrade-v4")]
-impl Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> {
+impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> {
     pub async fn start(
         discv4_addr: SocketAddr,
         sk: SecretKey,
