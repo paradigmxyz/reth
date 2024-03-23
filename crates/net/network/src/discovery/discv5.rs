@@ -161,17 +161,19 @@ where
     fn on_discovered_peer(&mut self, enr: discv5::Enr) {
         let Some(ref discv5) = self.disc else { return };
 
-        if let FilterOutcome::Ignore { reason } = discv5.filter_discovered_peer(&enr) {
-            trace!(target: "net::discovery::discv5",
-                ?enr,
-                reason,
-                "filtered out discovered peer"
-            );
+        let fork_id = match discv5.filter_discovered_peer(&enr) {
+            FilterOutcome::Ok => discv5.get_fork_id(&enr).ok(),
+            FilterOutcome::OkReturnForkId(fork_id) => Some(fork_id),
+            FilterOutcome::Ignore { reason } => {
+                trace!(target: "net::discovery::discv5",
+                    ?enr,
+                    reason,
+                    "filtered out discovered peer"
+                );
 
-            return
-        }
-
-        let fork_id = discv5.get_fork_id(&enr).ok();
+                return
+            }
+        };
 
         match discv5.try_into_reachable(enr.clone()) {
             Ok(enr_bc) => self.on_node_record_update(enr_bc, fork_id),

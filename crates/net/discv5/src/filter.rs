@@ -37,6 +37,9 @@ impl FilterDiscovered for NoopFilter {
 pub enum FilterOutcome {
     /// ENR passes filter rules.
     Ok,
+    /// ENR passes filter rules. [`ForkId`] is a by-product of filtering, and is returned to avoid
+    /// rlp decoding it twice.
+    OkReturnForkId(ForkId),
     /// ENR doesn't pass filter rules, for the given reason.
     Ignore {
         /// Reason for filtering out node record.
@@ -60,7 +63,7 @@ pub struct MustIncludeChain {
 
 impl FilterDiscovered for MustIncludeChain {
     fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
-        if enr.get(self.chain).is_none() {
+        if enr.get_raw_rlp(self.chain).is_none() {
             return FilterOutcome::Ignore { reason: self.ignore_reason() }
         }
         FilterOutcome::Ok
@@ -101,7 +104,7 @@ impl FilterDiscovered for MustIncludeFork {
 
         if let Ok(fork_id) = ForkId::decode(&mut fork_id_bytes) {
             if fork_id == self.fork_id {
-                return FilterOutcome::Ok
+                return FilterOutcome::OkReturnForkId(fork_id)
             }
         }
 

@@ -313,7 +313,7 @@ impl<T> DiscV5<T> {
             let filter = filter_discovered_peer.clone();
             let predicate = Box::new(move |enr: &discv5::Enr| -> bool {
                 match filter.filter(enr) {
-                    FilterOutcome::Ok => true,
+                    FilterOutcome::Ok | FilterOutcome::OkReturnForkId(_) => true,
                     FilterOutcome::Ignore { reason } => {
                         trace!(target: "net::discv5",
                             ?enr,
