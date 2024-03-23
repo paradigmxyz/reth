@@ -1070,13 +1070,44 @@ impl Default for TransactionFetcher {
     }
 }
 
+struct TxSizeMetadata {
+    peer_id: PeerId,
+    tx_encoded_len: usize,
+}
+
+impl PartialEq for TxSizeMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        self.peer_id == other.peer_id
+    }
+}
+
+impl Eq for TxSizeMetadata {}
+
+impl Hash for TxSizeMetadata {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.peer_id.hash(state);
+    }
+}
+
+impl TxSizeMetadata {
+    fn get_size(&self) -> Option<usize> {
+        if self.tx_encoded_len == 0 {
+            None
+        } else {
+            Some(self.tx_encoded_len)
+        }
+    }
+}
+
+
 /// Metadata of a transaction hash that is yet to be fetched.
 #[derive(Debug, Constructor, Clone)]
 pub struct TxFetchMetadata {
     /// The number of times a request attempt has been made for the hash.
     retries: u8,
     /// Peers that have announced the hash, but to which a request attempt has not yet been made.
-    fallback_peers: LruCache<PeerId>,
+
+    fallback_peers: LruMap<PeerId, PackedOption<usize>>,
     /// Size metadata of the transaction if it has been seen in an eth68 announcement.
     // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
     // another size tx than they announced. alt enter in request (won't catch peers announcing
