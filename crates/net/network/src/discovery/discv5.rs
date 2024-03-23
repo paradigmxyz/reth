@@ -7,6 +7,8 @@ use std::{
 
 use futures::StreamExt;
 use reth_discv4::secp256k1::SecretKey;
+#[cfg(feature = "discv5")]
+use reth_discv5::filter::MustIncludeFork;
 use reth_discv5::{
     discv5::{self, enr::Enr},
     enr::uncompressed_id_from_enr_pk,
@@ -26,7 +28,8 @@ use super::{Discovery, DiscoveryEvent};
 
 /// [`Discovery`] type that uses [`discv5::Discv5`].
 #[cfg(feature = "discv5")]
-pub type DiscoveryV5<T> = Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>;
+pub type DiscoveryV5<T = MustIncludeFork> =
+    Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>;
 
 impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>
 where
