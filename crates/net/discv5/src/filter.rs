@@ -1,13 +1,17 @@
 //! Predicates to constraint peer lookups.
 
+use alloy_rlp::Decodable;
 use derive_more::Constructor;
-use reth_primitives::{hex, ForkHash};
+use reth_primitives::{ForkId, MAINNET};
+
+/// Identifies an [`Enr`](discv5::enr::Enr) belonging to L1 EL mainnet.
+pub const ENR_KEY_FORK_ID_ETH: &'static [u8] = b"eth";
 
 /// Allows users to inject custom filtering rules on which peers to discover.
 pub trait FilterDiscovered {
     /// Applies filtering rules on [`Enr`](discv5::Enr) data. Returns [`Ok`](FilterOutcome::Ok) if
     /// peer should be included, otherwise [`Ignore`](FilterOutcome::Ignore).
-    fn filter_discovered_peer(&self, _enr: &discv5::Enr) -> FilterOutcome;
+    fn filter(&self, enr: &discv5::Enr) -> FilterOutcome;
 
     /// Message for [`FilterOutcome::Ignore`] should specify the reason for filtering out a node
     /// record.
@@ -19,7 +23,7 @@ pub trait FilterDiscovered {
 pub struct NoopFilter;
 
 impl FilterDiscovered for NoopFilter {
-    fn filter_discovered_peer(&self, _enr: &discv5::Enr) -> FilterOutcome {
+    fn filter(&self, _enr: &discv5::Enr) -> FilterOutcome {
         FilterOutcome::Ok
     }
 
@@ -48,14 +52,14 @@ impl FilterOutcome {
 }
 
 /// Filter requiring that peers advertise that they belong to some fork of a certain chain.
-#[derive(Debug, Constructor, Clone, Copy, Default)]
+#[derive(Debug, Constructor, Clone, Copy)]
 pub struct MustIncludeChain {
     /// Chain which node record must advertise.
     chain: &'static [u8],
 }
 
 impl FilterDiscovered for MustIncludeChain {
-    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome {
+    fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
         if enr.get(self.chain).is_none() {
             return FilterOutcome::Ignore { reason: self.ignore_reason() }
         }
@@ -67,36 +71,90 @@ impl FilterDiscovered for MustIncludeChain {
     }
 }
 
+impl Default for MustIncludeChain {
+    fn default() -> Self {
+        Self { chain: ENR_KEY_FORK_ID_ETH }
+    }
+}
+
 /// Filter requiring that peers advertise belonging to a certain fork.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MustIncludeFork {
     /// Filters chain which node record must advertise.
     chain: MustIncludeChain,
     /// Fork which node record must advertise.
-    fork: String,
+    fork_id: ForkId,
 }
 
 impl MustIncludeFork {
     /// Returns a new instance.
-    pub fn new(chain: &'static [u8], fork: ForkHash) -> Self {
-        Self { chain: MustIncludeChain::new(chain), fork: hex::encode(fork.0) }
+    pub fn new(chain: &'static [u8], fork: ForkId) -> Self {
+        Self { chain: MustIncludeChain::new(chain), fork_id: fork }
     }
 }
 
 impl FilterDiscovered for MustIncludeFork {
-    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome {
-        let Some(fork) = enr.get(self.chain.chain) else {
+    fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
+        let Some(mut fork_id_bytes) = enr.get_raw_rlp(self.chain.chain) else {
             return FilterOutcome::Ignore { reason: self.chain.ignore_reason() }
         };
 
-        if fork != self.fork.as_bytes() {
-            return FilterOutcome::Ignore { reason: self.ignore_reason() }
+        if let Ok(fork_id) = ForkId::decode(&mut fork_id_bytes) {
+            if fork_id == self.fork_id {
+                return FilterOutcome::Ok
+            }
         }
 
-        FilterOutcome::Ok
+        FilterOutcome::Ignore { reason: self.ignore_reason() }
     }
 
     fn ignore_reason(&self) -> String {
-        format!("{} fork {:?} required", String::from_utf8_lossy(self.chain.chain), self.fork,)
+        format!("{} fork {:?} required", String::from_utf8_lossy(self.chain.chain), self.fork_id)
+    }
+}
+
+impl Default for MustIncludeFork {
+    fn default() -> Self {
+        Self {
+            chain: MustIncludeChain::new(ENR_KEY_FORK_ID_ETH),
+            fork_id: MAINNET.latest_fork_id(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use discv5::enr::{CombinedKey, Enr};
+
+    use super::*;
+
+    #[test]
+    fn fork_filter() {
+        // rig test
+
+        let fork = MAINNET.cancun_fork_id().unwrap();
+        let filter = MustIncludeFork::new(ENR_KEY_FORK_ID_ETH, fork);
+
+        // enr_1 advertises fork configured in filter
+        let sk = CombinedKey::generate_secp256k1();
+        let enr_1 = Enr::builder()
+            .add_value_rlp(ENR_KEY_FORK_ID_ETH, alloy_rlp::encode(fork).into())
+            .build(&sk)
+            .unwrap();
+
+        // enr_2 advertises an older fork
+        let sk = CombinedKey::generate_secp256k1();
+        let enr_2 = Enr::builder()
+            .add_value_rlp(
+                ENR_KEY_FORK_ID_ETH,
+                alloy_rlp::encode(MAINNET.shanghai_fork_id().unwrap()).into(),
+            )
+            .build(&sk)
+            .unwrap();
+
+        // test
+
+        assert_eq!(FilterOutcome::Ok, filter.filter(&enr_1));
+        assert!(matches!(filter.filter(&enr_2), FilterOutcome::Ignore { .. }));
     }
 }

@@ -8,7 +8,7 @@ use std::{
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_primitives::{AnyNode, Bytes, ForkHash, NodeRecord, MAINNET};
+use reth_primitives::{AnyNode, Bytes, ForkId, NodeRecord, MAINNET};
 
 use crate::{
     enr::uncompressed_to_multiaddr_id,
@@ -27,8 +27,8 @@ pub struct DiscV5ConfigBuilder<Filter = MustIncludeChain> {
     discv5_config: Option<discv5::Config>,
     /// Nodes to boot from.
     bootstrap_nodes: HashSet<BootNode>,
-    /// [`ForkHash`] to set in local node record.
-    fork: Option<(&'static [u8], ForkHash)>,
+    /// [`ForkId`] to set in local node record.
+    fork: Option<(&'static [u8], ForkId)>,
     /// Mempool TCP port to advertise.
     tcp_port: Option<u16>,
     /// Additional kv-pairs that should be advertised to peers by including in local node record.
@@ -120,8 +120,8 @@ impl<T> DiscV5ConfigBuilder<T> {
         self
     }
 
-    /// Set [`ForkHash`], and key used to identify it, to set in local [`Enr`](discv5::enr::Enr).
-    pub fn fork(mut self, key: &'static [u8], value: ForkHash) -> Self {
+    /// Set [`ForkId`], and key used to identify it, to set in local [`Enr`](discv5::enr::Enr).
+    pub fn fork(mut self, key: &'static [u8], value: ForkId) -> Self {
         self.fork = Some((key, value));
         self
     }
@@ -190,7 +190,7 @@ impl<T> DiscV5ConfigBuilder<T> {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let fork = fork.unwrap_or((b"eth", MAINNET.latest_fork_id().hash));
+        let fork = fork.unwrap_or((b"eth", MAINNET.latest_fork_id()));
 
         let tcp_port = tcp_port.unwrap_or(DEFAULT_DISCOVERY_PORT);
 
@@ -218,8 +218,8 @@ pub struct DiscV5Config<Filter = MustIncludeChain> {
     pub(super) discv5_config: discv5::Config,
     /// Nodes to boot from.
     pub(super) bootstrap_nodes: HashSet<BootNode>,
-    /// [`ForkHash`] to set in local node record.
-    pub(super) fork: (&'static [u8], ForkHash),
+    /// [`ForkId`] to set in local node record.
+    pub(super) fork: (&'static [u8], ForkId),
     /// Mempool TCP port to advertise.
     pub(super) tcp_port: u16,
     /// Additional kv-pairs to include in local node record.
@@ -267,7 +267,7 @@ pub enum BootNode {
 mod test {
     use std::net::SocketAddrV4;
 
-    use reth_primitives::{hex, Hardfork};
+    use reth_primitives::hex;
 
     use super::*;
 
@@ -303,12 +303,5 @@ mod test {
         for node in MULTI_ADDRESSES.split(&[',']) {
             assert!(config.bootstrap_nodes.contains(&BootNode::Enode(node.to_string())));
         }
-    }
-
-    #[test]
-    fn fork() {
-        let config = DiscV5Config::builder().fork(b"eth", Hardfork::Cancun.fork_hash()).build();
-
-        assert_eq!("9f3d2254", hex::encode(config.fork.1 .0))
     }
 }

@@ -6,7 +6,7 @@ use ::enr::Enr;
 use alloy_rlp::Decodable;
 use derive_more::{Constructor, Deref, DerefMut};
 use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
-use filter::{FilterDiscovered, FilterOutcome, MustIncludeChain};
+use filter::{FilterDiscovered, FilterOutcome, MustIncludeFork};
 use futures::future::join_all;
 use itertools::Itertools;
 use reth_discv4::secp256k1::SecretKey;
@@ -36,8 +36,8 @@ pub enum Error {
     #[error("failed adding node to discv5, {0}")]
     AddNodeToDiscv5Failed(&'static str),
     /// Missing key used to identify mempool network.
-    #[error("fork id missing on enr, 'eth' key missing")]
-    ForkIdMissing,
+    #[error("fork missing on enr, 'eth' key missing")]
+    ForkMissing,
     /// Failed to decode [`ForkId`] rlp value.
     #[error("failed to decode fork id, 'eth': {0:?}")]
     ForkIdDecodeError(#[from] alloy_rlp::Error),
@@ -85,7 +85,7 @@ pub trait HandleDiscv5 {
         &self,
         enr: &discv5::enr::Enr<K>,
     ) -> Result<ForkId, Error> {
-        let mut fork_id_bytes = enr.get(self.fork_id_key()).ok_or(Error::ForkIdMissing)?;
+        let mut fork_id_bytes = enr.get_raw_rlp(self.fork_id_key()).ok_or(Error::ForkMissing)?;
 
         Ok(ForkId::decode(&mut fork_id_bytes)?)
     }
@@ -123,7 +123,7 @@ pub trait HandleDiscv5 {
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Deref, DerefMut, Clone, Constructor)]
-pub struct DiscV5<T = MustIncludeChain> {
+pub struct DiscV5<T = MustIncludeFork> {
     #[deref]
     #[deref_mut]
     discv5: Arc<discv5::Discv5>,
@@ -218,12 +218,12 @@ impl<T> DiscV5<T> {
             };
 
             // add fork id
-            let (chain, fork) = fork;
-            builder.add_value(chain, &Bytes::copy_from_slice(&fork.0[..]));
+            let (chain, fork_id) = fork;
+            builder.add_value_rlp(chain, alloy_rlp::encode(fork_id).into());
 
             // add other data
             for (key, value) in other_enr_data {
-                builder.add_value(key, &alloy_rlp::encode(value));
+                builder.add_value_rlp(key, alloy_rlp::encode(value).into());
             }
 
             // enr v4 not to get confused with discv4, independent versioning enr and
@@ -312,7 +312,7 @@ impl<T> DiscV5<T> {
 
             let filter = filter_discovered_peer.clone();
             let predicate = Box::new(move |enr: &discv5::Enr| -> bool {
-                match filter.filter_discovered_peer(enr) {
+                match filter.filter(enr) {
                     FilterOutcome::Ok => true,
                     FilterOutcome::Ignore { reason } => {
                         trace!(target: "net::discv5",
@@ -434,7 +434,7 @@ impl<T> HandleDiscv5 for DiscV5<T> {
     where
         Self::Filter: FilterDiscovered,
     {
-        T::filter_discovered_peer(&self.filter_discovered_peer, enr)
+        T::filter(&self.filter_discovered_peer, enr)
     }
 }
 

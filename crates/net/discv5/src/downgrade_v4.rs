@@ -29,7 +29,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
 use crate::{
-    filter::{FilterDiscovered, FilterOutcome, MustIncludeChain},
+    filter::{FilterDiscovered, FilterOutcome, MustIncludeFork},
     DiscV5, DiscV5Config, HandleDiscv5,
 };
 
@@ -52,7 +52,7 @@ pub enum Error {
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
 #[derive(Debug, Clone)]
-pub struct DiscV5WithV4Downgrade<T = MustIncludeChain> {
+pub struct DiscV5WithV4Downgrade<T = MustIncludeFork> {
     discv5: DiscV5<T>,
     discv4: Discv4,
 }
