@@ -33,6 +33,7 @@ reth-tokio-util.workspace = true
 enr = { workspace = true, features = ["rust-secp256k1"], optional = true }
 rlp = "0.5.2"
 alloy-rlp.workspace = true
+discv5.workspace = true
 
 # async/futures
 futures.workspace = true

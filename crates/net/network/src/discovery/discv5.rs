@@ -5,12 +5,12 @@ use std::{
     task::{Context, Poll},
 };
 
+use discv5::enr::Enr;
 use futures::StreamExt;
 use reth_discv4::secp256k1::SecretKey;
 #[cfg(feature = "discv5")]
 use reth_discv5::filter::MustIncludeChain;
 use reth_discv5::{
-    discv5::{self, enr::Enr},
     enr::uncompressed_id_from_enr_pk,
     filter::{FilterDiscovered, FilterOutcome},
     metrics::{AdvertisedChainCounter, UpdateMetrics},
