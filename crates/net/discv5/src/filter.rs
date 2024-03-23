@@ -125,8 +125,6 @@ impl Default for MustIncludeFork {
 mod tests {
     use discv5::enr::{CombinedKey, Enr};
 
-    use crate::IdentifyForkIdKVPair;
-
     use super::*;
 
     #[test]

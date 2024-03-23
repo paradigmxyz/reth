@@ -7,13 +7,13 @@ use std::{
     task::{Context, Poll},
 };
 
+use discv5::enr::Enr;
 use futures::StreamExt;
-use reth_discv4::{secp256k1::SecretKey, DiscoveryUpdate, Discv4Config};
+use reth_discv4::{secp256k1::SecretKey, Discv4Config};
 #[cfg(feature = "discv5-downgrade-v4")]
 use reth_discv5::filter::MustIncludeChain;
 use reth_discv5::{
-    discv5::enr::Enr, downgrade_v4::DiscoveryUpdateV5, filter::FilterDiscovered,
-    metrics::UpdateMetrics, DiscV5Config, DiscV5WithV4Downgrade, MergedUpdateStream,
+    filter::FilterDiscovered, metrics::UpdateMetrics, Discv5BCv4, MergedUpdateStream,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::NodeFromExternalSource;
@@ -30,9 +30,9 @@ use super::{Discovery, DiscoveryEvent};
 /// downgraded [`Discv4`](reth_discv4::Discv4) connections.
 #[cfg(feature = "discv5-downgrade-v4")]
 pub type DiscoveryV5V4<T = MustIncludeChain> =
-    Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>>;
+    Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>>;
 
-impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> {
+impl<T> Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>> {
     /// Spawns the discovery service.
     ///
     /// This will spawn [`discv5::Discv5`](reth_discv5::discv5) and [`Discv4`](reth_discv4::Discv4)
@@ -42,7 +42,7 @@ impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> 
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
         discv4_config: Option<Discv4Config>,
-        discv5_config: Option<DiscV5Config<T>>,
+        discv5_config: Option<reth_discv5::Config<T>>,
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError>
     where
@@ -55,7 +55,7 @@ impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> 
         let (disc, disc_updates, bc_local_discv5_enr) = match (discv4_config, discv5_config) {
             (Some(discv4_config), Some(discv5_config)) => {
                 let (disc, disc_updates, bc_discv5_enr) =
-                    DiscV5WithV4Downgrade::start(discv4_addr, sk, discv4_config, discv5_config)
+                    Discv5BCv4::start(discv4_addr, sk, discv4_config, discv5_config)
                         .await
                         .map_err(|err| NetworkError::custom_discovery(&err.to_string()))?;
 
@@ -93,7 +93,7 @@ impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> 
 }
 
 #[cfg(feature = "discv5-downgrade-v4")]
-impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> {
+impl<T> Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>> {
     pub async fn start(
         discv4_addr: SocketAddr,
         sk: SecretKey,
@@ -114,8 +114,8 @@ impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> 
         .await
     }
 
-    /// Returns a shared reference to the [`DiscV5WithV4Downgrade`] handle.
-    pub fn discv5(&self) -> Option<DiscV5WithV4Downgrade<T>>
+    /// Returns a shared reference to the [`Discv5BCv4`] handle.
+    pub fn discv5(&self) -> Option<Discv5BCv4<T>>
     where
         T: Clone,
     {
@@ -123,9 +123,9 @@ impl<T> Discovery<DiscV5WithV4Downgrade<T>, MergedUpdateStream, Enr<SecretKey>> 
     }
 }
 
-impl<S, T> Stream for Discovery<DiscV5WithV4Downgrade<T>, S, Enr<SecretKey>>
+impl<S, T> Stream for Discovery<Discv5BCv4<T>, S, Enr<SecretKey>>
 where
-    S: Stream<Item = DiscoveryUpdateV5> + Unpin + Send + 'static,
+    S: Stream<Item = reth_discv5::DiscoveryUpdate> + Unpin + Send + 'static,
     T: FilterDiscovered + Unpin,
 {
     type Item = DiscoveryEvent;
@@ -142,17 +142,18 @@ where
             self.disc_updates.as_mut().map(|ref mut updates| updates.poll_next_unpin(cx))
         {
             match update {
-                DiscoveryUpdateV5::V4(update) => {
+                reth_discv5::DiscoveryUpdate::V4(update) => {
                     let mut count_discovered = 0;
                     match &update {
-                        DiscoveryUpdate::Added(_) | DiscoveryUpdate::DiscoveredAtCapacity(_) => {
+                        reth_discv4::DiscoveryUpdate::Added(_) |
+                        reth_discv4::DiscoveryUpdate::DiscoveredAtCapacity(_) => {
                             count_discovered += 1
                         }
-                        DiscoveryUpdate::Batch(updates) => {
+                        reth_discv4::DiscoveryUpdate::Batch(updates) => {
                             for update in updates {
                                 match update {
-                                    DiscoveryUpdate::Added(_) |
-                                    DiscoveryUpdate::DiscoveredAtCapacity(_) => {
+                                    reth_discv4::DiscoveryUpdate::Added(_) |
+                                    reth_discv4::DiscoveryUpdate::DiscoveredAtCapacity(_) => {
                                         count_discovered += 1
                                     }
                                     _ => (),
@@ -172,7 +173,7 @@ where
 
                     self.on_discv4_update(update)
                 }
-                DiscoveryUpdateV5::V5(update) => self.on_discv5_update(update),
+                reth_discv5::DiscoveryUpdate::V5(update) => self.on_discv5_update(update),
             }
         }
 
@@ -206,11 +207,7 @@ mod tests {
     async fn start_discovery_node(
         udp_port_discv4: u16,
         udp_port_discv5: u16,
-    ) -> Discovery<
-        DiscV5WithV4Downgrade<NoopFilter>,
-        MergedUpdateStream,
-        enr::Enr<secp256k1::SecretKey>,
-    > {
+    ) -> Discovery<Discv5BCv4<NoopFilter>, MergedUpdateStream, enr::Enr<secp256k1::SecretKey>> {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv4_addr = format!("127.0.0.1:{udp_port_discv4}").parse().unwrap();
@@ -220,7 +217,7 @@ mod tests {
         let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
 
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
-        let discv5_config = DiscV5Config::builder()
+        let discv5_config = reth_discv5::Config::builder()
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .filter(NoopFilter)
             .build();
@@ -268,8 +265,8 @@ mod tests {
         // verify node_2 is in KBuckets of node_1:discv4 and vv
         let event_1_v4 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
         let event_2_v4 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
-        matches!(event_1_v4, DiscoveryUpdateV5::V4(DiscoveryUpdate::Added(node)) if node == discv4_enr_2);
-        matches!(event_2_v4, DiscoveryUpdateV5::V4(DiscoveryUpdate::Added(node)) if node == discv4_enr_1);
+        matches!(event_1_v4, reth_discv5::DiscoveryUpdate::V4(DiscoveryUpdate::Added(node)) if node == discv4_enr_2);
+        matches!(event_2_v4, reth_discv5::DiscoveryUpdate::V4(DiscoveryUpdate::Added(node)) if node == discv4_enr_1);
 
         // add node_2 to discovery handle of node_1 (should add node to discv5 kbuckets)
         let discv5_enr_node_2_reth_compatible_ty: Enr<SecretKey> =
@@ -301,16 +298,16 @@ mod tests {
         // verify node_1:discv5 is connected to node_2:discv5 and vv
         let event_2_v5 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
         let event_1_v5 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
-        matches!(event_1_v5, DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(node, socket)) if node == discv5_enr_node_2 && socket == discv5_enr_node_2.udp4_socket().unwrap().into());
-        matches!(event_2_v5, DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(node, socket)) if node == discv5_enr_node_1 && socket == discv5_enr_node_1.udp4_socket().unwrap().into());
+        matches!(event_1_v5, reth_discv5::DiscoveryUpdate::V5(discv5::Event::SessionEstablished(node, socket)) if node == discv5_enr_node_2 && socket == discv5_enr_node_2.udp4_socket().unwrap().into());
+        matches!(event_2_v5, reth_discv5::DiscoveryUpdate::V5(discv5::Event::SessionEstablished(node, socket)) if node == discv5_enr_node_1 && socket == discv5_enr_node_1.udp4_socket().unwrap().into());
 
         // verify node_1 is in KBuckets of node_2:discv5
         let event_2_v5 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
-        matches!(event_2_v5, DiscoveryUpdateV5::V5(discv5::Event::NodeInserted { node_id, replaced }) if node_id == discv5_id_2 && replaced.is_none());
+        matches!(event_2_v5, reth_discv5::DiscoveryUpdate::V5(discv5::Event::NodeInserted { node_id, replaced }) if node_id == discv5_id_2 && replaced.is_none());
 
         let event_2_v4 = node_2.disc_updates.as_mut().unwrap().next().await.unwrap();
         let event_1_v4 = node_1.disc_updates.as_mut().unwrap().next().await.unwrap();
-        matches!(event_1_v4, DiscoveryUpdateV5::V4(DiscoveryUpdate::Removed(node_id)) if node_id == discv4_id_2);
-        matches!(event_2_v4, DiscoveryUpdateV5::V4(DiscoveryUpdate::Removed(node_id)) if node_id == discv4_id_1);
+        matches!(event_1_v4, reth_discv5::DiscoveryUpdate::V4(DiscoveryUpdate::Removed(node_id)) if node_id == discv4_id_2);
+        matches!(event_2_v4, reth_discv5::DiscoveryUpdate::V4(DiscoveryUpdate::Removed(node_id)) if node_id == discv4_id_1);
     }
 }

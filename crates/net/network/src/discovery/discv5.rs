@@ -14,7 +14,7 @@ use reth_discv5::{
     enr::uncompressed_id_from_enr_pk,
     filter::{FilterDiscovered, FilterOutcome},
     metrics::{AdvertisedChainCounter, UpdateMetrics},
-    DiscV5, DiscV5Config, HandleDiscv5,
+    Config as DiscV5Config, Discv5, HandleDiscv5,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
@@ -30,9 +30,9 @@ use super::{Discovery, DiscoveryEvent};
 /// [`Discovery`] type that uses [`discv5::Discv5`].
 #[cfg(feature = "discv5")]
 pub type DiscoveryV5<T = MustIncludeChain> =
-    Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>;
+    Discovery<Discv5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>;
 
-impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>
+impl<T> Discovery<Discv5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>
 where
     T: FilterDiscovered + Clone + Send + 'static,
 {
@@ -51,7 +51,7 @@ where
 
         let (disc, disc_updates, bc_local_enr) = match discv5_config {
             Some(config) => {
-                let (disc, disc_updates, bc_local_enr) = DiscV5::start(&sk, config)
+                let (disc, disc_updates, bc_local_enr) = Discv5::start(&sk, config)
                     .await
                     .map_err(|e| NetworkError::custom_discovery(&e.to_string()))?;
 
@@ -84,7 +84,7 @@ where
 }
 
 #[cfg(feature = "discv5")]
-impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
+impl<T> Discovery<Discv5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
     pub async fn start(
         _discv4_addr: std::net::SocketAddr,
         sk: SecretKey,
@@ -98,8 +98,8 @@ impl<T> Discovery<DiscV5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>> {
         Discovery::start_discv5(sk, discv5_config, dns_discovery_config).await
     }
 
-    /// Returns a shared reference to the [`DiscV5`] handle.
-    pub fn discv5(&self) -> Option<DiscV5<T>>
+    /// Returns a shared reference to the [`Discv5`] handle.
+    pub fn discv5(&self) -> Option<Discv5<T>>
     where
         T: Clone,
     {
@@ -218,7 +218,7 @@ where
     }
 }
 
-impl<S, T> Stream for Discovery<DiscV5<T>, S, Enr<SecretKey>>
+impl<S, T> Stream for Discovery<Discv5<T>, S, Enr<SecretKey>>
 where
     S: Stream<Item = discv5::Event> + Unpin + Send + 'static,
     T: FilterDiscovered + Unpin,
@@ -275,7 +275,7 @@ mod tests {
 
     async fn start_discovery_node(
         udp_port_discv5: u16,
-    ) -> Discovery<DiscV5<NoopFilter>, ReceiverStream<discv5::Event>, enr::Enr<secp256k1::SecretKey>>
+    ) -> Discovery<Discv5<NoopFilter>, ReceiverStream<discv5::Event>, enr::Enr<secp256k1::SecretKey>>
     {
         let secret_key = SecretKey::new(&mut thread_rng());
 

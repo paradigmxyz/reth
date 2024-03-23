@@ -20,9 +20,9 @@ use crate::{
 /// Default is 60 seconds.
 const DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL: u64 = 60;
 
-/// Builds a [`DiscV5Config`].
+/// Builds a [`Config`].
 #[derive(Debug, Default)]
-pub struct DiscV5ConfigBuilder<Filter = MustIncludeChain> {
+pub struct ConfigBuilder<Filter = MustIncludeChain> {
     /// Config used by [`discv5::Discv5`]. Contains the discovery listen socket.
     discv5_config: Option<discv5::Config>,
     /// Nodes to boot from.
@@ -45,10 +45,10 @@ pub struct DiscV5ConfigBuilder<Filter = MustIncludeChain> {
     filter_discovered_peer: Filter,
 }
 
-impl<T> DiscV5ConfigBuilder<T> {
+impl<T> ConfigBuilder<T> {
     /// Returns a new builder, with all fields set like given instance.
-    pub fn new_from(discv5_config: DiscV5Config<T>) -> Self {
-        let DiscV5Config {
+    pub fn new_from(discv5_config: Config<T>) -> Self {
+        let Config {
             discv5_config,
             bootstrap_nodes,
             fork: fork_id,
@@ -149,7 +149,7 @@ impl<T> DiscV5ConfigBuilder<T> {
 
     /// Adds filter rules to apply to discovered peer to determine whether or not it should be
     /// passed to the mempool.
-    pub fn filter<F>(self, f: F) -> DiscV5ConfigBuilder<F>
+    pub fn filter<F>(self, f: F) -> ConfigBuilder<F>
     where
         F: FilterDiscovered,
     {
@@ -164,7 +164,7 @@ impl<T> DiscV5ConfigBuilder<T> {
             ..
         } = self;
 
-        DiscV5ConfigBuilder {
+        ConfigBuilder {
             discv5_config,
             bootstrap_nodes,
             fork,
@@ -176,8 +176,8 @@ impl<T> DiscV5ConfigBuilder<T> {
         }
     }
 
-    /// Returns a new [`DiscV5Config`].
-    pub fn build(self) -> DiscV5Config<T> {
+    /// Returns a new [`Config`].
+    pub fn build(self) -> Config<T> {
         let Self {
             discv5_config,
             bootstrap_nodes,
@@ -199,7 +199,7 @@ impl<T> DiscV5ConfigBuilder<T> {
         let self_lookup_interval =
             self_lookup_interval.unwrap_or(DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL);
 
-        DiscV5Config {
+        Config {
             discv5_config,
             bootstrap_nodes,
             fork,
@@ -214,7 +214,7 @@ impl<T> DiscV5ConfigBuilder<T> {
 
 /// Config used to bootstrap [`discv5::Discv5`].
 #[derive(Debug)]
-pub struct DiscV5Config<Filter = MustIncludeChain> {
+pub struct Config<Filter = MustIncludeChain> {
     /// Config used by [`discv5::Discv5`]. Contains the [`ListenConfig`], with the discovery listen
     /// socket.
     pub(super) discv5_config: discv5::Config,
@@ -236,14 +236,14 @@ pub struct DiscV5Config<Filter = MustIncludeChain> {
     pub(super) filter_discovered_peer: Filter,
 }
 
-impl DiscV5Config {
-    /// Returns a new [`DiscV5ConfigBuilder`].
-    pub fn builder() -> DiscV5ConfigBuilder {
-        DiscV5ConfigBuilder::default()
+impl Config {
+    /// Returns a new [`ConfigBuilder`].
+    pub fn builder() -> ConfigBuilder {
+        ConfigBuilder::default()
     }
 }
 
-impl<T> DiscV5Config<T> {
+impl<T> Config<T> {
     /// Returns the discovery (UDP) socket contained in the [`discv5::Config`]. Returns the IPv6
     /// socket, if both IPv4 and v6 are configured. This socket will be advertised to peers in the
     /// local [`Enr`](discv5::enr::Enr).
@@ -306,8 +306,7 @@ mod test {
     fn parse_boot_nodes() {
         const OP_SEPOLIA_CL_BOOTNODES: &str ="enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg,enr:-J64QFa3qMsONLGphfjEkeYyF6Jkil_jCuJmm7_a42ckZeUQGLVzrzstZNb1dgBp1GGx9bzImq5VxJLP-BaptZThGiWGAYrTytOvgmlkgnY0gmlwhGsV-zeHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDahfSECTIS_cXyZ8IyNf4leANlZnrsMEWTkEYxf4GMCmDdGNwgiQGg3VkcIIkBg";
 
-        let config =
-            DiscV5Config::builder().add_serialized_boot_nodes(OP_SEPOLIA_CL_BOOTNODES).build();
+        let config = Config::builder().add_serialized_boot_nodes(OP_SEPOLIA_CL_BOOTNODES).build();
 
         let socket_1 = "18.210.176.114:9222".parse::<SocketAddrV4>().unwrap();
         let socket_2 = "107.21.251.55:9222".parse::<SocketAddrV4>().unwrap();
@@ -327,7 +326,7 @@ mod test {
     fn parse_enodes() {
         const OP_MAINNET_EL_BOOTNODES: &str = "enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305,enode://dd751a9ef8912be1bfa7a5e34e2c3785cc5253110bd929f385e07ba7ac19929fb0e0c5d93f77827291f4da02b2232240fbc47ea7ce04c46e333e452f8656b667@34.65.107.0:30305,enode://c5d289b56a77b6a2342ca29956dfd07aadf45364dde8ab20d1dc4efd4d1bc6b4655d902501daea308f4d8950737a4e93a4dfedd17b49cd5760ffd127837ca965@34.65.202.239:30305,enode://87a32fd13bd596b2ffca97020e31aef4ddcc1bbd4b95bb633d16c1329f654f34049ed240a36b449fda5e5225d70fe40bc667f53c304b71f8e68fc9d448690b51@3.231.138.188:30301,enode://ca21ea8f176adb2e229ce2d700830c844af0ea941a1d8152a9513b966fe525e809c3a6c73a2c18a12b74ed6ec4380edf91662778fe0b79f6a591236e49e176f9@184.72.129.189:30301,enode://acf4507a211ba7c1e52cdf4eef62cdc3c32e7c9c47998954f7ba024026f9a6b2150cd3f0b734d9c78e507ab70d59ba61dfe5c45e1078c7ad0775fb251d7735a2@3.220.145.177:30301,enode://8a5a5006159bf079d06a04e5eceab2a1ce6e0f721875b2a9c96905336219dbe14203d38f70f3754686a6324f786c2f9852d8c0dd3adac2d080f4db35efc678c5@3.231.11.52:30301,enode://cdadbe835308ad3557f9a1de8db411da1a260a98f8421d62da90e71da66e55e98aaa8e90aa7ce01b408a54e4bd2253d701218081ded3dbe5efbbc7b41d7cef79@54.198.153.150:30301";
 
-        let config = DiscV5Config::builder().add_enode_boot_nodes(OP_MAINNET_EL_BOOTNODES).build();
+        let config = Config::builder().add_enode_boot_nodes(OP_MAINNET_EL_BOOTNODES).build();
 
         const MULTI_ADDRESSES: &str = "/ip4/184.72.129.189/udp/30301/p2p/16Uiu2HAmSG2hdLwyQHQmG4bcJBgD64xnW63WMTLcrNq6KoZREfGb,/ip4/3.231.11.52/udp/30301/p2p/16Uiu2HAmMy4V8bi3XP7KDfSLQcLACSvTLroRRwEsTyFUKo8NCkkp,/ip4/54.198.153.150/udp/30301/p2p/16Uiu2HAmSVsb7MbRf1jg3Dvd6a3n5YNqKQwn1fqHCFgnbqCsFZKe,/ip4/3.220.145.177/udp/30301/p2p/16Uiu2HAm74pBDGdQ84XCZK27GRQbGFFwQ7RsSqsPwcGmCR3Cwn3B,/ip4/3.231.138.188/udp/30301/p2p/16Uiu2HAmMnTiJwgFtSVGV14ZNpwAvS1LUoF4pWWeNtURuV6C3zYB";
 

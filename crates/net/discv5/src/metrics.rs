@@ -1,5 +1,5 @@
-//! Tracks peer discovery for [`DiscV5`](crate::DiscV5) and
-//! [`DiscV5WithV4Downgrade`](crate::DiscV5WithV4Downgrade`).
+//! Tracks peer discovery for [`Discv5`](crate::DiscV5) and
+//! [`Discv5BCv4`](crate::Discv5BCv4`).
 
 use metrics::Counter;
 use reth_metrics::Metrics;
@@ -13,8 +13,8 @@ pub trait UpdateMetrics {
         F: Fn(&mut Metrics) -> R;
 }
 
-/// Information tracked by [`DiscV5`](crate::DiscV5) and
-/// [`DiscV5WithV4Downgrade`](crate::DiscV5WithV4Downgrade).
+/// Information tracked by [`Discv5`](crate::DiscV5) and
+/// [`Discv5BCv4`](crate::Discv5BCv4).
 #[derive(Debug, Default, Clone)]
 pub struct Metrics {
     /// Frequency of chains advertised in discovered peers' node records.
@@ -43,7 +43,7 @@ pub struct DiscoveredPeersMetrics {
     total_sessions_unreachable_v5: Counter,
     /// Total peers discovered by [`Discv4`](reth_discv4::Discv4), running as service to support
     /// backwards compatibility (not running at full capacity) in
-    /// [`DiscV5WithV4Downgrade`](crate::DiscV5WithV4Downgrade).
+    /// [`Discv5BCv4`](crate::Discv5BCv4).
     ///
     /// Note: the definition of 'discovered' is not exactly synonymous in [`discv5::Discv5`] and
     /// [`Discv4`](reth_discv4::Discv4).
@@ -70,7 +70,7 @@ impl DiscoveredPeersMetrics {
     }
 
     /// Counts peers discovered by [`Discv4`](reth_discv4::Discv4) as backwards compatibility
-    /// support in [`DiscV5WithV4Downgrade`](crate::DiscV5WithV4Downgrade).
+    /// support in [`Discv5BCv4`](crate::Discv5BCv4).
     pub fn increment_discovered_v4_as_downgrade(&mut self, num: u64) {
         self.total_discovered_peers_discv4_as_downgrade.increment(num)
     }

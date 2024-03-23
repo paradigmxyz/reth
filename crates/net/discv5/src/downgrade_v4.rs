@@ -17,7 +17,7 @@ use futures::{
 use reth_discv4::{
     error::Discv4Error,
     secp256k1::{self, PublicKey, SecretKey},
-    DiscoveryUpdate, Discv4, Discv4Config,
+    Discv4, Discv4Config,
 };
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{
@@ -29,9 +29,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
 use crate::{
+    config::Config,
     filter::{FilterDiscovered, FilterOutcome, MustIncludeChain},
     metrics::{Metrics, UpdateMetrics},
-    DiscV5, DiscV5Config, HandleDiscv5,
+    Discv5, HandleDiscv5,
 };
 
 /// Errors interfacing between [`discv5::Discv5`] and [`Discv4`].
@@ -53,14 +54,14 @@ pub enum Error {
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
 #[derive(Debug, Clone)]
-pub struct DiscV5WithV4Downgrade<T = MustIncludeChain> {
-    discv5: DiscV5<T>,
+pub struct Discv5BCv4<T = MustIncludeChain> {
+    discv5: Discv5<T>,
     discv4: Discv4,
 }
 
-impl<T> DiscV5WithV4Downgrade<T> {
+impl<T> Discv5BCv4<T> {
     /// Returns a new combined handle.
-    pub fn new(discv5: DiscV5<T>, discv4: Discv4) -> Self {
+    pub fn new(discv5: Discv5<T>, discv4: Discv4) -> Self {
         Self { discv5, discv4 }
     }
 
@@ -85,7 +86,7 @@ impl<T> DiscV5WithV4Downgrade<T> {
         discv4_addr: SocketAddr, // discv5 addr in config
         sk: SecretKey,
         discv4_config: Discv4Config,
-        discv5_config: DiscV5Config<T>,
+        discv5_config: Config<T>,
     ) -> Result<(Self, MergedUpdateStream, NodeRecord), Error>
     where
         T: FilterDiscovered + Send + Sync + Clone + 'static,
@@ -96,7 +97,7 @@ impl<T> DiscV5WithV4Downgrade<T> {
         // 1. start discv5
         //
         let (discv5, discv5_updates, bc_local_discv5_enr) =
-            DiscV5::start(&sk, discv5_config).await?;
+            Discv5::start(&sk, discv5_config).await?;
 
         //
         // 2. types needed for interfacing with discv4
@@ -163,7 +164,7 @@ impl<T> DiscV5WithV4Downgrade<T> {
         // 5. merge both discovery nodes
         //
         // combined handle
-        let disc = DiscV5WithV4Downgrade::new(discv5, discv4);
+        let disc = Discv5BCv4::new(discv5, discv4);
 
         // combined update stream
         let disc_updates = MergedUpdateStream::merge_discovery_streams(
@@ -178,7 +179,7 @@ impl<T> DiscV5WithV4Downgrade<T> {
     }
 }
 
-impl<T> HandleDiscovery for DiscV5WithV4Downgrade<T> {
+impl<T> HandleDiscovery for Discv5BCv4<T> {
     fn add_node_to_routing_table(
         &self,
         node_record: NodeFromExternalSource,
@@ -212,7 +213,7 @@ impl<T> HandleDiscovery for DiscV5WithV4Downgrade<T> {
     }
 }
 
-impl<T> HandleDiscv5 for DiscV5WithV4Downgrade<T>
+impl<T> HandleDiscv5 for Discv5BCv4<T>
 where
     T: FilterDiscovered,
 {
@@ -220,7 +221,7 @@ where
 
     fn with_discv5<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&DiscV5<Self::Filter>) -> R,
+        F: FnOnce(&Discv5<Self::Filter>) -> R,
     {
         f(&self.discv5)
     }
@@ -243,26 +244,26 @@ where
 
 /// Wrapper around update type used in [`discv5::Discv5`] and [`Discv4`].
 #[derive(Debug, From)]
-pub enum DiscoveryUpdateV5 {
+pub enum DiscoveryUpdate {
     /// A [`discv5::Event`], an update from [`discv5::Discv5`].
     V5(discv5::Event),
-    /// A [`DiscoveryUpdate`], an update from [`Discv4`].
-    V4(DiscoveryUpdate),
+    /// A [`reth_discv4::DiscoveryUpdate`], an update from [`Discv4`].
+    V4(reth_discv4::DiscoveryUpdate),
 }
 
-/// Stream wrapper for streams producing types that can convert to [`DiscoveryUpdateV5`].
+/// Stream wrapper for streams producing types that can convert to [`DiscoveryUpdate`].
 #[derive(Debug)]
 pub struct UpdateStream<S>(S);
 
 impl<S, I> Stream for UpdateStream<S>
 where
     S: Stream<Item = I> + Unpin,
-    DiscoveryUpdateV5: From<I>,
+    DiscoveryUpdate: From<I>,
 {
-    type Item = DiscoveryUpdateV5;
+    type Item = DiscoveryUpdate;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(ready!(self.0.poll_next_unpin(cx)).map(DiscoveryUpdateV5::from))
+        Poll::Ready(ready!(self.0.poll_next_unpin(cx)).map(DiscoveryUpdate::from))
     }
 }
 
@@ -272,7 +273,7 @@ where
 pub struct MergedUpdateStream {
     inner: Select<
         UpdateStream<ReceiverStream<discv5::Event>>,
-        UpdateStream<ReceiverStream<DiscoveryUpdate>>,
+        UpdateStream<ReceiverStream<reth_discv4::DiscoveryUpdate>>,
     >,
     discv5_kbuckets_change_tx: watch::Sender<()>,
 }
@@ -282,7 +283,7 @@ impl MergedUpdateStream {
     /// downgrading to discv4.
     pub fn merge_discovery_streams(
         discv5_event_stream: mpsc::Receiver<discv5::Event>,
-        discv4_update_stream: ReceiverStream<DiscoveryUpdate>,
+        discv4_update_stream: ReceiverStream<reth_discv4::DiscoveryUpdate>,
         discv5_kbuckets_change_tx: watch::Sender<()>,
     ) -> Self {
         let discv5_event_stream = UpdateStream(ReceiverStream::new(discv5_event_stream));
@@ -299,11 +300,11 @@ impl MergedUpdateStream {
 }
 
 impl Stream for MergedUpdateStream {
-    type Item = DiscoveryUpdateV5; // todo: return result
+    type Item = DiscoveryUpdate; // todo: return result
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let update = ready!(self.inner.poll_next_unpin(cx));
-        if let Some(DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(ref enr, _))) = update {
+        if let Some(DiscoveryUpdate::V5(discv5::Event::SessionEstablished(ref enr, _))) = update {
             //
             // Notify discv4 that a discv5 session has been established.
             //
@@ -333,7 +334,7 @@ impl Stream for MergedUpdateStream {
     }
 }
 
-impl<T> UpdateMetrics for DiscV5WithV4Downgrade<T> {
+impl<T> UpdateMetrics for Discv5BCv4<T> {
     fn with_metrics<R, F>(&mut self, f: F) -> R
     where
         F: Fn(&mut Metrics) -> R,
@@ -356,7 +357,7 @@ mod tests {
     async fn start_discovery_node(
         udp_port_discv4: u16,
         udp_port_discv5: u16,
-    ) -> (DiscV5WithV4Downgrade<NoopFilter>, MergedUpdateStream, NodeRecord) {
+    ) -> (Discv5BCv4<NoopFilter>, MergedUpdateStream, NodeRecord) {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv4_addr = format!("127.0.0.1:{udp_port_discv4}").parse().unwrap();
@@ -366,12 +367,12 @@ mod tests {
         let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
 
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
-        let discv5_config = DiscV5Config::builder()
+        let discv5_config = Config::builder()
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .filter(NoopFilter)
             .build();
 
-        DiscV5WithV4Downgrade::start(discv4_addr, secret_key, discv4_config, discv5_config)
+        Discv5BCv4::start(discv4_addr, secret_key, discv4_config, discv5_config)
             .await
             .expect("should build discv5 with discv4 downgrade")
     }
@@ -422,11 +423,11 @@ mod tests {
         let event_2_v4 = stream_2.next().await.unwrap();
         matches!(
             event_1_v4,
-            DiscoveryUpdateV5::V4(DiscoveryUpdate::Added(node)) if node == discv4_enr_2
+            DiscoveryUpdate::V4(reth_discv4::DiscoveryUpdate::Added(node)) if node == discv4_enr_2
         );
         matches!(
             event_2_v4,
-            DiscoveryUpdateV5::V4(DiscoveryUpdate::Added(node)) if node == discv4_enr_1
+            DiscoveryUpdate::V4(reth_discv4::DiscoveryUpdate::Added(node)) if node == discv4_enr_1
         );
 
         // add node_2 to discovery handle of node_1 (should add node to discv5 kbuckets)
@@ -448,29 +449,29 @@ mod tests {
         let event_1_v5 = stream_1.next().await.unwrap();
         matches!(
             event_1_v5,
-            DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(node, socket)) if node == discv5_enr_2 && socket == discv5_enr_2.udp4_socket().unwrap().into()
+            DiscoveryUpdate::V5(discv5::Event::SessionEstablished(node, socket)) if node == discv5_enr_2 && socket == discv5_enr_2.udp4_socket().unwrap().into()
         );
         matches!(
             event_2_v5,
-            DiscoveryUpdateV5::V5(discv5::Event::SessionEstablished(node, socket)) if node == discv5_enr_1 && socket == discv5_enr_1.udp4_socket().unwrap().into()
+            DiscoveryUpdate::V5(discv5::Event::SessionEstablished(node, socket)) if node == discv5_enr_1 && socket == discv5_enr_1.udp4_socket().unwrap().into()
         );
 
         // verify node_1 is in KBuckets of node_2:discv5
         let event_2_v5 = stream_2.next().await.unwrap();
         matches!(
             event_2_v5,
-            DiscoveryUpdateV5::V5(discv5::Event::NodeInserted { node_id, replaced }) if node_id == discv5_id_2 && replaced.is_none()
+            DiscoveryUpdate::V5(discv5::Event::NodeInserted { node_id, replaced }) if node_id == discv5_id_2 && replaced.is_none()
         );
 
         let event_2_v4 = stream_2.next().await.unwrap();
         let event_1_v4 = stream_1.next().await.unwrap();
         matches!(
             event_1_v4,
-            DiscoveryUpdateV5::V4(DiscoveryUpdate::Removed(node_id)) if node_id == discv4_id_2
+            DiscoveryUpdate::V4(reth_discv4::DiscoveryUpdate::Removed(node_id)) if node_id == discv4_id_2
         );
         matches!(
             event_2_v4,
-            DiscoveryUpdateV5::V4(DiscoveryUpdate::Removed(node_id)) if node_id == discv4_id_1
+            DiscoveryUpdate::V4(reth_discv4::DiscoveryUpdate::Removed(node_id)) if node_id == discv4_id_1
         );
     }
 }

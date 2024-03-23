@@ -25,10 +25,10 @@ pub mod metrics;
 
 pub use discv5::{self, IpMode};
 
-pub use config::{BootNode, ChainRef, DiscV5Config, DiscV5ConfigBuilder, IdentifyForkIdKVPair};
-pub use downgrade_v4::{DiscV5WithV4Downgrade, MergedUpdateStream};
+pub use config::{BootNode, ChainRef, Config, ConfigBuilder, IdentifyForkIdKVPair};
+pub use downgrade_v4::{DiscoveryUpdate, Discv5BCv4, MergedUpdateStream};
 pub use enr::uncompressed_id_from_enr_pk;
-use filter::{FilterDiscovered, FilterOutcome, MustIncludeChain};
+pub use filter::{FilterDiscovered, FilterOutcome, MustIncludeChain, MustIncludeFork};
 use metrics::{Metrics, UpdateMetrics};
 
 /// Errors from using [`discv5::Discv5`] handle.
@@ -68,13 +68,13 @@ pub enum Error {
 
 /// Use API of [`discv5::Discv5`].
 pub trait HandleDiscv5 {
-    /// Filter type is constrained by [`DiscV5Config`].
+    /// Filter type is constrained by [`Config`].
     type Filter;
 
     /// Exposes API of [`discv5::Discv5`].
     fn with_discv5<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&DiscV5<Self::Filter>) -> R;
+        F: FnOnce(&Discv5<Self::Filter>) -> R;
 
     /// Returns the [`IpMode`] of the local node.
     fn ip_mode(&self) -> IpMode;
@@ -125,7 +125,7 @@ pub trait HandleDiscv5 {
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Deref, DerefMut, Clone, Constructor)]
-pub struct DiscV5<T = MustIncludeChain> {
+pub struct Discv5<T = MustIncludeChain> {
     #[deref]
     #[deref_mut]
     discv5: Arc<discv5::Discv5>,
@@ -139,7 +139,7 @@ pub struct DiscV5<T = MustIncludeChain> {
     metrics: Metrics,
 }
 
-impl<T> DiscV5<T> {
+impl<T> Discv5<T> {
     fn add_node(&self, node_record: NodeFromExternalSource) -> Result<(), Error> {
         let NodeFromExternalSource::Enr(enr) = node_record else {
             unreachable!("cannot convert `NodeRecord` type to `Enr` type")
@@ -166,12 +166,12 @@ impl<T> DiscV5<T> {
     }
 
     /// Spawns [`discv5::Discv5`]. Returns [`discv5::Discv5`] handle in reth compatible wrapper type
-    /// [`DiscV5`], a receiver of [`discv5::Event`]s from the underlying node, and the local
+    /// [`Discv5`], a receiver of [`discv5::Event`]s from the underlying node, and the local
     /// [`Enr`](discv5::Enr) converted into the reth compatible [`NodeRecord`] type (used in
     /// [`Discv4`](reth_discv4::Discv4)).
     pub async fn start(
         sk: &SecretKey,
-        discv5_config: DiscV5Config<T>,
+        discv5_config: Config<T>,
     ) -> Result<(Self, mpsc::Receiver<discv5::Event>, NodeRecord), Error>
     where
         T: FilterDiscovered + Clone + Send + 'static,
@@ -179,7 +179,7 @@ impl<T> DiscV5<T> {
         //
         // 1. make local enr from listen config
         //
-        let DiscV5Config {
+        let Config {
             discv5_config,
             bootstrap_nodes,
             fork,
@@ -373,20 +373,20 @@ impl<T> DiscV5<T> {
         });
 
         Ok((
-            DiscV5::new(discv5, ip_mode, chain, filter_discovered_peer, Metrics::default()),
+            Discv5::new(discv5, ip_mode, chain, filter_discovered_peer, Metrics::default()),
             discv5_updates,
             bc_enr,
         ))
     }
 }
 
-impl<T> fmt::Debug for DiscV5<T> {
+impl<T> fmt::Debug for Discv5<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         "{ .. }".fmt(f)
     }
 }
 
-impl<T> HandleDiscovery for DiscV5<T> {
+impl<T> HandleDiscovery for Discv5<T> {
     fn add_node_to_routing_table(
         &self,
         node_record: NodeFromExternalSource,
@@ -420,7 +420,7 @@ impl<T> HandleDiscovery for DiscV5<T> {
     }
 }
 
-impl<T> HandleDiscv5 for DiscV5<T> {
+impl<T> HandleDiscv5 for Discv5<T> {
     type Filter = T;
 
     fn with_discv5<F, R>(&self, f: F) -> R
@@ -446,7 +446,7 @@ impl<T> HandleDiscv5 for DiscV5<T> {
     }
 }
 
-impl<T> UpdateMetrics for DiscV5<T> {
+impl<T> UpdateMetrics for Discv5<T> {
     fn with_metrics<R, F>(&mut self, f: F) -> R
     where
         F: Fn(&mut Metrics) -> R,
@@ -468,18 +468,18 @@ mod tests {
 
     async fn start_discovery_node(
         udp_port_discv5: u16,
-    ) -> (DiscV5<NoopFilter>, mpsc::Receiver<discv5::Event>, NodeRecord) {
+    ) -> (Discv5<NoopFilter>, mpsc::Receiver<discv5::Event>, NodeRecord) {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
 
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
-        let discv5_config = DiscV5Config::builder()
+        let discv5_config = Config::builder()
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .filter(NoopFilter)
             .build();
 
-        DiscV5::start(&secret_key, discv5_config).await.expect("should build discv5")
+        Discv5::start(&secret_key, discv5_config).await.expect("should build discv5")
     }
 
     #[tokio::test(flavor = "multi_thread")]
