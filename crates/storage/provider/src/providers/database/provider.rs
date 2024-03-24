@@ -318,30 +318,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(self.tx.commit()?)
     }
 
-    /// Gets walker for given table.
-    pub fn with_walker<T: Table, F, R>(
-        &self,
-        range: impl RangeBounds<<T as Table>::Key>,
-        f: F,
-    ) -> Result<R, DatabaseError>
-    where
-        F: FnOnce(RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>) -> Result<R, DatabaseError>,
-    {
-        self.with_cursor(|mut cursor| {
-            let walker = cursor.walk_range(range)?;
-
-            f(walker)
-        })
-    }
-
-    /// Gets walker for given table.
-    pub fn with_cursor<T: Table, F, R>(&self, f: F) -> Result<R, DatabaseError>
-    where
-        F: FnOnce(<TX as DbTxMut>::CursorMut<T>) -> Result<R, DatabaseError>,
-    {
-        f(self.tx.cursor_write::<T>()?)
-    }
-
     // TODO(joshie) TEMPORARY should be moved to trait providers
 
     /// Unwind or peek at last N blocks of state recreating the [`BundleStateWithReceipts`].
