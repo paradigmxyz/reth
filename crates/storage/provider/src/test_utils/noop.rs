@@ -195,17 +195,17 @@ impl TransactionsProvider for NoopProvider {
         Ok(Vec::default())
     }
 
-    fn senders_by_tx_range(
-        &self,
-        _range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Address>> {
-        Ok(Vec::default())
-    }
-
     fn transactions_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+        Ok(Vec::default())
+    }
+
+    fn senders_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Address>> {
         Ok(Vec::default())
     }
 
@@ -429,14 +429,14 @@ impl StageCheckpointReader for NoopProvider {
 }
 
 impl WithdrawalsProvider for NoopProvider {
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        Ok(None)
-    }
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,
         _timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
+        Ok(None)
+    }
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         Ok(None)
     }
 }

@@ -2134,32 +2134,40 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
-    fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
-        // account history stage
-        {
-            let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
-            self.insert_account_history_index(indices)?;
-        }
-
-        // storage history stage
-        {
-            let indices = self.changed_storages_and_blocks_with_range(range)?;
-            self.insert_storage_history_index(indices)?;
-        }
-
-        Ok(())
-    }
-
-    fn insert_storage_history_index(
+    fn unwind_account_history_indices(
         &self,
-        storage_transitions: BTreeMap<(Address, B256), Vec<u64>>,
-    ) -> ProviderResult<()> {
-        self.append_history_index::<_, tables::StoragesHistory>(
-            storage_transitions,
-            |(address, storage_key), highest_block_number| {
-                StorageShardedKey::new(address, storage_key, highest_block_number)
-            },
-        )
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<usize> {
+        let mut last_indices = self
+            .tx
+            .cursor_read::<tables::AccountChangeSets>()?
+            .walk_range(range)?
+            .map(|entry| entry.map(|(index, account)| (account.address, index)))
+            .collect::<Result<Vec<_>, _>>()?;
+        last_indices.sort_by_key(|(a, _)| *a);
+
+        // Unwind the account history index.
+        let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
+        for &(address, rem_index) in &last_indices {
+            let partial_shard = unwind_history_shards::<_, tables::AccountsHistory, _>(
+                &mut cursor,
+                ShardedKey::last(address),
+                rem_index,
+                |sharded_key| sharded_key.key == address,
+            )?;
+
+            // Check the last returned partial shard.
+            // If it's not empty, the shard needs to be reinserted.
+            if !partial_shard.is_empty() {
+                cursor.insert(
+                    ShardedKey::last(address),
+                    BlockNumberList::new_pre_sorted(partial_shard),
+                )?;
+            }
+        }
+
+        let changesets = last_indices.len();
+        Ok(changesets)
     }
 
     fn insert_account_history_index(
@@ -2212,40 +2220,32 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
         Ok(changesets)
     }
 
-    fn unwind_account_history_indices(
+    fn insert_storage_history_index(
         &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<usize> {
-        let mut last_indices = self
-            .tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range)?
-            .map(|entry| entry.map(|(index, account)| (account.address, index)))
-            .collect::<Result<Vec<_>, _>>()?;
-        last_indices.sort_by_key(|(a, _)| *a);
+        storage_transitions: BTreeMap<(Address, B256), Vec<u64>>,
+    ) -> ProviderResult<()> {
+        self.append_history_index::<_, tables::StoragesHistory>(
+            storage_transitions,
+            |(address, storage_key), highest_block_number| {
+                StorageShardedKey::new(address, storage_key, highest_block_number)
+            },
+        )
+    }
 
-        // Unwind the account history index.
-        let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
-        for &(address, rem_index) in &last_indices {
-            let partial_shard = unwind_history_shards::<_, tables::AccountsHistory, _>(
-                &mut cursor,
-                ShardedKey::last(address),
-                rem_index,
-                |sharded_key| sharded_key.key == address,
-            )?;
-
-            // Check the last returned partial shard.
-            // If it's not empty, the shard needs to be reinserted.
-            if !partial_shard.is_empty() {
-                cursor.insert(
-                    ShardedKey::last(address),
-                    BlockNumberList::new_pre_sorted(partial_shard),
-                )?;
-            }
+    fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
+        // account history stage
+        {
+            let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
+            self.insert_account_history_index(indices)?;
         }
 
-        let changesets = last_indices.len();
-        Ok(changesets)
+        // storage history stage
+        {
+            let indices = self.changed_storages_and_blocks_with_range(range)?;
+            self.insert_storage_history_index(indices)?;
+        }
+
+        Ok(())
     }
 }
 

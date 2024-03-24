@@ -590,7 +590,7 @@ impl Discv4Service {
 
     /// Returns the current enr sequence of the local record.
     fn enr_seq(&self) -> Option<u64> {
-        (self.config.enable_eip868).then(|| self.local_eip_868_enr.seq())
+        self.config.enable_eip868.then(|| self.local_eip_868_enr.seq())
     }
 
     /// Sets the [Interval] used for periodically looking up targets over the network

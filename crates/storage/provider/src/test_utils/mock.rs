@@ -692,14 +692,14 @@ impl StateProviderFactory for Arc<MockEthProvider> {
 }
 
 impl WithdrawalsProvider for MockEthProvider {
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        Ok(None)
-    }
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,
         _timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
+        Ok(None)
+    }
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         Ok(None)
     }
 }
