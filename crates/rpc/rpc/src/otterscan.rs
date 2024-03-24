@@ -62,7 +62,7 @@ where
                 },
             )
             .await?
-            .ok_or(internal_rpc_err("transaction not found"))
+            .ok_or_else(|| internal_rpc_err("transaction not found"))
     }
 
     /// Handler for `ots_traceTransaction`

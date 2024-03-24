@@ -1426,7 +1426,7 @@ async fn test_eth_get_transaction_count_rpc_call() {
         "eth_getTransactionCount",
         rpc_params!["0x407d73d8a49eeb85d32cf465507dd71d507100c1", "not_valid_block_number"], // Incorrect parameters
     )
-        .await;
+    .await;
 }
 
 #[cfg(test)]
