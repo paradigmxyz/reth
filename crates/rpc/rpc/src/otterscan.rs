@@ -1,4 +1,5 @@
 use crate::{eth::EthTransactions, result::internal_rpc_err};
+use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
@@ -46,23 +47,18 @@ where
     }
 
     /// Handler for `ots_getTransactionError`
-    async fn get_transaction_error(&self, _tx_hash: TxHash) -> RpcResult<String> {
+    async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>> {
         self.eth
             .spawn_trace_transaction_in_block_with_inspector(
-                _tx_hash,
+                tx_hash,
                 NoOpInspector,
                 |_tx_info, _inspector, res, _| match res.result {
-                    // hexadecimal-formatted error blob
-                    ExecutionResult::Revert { output, .. } => Ok(format!("b{output}")),
-
-                    // Returns "0x"
-                    //  1. if the transaction was successfully executed.
-                    //  2. if it failed with no revert reason or out of gas
-                    _ => Ok("0x".to_string()),
+                    ExecutionResult::Revert { output, .. } => Ok(output),
+                    _ => Ok(Bytes::new()),
                 },
             )
-            .await?
-            .ok_or_else(|| internal_rpc_err("transaction not found"))
+            .await
+            .map_err(|e| internal_rpc_err(e.to_string()))
     }
 
     /// Handler for `ots_traceTransaction`

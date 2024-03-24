@@ -301,7 +301,7 @@ where
         OtterscanClient::get_internal_operations(client, tx_hash).await.err().unwrap()
     ));
 
-    OtterscanClient::get_transaction_error(client, tx_hash).await.err().unwrap();
+    OtterscanClient::get_transaction_error(client, tx_hash).await.unwrap();
 
     assert!(is_unimplemented(
         OtterscanClient::trace_transaction(client, tx_hash).await.err().unwrap()
