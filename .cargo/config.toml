@@ -1,5 +1,5 @@
 [alias]
-docs = "doc --workspace --exclude reth-network --all-features --no-deps"
+docs = "doc --workspace --all-features --no-deps"
 
 [target.x86_64-pc-windows-msvc]
 rustflags = [

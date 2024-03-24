@@ -303,7 +303,6 @@ fix-lint-op-reth:
 fix-lint-other-targets:
 	cargo +nightly clippy \
 	--workspace \
-	--exclude reth-network \
 	--lib \
 	--examples \
 	--tests \
@@ -346,7 +345,6 @@ lint-op-reth:
 lint-other-targets:
 	cargo +nightly clippy \
 	--workspace \
-	--exclude reth-network \
 	--lib \
 	--examples \
 	--tests \
@@ -360,7 +358,8 @@ lint:
 	make lint-other-targets && \
 	make fmt
 
-rustdocs:
+.PHONY: rustdocs
+rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
 	RUSTDOCFLAGS="\
 	--cfg docsrs \
 	--show-type-layout \
@@ -368,10 +367,6 @@ rustdocs:
 	--enable-index-page -Zunstable-options -D warnings" \
 	cargo +nightly docs \
 	--document-private-items
-
-.PHONY: rustdocs
-rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
-	make rustdocs
 	
 test-reth:
 	cargo test \
