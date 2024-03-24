@@ -136,7 +136,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                 let (tx_id, sender) = match recovered {
                     Ok(result) => result,
                     Err(error) => {
-                        match *error {
+                        return match *error {
                             SenderRecoveryStageError::FailedRecovery(err) => {
                                 // get the block number for the bad transaction
                                 let block_number = tx
@@ -148,14 +148,14 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                                 let sealed_header = provider
                                     .sealed_header(block_number)?
                                     .ok_or(ProviderError::HeaderNotFound(block_number.into()))?;
-                                return Err(StageError::Block {
+                                Err(StageError::Block {
                                     block: Box::new(sealed_header),
                                     error: BlockErrorKind::Validation(
                                         consensus::ConsensusError::TransactionSignerRecoveryError,
                                     ),
                                 })
                             }
-                            SenderRecoveryStageError::StageError(err) => return Err(err),
+                            SenderRecoveryStageError::StageError(err) => Err(err),
                         }
                     }
                 };

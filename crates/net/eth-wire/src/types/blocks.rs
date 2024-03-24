@@ -54,13 +54,13 @@ pub struct BlockHeaders(
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for BlockHeaders {
     type Parameters = ();
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         let headers_strategy = vec(valid_header_strategy(), 0..10); // Adjust the range as needed
 
         headers_strategy.prop_map(BlockHeaders).boxed()
     }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
