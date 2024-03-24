@@ -12,7 +12,7 @@ use reth_primitives::{AnyNode, Bytes, ForkId, NodeRecord, MAINNET};
 
 use crate::{
     enr::uncompressed_to_multiaddr_id,
-    filter::{FilterDiscovered, MustIncludeChain},
+    filter::{FilterDiscovered, MustNotIncludeChains},
 };
 
 /// Default interval in seconds at which to run a self-lookup up query.
@@ -22,7 +22,7 @@ const DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL: u64 = 60;
 
 /// Builds a [`Config`].
 #[derive(Debug, Default)]
-pub struct ConfigBuilder<Filter = MustIncludeChain> {
+pub struct ConfigBuilder<Filter = MustNotIncludeChains> {
     /// Config used by [`discv5::Discv5`]. Contains the discovery listen socket.
     discv5_config: Option<discv5::Config>,
     /// Nodes to boot from.
@@ -214,7 +214,7 @@ impl<T> ConfigBuilder<T> {
 
 /// Config used to bootstrap [`discv5::Discv5`].
 #[derive(Debug)]
-pub struct Config<Filter = MustIncludeChain> {
+pub struct Config<Filter = MustNotIncludeChains> {
     /// Config used by [`discv5::Discv5`]. Contains the [`ListenConfig`], with the discovery listen
     /// socket.
     pub(super) discv5_config: discv5::Config,

@@ -30,7 +30,7 @@ use tracing::error;
 
 use crate::{
     config::Config,
-    filter::{FilterDiscovered, FilterOutcome, MustIncludeChain},
+    filter::{FilterDiscovered, FilterOutcome, MustNotIncludeChains},
     metrics::{Metrics, UpdateMetrics},
     Discv5, HandleDiscv5,
 };
@@ -54,7 +54,7 @@ pub enum Error {
 
 /// Wraps [`discv5::Discv5`] supporting downgrade to [`Discv4`].
 #[derive(Debug, Clone)]
-pub struct Discv5BCv4<T = MustIncludeChain> {
+pub struct Discv5BCv4<T = MustNotIncludeChains> {
     discv5: Discv5<T>,
     discv4: Discv4,
 }

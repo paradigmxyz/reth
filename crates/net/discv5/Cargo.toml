@@ -39,6 +39,7 @@ tracing.workspace = true
 thiserror.workspace = true
 itertools.workspace = true
 metrics.workspace = true
+dashmap = "5.5.3"
 
 [dev-dependencies]
 rand.workspace = true

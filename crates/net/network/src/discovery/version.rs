@@ -12,7 +12,7 @@ use derive_more::From;
 use futures::{Stream, StreamExt};
 use pin_project::pin_project;
 use reth_discv4::{secp256k1::SecretKey, Discv4, Discv4Config};
-use reth_discv5::{Discv5, Discv5BCv4, FilterDiscovered, MustIncludeChain};
+use reth_discv5::{Discv5, Discv5BCv4, FilterDiscovered, MustNotIncludeChains};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{ForkId, PeerId};
@@ -61,7 +61,7 @@ macro_rules! trait_method_body {
 /// Devp2p discovery node. Transparent wrapper of versioned types.
 #[pin_project(project = EnumProj)]
 #[derive(Debug, From)]
-pub enum Discovery<T = MustIncludeChain> {
+pub enum Discovery<T = MustNotIncludeChains> {
     /// Protocol version 5.
     V5(#[pin] Discovery5<T>),
     /// Protocol version 5, with support for version 4 backwards compatibility.

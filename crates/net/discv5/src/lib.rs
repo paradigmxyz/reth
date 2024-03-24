@@ -28,7 +28,7 @@ pub use discv5::{self, IpMode};
 pub use config::{BootNode, ChainRef, Config, ConfigBuilder, IdentifyForkIdKVPair};
 pub use downgrade_v4::{DiscoveryUpdate, Discv5BCv4, MergedUpdateStream};
 pub use enr::uncompressed_id_from_enr_pk;
-pub use filter::{FilterDiscovered, FilterOutcome, MustIncludeChain, MustIncludeFork};
+pub use filter::{FilterDiscovered, FilterOutcome, MustIncludeFork, MustNotIncludeChains};
 use metrics::{Metrics, UpdateMetrics};
 
 /// Errors from using [`discv5::Discv5`] handle.
@@ -125,7 +125,7 @@ pub trait HandleDiscv5 {
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Deref, DerefMut, Clone, Constructor)]
-pub struct Discv5<T = MustIncludeChain> {
+pub struct Discv5<T = MustNotIncludeChains> {
     #[deref]
     #[deref_mut]
     discv5: Arc<discv5::Discv5>,

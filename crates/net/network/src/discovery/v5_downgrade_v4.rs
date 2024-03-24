@@ -11,7 +11,7 @@ use discv5::enr::Enr;
 use futures::{Stream, StreamExt};
 use reth_discv4::{secp256k1::SecretKey, Discv4Config};
 use reth_discv5::{
-    filter::{FilterDiscovered, MustIncludeChain},
+    filter::{FilterDiscovered, MustNotIncludeChains},
     metrics::UpdateMetrics,
     Discv5BCv4, MergedUpdateStream,
 };
@@ -29,7 +29,7 @@ use super::{
 /// [`Discovery`] type that uses [`discv5::Discv5`](reth_discv5::discv5), with support for
 /// downgraded [`Discv4`](reth_discv4::Discv4) connections.
 
-pub type Discovery5BC<T = MustIncludeChain> =
+pub type Discovery5BC<T = MustNotIncludeChains> =
     Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>>;
 
 impl<T> Discovery<Discv5BCv4<T>, MergedUpdateStream, Enr<SecretKey>> {

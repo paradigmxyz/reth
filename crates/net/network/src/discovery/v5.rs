@@ -11,13 +11,12 @@ use reth_discv4::secp256k1::SecretKey;
 
 use reth_discv5::{
     enr::uncompressed_id_from_enr_pk,
-    filter::{FilterDiscovered, FilterOutcome, MustIncludeChain},
+    filter::{FilterDiscovered, FilterOutcome, MustNotIncludeChains},
     metrics::{AdvertisedChainCounter, UpdateMetrics},
     Config as DiscV5Config, Discv5, HandleDiscv5,
 };
 use reth_dns_discovery::{new_with_dns_resolver, DnsDiscoveryConfig};
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
-
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tracing::trace;
 
@@ -30,7 +29,7 @@ use super::{
 
 /// [`Discovery`] type that uses [`discv5::Discv5`].
 
-pub type Discovery5<T = MustIncludeChain> =
+pub type Discovery5<T = MustNotIncludeChains> =
     Discovery<Discv5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>;
 
 impl<T> Discovery<Discv5<T>, ReceiverStream<discv5::Event>, Enr<SecretKey>>

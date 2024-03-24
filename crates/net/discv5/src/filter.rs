@@ -1,7 +1,9 @@
 //! Predicates to constraint peer lookups.
 
 use alloy_rlp::Decodable;
+use dashmap::DashSet;
 use derive_more::Constructor;
+use itertools::Itertools;
 use reth_primitives::{ForkId, MAINNET};
 
 use crate::{ChainRef, IdentifyForkIdKVPair};
@@ -54,7 +56,7 @@ impl FilterOutcome {
 }
 
 /// Filter requiring that peers advertise that they belong to some fork of a certain chain.
-#[derive(Debug, Constructor, Clone, Copy)]
+#[derive(Debug, Constructor, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MustIncludeChain {
     /// Chain which node record must advertise.
     chain: &'static [u8],
@@ -76,6 +78,33 @@ impl FilterDiscovered for MustIncludeChain {
 impl Default for MustIncludeChain {
     fn default() -> Self {
         Self { chain: ChainRef::ETH }
+    }
+}
+
+/// Filter requiring that peers not advertise that they belong to some chains.
+#[derive(Debug, Constructor, Clone, Default)]
+pub struct MustNotIncludeChains {
+    chains: DashSet<MustIncludeChain>,
+}
+
+impl FilterDiscovered for MustNotIncludeChains {
+    fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
+        for chain in self.chains.iter() {
+            if matches!(chain.filter(enr), FilterOutcome::Ok) {
+                return FilterOutcome::Ignore { reason: self.ignore_reason() }
+            }
+        }
+        if enr.get_raw_rlp(ChainRef::ETH2).is_some() {
+            return FilterOutcome::Ignore { reason: self.ignore_reason() }
+        }
+        FilterOutcome::Ok
+    }
+
+    fn ignore_reason(&self) -> String {
+        format!(
+            "{} forks not allowed",
+            self.chains.iter().map(|chain| String::from_utf8_lossy(chain.chain)).format("{},")
+        )
     }
 }
 
