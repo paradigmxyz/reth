@@ -251,6 +251,7 @@ nybbles = "0.2.1"
 smallvec = "1"
 dyn-clone = "1.0.17"
 sha2 = { version = "0.10", default-features = false }
+paste = "1.0"
 
 # proc-macros
 proc-macro2 = "1.0"
