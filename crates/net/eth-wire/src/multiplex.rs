@@ -166,7 +166,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
             tokio::select! {
                 Some(Ok(msg)) = self.inner.conn.next() => {
                     // Ensure the message belongs to the primary protocol
-                    let Some(&offset) = msg.first()
+                    let Some(offset) = msg.first().copied()
                     else {
                         return Err(P2PStreamError::EmptyProtocolMessage.into())
                     };
@@ -521,7 +521,7 @@ where
                 match this.inner.conn.poll_next_unpin(cx) {
                     Poll::Ready(Some(Ok(msg))) => {
                         delegated = true;
-                        let Some(&offset) = msg.first() else {
+                        let Some(offset) = msg.first().copied() else {
                             return Poll::Ready(Some(Err(
                                 P2PStreamError::EmptyProtocolMessage.into()
                             )))
