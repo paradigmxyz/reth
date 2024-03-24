@@ -13,8 +13,8 @@ use reth_primitives::BlockNumber;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
 
-/// Number of entries before pushing indices from cache to [`Collector`]
-const DEFAULT_CACHE_THRESHOLD: usize = 200_000;
+/// Number of blocks before pushing indices from cache to [`Collector`]
+const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
 
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
@@ -50,7 +50,6 @@ where
 
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
     let mut cache: HashMap<P, Vec<u64>> = HashMap::new();
-    let mut entries = 0;
 
     let mut collect = |cache: &HashMap<P, Vec<u64>>| {
         for (key, indice_list) in cache {
@@ -67,21 +66,27 @@ where
     let total_changesets = tx.entries::<CS>()?;
     let interval = (total_changesets / 100).max(1);
 
+    let mut flush_counter = 0;
+    let mut current_block_number = u64::MAX;
     for (idx, entry) in changeset_cursor.walk_range(range)?.enumerate() {
-        let (index, key) = partial_key_factory(entry?);
-        cache.entry(key).or_default().push(index);
+        let (block_number, key) = partial_key_factory(entry?);
+        cache.entry(key).or_default().push(block_number);
 
         if idx > 0 && idx % interval == 0 && total_changesets > 100 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
         }
 
-        entries += 1;
-        if entries > DEFAULT_CACHE_THRESHOLD {
-            entries = 0;
-
-            collect(&cache)?;
-            cache.clear();
+        // Make sure we only flush the cache every DEFAULT_CACHE_THRESHOLD blocks.
+        if current_block_number != block_number {
+            current_block_number = block_number;
+            flush_counter += 1;
+            if flush_counter > DEFAULT_CACHE_THRESHOLD {    
+                collect(&cache)?;
+                cache.clear();
+                flush_counter = 0;
+            }
         }
+        
     }
     collect(&cache)?;
 
