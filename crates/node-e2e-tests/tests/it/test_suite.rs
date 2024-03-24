@@ -73,7 +73,8 @@ impl TestSuite {
 		"londonBlock": 0,
 		"arrowGlacierBlock": 0,
 		"grayGlacierBlock": 0,
-		"shanghaiTime": 1710500924,
+		"shanghaiTime": 0,
+        "cancunTime":0,
 		"terminalTotalDifficulty": 0,
 		"terminalTotalDifficultyPassed": true
 }

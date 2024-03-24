@@ -2,15 +2,12 @@ use crate::test_suite::TestSuite;
 use futures_util::StreamExt;
 use reth::{
     builder::{NodeBuilder, NodeHandle},
-    payload::{EthPayloadBuilderAttributes, Events},
+    payload::EthPayloadBuilderAttributes,
     providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
         api::EngineApiClient,
-        compat::engine::payload::convert_payload_field_v2_to_payload,
         eth::EthTransactions,
-        types::engine::{
-            ExecutionPayloadEnvelopeV2, ExecutionPayloadInputV2, ForkchoiceState, PayloadAttributes,
-        },
+        types::engine::{ExecutionPayloadEnvelopeV3, ForkchoiceState, PayloadAttributes},
     },
     tasks::TaskManager,
 };
@@ -46,26 +43,35 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 
     // trigger new payload building draining the pool
     let eth_attr = eth_payload_attributes();
-    let payload_id = node.payload_builder.new_payload(eth_attr).await?;
+    let payload_id = node.payload_builder.new_payload(eth_attr.clone()).await?;
 
     // resolve best payload via engine api
     let client = node.auth_server_handle().http_client();
-    EngineApiClient::<EthEngineTypes>::get_payload_v2(&client, payload_id).await?;
+    EngineApiClient::<EthEngineTypes>::get_payload_v3(&client, payload_id).await?;
 
-    // get the best payload built via payload events
-    let payload: Events<EthEngineTypes> = payload_events.recv().await.unwrap()?;
-    if let reth::payload::Events::BuiltPayload(payload) = payload {
+    let mut payload_event_stream = payload_events.into_stream();
+
+    // first event is the payload attributes
+    let first_event = payload_event_stream.next().await.unwrap()?;
+    if let reth::payload::Events::Attributes(attr) = first_event {
+        assert_eq!(eth_attr.timestamp, attr.timestamp);
+    }
+
+    // second event is built payload
+    let second_event = payload_event_stream.next().await.unwrap()?;
+    if let reth::payload::Events::BuiltPayload(payload) = second_event {
         // setup payload for submission
-        let envelope_v2 = ExecutionPayloadEnvelopeV2::from(payload);
-        let exec_payload = convert_payload_field_v2_to_payload(envelope_v2.execution_payload);
-        let payload_input = ExecutionPayloadInputV2 {
-            execution_payload: exec_payload.as_v1().clone(),
-            withdrawals: Some(vec![]),
-        };
+        let envelope_v3 = ExecutionPayloadEnvelopeV3::from(payload);
+        let payload_v3 = envelope_v3.execution_payload;
 
         // submit payload to engine api
-        let submission =
-            EngineApiClient::<EthEngineTypes>::new_payload_v2(&client, payload_input).await?;
+        let submission = EngineApiClient::<EthEngineTypes>::new_payload_v3(
+            &client,
+            payload_v3,
+            vec![],
+            eth_attr.parent_beacon_block_root.unwrap(),
+        )
+        .await?;
         assert!(submission.is_valid());
 
         // get latest valid hash from blockchaint tree
@@ -84,8 +90,8 @@ async fn can_run_eth_node() -> eyre::Result<()> {
         .await?;
         assert!(fcu.is_valid());
 
-        // get head block from notifications stream and verify the tx has been pushed to the pool is
-        // actually present in the canonical block
+        // get head block from notifications stream and verify the tx has been pushed to the pool
+        // is actually present in the canonical block
         let head = notifications.next().await.unwrap();
         let tx = head.tip().transactions().next().unwrap();
         assert_eq!(tx.hash(), transfer_tx.hash);
@@ -109,7 +115,7 @@ fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
         prev_randao: B256::ZERO,
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
-        parent_beacon_block_root: None,
+        parent_beacon_block_root: Some(B256::ZERO),
     };
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
