@@ -2,7 +2,7 @@
 
 use crate::{
     cache::LruCache,
-    discovery::ProxyHandleDiscovery,
+    discovery::{version::ProxyHandleDiscovery, ProxyHandleDiscovery},
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     manager::DiscoveredEvent,
     message::{
