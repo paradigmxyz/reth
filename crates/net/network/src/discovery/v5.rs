@@ -82,6 +82,7 @@ where
     D: HandleDiscovery + HandleDiscv5<Filter = T> + UpdateMetrics,
     T: FilterDiscovered,
 {
+    /// Process an event from the underlying [`discv5::Discv5`] node.
     pub fn on_discv5_update(&mut self, update: discv5::Event) {
         match update {
             discv5::Event::Discovered(enr) => {
@@ -96,7 +97,7 @@ where
                     metrics.discovered_peers_chain_type.increment_once_by_chain_type(counter);
                 });
 
-                if let ProcessPeerResult::Unreachable = self.on_discovered_peer(enr) {
+                if matches!(self.on_discovered_peer(enr), ProcessPeerResult::Unreachable) {
                     self.disc.as_mut().unwrap().with_metrics(|metrics| {
                         metrics.discovered_peers_by_protocol.increment_discovered_unreachable_v5(1);
                     });
@@ -130,13 +131,12 @@ where
                 // node has been discovered unrelated to a query, e.g. an incoming connection to
                 // discv5
 
-                self.disc.as_mut().map(|discv5| {
-                    discv5.with_metrics(|metrics| {
-                        metrics.discovered_peers_by_protocol.increment_discovered_v5(1);
-                    })
+                let discv5 = self.disc.as_mut().unwrap();
+                discv5.with_metrics(|metrics| {
+                    metrics.discovered_peers_by_protocol.increment_discovered_v5(1);
                 });
 
-                if let ProcessPeerResult::Unreachable = self.on_discovered_peer(enr) {
+                if matches!(self.on_discovered_peer(enr), ProcessPeerResult::Unreachable) {
                     self.disc.as_mut().unwrap().with_metrics(|metrics| {
                         metrics.discovered_peers_by_protocol.increment_discovered_unreachable_v5(1);
                     });
@@ -263,9 +263,7 @@ mod tests {
             .filter(NoopFilter)
             .build();
 
-        Discovery::start_discv5(secret_key, Some(discv5_config), None)
-            .await
-            .expect("should build discv5")
+        Discovery::start_discv5(secret_key, discv5_config, None).await.expect("should build discv5")
     }
 
     #[tokio::test(flavor = "multi_thread")]

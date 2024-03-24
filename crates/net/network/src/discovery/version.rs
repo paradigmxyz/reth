@@ -16,12 +16,15 @@ use reth_discv5::{Discv5, Discv5BCv4, FilterDiscovered, MustIncludeChain};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{ForkId, PeerId};
+use tokio::sync::mpsc;
 
 use crate::{error::NetworkError, DiscoveryEvent};
 
 use super::{v5::Discovery5, v5_downgrade_v4::Discovery5BC, Discovery as Discovery4};
 
-pub trait ProxyHandleDiscovery {
+/// Used by [`NetworkManager`](crate::NetworkManager) to interface with versioned [`Discovery`]
+/// wrapper.
+pub trait HandleDiscoveryServices {
     /// Updates the `eth:ForkId` field in discovery.
     fn update_fork_id(&self, fork_id: ForkId);
 
@@ -33,8 +36,12 @@ pub trait ProxyHandleDiscovery {
 
     /// Returns the id with which the local identifies itself in the network
     fn local_id(&self) -> PeerId;
+
+    /// Registers a listener for receiving [DiscoveryEvent] updates.
+    fn add_listener(&mut self, tx: mpsc::UnboundedSender<DiscoveryEvent>);
 }
 
+/// Returns a versioned wrapper around the discovery handle.
 pub trait CloneDiscoveryHandle {
     /// Returns a thread safe shared reference to the discovery handle.
     fn handle(&self) -> Option<DiscoveryHandle>;
@@ -64,6 +71,7 @@ pub enum Discovery<T = MustIncludeChain> {
 }
 
 impl<T> Discovery<T> {
+    /// Starts [`discv5::Discv5`].
     pub async fn start(
         discv4_addr: std::net::SocketAddr,
         sk: SecretKey,
@@ -96,7 +104,7 @@ impl<T> Discovery<T> {
     }
 }
 
-impl ProxyHandleDiscovery for Discovery {
+impl HandleDiscoveryServices for Discovery {
     fn update_fork_id(&self, fork_id: ForkId) {
         trait_method_body!(self, update_fork_id, fork_id,)
     }
@@ -112,6 +120,14 @@ impl ProxyHandleDiscovery for Discovery {
     fn local_id(&self) -> PeerId {
         trait_method_body!(self, local_id,)
     }
+
+    fn add_listener(&mut self, tx: mpsc::UnboundedSender<DiscoveryEvent>) {
+        match self {
+            Self::V5(discv5) => discv5.discovery_listeners.push(tx),
+            Self::V5BCv4(discv5) => discv5.discovery_listeners.push(tx),
+            Self::V4(discv4) => discv4.discovery_listeners.push(tx),
+        }
+    }
 }
 
 impl CloneDiscoveryHandle for Discovery {
@@ -123,7 +139,7 @@ impl CloneDiscoveryHandle for Discovery {
 impl Stream for Discovery {
     type Item = DiscoveryEvent;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.project() {
             EnumProj::V5(mut discv5) => discv5.poll_next_unpin(cx),
             EnumProj::V5BCv4(mut discv5) => discv5.poll_next_unpin(cx),

@@ -1,6 +1,6 @@
 //! Minimal interface between discovery and network.
 
-use std::{error::Error, net::IpAddr, sync::Arc};
+use std::{error::Error, net::IpAddr};
 
 use derive_more::From;
 use enr::Enr;

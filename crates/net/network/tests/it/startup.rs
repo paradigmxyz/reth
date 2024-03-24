@@ -50,7 +50,7 @@ mod discv4_tests {
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
     use reth_discv4::Discv4Config;
-    use reth_network::Discovery;
+    use reth_network::discovery::Discovery;
     use tokio::net::TcpListener;
 
     use super::*;

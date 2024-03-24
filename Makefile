@@ -354,34 +354,13 @@ lint-other-targets:
 	--all-features \
 	-- -D warnings
 
-lint-network:
-	cargo +nightly clippy \
-	-p reth-network \
-	--lib \
-	--examples \
-	--tests \
-	--benches \
-	-- -D warnings
-
-lint-discv5-downgrade-v4:
-	cargo +nightly clippy \
-	-p reth-network \
-	--lib \
-	--examples \
-	--tests \
-	--benches \
-	--features discv5-downgrade-v4 \
-	-- -D warnings
-
 lint:
 	make lint-reth && \
 	make lint-op-reth && \
 	make lint-other-targets && \
-	make lint-network && \
-	make lint-discv5-downgrade-v4 && \
 	make fmt
 
-rustdocs-other-targets:
+rustdocs:
 	RUSTDOCFLAGS="\
 	--cfg docsrs \
 	--show-type-layout \
@@ -390,35 +369,9 @@ rustdocs-other-targets:
 	cargo +nightly docs \
 	--document-private-items
 
-rustdocs-network: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
-	RUSTDOCFLAGS="\
-	--cfg docsrs \
-	--show-type-layout \
-	--generate-link-to-definition \
-	--enable-index-page -Zunstable-options -D warnings" \
-	cargo +nightly doc \
-	-p reth-network \
-	--features discv5-downgrade-v4 \
-	--no-deps \
-	--document-private-items
-
-rustdocs-discv5-downgrade-v4: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
-	RUSTDOCFLAGS="\
-	--cfg docsrs \
-	--show-type-layout \
-	--generate-link-to-definition \
-	--enable-index-page -Zunstable-options -D warnings" \
-	cargo +nightly doc \
-	-p reth-network \
-	--features discv5-downgrade-v4 \
-	--no-deps \
-	--document-private-items
-
 .PHONY: rustdocs
 rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
-	make rustdocs-other-targets && \
-	make rustdocs-network && \
-	make rustdocs-discv5-downgrade-v4
+	make rustdocs
 	
 test-reth:
 	cargo test \
@@ -450,6 +403,7 @@ test-other-targets:
 test-doc:
 	cargo test --doc --workspace --features "ethereum"
 	cargo test --doc --workspace --features "optimism"
+	cargo test --doc --all --all-features
 
 test:
 	make test-reth && \

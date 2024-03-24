@@ -18,7 +18,7 @@
 use crate::{
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
-    discovery::version::{CloneDiscoveryHandle, ProxyHandleDiscovery},
+    discovery::version::{CloneDiscoveryHandle, HandleDiscoveryServices},
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},

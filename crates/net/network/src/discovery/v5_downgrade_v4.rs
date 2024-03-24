@@ -126,12 +126,11 @@ where
                         _ => (),
                     }
 
-                    self.disc.as_mut().map(|discv5| {
-                        discv5.with_metrics(|metrics| {
-                            metrics
-                                .discovered_peers_by_protocol
-                                .increment_discovered_v4_as_downgrade(count_discovered)
-                        })
+                    let discv5 = self.disc.as_mut().unwrap();
+                    discv5.with_metrics(|metrics| {
+                        metrics
+                            .discovered_peers_by_protocol
+                            .increment_discovered_v4_as_downgrade(count_discovered)
                     });
 
                     self.on_discv4_update(update)
@@ -161,7 +160,7 @@ where
 mod tests {
     use rand::thread_rng;
     use reth_discv4::{DiscoveryUpdate, Discv4ConfigBuilder};
-    use reth_discv5::{discv5, enr::EnrCombinedKeyWrapper, filter::NoopFilter, HandleDiscv5};
+    use reth_discv5::{enr::EnrCombinedKeyWrapper, filter::NoopFilter, HandleDiscv5};
     use reth_net_common::discovery::HandleDiscovery;
     use tracing::trace;
 
@@ -188,8 +187,8 @@ mod tests {
         Discovery::start_discv5_with_v4_downgrade(
             discv4_addr,
             secret_key,
-            Some(discv4_config),
-            Some(discv5_config),
+            discv4_config,
+            discv5_config,
             None,
         )
         .await

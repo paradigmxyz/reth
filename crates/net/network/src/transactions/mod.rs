@@ -1085,6 +1085,10 @@ where
                     // known that this transaction is bad. (e.g. consensus rules).
                     // Note: nonce gaps are not considered bad transactions.
                     //
+                    trace!(target: "net::tx::manager",
+                        %err,
+                        "bad import"
+                    );
                     if err.is_bad_transaction() && !self.network.is_syncing() {
                         debug!(target: "net::tx", %err, "bad pool transaction import");
                         self.on_bad_import(err.hash);
@@ -1154,6 +1158,10 @@ where
 
     /// Clear the transaction
     fn on_good_import(&mut self, hash: TxHash) {
+        trace!(target: "net::tx::manager",
+            %hash,
+            "good import"
+        );
         self.transactions_by_peers.remove(&hash);
     }
 

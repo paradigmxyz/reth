@@ -19,9 +19,9 @@ pub mod v5;
 pub mod v5_downgrade_v4;
 pub mod version;
 
-use version::ProxyHandleDiscovery;
+use version::HandleDiscoveryServices;
 
-impl<D, S, N> ProxyHandleDiscovery for Discovery<D, S, N>
+impl<D, S, N> HandleDiscoveryServices for Discovery<D, S, N>
 where
     D: HandleDiscovery,
 {
@@ -49,6 +49,10 @@ where
 
     fn local_id(&self) -> PeerId {
         self.local_enr.id
+    }
+
+    fn add_listener(&mut self, tx: mpsc::UnboundedSender<DiscoveryEvent>) {
+        self.discovery_listeners.push(tx);
     }
 }
 
@@ -85,11 +89,6 @@ impl<D, S, N> Discovery<D, S, N>
 where
     D: HandleDiscovery,
 {
-    /// Registers a listener for receiving [DiscoveryEvent] updates.
-    pub(crate) fn add_listener(&mut self, tx: mpsc::UnboundedSender<DiscoveryEvent>) {
-        self.discovery_listeners.push(tx);
-    }
-
     /// Notifies all registered listeners with the provided `event`.
     #[inline]
     fn notify_listeners(&mut self, event: &DiscoveryEvent) {
@@ -199,7 +198,6 @@ impl<D, S, N> Discovery<D, S, N> {
 }
 
 #[cfg(test)]
-
 mod discv4_tests {
     use super::*;
     use rand::thread_rng;
@@ -208,7 +206,6 @@ mod discv4_tests {
     use std::net::{Ipv4Addr, SocketAddrV4};
 
     #[tokio::test(flavor = "multi_thread")]
-
     async fn test_discovery_setup() {
         let mut rng = thread_rng();
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);

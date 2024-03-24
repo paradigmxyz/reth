@@ -118,7 +118,7 @@ mod budget;
 mod builder;
 mod cache;
 pub mod config;
-mod discovery;
+pub mod discovery;
 pub mod error;
 pub mod eth_requests;
 mod fetch;

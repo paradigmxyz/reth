@@ -2,7 +2,7 @@
 
 use crate::{
     cache::LruCache,
-    discovery::{version::ProxyHandleDiscovery, ProxyHandleDiscovery},
+    discovery::version::HandleDiscoveryServices,
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     manager::DiscoveredEvent,
     message::{
@@ -10,7 +10,7 @@ use crate::{
         PeerResponseResult,
     },
     peers::{PeerAction, PeersManager},
-    Discovery, DiscoveryEvent, FetchClient, ProxyHandleDiscovery,
+    Discovery, DiscoveryEvent, FetchClient,
 };
 use futures::StreamExt;
 use rand::seq::SliceRandom;
@@ -529,8 +529,8 @@ pub(crate) enum StateAction {
 #[cfg(test)]
 mod tests {
     use crate::{
-        fetch::StateFetcher, message::PeerRequestSender, peers::PeersManager, state::NetworkState,
-        Discovery, PeerRequest,
+        discovery::Discovery as Discovery4, fetch::StateFetcher, message::PeerRequestSender,
+        peers::PeersManager, state::NetworkState, Discovery, PeerRequest,
     };
     use reth_eth_wire::{
         capability::{Capabilities, Capability},
@@ -555,7 +555,7 @@ mod tests {
             peers_manager: Default::default(),
             queued_messages: Default::default(),
             client: NoopProvider::default(),
-            discovery: Discovery::noop(),
+            discovery: Discovery::V4(Discovery4::noop()),
             state_fetcher: StateFetcher::new(handle, Default::default()),
         }
     }

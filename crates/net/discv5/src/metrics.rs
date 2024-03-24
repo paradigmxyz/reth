@@ -1,4 +1,4 @@
-//! Tracks peer discovery for [`Discv5`](crate::DiscV5) and
+//! Tracks peer discovery for [`Discv5`](crate::Discv5) and
 //! [`Discv5BCv4`](crate::Discv5BCv4`).
 
 use metrics::Counter;
@@ -13,7 +13,7 @@ pub trait UpdateMetrics {
         F: Fn(&mut Metrics) -> R;
 }
 
-/// Information tracked by [`Discv5`](crate::DiscV5) and
+/// Information tracked by [`Discv5`](crate::Discv5) and
 /// [`Discv5BCv4`](crate::Discv5BCv4).
 #[derive(Debug, Default, Clone)]
 pub struct Metrics {
