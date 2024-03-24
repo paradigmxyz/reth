@@ -93,7 +93,9 @@ where
         // The input field returns only the 4 bytes method selector instead of the entire
         // calldata byte blob.
         for tx in &mut transactions {
-            tx.input = tx.input.slice(..4);
+            if tx.input.len() > 4 {
+                tx.input = tx.input.slice(..4);
+            }
         }
 
         let mut receipts =
