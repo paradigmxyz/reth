@@ -300,9 +300,9 @@ where
     assert!(is_unimplemented(
         OtterscanClient::get_internal_operations(client, tx_hash).await.err().unwrap()
     ));
-    assert!(is_unimplemented(
-        OtterscanClient::get_transaction_error(client, tx_hash).await.err().unwrap()
-    ));
+
+    OtterscanClient::get_transaction_error(client, tx_hash).await.err().unwrap();
+
     assert!(is_unimplemented(
         OtterscanClient::trace_transaction(client, tx_hash).await.err().unwrap()
     ));
@@ -567,7 +567,7 @@ async fn test_eth_get_block_by_number_rpc_call() {
         "eth_getBlockByNumber",
         rpc_params!["0x1b4", true], // Block number and full transaction object flag
     )
-    .await;
+        .await;
 
     // Requesting block by number with wrong fields
     test_rpc_call_err::<Option<RichBlock>>(
@@ -575,7 +575,7 @@ async fn test_eth_get_block_by_number_rpc_call() {
         "eth_getBlockByNumber",
         rpc_params!["0x1b4", "0x1b4"],
     )
-    .await;
+        .await;
 
     // Requesting block by number with missing fields
     test_rpc_call_err::<Option<RichBlock>>(&client, "eth_getBlockByNumber", rpc_params!["0x1b4"])
@@ -597,7 +597,7 @@ async fn test_eth_get_block_by_hash_rpc_call() {
         "eth_getBlockByHash",
         rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae", false],
     )
-    .await;
+        .await;
 
     // Requesting block by hash with wrong fields
     test_rpc_call_err::<Option<RichBlock>>(
@@ -605,7 +605,7 @@ async fn test_eth_get_block_by_hash_rpc_call() {
         "eth_getBlockByHash",
         rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae", "0x1b4"],
     )
-    .await;
+        .await;
 
     // Requesting block by hash with missing fields
     test_rpc_call_err::<Option<RichBlock>>(
@@ -613,7 +613,7 @@ async fn test_eth_get_block_by_hash_rpc_call() {
         "eth_getBlockByHash",
         rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae"],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -634,7 +634,7 @@ async fn test_eth_get_code_rpc_call() {
             "0x2" // 2
         ],
     )
-    .await;
+        .await;
 
     // Define test cases with different default block parameters
     let default_block_params = vec!["earliest", "latest", "pending"];
@@ -647,7 +647,7 @@ async fn test_eth_get_code_rpc_call() {
             "eth_getCode",
             rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", param],
         )
-        .await;
+            .await;
     }
 
     // Without block number which is optional
@@ -656,7 +656,7 @@ async fn test_eth_get_code_rpc_call() {
         "eth_getCode",
         rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"],
     )
-    .await;
+        .await;
 
     // Requesting code at a given address with invalid default block parameter
     test_rpc_call_err::<Bytes>(
@@ -664,7 +664,7 @@ async fn test_eth_get_code_rpc_call() {
         "eth_getCode",
         rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", "finalized"],
     )
-    .await;
+        .await;
 
     // Requesting code at a given address with wrong fields
     test_rpc_call_err::<Bytes>(
@@ -672,7 +672,7 @@ async fn test_eth_get_code_rpc_call() {
         "eth_getCode",
         rpc_params!["0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b", false],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -821,7 +821,7 @@ async fn test_eth_get_block_transaction_count_by_hash_rpc_call() {
         "eth_getBlockTransactionCountByHash",
         rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238"],
     )
-    .await;
+        .await;
 
     // Requesting transaction count by block hash with additional fields
     test_rpc_call_ok::<Option<U256>>(
@@ -829,7 +829,7 @@ async fn test_eth_get_block_transaction_count_by_hash_rpc_call() {
         "eth_getBlockTransactionCountByHash",
         rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238", true],
     )
-    .await;
+        .await;
 
     // Requesting transaction count by block hash with missing fields
     test_rpc_call_err::<Option<U256>>(&client, "eth_getBlockTransactionCountByHash", rpc_params![])
@@ -841,7 +841,7 @@ async fn test_eth_get_block_transaction_count_by_hash_rpc_call() {
         "eth_getBlockTransactionCountByHash",
         rpc_params![true],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -859,7 +859,7 @@ async fn test_eth_get_block_transaction_count_by_number_rpc_call() {
         "eth_getBlockTransactionCountByNumber",
         rpc_params!["0xe8"],
     )
-    .await;
+        .await;
 
     // Requesting transaction count by block number with additional fields
     test_rpc_call_ok::<Option<U256>>(
@@ -867,7 +867,7 @@ async fn test_eth_get_block_transaction_count_by_number_rpc_call() {
         "eth_getBlockTransactionCountByNumber",
         rpc_params!["0xe8", true],
     )
-    .await;
+        .await;
 
     // Requesting transaction count by block number with missing fields
     test_rpc_call_err::<Option<U256>>(
@@ -875,7 +875,7 @@ async fn test_eth_get_block_transaction_count_by_number_rpc_call() {
         "eth_getBlockTransactionCountByNumber",
         rpc_params![],
     )
-    .await;
+        .await;
 
     // Requesting transaction count by block number with wrong field
     test_rpc_call_err::<Option<U256>>(
@@ -883,7 +883,7 @@ async fn test_eth_get_block_transaction_count_by_number_rpc_call() {
         "eth_getBlockTransactionCountByNumber",
         rpc_params![true],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -901,7 +901,7 @@ async fn test_eth_get_uncle_count_by_block_hash_rpc_call() {
         "eth_getUncleCountByBlockHash",
         rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238"],
     )
-    .await;
+        .await;
 
     // Requesting uncle count by block hash with additional fields
     test_rpc_call_ok::<Option<U256>>(
@@ -909,7 +909,7 @@ async fn test_eth_get_uncle_count_by_block_hash_rpc_call() {
         "eth_getUncleCountByBlockHash",
         rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238", true],
     )
-    .await;
+        .await;
 
     // Requesting uncle count by block hash with missing fields
     test_rpc_call_err::<Option<U256>>(&client, "eth_getUncleCountByBlockHash", rpc_params![]).await;
@@ -934,7 +934,7 @@ async fn test_eth_get_uncle_count_by_block_number_rpc_call() {
         "eth_getUncleCountByBlockNumber",
         rpc_params!["0xe8"],
     )
-    .await;
+        .await;
 
     // Requesting uncle count by block number with additional fields
     test_rpc_call_ok::<Option<U256>>(
@@ -942,7 +942,7 @@ async fn test_eth_get_uncle_count_by_block_number_rpc_call() {
         "eth_getUncleCountByBlockNumber",
         rpc_params!["0xe8", true],
     )
-    .await;
+        .await;
 
     // Requesting uncle count by block number with missing fields
     test_rpc_call_err::<Option<U256>>(&client, "eth_getUncleCountByBlockNumber", rpc_params![])
@@ -968,7 +968,7 @@ async fn test_eth_get_block_receipts_rpc_call() {
         "eth_getBlockReceipts",
         rpc_params!["0xe8"],
     )
-    .await;
+        .await;
 
     // Requesting block receipts by block hash with additional fields
     test_rpc_call_ok::<Option<Vec<TransactionReceipt>>>(
@@ -976,7 +976,7 @@ async fn test_eth_get_block_receipts_rpc_call() {
         "eth_getBlockReceipts",
         rpc_params!["0xe8", true],
     )
-    .await;
+        .await;
 
     // Requesting block receipts by block hash with missing fields
     test_rpc_call_err::<Option<Vec<TransactionReceipt>>>(
@@ -984,7 +984,7 @@ async fn test_eth_get_block_receipts_rpc_call() {
         "eth_getBlockReceipts",
         rpc_params![],
     )
-    .await;
+        .await;
 
     // Requesting block receipts by block hash with wrong field
     test_rpc_call_err::<Option<Vec<TransactionReceipt>>>(
@@ -992,7 +992,7 @@ async fn test_eth_get_block_receipts_rpc_call() {
         "eth_getBlockReceipts",
         rpc_params![true],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1010,7 +1010,7 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
         "eth_getUncleByBlockHashAndIndex",
         rpc_params!["0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b", "0x0"],
     )
-    .await;
+        .await;
 
     // Requesting uncle by block hash and index with additional fields
     test_rpc_call_ok::<Option<RichBlock>>(
@@ -1022,7 +1022,7 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
             true
         ],
     )
-    .await;
+        .await;
 
     // Requesting uncle by block hash and index with missing fields
     test_rpc_call_err::<Option<RichBlock>>(
@@ -1030,7 +1030,7 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
         "eth_getUncleByBlockHashAndIndex",
         rpc_params![],
     )
-    .await;
+        .await;
 
     // Requesting uncle by block hash and index with wrong fields
     test_rpc_call_err::<Option<RichBlock>>(
@@ -1038,7 +1038,7 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
         "eth_getUncleByBlockHashAndIndex",
         rpc_params![true],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1056,7 +1056,7 @@ async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
         "eth_getUncleByBlockNumberAndIndex",
         rpc_params!["0x29c", "0x0"],
     )
-    .await;
+        .await;
 
     // Requesting uncle by block number and index with additional fields
     test_rpc_call_ok::<Option<RichBlock>>(
@@ -1064,7 +1064,7 @@ async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
         "eth_getUncleByBlockNumberAndIndex",
         rpc_params!["0x29c", "0x0", true],
     )
-    .await;
+        .await;
 
     // Requesting uncle by block number and index with missing fields
     test_rpc_call_err::<Option<RichBlock>>(
@@ -1072,7 +1072,7 @@ async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
         "eth_getUncleByBlockNumberAndIndex",
         rpc_params![],
     )
-    .await;
+        .await;
 
     // Requesting uncle by block number and index with wrong fields
     test_rpc_call_err::<Option<RichBlock>>(
@@ -1080,7 +1080,7 @@ async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
         "eth_getUncleByBlockNumberAndIndex",
         rpc_params![true],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1098,7 +1098,7 @@ async fn test_eth_get_transaction_by_hash_rpc_call() {
         "eth_getTransactionByHash",
         rpc_params!["0x88df016429689c079f3b2f6ad39fa052532c56795b733da78a91ebe6a713944b"],
     )
-    .await;
+        .await;
 
     // Requesting transaction by hash with additional fields
     test_rpc_call_ok::<Option<Transaction>>(
@@ -1106,7 +1106,7 @@ async fn test_eth_get_transaction_by_hash_rpc_call() {
         "eth_getTransactionByHash",
         rpc_params!["0x88df016429689c079f3b2f6ad39fa052532c56795b733da78a91ebe6a713944b", true],
     )
-    .await;
+        .await;
 
     // Requesting transaction by hash with missing fields
     test_rpc_call_err::<Option<Transaction>>(&client, "eth_getTransactionByHash", rpc_params![])
@@ -1118,7 +1118,7 @@ async fn test_eth_get_transaction_by_hash_rpc_call() {
         "eth_getTransactionByHash",
         rpc_params![true],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1136,7 +1136,7 @@ async fn test_eth_get_transaction_by_block_hash_and_index_rpc_call() {
         "eth_getTransactionByBlockHashAndIndex",
         rpc_params!["0x1dad0df7c027bcc86d06b3a6709ff78decd732c37b73123453ba7d9463eae60d", "0x0"],
     )
-    .await;
+        .await;
 
     // Requesting transaction by block hash and index with additional fields
     test_rpc_call_ok::<Option<Transaction>>(
@@ -1148,7 +1148,7 @@ async fn test_eth_get_transaction_by_block_hash_and_index_rpc_call() {
             true
         ],
     )
-    .await;
+        .await;
 
     // Requesting transaction by block hash and index with missing fields
     test_rpc_call_err::<Option<Transaction>>(
@@ -1156,7 +1156,7 @@ async fn test_eth_get_transaction_by_block_hash_and_index_rpc_call() {
         "eth_getTransactionByBlockHashAndIndex",
         rpc_params![],
     )
-    .await;
+        .await;
 
     // Requesting transaction by block hash and index with wrong fields
     test_rpc_call_err::<Option<Transaction>>(
@@ -1164,7 +1164,7 @@ async fn test_eth_get_transaction_by_block_hash_and_index_rpc_call() {
         "eth_getTransactionByBlockHashAndIndex",
         rpc_params![true],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1182,7 +1182,7 @@ async fn test_eth_get_transaction_by_block_number_and_index_rpc_call() {
         "eth_getTransactionByBlockNumberAndIndex",
         rpc_params!["0x29c", "0x0"],
     )
-    .await;
+        .await;
 
     // Requesting transaction by block number and index with additional fields
     test_rpc_call_ok::<Option<Transaction>>(
@@ -1190,7 +1190,7 @@ async fn test_eth_get_transaction_by_block_number_and_index_rpc_call() {
         "eth_getTransactionByBlockNumberAndIndex",
         rpc_params!["0x29c", "0x0", true],
     )
-    .await;
+        .await;
 
     // Requesting transaction by block number and index with missing fields
     test_rpc_call_err::<Option<Transaction>>(
@@ -1198,7 +1198,7 @@ async fn test_eth_get_transaction_by_block_number_and_index_rpc_call() {
         "eth_getTransactionByBlockNumberAndIndex",
         rpc_params![],
     )
-    .await;
+        .await;
 
     // Requesting transaction by block number and index with wrong fields
     test_rpc_call_err::<Option<Transaction>>(
@@ -1206,7 +1206,7 @@ async fn test_eth_get_transaction_by_block_number_and_index_rpc_call() {
         "eth_getTransactionByBlockNumberAndIndex",
         rpc_params![true],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1224,7 +1224,7 @@ async fn test_eth_get_transaction_receipt_rpc_call() {
         "eth_getTransactionReceipt",
         rpc_params!["0x85d995eba9763907fdf35cd2034144dd9d53ce32cbec21349d4b12823c6860c5"],
     )
-    .await;
+        .await;
 
     // Requesting transaction receipt by transaction hash with additional fields
     test_rpc_call_ok::<Option<TransactionReceipt>>(
@@ -1232,7 +1232,7 @@ async fn test_eth_get_transaction_receipt_rpc_call() {
         "eth_getTransactionReceipt",
         rpc_params!["0x85d995eba9763907fdf35cd2034144dd9d53ce32cbec21349d4b12823c6860c5", true],
     )
-    .await;
+        .await;
 
     // Requesting transaction receipt by transaction hash with missing fields
     test_rpc_call_err::<Option<TransactionReceipt>>(
@@ -1240,7 +1240,7 @@ async fn test_eth_get_transaction_receipt_rpc_call() {
         "eth_getTransactionReceipt",
         rpc_params![],
     )
-    .await;
+        .await;
 
     // Requesting transaction receipt by transaction hash with wrong fields
     test_rpc_call_err::<Option<TransactionReceipt>>(
@@ -1248,7 +1248,7 @@ async fn test_eth_get_transaction_receipt_rpc_call() {
         "eth_getTransactionReceipt",
         rpc_params![true],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1271,7 +1271,7 @@ async fn test_eth_get_balance_rpc_call() {
             "eth_getBalance",
             rpc_params!["0x407d73d8a49eeb85d32cf465507dd71d507100c1", param],
         )
-        .await;
+            .await;
     }
 
     // Requesting balance by address with additional fields
@@ -1280,7 +1280,7 @@ async fn test_eth_get_balance_rpc_call() {
         "eth_getBalance",
         rpc_params!["0x407d73d8a49eeb85d32cf465507dd71d507100c1", "latest", true],
     )
-    .await;
+        .await;
 
     // Requesting balance by address without block number which is optional
     test_rpc_call_ok::<U256>(
@@ -1288,7 +1288,7 @@ async fn test_eth_get_balance_rpc_call() {
         "eth_getBalance",
         rpc_params!["0x407d73d8a49eeb85d32cf465507dd71d507100c1"],
     )
-    .await;
+        .await;
 
     // Requesting balance by address with no field
     test_rpc_call_err::<U256>(&client, "eth_getBalance", rpc_params![]).await;
@@ -1299,7 +1299,7 @@ async fn test_eth_get_balance_rpc_call() {
         "eth_getBalance",
         rpc_params![true], // Incorrect parameters
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1326,7 +1326,7 @@ async fn test_eth_get_storage_at_rpc_call() {
                 param                                         // Block number or tag
             ],
         )
-        .await;
+            .await;
     }
 
     // Requesting storage at a given address with additional fields
@@ -1340,7 +1340,7 @@ async fn test_eth_get_storage_at_rpc_call() {
             true                                          // Additional field
         ],
     )
-    .await;
+        .await;
 
     // Requesting storage at a given address without block number which is optional
     test_rpc_call_ok::<Bytes>(
@@ -1351,7 +1351,7 @@ async fn test_eth_get_storage_at_rpc_call() {
             "0x0"                                         // Position in the storage
         ],
     )
-    .await;
+        .await;
 
     // Requesting storage at a given address with no field
     test_rpc_call_err::<Bytes>(&client, "eth_getStorageAt", rpc_params![]).await;
@@ -1366,7 +1366,7 @@ async fn test_eth_get_storage_at_rpc_call() {
             "not_valid_block_number"                      // Block number or tag
         ],
     )
-    .await;
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1392,7 +1392,7 @@ async fn test_eth_get_transaction_count_rpc_call() {
                 param                                         // Block number or tag
             ],
         )
-        .await;
+            .await;
     }
 
     // Requesting transaction count by address with additional fields
@@ -1405,7 +1405,7 @@ async fn test_eth_get_transaction_count_rpc_call() {
             true                                          // Additional field
         ],
     )
-    .await;
+        .await;
 
     // Requesting transaction count by address without block number which is optional
     test_rpc_call_ok::<U256>(
@@ -1415,7 +1415,7 @@ async fn test_eth_get_transaction_count_rpc_call() {
             "0x407d73d8a49eeb85d32cf465507dd71d507100c1" // Address
         ],
     )
-    .await;
+        .await;
 
     // Requesting transaction count by address with no field
     test_rpc_call_err::<U256>(&client, "eth_getTransactionCount", rpc_params![]).await;
@@ -1426,7 +1426,7 @@ async fn test_eth_get_transaction_count_rpc_call() {
         "eth_getTransactionCount",
         rpc_params!["0x407d73d8a49eeb85d32cf465507dd71d507100c1", "not_valid_block_number"], // Incorrect parameters
     )
-    .await;
+        .await;
 }
 
 #[cfg(test)]
