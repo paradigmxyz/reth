@@ -1,12 +1,15 @@
-use crate::result::internal_rpc_err;
+use alloy_primitives::Bloom;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_types::{
-    BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
-    Transaction, TransactionsWithReceipts,
+    Block, BlockDetails, BlockTransactions, ContractCreator, InternalOperation,
+    OtsBlockTransactions, OtsTransactionReceipt, TraceEntry, Transaction, TransactionsWithReceipts,
 };
+
+use crate::result::internal_rpc_err;
 
 const API_LEVEL: u64 = 8;
 
@@ -71,11 +74,56 @@ where
     /// Handler for `getBlockTransactions`
     async fn get_block_transactions(
         &self,
-        _block_number: BlockNumberOrTag,
-        _page_number: usize,
-        _page_size: usize,
+        block_number: BlockNumberOrTag,
+        page_number: usize,
+        page_size: usize,
     ) -> RpcResult<OtsBlockTransactions> {
-        Err(internal_rpc_err("unimplemented"))
+        let block = self
+            .eth
+            .block_by_number(block_number, true)
+            .await?
+            .ok_or_else(|| internal_rpc_err("block not found"))?;
+
+        if let BlockTransactions::Full(transactions) = &block.transactions {
+            let mut transactions = transactions.clone();
+
+            // The input field returns only the 4 bytes method selector instead of the entire
+            // calldata byte blob.
+            for tx in &mut transactions {
+                tx.input = tx.input.slice(..4);
+            }
+
+            let mut receipts =
+                self.eth.block_receipts(BlockId::Number(block_number)).await?.unwrap_or(vec![]);
+
+            // For receipts
+            //  1. logs attribute returns null
+            //  2. logsBloom attribute returns null.
+            receipts.iter_mut().for_each(|receipt| {
+                receipt.logs = vec![];
+                receipt.logs_bloom = Bloom::default();
+            });
+
+            // Crop page
+            let page_end = transactions.len().saturating_sub(page_number * page_size);
+            let page_start = page_end.saturating_sub(page_size);
+
+            // Crop transactions
+            transactions = transactions.drain(page_start..page_end).collect();
+
+            let block =
+                Block { transactions: BlockTransactions::Full(transactions), ..block.inner };
+
+            // Crop receipts and transform them into OtsTransactionReceipt
+            let timestamp = u64::try_from(block.header.timestamp).unwrap_or(0);
+            let receipts = receipts
+                .drain(page_start..page_end)
+                .map(|receipt| OtsTransactionReceipt { receipt, timestamp })
+                .collect();
+            Ok(OtsBlockTransactions { fullblock: block.into(), receipts })
+        } else {
+            return Err(internal_rpc_err("block is not full"));
+        }
     }
 
     /// Handler for `searchTransactionsBefore`
