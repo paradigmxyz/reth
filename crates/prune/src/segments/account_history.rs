@@ -1,15 +1,15 @@
 use std::num::NonZeroUsize;
 
 use crate::{
-    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
+    segments::{
+        history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
+    },
     PrunerError,
 };
 use reth_db::{database::Database, models::ShardedKey, tables};
-use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder};
+use reth_primitives::{PruneMode, PruneSegment};
+use reth_provider::DatabaseProviderRW;
 use tracing::{instrument, trace};
-
-use super::history::step_prune_indices;
 
 #[derive(Debug)]
 pub struct AccountHistory {
@@ -37,337 +37,221 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let (block_range_start, block_range_end) = match input.get_next_block_range() {
-            Some(range) => (*range.start(), *range.end()),
+        let range = match input.get_next_block_range() {
+            Some(range) => range,
             None => {
-                trace!(target: "pruner", "No headers to prune");
+                trace!(target: "pruner", "No account history to prune");
                 return Ok(PruneOutput::done())
             }
         };
+        let range_end = *range.end();
 
-        let mut last_pruned_block =
-            if block_range_start == 0 { None } else { Some(block_range_start - 1) };
+        let limiter = input.limiter.divide_deleted_entries_limit(NonZeroUsize::new(2).unwrap());
 
-        let mut limiter = input.limiter;
+        let mut last_changeset_pruned_block = None;
+        let (pruned_changesets, progress) = provider
+            .prune_table_with_range::<tables::AccountChangeSets>(
+                range,
+                limiter,
+                |_| false,
+                |row| last_changeset_pruned_block = Some(row.0),
+            )?;
+        trace!(target: "pruner", pruned = %pruned_changesets, done = %progress.is_finished(), "Pruned account history (changesets)");
 
-        let tables_iter = AccountHistoryTablesIter::new(
+        let last_changeset_pruned_block = last_changeset_pruned_block
+            // If there's more account account changesets to prune, set the checkpoint block number
+            // to previous, so we could finish pruning its account changesets on the next run.
+            .map(
+                |block_number| {
+                    if progress.is_finished() {
+                        block_number
+                    } else {
+                        block_number.saturating_sub(1)
+                    }
+                },
+            )
+            .unwrap_or(range_end);
+
+        let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountsHistory, _>(
             provider,
-            &mut limiter,
-            last_pruned_block,
-            block_range_end,
-        );
-
-        for res in tables_iter.into_iter() {
-            last_pruned_block = res?;
-        }
-
-        let done = last_pruned_block.map_or(false, |block| block == block_range_end);
-        let progress = PruneProgress::new(done, limiter.is_timed_out());
-        let pruned = limiter.deleted_entries_count();
+            last_changeset_pruned_block,
+            |a, b| a.key == b.key,
+            |key| ShardedKey::last(key.key),
+        )?;
+        trace!(target: "pruner", %processed, pruned = %pruned_indices, done = %progress.is_finished(), "Pruned account history (history)" );
 
         Ok(PruneOutput {
             progress,
-            pruned,
+            pruned: pruned_changesets + pruned_indices,
             checkpoint: Some(PruneOutputCheckpoint {
-                block_number: last_pruned_block,
+                block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
             }),
         })
-    }
-
-    fn new_limiter_from_parent_scope_limiter(&self, limiter: &PruneLimiter) -> PruneLimiter {
-        PruneLimiterBuilder::floor_deleted_entries_limit_to_multiple_of(
-            limiter,
-            NonZeroUsize::new(2).unwrap(),
-        )
-        .build()
-    }
-}
-
-#[derive(Debug)]
-struct AccountHistoryTablesIter<'a, 'b, DB>
-where
-    DB: Database,
-{
-    provider: &'a DatabaseProviderRW<DB>,
-    limiter: &'b mut PruneLimiter,
-    last_pruned_block: Option<u64>,
-    to_block: u64,
-}
-
-impl<'a, 'b, DB> AccountHistoryTablesIter<'a, 'b, DB>
-where
-    DB: Database,
-{
-    fn new(
-        provider: &'a DatabaseProviderRW<DB>,
-        limiter: &'b mut PruneLimiter,
-        last_pruned_block: Option<u64>,
-        to_block: u64,
-    ) -> Self {
-        Self { provider, limiter, last_pruned_block, to_block }
-    }
-}
-
-impl<'a, 'b, DB> Iterator for AccountHistoryTablesIter<'a, 'b, DB>
-where
-    DB: Database,
-{
-    type Item = Result<Option<u64>, PrunerError>;
-    fn next(&mut self) -> Option<Self::Item> {
-        let Self { provider, limiter, last_pruned_block, to_block } = self;
-
-        if limiter.is_limit_reached() || Some(*to_block) == *last_pruned_block {
-            return None
-        }
-
-        let block_step =
-            if let Some(block) = *last_pruned_block { block + 1..=block + 2 } else { 0..=1 };
-
-        let next_up_last_pruned_block = Some(*block_step.start());
-        let mut last_pruned_block_changesets = None;
-        // todo: guarantee skip filter and delete callback are same for all header table types
-
-        let to_block = match provider.with_walker::<tables::AccountChangeSets, _, _>(
-            block_step.clone(),
-            |ref mut walker| {
-                provider.step_prune_range(walker, limiter, &mut |_| false, &mut |row| {
-                    last_pruned_block_changesets = Some(row.0)
-                })
-            },
-        ) {
-            Err(err) => return Some(Err(err.into())),
-            Ok(res) => if res.is_finished() {
-                last_pruned_block_changesets
-            } else {
-                last_pruned_block_changesets.map(|block| block.saturating_sub(1))
-            }
-            .unwrap_or(*block_step.end()),
-        };
-
-        if let Err(err) = provider.with_cursor::<tables::AccountsHistory, _, _>(|ref mut cursor| {
-            step_prune_indices::<DB, _, _>(
-                cursor,
-                to_block,
-                limiter,
-                &|a, b| a.key == b.key,
-                &|key| ShardedKey::last(key.key),
-            )
-        }) {
-            return Some(Err(err.into()))
-        }
-
-        *last_pruned_block = next_up_last_pruned_block;
-
-        Some(Ok(*last_pruned_block))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::BTreeMap,
-        ops::{AddAssign, Range, RangeInclusive},
+    use crate::segments::{AccountHistory, PruneInput, PruneOutput, Segment};
+    use assert_matches::assert_matches;
+    use reth_db::{tables, BlockNumberList};
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_block_range, random_changeset_range, random_eoa_accounts},
     };
-
-    use reth_db::{models::ShardedKey, tables, DatabaseEnv};
-    use reth_primitives::{
-        Address, BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment,
-    };
-    use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
-    use tracing::trace;
-
-    use crate::segments::{history::test::TestRig, AccountHistory, Segment};
-
-    struct AccountHistoryTestRigBuilder {
-        block_range: RangeInclusive<u64>,
-        n_storage_changes: Range<u64>,
-        key_range: Range<u64>,
-        prune_job_deleted_entries_limit: usize,
-    }
-
-    impl AccountHistoryTestRigBuilder {
-        fn new(
-            block_range: RangeInclusive<u64>,
-            n_storage_changes: Range<u64>,
-            key_range: Range<u64>,
-            prune_job_deleted_entries_limit: usize,
-        ) -> Self {
-            Self { block_range, n_storage_changes, key_range, prune_job_deleted_entries_limit }
-        }
-
-        fn build(self) -> TestRig<ShardedKey<Address>> {
-            reth_tracing::init_test_tracing();
-
-            let Self { block_range, n_storage_changes, key_range, prune_job_deleted_entries_limit } =
-                self;
-
-            let (db, original_changesets) =
-                TestRig::<ShardedKey<Address>>::init_db(block_range, n_storage_changes, key_range);
-
-            // verify db init
-            let account_occurrences = db
-                .table::<tables::AccountsHistory>()
-                .unwrap()
-                .into_iter()
-                .fold(BTreeMap::<_, usize>::new(), |mut map, (key, _)| {
-                    map.entry(key.key).or_default().add_assign(1);
-                    map
-                });
-            assert!(account_occurrences.into_iter().any(|(_, occurrences)| occurrences > 1));
-
-            assert_eq!(
-                db.table::<tables::AccountChangeSets>().unwrap().len(),
-                original_changesets.iter().flatten().count()
-            );
-
-            let original_shards = db.table::<tables::AccountsHistory>().unwrap();
-
-            // get limiter for whole prune job (each prune job would call prune on each segment
-            // once)
-            let job_limiter = PruneLimiterBuilder::default()
-                .deleted_entries_limit(prune_job_deleted_entries_limit)
-                .build();
-
-            trace!(target: "pruner::test",
-                changesets_len=original_changesets.len(),
-                original_shards_len=original_shards.len(),
-                job_deleted_entries_limit=job_limiter.deleted_entries_limit(),
-                "new account history test rig"
-            );
-
-            TestRig::new(db, original_changesets, original_shards, job_limiter)
-        }
-    }
-
-    fn test_prune_until_entries_delete_limit(
-        test_rig: &mut TestRig<ShardedKey<Address>>,
-        to_block: BlockNumber,
-        run: usize,
-        expected_progress: PruneProgress,
-    ) {
-        reth_tracing::init_test_tracing();
-
-        let prune_mode = PruneMode::Before(to_block);
-        let segment = AccountHistory::new(prune_mode);
-
-        // a new segment limiter is made on each run as if each call to prune is ran as part of a
-        // separate prune job (each prune job prunes every segment at most once)
-        let (limiter, limit) = {
-            let segment_limiter =
-                <AccountHistory as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
-                    &segment,
-                    test_rig.job_limiter(),
-                );
-
-            // expected to be the same as `prune_job_limit` if `prune_job_limit` is a multiple of 2
-            let job_limit = test_rig.job_limiter().deleted_entries_limit().unwrap();
-            let maybe_adjusted_limit = segment_limiter.deleted_entries_limit().unwrap();
-            assert_eq!(
-                if job_limit % 2 == 0 { job_limit } else { job_limit - 1 },
-                maybe_adjusted_limit
-            );
-
-            (segment_limiter, maybe_adjusted_limit)
-        };
-
-        trace!(target: "pruner::test",
-            deleted_entries_limit=limit,
-            run,
-            "limit for run"
-        );
-
-        let input = test_rig.get_input(to_block, PruneSegment::AccountHistory, limiter);
-        let provider = test_rig.db().factory.provider_rw().unwrap();
-
-        // Run pruning
-        let result = segment.prune(&provider, input).unwrap();
-        let checkpoint = result.checkpoint.unwrap().as_prune_checkpoint(prune_mode);
-
-        trace!(target: "pruner::test",
-            ?checkpoint,
-            progress=?result.progress,
-            run,
-            "stopped pruning"
-        );
-
-        // must commit to db before reading new state of data
-        segment.save_checkpoint(&provider, checkpoint).unwrap();
-        provider.commit().expect("commit");
-
-        assert_eq!(
-            test_rig
-                .db()
-                .factory
-                .provider()
-                .unwrap()
-                .get_prune_checkpoint(PruneSegment::AccountHistory)
-                .unwrap(),
-            Some(PruneCheckpoint {
-                block_number: result.checkpoint.unwrap().block_number,
-                tx_number: None,
-                prune_mode
-            })
-        );
-
-        // Read new state of data
-        let pruned_changesets = test_rig.pruned_changesets::<tables::AccountChangeSets>(run);
-        let pruned_shards = test_rig.pruned_shards::<tables::AccountsHistory>(run);
-        let pruned = pruned_changesets + pruned_shards;
-
-        trace!(target: "pruner::test",
-            pruned_changesets,
-            pruned_shards,
-            run,
-            "total pruned entries in run"
-        );
-
-        // verify result
-        let reported_progress = result.progress;
-        let reported_pruned = result.pruned;
-
-        // verify new state of data against result
-        if expected_progress.is_finished() {
-            // todo: debug why `pruned`` + 1 sometimes?
-            // `pruned` comes from limiter.deleted_entries_count(). how is one less entry counted
-            // related to checkpoint saved at previous block if change set not completely pruned...?
-            trace!(target: "pruner::test",
-                pruned,
-                reported_pruned,
-                run,
-                "total pruned entries in run"
-            );
-            assert!(pruned == reported_pruned + 1 || pruned == reported_pruned, "run {run}");
-        } else {
-            assert_eq!(pruned, reported_pruned, "run {run}");
-        }
-
-        assert_eq!(expected_progress, reported_progress, "run {run}");
-
-        if expected_progress.is_entries_limit_reached() {
-            assert_eq!(limit, reported_pruned, "run {run}")
-        }
-    }
+    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
+    use reth_provider::{PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder};
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use std::{collections::BTreeMap, ops::AddAssign};
 
     #[test]
     fn prune() {
-        let mut test_rig = AccountHistoryTestRigBuilder::new(1..=5000, 0..0, 0..0, 1000).build();
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
 
-        // limit on deleted entries for each run is 1000. if limit would have been more than 1996,
-        // then pruning would finish in 1 run: 2 tables, one entry deleted per table per block
-        // step, step up to block 998 = 2 * 998 = 1996 entries.
-        test_prune_until_entries_delete_limit(
-            &mut test_rig,
-            998,
-            1,
-            PruneProgress::new_entries_limit_reached(),
+        let blocks = random_block_range(&mut rng, 1..=5000, B256::ZERO, 0..1);
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
+
+        let (changesets, _) = random_changeset_range(
+            &mut rng,
+            blocks.iter(),
+            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            0..0,
+            0..0,
         );
-        test_prune_until_entries_delete_limit(&mut test_rig, 998, 2, PruneProgress::new_finished());
-        test_prune_until_entries_delete_limit(
-            &mut test_rig,
-            1400,
-            3,
-            PruneProgress::new_finished(),
+        db.insert_changesets(changesets.clone(), None).expect("insert changesets");
+        db.insert_history(changesets.clone(), None).expect("insert history");
+
+        let account_occurrences = db.table::<tables::AccountsHistory>().unwrap().into_iter().fold(
+            BTreeMap::<_, usize>::new(),
+            |mut map, (key, _)| {
+                map.entry(key.key).or_default().add_assign(1);
+                map
+            },
         );
+        assert!(account_occurrences.into_iter().any(|(_, occurrences)| occurrences > 1));
+
+        assert_eq!(
+            db.table::<tables::AccountChangeSets>().unwrap().len(),
+            changesets.iter().flatten().count()
+        );
+
+        let original_shards = db.table::<tables::AccountsHistory>().unwrap();
+
+        let test_prune = |to_block: BlockNumber, run: usize, expected_result: (bool, usize)| {
+            let prune_mode = PruneMode::Before(to_block);
+            let deleted_entries_limit = 2000;
+            let input = PruneInput {
+                previous_checkpoint: db
+                    .factory
+                    .provider()
+                    .unwrap()
+                    .get_prune_checkpoint(PruneSegment::AccountHistory)
+                    .unwrap(),
+                to_block,
+                limiter: PruneLimiterBuilder::default()
+                    .deleted_entries_limit(deleted_entries_limit)
+                    .build(),
+            };
+            let segment = AccountHistory::new(prune_mode);
+
+            let provider = db.factory.provider_rw().unwrap();
+            let result = segment.prune(&provider, input).unwrap();
+            assert_matches!(
+                result,
+                PruneOutput {progress, pruned, checkpoint: Some(_)}
+                    if (progress.is_finished(), pruned) == expected_result
+            );
+            segment
+                .save_checkpoint(
+                    &provider,
+                    result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
+                )
+                .unwrap();
+            provider.commit().expect("commit");
+
+            let changesets = changesets
+                .iter()
+                .enumerate()
+                .flat_map(|(block_number, changeset)| {
+                    changeset.iter().map(move |change| (block_number, change))
+                })
+                .collect::<Vec<_>>();
+
+            #[allow(clippy::skip_while_next)]
+            let pruned = changesets
+                .iter()
+                .enumerate()
+                .skip_while(|(i, (block_number, _))| {
+                    *i < deleted_entries_limit / 2 * run && *block_number <= to_block as usize
+                })
+                .next()
+                .map(|(i, _)| i)
+                .unwrap_or_default();
+
+            let mut pruned_changesets = changesets
+                .iter()
+                // Skip what we've pruned so far, subtracting one to get last pruned block number
+                // further down
+                .skip(pruned.saturating_sub(1));
+
+            let last_pruned_block_number = pruned_changesets
+                .next()
+                .map(|(block_number, _)| if result.progress.is_finished() {
+                    *block_number
+                } else {
+                    block_number.saturating_sub(1)
+                } as BlockNumber)
+                .unwrap_or(to_block);
+
+            let pruned_changesets = pruned_changesets.fold(
+                BTreeMap::<_, Vec<_>>::new(),
+                |mut acc, (block_number, change)| {
+                    acc.entry(block_number).or_default().push(change);
+                    acc
+                },
+            );
+
+            assert_eq!(
+                db.table::<tables::AccountChangeSets>().unwrap().len(),
+                pruned_changesets.values().flatten().count()
+            );
+
+            let actual_shards = db.table::<tables::AccountsHistory>().unwrap();
+
+            let expected_shards = original_shards
+                .iter()
+                .filter(|(key, _)| key.highest_block_number > last_pruned_block_number)
+                .map(|(key, blocks)| {
+                    let new_blocks = blocks
+                        .iter()
+                        .skip_while(|block| *block <= last_pruned_block_number)
+                        .collect::<Vec<_>>();
+                    (key.clone(), BlockNumberList::new_pre_sorted(new_blocks))
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(actual_shards, expected_shards);
+
+            assert_eq!(
+                db.factory
+                    .provider()
+                    .unwrap()
+                    .get_prune_checkpoint(PruneSegment::AccountHistory)
+                    .unwrap(),
+                Some(PruneCheckpoint {
+                    block_number: Some(last_pruned_block_number),
+                    tx_number: None,
+                    prune_mode
+                })
+            );
+        };
+
+        test_prune(998, 1, (false, 1000));
+        test_prune(998, 2, (true, 998));
+        test_prune(1400, 3, (true, 804));
     }
 }

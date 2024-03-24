@@ -2616,8 +2616,8 @@ pub struct PruneLimiter {
 }
 
 impl PruneLimiter {
-    /// Returns the maximum entries that can be deleted from the database in one prune job. `None`
-    /// is equivalent to unlimited entries.
+    /// Returns the maximum entries that can be deleted from the database in one prune job.
+    /// `None` is equivalent to unlimited entries.
     pub fn deleted_entries_limit(&self) -> Option<usize> {
         self.deleted_entries_limit
     }
@@ -2707,6 +2707,13 @@ impl PruneLimiter {
     /// Sets the last pruned block to the given number.
     pub fn set_last_pruned_block(&mut self, block: Option<u64>) {
         self.last_pruned_block = block
+    }
+
+    /// Divides the limit on deleted entries by the given number.
+    pub fn divide_deleted_entries_limit(mut self, divisor: NonZeroUsize) -> Self {
+        self.deleted_entries_limit = self.deleted_entries_limit.map(|limit| limit / divisor.get());
+
+        self
     }
 }
 /// Builder for [`PruneLimiter`].
