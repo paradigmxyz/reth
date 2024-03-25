@@ -478,7 +478,7 @@ where
                     this.pinger.on_pong()?
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
-                    // At this point, the `decempres_buf` contains the snappy decompressed
+                    // At this point, the `decompress_buf` contains the snappy decompressed
                     // disconnect message.
                     //
                     // It's possible we already tried to RLP decode this, but it was snappy
