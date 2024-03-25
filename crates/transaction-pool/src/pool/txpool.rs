@@ -167,7 +167,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                     self.add_transaction_to_subpool(to, tx);
                 }
             }
-            (_, _) => {
+            (Ordering::Less, _) | (_, Ordering::Less) => {
                 // decreased blob/base fee: recheck blob pool and promote all that are now valid
                 let removed =
                     self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
