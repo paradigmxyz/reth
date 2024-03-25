@@ -449,33 +449,59 @@ where
             if let Some(CurrentStage { stage_id, eta, checkpoint, target }) =
                 &this.state.current_stage
             {
-                let stage_progress = OptionalField(
-                    checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
-                );
+                let stage_progress =
+                    checkpoint.entities().and_then(|entities| entities.fmt_percentage());
+                let stage_eta = eta.fmt_for_stage(*stage_id);
 
-                if let Some(stage_eta) = eta.fmt_for_stage(*stage_id) {
-                    info!(
-                        target: "reth::cli",
-                        connected_peers = this.state.num_connected_peers(),
-                        %freelist,
-                        stage = %stage_id,
-                        checkpoint = checkpoint.block_number,
-                        target = %OptionalField(*target),
-                        %stage_progress,
-                        %stage_eta,
-                        "Status"
-                    );
-                } else {
-                    info!(
-                        target: "reth::cli",
-                        connected_peers = this.state.num_connected_peers(),
-                        %freelist,
-                        stage = %stage_id,
-                        checkpoint = checkpoint.block_number,
-                        target = %OptionalField(*target),
-                        %stage_progress,
-                        "Status"
-                    );
+                match (stage_progress, stage_eta) {
+                    (Some(stage_progress), Some(stage_eta)) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_progress,
+                            %stage_eta,
+                            "Status"
+                        )
+                    }
+                    (Some(stage_progress), None) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_progress,
+                            "Status"
+                        )
+                    }
+                    (None, Some(stage_eta)) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_eta,
+                            "Status"
+                        )
+                    }
+                    (None, None) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            "Status"
+                        )
+                    }
                 }
             } else if let Some(latest_block) = this.state.latest_block {
                 let now =

@@ -595,9 +595,10 @@ impl ChainSpec {
 
         // If shanghai is activated, initialize the header with an empty withdrawals hash, and
         // empty withdrawals list.
-        let withdrawals_root =
-            (self.fork(Hardfork::Shanghai).active_at_timestamp(self.genesis.timestamp))
-                .then_some(EMPTY_WITHDRAWALS);
+        let withdrawals_root = self
+            .fork(Hardfork::Shanghai)
+            .active_at_timestamp(self.genesis.timestamp)
+            .then_some(EMPTY_WITHDRAWALS);
 
         // If Cancun is activated at genesis, we set:
         // * parent beacon block root to 0x0
@@ -647,7 +648,7 @@ impl ChainSpec {
         let genesis_base_fee = self.genesis.base_fee_per_gas.unwrap_or(EIP1559_INITIAL_BASE_FEE);
 
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        (self.fork(Hardfork::London).active_at_block(0)).then_some(genesis_base_fee)
+        self.fork(Hardfork::London).active_at_block(0).then_some(genesis_base_fee)
     }
 
     /// Get the [BaseFeeParams] for the chain at the given timestamp.
