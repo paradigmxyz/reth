@@ -131,7 +131,7 @@ where
         let block = Block { transactions: BlockTransactions::Full(transactions), ..block.inner };
 
         // Crop receipts and transform them into OtsTransactionReceipt
-        let timestamp = u64::try_from(block.header.timestamp).unwrap_or(0);
+        let timestamp = u64::try_from(block.header.timestamp).unwrap_or(u64::MAX);
         let receipts = receipts
             .drain(page_start..page_end)
             .map(|receipt| OtsTransactionReceipt { receipt, timestamp })
