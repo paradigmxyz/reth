@@ -60,7 +60,10 @@ where
 
         let best_block_number = provider_ro.best_block_number()?;
         if last_num != best_block_number {
-            return Err(ConsistentViewError::Syncing(best_block_number).into())
+            return Err(ConsistentViewError::Syncing {
+                best_block: GotExpected { got: best_block_number, expected: last_num },
+            }
+            .into())
         }
 
         Ok(provider_ro)
