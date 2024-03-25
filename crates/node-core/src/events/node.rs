@@ -360,8 +360,8 @@ struct CurrentStage {
     stage_id: StageId,
     eta: Eta,
     checkpoint: StageCheckpoint,
-    /// The entities checkpint for reporting the progress. If `None`, then the progress is not
-    /// available, probably because the stage didn't finish running yet and didn't update its
+    /// The entities checkpoint for reporting the progress. If `None`, then the progress is not
+    /// available, probably because the stage didn't finish running and didn't update its
     /// checkpoint yet.
     entities_checkpoint: Option<EntitiesCheckpoint>,
     target: Option<BlockNumber>,
