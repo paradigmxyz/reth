@@ -1,4 +1,5 @@
-use crate::result::internal_rpc_err;
+use crate::{eth::EthTransactions, result::internal_rpc_err};
+use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
@@ -7,6 +8,8 @@ use reth_rpc_types::{
     BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
     Transaction, TransactionsWithReceipts,
 };
+use revm::inspectors::NoOpInspector;
+use revm_primitives::ExecutionResult;
 
 const API_LEVEL: u64 = 8;
 
@@ -26,7 +29,7 @@ impl<Eth> OtterscanApi<Eth> {
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer,
+    Eth: EthApiServer + EthTransactions,
 {
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {
@@ -44,8 +47,20 @@ where
     }
 
     /// Handler for `ots_getTransactionError`
-    async fn get_transaction_error(&self, _tx_hash: TxHash) -> RpcResult<String> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>> {
+        let maybe_revert = self
+            .eth
+            .spawn_trace_transaction_in_block_with_inspector(
+                tx_hash,
+                NoOpInspector,
+                |_tx_info, _inspector, res, _| match res.result {
+                    ExecutionResult::Revert { output, .. } => Ok(Some(output)),
+                    _ => Ok(None),
+                },
+            )
+            .await
+            .map(Option::flatten)?;
+        Ok(maybe_revert)
     }
 
     /// Handler for `ots_traceTransaction`
