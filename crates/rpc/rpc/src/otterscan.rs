@@ -1,8 +1,8 @@
-use crate::{eth::EthTransactions, result::internal_rpc_err};
 use alloy_primitives::Bytes;
-use alloy_primitives::Bloom;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+use revm::inspectors::NoOpInspector;
+use revm_primitives::ExecutionResult;
 
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
@@ -10,8 +10,8 @@ use reth_rpc_types::{
     Block, BlockDetails, BlockTransactions, ContractCreator, InternalOperation,
     OtsBlockTransactions, OtsTransactionReceipt, TraceEntry, Transaction, TransactionsWithReceipts,
 };
-use revm::inspectors::NoOpInspector;
-use revm_primitives::ExecutionResult;
+
+use crate::{eth::EthTransactions, result::internal_rpc_err};
 
 const API_LEVEL: u64 = 8;
 
@@ -92,11 +92,17 @@ where
         page_number: usize,
         page_size: usize,
     ) -> RpcResult<OtsBlockTransactions> {
-        let block = self
-            .eth
-            .block_by_number(block_number, true)
-            .await?
-            .ok_or_else(|| internal_rpc_err("block not found"))?;
+        let block = self.eth.block_by_number(block_number, true);
+        let receipts = self.eth.block_receipts(BlockId::Number(block_number));
+        let (block, receipts) = futures::try_join!(block, receipts)?;
+        let block = block.ok_or_else(|| internal_rpc_err("block not found"))?;
+        let mut receipts = receipts.ok_or_else(|| internal_rpc_err("receipts not found"))?;
+        let tx_len = block.transactions.len();
+        if tx_len != receipts.len() {
+            return Err(internal_rpc_err(
+                "the number of transactions does not match the number of receipts",
+            ));
+        }
 
         let BlockTransactions::Full(transactions) = &block.transactions else {
             return Err(internal_rpc_err("block is not full"));
@@ -112,19 +118,8 @@ where
             }
         }
 
-        let mut receipts =
-            self.eth.block_receipts(BlockId::Number(block_number)).await?.unwrap_or(vec![]);
-
-        // For receipts
-        //  1. logs attribute returns null
-        //  2. logsBloom attribute returns null.
-        receipts.iter_mut().for_each(|receipt| {
-            receipt.logs = vec![];
-            receipt.logs_bloom = Bloom::default();
-        });
-
         // Crop page
-        let page_end = transactions.len().saturating_sub(page_number * page_size);
+        let page_end = tx_len.saturating_sub(page_number * page_size);
         let page_start = page_end.saturating_sub(page_size);
 
         // Crop transactions

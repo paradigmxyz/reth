@@ -1,6 +1,8 @@
 #![allow(missing_docs)]
 
-use crate::{Block, BlockTransactions, Rich, Transaction, TransactionReceipt};
+use crate::{
+    serde_helpers::u64_hex, Block, BlockTransactions, Rich, Transaction, TransactionReceipt,
+};
 use alloy_primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +72,7 @@ pub struct BlockDetails {
 pub struct OtsTransactionReceipt {
     #[serde(flatten)]
     pub receipt: TransactionReceipt,
+    #[serde(with = "u64_hex")]
     pub timestamp: u64,
 }
 
