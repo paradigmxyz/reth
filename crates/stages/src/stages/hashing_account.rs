@@ -19,7 +19,7 @@ use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsRe
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
-    sync::mpsc,
+    sync::mpsc::{self, Receiver},
 };
 use tracing::*;
 
@@ -163,11 +163,18 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             // clear table, load all accounts and hash it
             tx.clear::<tables::HashedAccounts>()?;
 
+            let start = None;
             let mut accounts_cursor = tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
+            let mut collector =
+                Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
+            let mut channels = Vec::with_capacity(10_000);
+
+            // itertools chunks doesn't support enumerate, so we use a counter to know when to flush
+            // hashes from channels to disk.
+            let mut flush_counter = 1;
 
             // channels used to return result of account hashing
-            let mut channels = Vec::new();
-            for chunk in &accounts_cursor.walk(None)?.chunks(100) {
+            for chunk in &accounts_cursor.walk(start)?.chunks(100) {
                 // An _unordered_ channel to receive results from a rayon job
                 let (tx, rx) = mpsc::channel();
                 channels.push(rx);
@@ -185,16 +192,16 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                         let _ = tx.send((RawKey::new(keccak256(address)), account));
                     }
                 });
-            }
-            let mut collector =
-                Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
 
-            // Iterate over channels and append the hashed accounts.
-            for channel in channels {
-                while let Ok((key, v)) = channel.recv() {
-                    collector.insert(key, v)?;
+                flush_counter += 1;
+
+                // We flush at every 1_000_000th entry, capping at 10_000 maximum channels.
+                if flush_counter % 10_000 == 0 {
+                    collect(&mut channels, &mut collector)?;
                 }
             }
+
+            collect(&mut channels, &mut collector)?;
 
             let mut hashed_account_cursor =
                 tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
@@ -249,6 +256,20 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 .with_account_hashing_stage_checkpoint(stage_checkpoint),
         })
     }
+}
+
+/// Flushes channels hashes to ETL collector.
+fn collect(
+    channels: &mut Vec<Receiver<(RawKey<B256>, RawValue<Account>)>>,
+    collector: &mut Collector<RawKey<B256>, RawValue<Account>>,
+) -> Result<(), StageError> {
+    for channel in channels.into_iter() {
+        while let Ok((key, v)) = channel.recv() {
+            collector.insert(key, v)?;
+        }
+    }
+    channels.clear();
+    Ok(())
 }
 
 fn stage_checkpoint_progress<DB: Database>(
