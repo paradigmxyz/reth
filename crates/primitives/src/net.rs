@@ -1,4 +1,4 @@
-pub use reth_rpc_types::NodeRecord;
+pub use reth_rpc_types::{pk_to_id, NodeRecord, NodeRecordParseError};
 
 // <https://github.com/ledgerwatch/erigon/blob/610e648dc43ec8cd6563313e28f06f534a9091b3/params/bootnodes.go>
 
@@ -73,10 +73,15 @@ mod tests {
         str::FromStr,
     };
 
+    use crate::MAINNET;
+
     use super::*;
-    use alloy_rlp::Decodable;
+    use alloy_rlp::{Decodable, Encodable};
+    use enr::Enr;
     use rand::{thread_rng, Rng, RngCore};
+    use reth_ethereum_forks::Hardfork;
     use reth_rpc_types::PeerId;
+    use secp256k1::SecretKey;
 
     #[test]
     fn test_mapped_ipv6() {
@@ -196,5 +201,38 @@ mod tests {
             udp_port: 30301u16,
             id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
         })
+    }
+
+    #[test]
+    fn conversion_to_node_record_from_enr() {
+        const IP: &'static str = "::";
+        const TCP_PORT: u16 = 30303;
+        const UDP_PORT: u16 = 9000;
+
+        let mut rng = thread_rng();
+        let key = SecretKey::new(&mut rng);
+
+        let mut buf = Vec::new();
+        let fork_id = MAINNET.hardfork_fork_id(Hardfork::Frontier);
+        fork_id.unwrap().encode(&mut buf);
+
+        let enr = Enr::builder()
+            .ip6(IP.parse().unwrap())
+            .udp6(UDP_PORT)
+            .tcp6(TCP_PORT)
+            .build(&key)
+            .unwrap();
+
+        let node_record_with_fork_id = NodeRecord::try_from(enr.clone()).unwrap();
+
+        assert_eq!(
+            NodeRecord {
+                address: IP.parse().unwrap(),
+                tcp_port: TCP_PORT,
+                udp_port: UDP_PORT,
+                id: pk_to_id(&enr.public_key())
+            },
+            node_record_with_fork_id
+        )
     }
 }

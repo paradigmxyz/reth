@@ -1,5 +1,6 @@
-use crate::PeerId;
+use crate::{pk_to_id, PeerId};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use enr::Enr;
 use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
@@ -9,6 +10,7 @@ use std::{
     num::ParseIntError,
     str::FromStr,
 };
+use thiserror::Error;
 use url::{Host, Url};
 
 /// Represents a ENR in discovery.
@@ -114,8 +116,8 @@ impl fmt::Display for NodeRecord {
     }
 }
 
-/// Possible error types when parsing a `NodeRecord`
-#[derive(Debug, thiserror::Error)]
+/// Possible error types when parsing a [`NodeRecord`]
+#[derive(Debug, Error)]
 pub enum NodeRecordParseError {
     /// Invalid url
     #[error("Failed to parse url: {0}")]
@@ -126,6 +128,9 @@ pub enum NodeRecordParseError {
     /// Invalid discport
     #[error("Failed to discport query: {0}")]
     Discport(ParseIntError),
+    /// Conversion from type [`Enr<SecretKey>`] failed.
+    #[error("failed to convert enr into dns node record, enr: {0}")]
+    ConversionFromEnrFailed(Enr<SecretKey>),
 }
 
 impl FromStr for NodeRecord {
@@ -162,6 +167,29 @@ impl FromStr for NodeRecord {
             .map_err(|e| NodeRecordParseError::InvalidId(e.to_string()))?;
 
         Ok(Self { address, id, tcp_port: port, udp_port })
+    }
+}
+
+impl TryFrom<Enr<SecretKey>> for NodeRecord {
+    type Error = NodeRecordParseError;
+
+    fn try_from(enr: Enr<SecretKey>) -> Result<Self, Self::Error> {
+        let Some(address) = enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))
+        else {
+            return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
+        };
+
+        let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
+            return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
+        };
+
+        let Some(udp_port) = enr.udp4().or_else(|| enr.udp6()) else {
+            return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
+        };
+
+        let id = pk_to_id(&enr.public_key());
+
+        Ok(NodeRecord { address, tcp_port, udp_port, id }.into_ipv4_mapped())
     }
 }
 
