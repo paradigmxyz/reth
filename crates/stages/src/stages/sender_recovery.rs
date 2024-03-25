@@ -89,7 +89,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // transactions, we effectively max limit each batch to 1000 channels in memory.
         let batch_size = 100_000;
         let batch = (tx_range.start..tx_range.end)
-            .step_by(100_000)
+            .step_by(batch_size)
             .map(|start| start..std::cmp::min(start + batch_size as u64, tx_range.end))
             .collect::<Vec<Range<u64>>>();
 
