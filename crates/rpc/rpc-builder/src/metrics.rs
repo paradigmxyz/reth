@@ -4,7 +4,12 @@ use reth_metrics::{
     Metrics,
 };
 use std::{
-    collections::HashMap, future::Future, net::SocketAddr, pin::Pin, sync::Arc, time::Instant,
+    collections::HashMap,
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Instant,
 };
 
 /// Metrics for the RPC server
@@ -26,7 +31,7 @@ impl RpcServerMetrics {
     }
 }
 
-/// A [RpcServiceT] middleware that captures metrics for the RPC server.
+/// A [RpcServiceT] middleware that captures RPC metrics for the server.
 #[derive(Default, Clone)]
 pub(crate) struct RpcServerMetricsLayer<S> {
     metrics: RpcServerMetrics,
@@ -39,20 +44,25 @@ impl<S> RpcServerMetricsLayer<S> {
     }
 }
 
+// TODO: only do this for Call metrics
 impl<'a, S> RpcServiceT<'a> for RpcServerMetricsLayer<S>
 where
     S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
 {
-    type Future = Pin<Box<dyn Future<Output = MethodResponse> + Send + 'a>>;
+    type Future = MeteredRequestFuture<S::Future>;
 
     fn call(&self, req: Request<'a>) -> Self::Future {
-        let service = self.service.clone();
-        Box::pin(async move {
-            let started_at = Instant::now();
-            let rp = service.call(req).await;
-
-            rp
-        })
+        self.metrics.inner.connection_metrics.requests_started.increment(1);
+        let call_metrics = self.metrics.inner.call_metrics.get_key_value(req.method.as_ref());
+        if let Some((_, call_metrics)) = &call_metrics {
+            call_metrics.started.increment(1);
+        }
+        MeteredRequestFuture {
+            fut: self.service.call(req),
+            started_at: Instant::now(),
+            metrics: self.metrics.clone(),
+            method: call_metrics.map(|(method, _)| *method),
+        }
     }
 }
 
@@ -63,6 +73,60 @@ struct RpcServerMetricsInner {
     connection_metrics: RpcServerConnectionMetrics,
     /// Call metrics per RPC method
     call_metrics: HashMap<&'static str, RpcServerCallMetrics>,
+}
+
+/// Response future to update the metrics for a single request/response pair.
+#[pin_project::pin_project]
+pub(crate) struct MeteredRequestFuture<F> {
+    #[pin]
+    fut: F,
+    /// time when the request started
+    started_at: Instant,
+    /// metrics for the method call
+    metrics: RpcServerMetrics,
+    /// the method name if known
+    method: Option<&'static str>,
+}
+
+impl<F> MeteredRequestFuture<F> {
+    /// Returns the call metrics for the method if known.
+    fn call_metrics(&self) -> Option<&RpcServerCallMetrics> {
+        self.metrics.inner.call_metrics.get(self.method?)
+    }
+}
+
+impl<F> std::fmt::Debug for MeteredRequestFuture<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MeteredRequestFuture")
+    }
+}
+
+impl<F: Future<Output = MethodResponse>> Future for MeteredRequestFuture<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let fut = self.project().fut;
+
+        let res = fut.poll(cx);
+        if let Poll::Ready(resp) = &res {
+            let elapsed = self.started_at.elapsed().as_secs_f64();
+
+            // update transport metrics
+            self.metrics.inner.connection_metrics.requests_finished.increment(1);
+            self.metrics.inner.connection_metrics.request_time_seconds.record(elapsed);
+
+            // update call metrics
+            if let Some(call_metrics) = self.call_metrics() {
+                call_metrics.time_seconds.record(elapsed);
+                if resp.is_success() {
+                    call_metrics.successful.increment(1);
+                } else {
+                    call_metrics.failed.increment(1);
+                }
+            }
+        }
+        res
+    }
 }
 
 /// The transport protocol used for the RPC connection.
