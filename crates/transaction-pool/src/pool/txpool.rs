@@ -147,12 +147,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         std::mem::swap(&mut self.all_transactions.pending_fees.blob_fee, &mut pending_blob_fee);
         match (self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee), base_fee_update)
         {
-            (Ordering::Equal, Ordering::Equal) => {
+            (Ordering::Equal, Ordering::Equal) | (Ordering::Equal, Ordering::Greater) => {
                 // fee unchanged, nothing to update
             }
-            (Ordering::Greater, Ordering::Equal) |
-            (Ordering::Equal, Ordering::Greater) |
-            (Ordering::Greater, Ordering::Greater) => {
+            (Ordering::Greater, Ordering::Equal) | (Ordering::Greater, Ordering::Greater) => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
                 let removed =
                     self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
@@ -161,7 +159,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         let tx =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
 
-                        // we unset the blob fee cap block flag, if the base fee is too high now
+                        // the blob fee is too high now, unset the blob fee cap block flag
                         tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
                         tx.subpool = tx.state.into();
                         tx.subpool
@@ -169,42 +167,8 @@ impl<T: TransactionOrdering> TxPool<T> {
                     self.add_transaction_to_subpool(to, tx);
                 }
             }
-            (Ordering::Less, Ordering::Equal) | (_, Ordering::Less) => {
-                // decreased blob fee or base fee: recheck blob pool and promote all that are now
-                // valid
-                let removed =
-                    self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
-                for tx in removed {
-                    let to = {
-                        let tx =
-                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
-                        tx.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
-                        tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-                        tx.subpool = tx.state.into();
-                        tx.subpool
-                    };
-                    self.add_transaction_to_subpool(to, tx);
-                }
-            }
-            (Ordering::Less, Ordering::Greater) => {
-                // increased blob fee: recheck pending pool and remove all that are no longer valid
-                let removed =
-                    self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
-                for tx in removed {
-                    let to = {
-                        let tx =
-                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
-
-                        // we unset the blob fee cap block flag, if the base fee is too high now
-                        tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
-                        tx.subpool = tx.state.into();
-                        tx.subpool
-                    };
-                    self.add_transaction_to_subpool(to, tx);
-                }
-
-                // decreased blob fee or base fee: recheck blob pool and promote all that are now
-                // valid
+            (Ordering::Less, _) | (_, Ordering::Less) => {
+                // decreased blob/base fee: recheck blob pool and promote all that are now valid
                 let removed =
                     self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
                 for tx in removed {
@@ -1480,13 +1444,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ///
     /// The pool enforces exclusivity of eip-4844 blob vs non-blob transactions on a per sender
     /// basis:
-    ///   - If the pool already includes a blob transaction from the `transaction`'s sender, then
-    ///     the  `transaction` must also be a blob transaction
+    ///  - If the pool already includes a blob transaction from the `transaction`'s sender, then the
+    ///    `transaction` must also be a blob transaction
     ///  - If the pool already includes a non-blob transaction from the `transaction`'s sender, then
-    ///    the  `transaction` must _not_ be a blob transaction.
+    ///    the `transaction` must _not_ be a blob transaction.
     ///
     /// In other words, the presence of blob transactions exclude non-blob transactions and vice
-    /// versa:
+    /// versa.
     ///
     /// ## Replacements
     ///
@@ -1602,7 +1566,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let mut next_nonce = on_chain_id.nonce;
 
             // We need to find out if the next transaction of the sender is considered pending
-            //
             let mut has_parked_ancestor = if ancestor.is_none() {
                 // the new transaction is the next one
                 false
