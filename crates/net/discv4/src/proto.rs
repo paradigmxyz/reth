@@ -549,7 +549,7 @@ mod tests {
         test_utils::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
         DEFAULT_DISCOVERY_PORT, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
     };
-    use enr::{EnrBuilder, EnrPublicKey};
+    use enr::EnrPublicKey;
     use rand::{thread_rng, Rng, RngCore};
     use reth_primitives::{hex, ForkHash};
 
@@ -565,10 +565,7 @@ mod tests {
                 udp_port: rng.gen(),
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = NodeEndpoint::decode(&mut buf.as_ref()).unwrap();
+            let decoded = NodeEndpoint::decode(&mut alloy_rlp::encode(msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -585,10 +582,7 @@ mod tests {
                 udp_port: rng.gen(),
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = NodeEndpoint::decode(&mut buf.as_ref()).unwrap();
+            let decoded = NodeEndpoint::decode(&mut alloy_rlp::encode(msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -606,10 +600,7 @@ mod tests {
                 enr_sq: None,
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = Ping::decode(&mut buf.as_ref()).unwrap();
+            let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -627,10 +618,7 @@ mod tests {
                 enr_sq: Some(rng.gen()),
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = Ping::decode(&mut buf.as_ref()).unwrap();
+            let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -648,10 +636,7 @@ mod tests {
                 enr_sq: None,
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = Pong::decode(&mut buf.as_ref()).unwrap();
+            let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -669,10 +654,7 @@ mod tests {
                 enr_sq: Some(rng.gen()),
             };
 
-            let mut buf = BytesMut::new();
-            msg.encode(&mut buf);
-
-            let decoded = Pong::decode(&mut buf.as_ref()).unwrap();
+            let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
             assert_eq!(msg, decoded);
         }
     }
@@ -683,9 +665,10 @@ mod tests {
         let msg = rng_message(&mut rng);
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
         let (buf, _) = msg.encode(&secret_key);
-        let mut buf = BytesMut::from(buf.as_ref());
-        buf.put_u8(0);
-        match Message::decode(buf.as_ref()).unwrap_err() {
+
+        let mut buf_vec = buf.to_vec();
+        buf_vec.push(0);
+        match Message::decode(buf_vec.as_slice()).unwrap_err() {
             DecodePacketError::HashMismatch => {}
             err => {
                 unreachable!("unexpected err {}", err)
@@ -780,7 +763,7 @@ mod tests {
         let fork_id: ForkId = ForkId { hash: ForkHash([220, 233, 108, 45]), next: 0u64 };
 
         let enr = {
-            let mut builder = EnrBuilder::new("v4");
+            let mut builder = Enr::builder();
             builder.ip(ip.into());
             builder.tcp4(tcp);
             let mut buf = Vec::new();
@@ -790,10 +773,10 @@ mod tests {
             EnrWrapper::new(builder.build(&key).unwrap())
         };
 
-        let enr_respone = EnrResponse { request_hash: rng.gen(), enr };
+        let enr_response = EnrResponse { request_hash: rng.gen(), enr };
 
         let mut buf = Vec::new();
-        enr_respone.encode(&mut buf);
+        enr_response.encode(&mut buf);
 
         let decoded = EnrResponse::decode(&mut &buf[..]).unwrap();
 
@@ -831,9 +814,7 @@ mod tests {
         assert_eq!(pubkey.to_vec(), expected_pubkey);
         assert!(enr.0.verify());
 
-        let mut encoded = BytesMut::new();
-        enr.encode(&mut encoded);
-        assert_eq!(&encoded[..], &valid_record[..]);
+        assert_eq!(&alloy_rlp::encode(&enr)[..], &valid_record[..]);
 
         // ensure the length is equal
         assert_eq!(enr.length(), valid_record.len());
@@ -879,15 +860,13 @@ mod tests {
         let tcp = 3000;
 
         let enr = {
-            let mut builder = EnrBuilder::new("v4");
+            let mut builder = Enr::builder();
             builder.ip(ip.into());
             builder.tcp4(tcp);
             EnrWrapper::new(builder.build(&key).unwrap())
         };
 
-        let mut encoded = BytesMut::new();
-        enr.encode(&mut encoded);
-        let mut encoded_bytes = &encoded[..];
+        let mut encoded_bytes = &alloy_rlp::encode(&enr)[..];
         let decoded_enr = EnrWrapper::<SecretKey>::decode(&mut encoded_bytes).unwrap();
 
         // Byte array must be consumed after enr has finished decoding

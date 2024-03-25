@@ -8,17 +8,19 @@ use crate::{
         NodeComponentsBuilder, PoolBuilder,
     },
     hooks::NodeHooks,
-    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter, NodeTypes},
+    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter},
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     Node, NodeHandle,
 };
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};
+use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
+use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -27,6 +29,7 @@ use reth_db::{
 };
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
+use reth_node_api::NodeTypes;
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
@@ -38,19 +41,16 @@ use reth_node_core::{
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
 };
-use reth_primitives::{
-    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    format_ether, ChainSpec,
-};
+use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, format_ether, ChainSpec};
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, error, info};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
-use std::{str::FromStr, sync::Arc};
+use std::{cmp::max, str::FromStr, sync::Arc, thread::available_parallelism};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
 /// The builtin provider type of the reth node.
@@ -66,12 +66,14 @@ type RethFullAdapter<DB, N> =
 /// [`NodeBuilder`] provides a [builder-like interface][builder] for composing
 /// components of a node.
 ///
-/// Configuring a node starts out with a [`NodeConfig`] and then proceeds to configure the core
-/// static types of the node: [NodeTypes], these include the node's primitive types and the node's
-/// engine types.
+/// ## Order
+///
+/// Configuring a node starts out with a [`NodeConfig`] (this can be obtained from cli arguments for
+/// example) and then proceeds to configure the core static types of the node: [NodeTypes], these
+/// include the node's primitive types and the node's engine types.
 ///
 /// Next all stateful components of the node are configured, these include the
-/// [ConfigureEvm](reth_node_api::evm::ConfigureEvm), the database [Database] and finally all the
+/// [ConfigureEvm](reth_node_api::evm::ConfigureEvm), the database [Database] and all the
 /// components of the node that are downstream of those types, these include:
 ///
 ///  - The transaction pool: [PoolBuilder]
@@ -87,6 +89,48 @@ type RethFullAdapter<DB, N> =
 /// the [Node] trait, see `reth_node_ethereum::EthereumNode` or `reth_node_optimism::OptimismNode`.
 ///
 /// The [NodeBuilder::node] function configures the node's types and components in one step.
+///
+/// ## Components
+///
+/// All components are configured with a [NodeComponentsBuilder] that is responsible for actually
+/// creating the node components during the launch process. The [ComponentsBuilder] is a general
+/// purpose implementation of the [NodeComponentsBuilder] trait that can be used to configure the
+/// network, transaction pool and payload builder of the node. It enforces the correct order of
+/// configuration, for example the network and the payload builder depend on the transaction pool
+/// type that is configured first.
+///
+/// All builder traits are generic over the node types and are invoked with the [BuilderContext]
+/// that gives access to internals of the that are needed to configure the components. This include
+/// the original config, chain spec, the database provider and the task executor,
+///
+/// ## Hooks
+///
+/// Once all the components are configured, the builder can be used to set hooks that are run at
+/// specific points in the node's lifecycle. This way custom services can be spawned before the node
+/// is launched [NodeBuilder::on_component_initialized], or once the rpc server(s) are launched
+/// [NodeBuilder::on_rpc_started]. The [NodeBuilder::extend_rpc_modules] can be used to inject
+/// custom rpc modules into the rpc server before it is launched. See also [RpcContext]
+/// All hooks accept a closure that is then invoked at the appropriate time in the node's launch
+/// process.
+///
+/// ## Internals
+///
+/// The node builder is fully type safe, it uses the [NodeTypes] trait to enforce that all
+/// components are configured with the correct types. However the database types and with that the
+/// provider trait implementations are currently created by the builder itself during the launch
+/// process, hence the database type is not part of the [NodeTypes] trait and the node's components,
+/// that depend on the database, are configured separately. In order to have a nice trait that
+/// encapsulates the entire node the [FullNodeComponents] trait was introduced. This trait has
+/// convenient associated types for all the components of the node. After [NodeBuilder::launch] the
+/// [NodeHandle] contains an instance of [FullNode] that implements the [FullNodeComponents] trait
+/// and has access to all the components of the node. Internally the node builder uses several
+/// generic adapter types that are then map to traits with associated types for ease of use.
+///
+/// ### Limitations
+///
+/// Currently the launch process is limited to ethereum nodes and requires all the components
+/// specified above. It also expect beacon consensus with the ethereum engine API that is configured
+/// by the builder itself during launch. This might change in the future.
 ///
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
 pub struct NodeBuilder<DB, State> {
@@ -109,12 +153,12 @@ impl<DB, State> NodeBuilder<DB, State> {
         let config_path = self.config.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let mut config = confy::load_path::<reth_config::Config>(&config_path)
-            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))?;
+            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
         // Update the config with the command line arguments
-        config.peers.connect_trusted_nodes_only = self.config.network.trusted_only;
+        config.peers.trusted_nodes_only = self.config.network.trusted_only;
 
         if !self.config.network.trusted_peers.is_empty() {
             info!(target: "reth::cli", "Adding trusted nodes");
@@ -395,6 +439,14 @@ where
         // Does not do anything on windows.
         fdlimit::raise_fd_limit()?;
 
+        // Limit the global rayon thread pool, reserving 2 cores for the rest of the system
+        let _ = ThreadPoolBuilder::new()
+            .num_threads(
+                available_parallelism().map_or(25, |cpus| max(cpus.get().saturating_sub(2), 2)),
+            )
+            .build_global()
+            .map_err(|e| error!("Failed to build global thread pool: {:?}", e));
+
         let provider_factory = ProviderFactory::new(
             database.clone(),
             Arc::clone(&config.chain),
@@ -416,7 +468,7 @@ where
 
         let genesis_hash = init_genesis(provider_factory.clone())?;
 
-        info!(target: "reth::cli", "{}",config.chain.display_hardforks());
+        info!(target: "reth::cli", "\n{}", config.chain.display_hardforks());
 
         let consensus = config.consensus();
 
@@ -425,7 +477,7 @@ where
         let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
         executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
 
-        let prune_config = config.prune_config()?.or(reth_config.prune.clone());
+        let prune_config = config.prune_config()?.or_else(|| reth_config.prune.clone());
 
         let evm_config = types.evm_config();
         let tree_config = BlockchainTreeConfig::default();
@@ -468,7 +520,7 @@ where
             executor,
             data_dir,
             mut config,
-            reth_config,
+            mut reth_config,
             ..
         } = ctx;
 
@@ -503,18 +555,24 @@ where
         let max_block = config.max_block(&network_client, provider_factory.clone()).await?;
         let mut hooks = EngineHooks::new();
 
-        let mut static_file_producer = StaticFileProducer::new(
+        let static_file_producer = StaticFileProducer::new(
             provider_factory.clone(),
             provider_factory.static_file_provider(),
             prune_config.clone().unwrap_or_default().segments,
         );
-        let static_file_producer_events = static_file_producer.events();
+        let static_file_producer_events = static_file_producer.lock().events();
         hooks.add(StaticFileHook::new(static_file_producer.clone(), Box::new(executor.clone())));
         info!(target: "reth::cli", "StaticFileProducer initialized");
+
+        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
+        if reth_config.stages.etl.dir.is_none() {
+            reth_config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+        }
 
         // Configure the pipeline
         let (mut pipeline, client) = if config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
+
             for (idx, (address, alloc)) in config.chain.genesis.alloc.iter().enumerate() {
                 info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
             }
@@ -647,7 +705,7 @@ where
 
         // Start RPC servers
 
-        let (rpc_server_handles, rpc_registry) = crate::rpc::launch_rpc_servers(
+        let (rpc_server_handles, mut rpc_registry) = crate::rpc::launch_rpc_servers(
             node_components.clone(),
             engine_api,
             &config,
@@ -655,6 +713,11 @@ where
             rpc,
         )
         .await?;
+
+        // in dev mode we generate 20 random dev-signer accounts
+        if config.dev.dev {
+            rpc_registry.eth_api().with_dev_accounts();
+        }
 
         // Run consensus engine to completion
         let (tx, rx) = oneshot::channel();
@@ -1038,16 +1101,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.config().txpool.pool_config()
     }
 
-    /// Loads the trusted setup params from a given file path or falls back to
-    /// `MAINNET_KZG_TRUSTED_SETUP`.
+    /// Loads `MAINNET_KZG_TRUSTED_SETUP`.
     pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-        if let Some(ref trusted_setup_file) = self.config().trusted_setup_file {
-            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .map_err(LoadKzgSettingsError::KzgError)?;
-            Ok(Arc::new(trusted_setup))
-        } else {
-            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
-        }
+        Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
     }
 
     /// Returns the config for payload building.

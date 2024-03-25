@@ -85,7 +85,7 @@ impl Command {
                 match content {
                     Some(content) => {
                         if raw {
-                            println!("{:?}", content);
+                            println!("{content:?}");
                         } else {
                             match segment {
                                 StaticFileSegment::Headers => {
@@ -157,7 +157,7 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
 
         match content {
             Some(content) => {
-                println!("{}", content);
+                println!("{content}");
             }
             None => {
                 error!(target: "reth::cli", "No content for the given table key.");

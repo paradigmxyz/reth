@@ -1,14 +1,11 @@
 use crate::{
-    providers::{
-        state::{historical::HistoricalStateProvider, latest::LatestStateProvider},
-        StaticFileProvider,
-    },
+    providers::{state::latest::LatestStateProvider, StaticFileProvider},
     to_range,
     traits::{BlockSource, ReceiptProvider},
-    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, EvmEnvProvider,
-    HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
+    EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
@@ -34,7 +31,7 @@ mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 use reth_db::mdbx::DatabaseArguments;
 
-/// A common provider that fetches data from a database.
+/// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
 #[derive(Debug, Clone)]
@@ -127,7 +124,7 @@ impl<DB: Database> ProviderFactory<DB> {
         )))
     }
 
-    /// Storage provider for latest block
+    /// State provider for latest block
     #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
@@ -135,61 +132,11 @@ impl<DB: Database> ProviderFactory<DB> {
     }
 
     /// Storage provider for state at that given block
-    fn state_provider_by_block_number(
-        &self,
-        provider: DatabaseProviderRO<DB>,
-        mut block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox> {
-        if block_number == provider.best_block_number().unwrap_or_default() &&
-            block_number == provider.last_block_number().unwrap_or_default()
-        {
-            return Ok(Box::new(LatestStateProvider::new(
-                provider.into_tx(),
-                self.static_file_provider(),
-            )))
-        }
-
-        // +1 as the changeset that we want is the one that was applied after this block.
-        block_number += 1;
-
-        let account_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PruneSegment::AccountHistory)?;
-        let storage_history_prune_checkpoint =
-            provider.get_prune_checkpoint(PruneSegment::StorageHistory)?;
-
-        let mut state_provider = HistoricalStateProvider::new(
-            provider.into_tx(),
-            block_number,
-            self.static_file_provider(),
-        );
-
-        // If we pruned account or storage history, we can't return state on every historical block.
-        // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
-        if let Some(prune_checkpoint_block_number) =
-            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_account_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-        if let Some(prune_checkpoint_block_number) =
-            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
-        {
-            state_provider = state_provider.with_lowest_available_storage_history_block_number(
-                prune_checkpoint_block_number + 1,
-            );
-        }
-
-        Ok(Box::new(state_provider))
-    }
-
-    /// Storage provider for state at that given block
     pub fn history_by_block_number(
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        let provider = self.provider()?;
-        let state_provider = self.state_provider_by_block_number(provider, block_number)?;
+        let state_provider = self.provider()?.state_provider_by_block_number(block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
         Ok(state_provider)
     }
@@ -202,9 +149,15 @@ impl<DB: Database> ProviderFactory<DB> {
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
-        let state_provider = self.state_provider_by_block_number(provider, block_number)?;
-        trace!(target: "providers::db", ?block_number, "Returning historical state provider for block hash");
+        let state_provider = self.provider()?.state_provider_by_block_number(block_number)?;
+        trace!(target: "providers::db", ?block_number, %block_hash, "Returning historical state provider for block hash");
         Ok(state_provider)
+    }
+}
+
+impl<DB: Database> DatabaseProviderFactory<DB> for ProviderFactory<DB> {
+    fn database_provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
+        self.provider()
     }
 }
 
@@ -607,6 +560,7 @@ mod tests {
     use assert_matches::assert_matches;
     use rand::Rng;
     use reth_db::{
+        mdbx::DatabaseArguments,
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
@@ -654,11 +608,12 @@ mod tests {
     #[test]
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let factory = ProviderFactory::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
-            Default::default(),
-            create_test_static_files_dir(),
+            DatabaseArguments::new(Default::default()),
+            static_dir_path,
         )
         .unwrap();
 
@@ -777,7 +732,7 @@ mod tests {
         static_file_writer.commit().unwrap();
         drop(static_file_writer);
 
-        let gap = provider.sync_gap(mode.clone(), checkpoint).unwrap();
+        let gap = provider.sync_gap(mode, checkpoint).unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
     }

@@ -34,6 +34,12 @@ pub struct NetworkMetrics {
     /// Number of active outgoing connections
     pub(crate) outgoing_connections: Gauge,
 
+    /// Number of currently pending outgoing connections
+    pub(crate) pending_outgoing_connections: Gauge,
+
+    /// Total number of pending connections, incoming and outgoing.
+    pub(crate) total_pending_connections: Gauge,
+
     /// Total Number of incoming connections handled
     pub(crate) total_incoming_connections: Counter,
 
@@ -75,7 +81,7 @@ pub struct NetworkMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct SessionManagerMetrics {
-    /// Number of dials that resulted in a peer being added to the peerset
+    /// Number of successful outgoing dial attempts.
     pub(crate) total_dial_successes: Counter,
 }
 
@@ -331,21 +337,21 @@ pub struct TxTypesCounter {
 
 impl TxTypesCounter {
     pub(crate) fn increase_by_tx_type(&mut self, tx_type: TxType) {
+        #[allow(unreachable_patterns)]
         match tx_type {
             TxType::Legacy => {
                 self.legacy += 1;
             }
-            TxType::EIP2930 => {
+            TxType::Eip2930 => {
                 self.eip2930 += 1;
             }
-            TxType::EIP1559 => {
+            TxType::Eip1559 => {
                 self.eip1559 += 1;
             }
-            TxType::EIP4844 => {
+            TxType::Eip4844 => {
                 self.eip4844 += 1;
             }
-            #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => {}
+            _ => {}
         }
     }
 }

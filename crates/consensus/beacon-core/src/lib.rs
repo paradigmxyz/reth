@@ -83,7 +83,7 @@ impl Consensus for BeaconConsensus {
             //  * difficulty, mix_hash & nonce aka PoW stuff
             // low priority as syncing is done in reverse order
 
-            // Check if timestamp is in future. Clock can drift but this can be consensus issue.
+            // Check if timestamp is in the future. Clock can drift but this can be consensus issue.
             let present_timestamp =
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 

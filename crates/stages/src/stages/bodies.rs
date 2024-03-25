@@ -25,7 +25,7 @@ use tracing::*;
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
 ///
-/// The body stage downloads block bodies for all block headers stored locally in the database.
+/// The body stage downloads block bodies for all block headers stored locally in storage.
 ///
 /// # Empty blocks
 ///
@@ -33,7 +33,7 @@ use tracing::*;
 /// no transactions will not have a block body downloaded for them, since it would be meaningless to
 /// do so.
 ///
-/// This also means that if there is no body for the block in the database (assuming the
+/// This also means that if there is no body for the block in storage (assuming the
 /// block number <= the synced block of this stage), then the block can be considered empty.
 ///
 /// # Tables
@@ -179,8 +179,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
             // Increment block on static file header.
             if block_number > 0 {
-                let appended_block_number =
-                    static_file_producer.increment_block(StaticFileSegment::Transactions)?;
+                let appended_block_number = static_file_producer
+                    .increment_block(StaticFileSegment::Transactions, block_number)?;
 
                 if appended_block_number != block_number {
                     // This scenario indicates a critical error in the logic of adding new
@@ -587,13 +587,10 @@ mod tests {
         use reth_interfaces::{
             p2p::{
                 bodies::{
-                    client::{BodiesClient, BodiesFut},
                     downloader::{BodyDownloader, BodyDownloaderResult},
                     response::BlockResponse,
                 },
-                download::DownloadClient,
                 error::DownloadResult,
-                priority::Priority,
             },
             test_utils::{
                 generators,
@@ -841,32 +838,6 @@ mod tests {
                     Ok(())
                 })?;
                 Ok(())
-            }
-        }
-
-        /// A [BodiesClient] that should not be called.
-        #[derive(Debug)]
-        pub(crate) struct NoopClient;
-
-        impl DownloadClient for NoopClient {
-            fn report_bad_message(&self, _: reth_primitives::PeerId) {
-                panic!("Noop client should not be called")
-            }
-
-            fn num_connected_peers(&self) -> usize {
-                panic!("Noop client should not be called")
-            }
-        }
-
-        impl BodiesClient for NoopClient {
-            type Output = BodiesFut;
-
-            fn get_block_bodies_with_priority(
-                &self,
-                _hashes: Vec<B256>,
-                _priority: Priority,
-            ) -> Self::Output {
-                panic!("Noop client should not be called")
             }
         }
 

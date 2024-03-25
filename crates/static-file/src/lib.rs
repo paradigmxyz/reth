@@ -13,5 +13,6 @@ mod static_file_producer;
 
 pub use event::StaticFileProducerEvent;
 pub use static_file_producer::{
-    StaticFileProducer, StaticFileProducerResult, StaticFileProducerWithResult, StaticFileTargets,
+    StaticFileProducer, StaticFileProducerInner, StaticFileProducerResult,
+    StaticFileProducerWithResult, StaticFileTargets,
 };

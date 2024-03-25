@@ -79,7 +79,8 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 
     // Insert header
     let tx = provider_rw.into_tx();
-    insert_genesis_header::<DB>(&tx, factory.static_file_provider(), chain.clone())?;
+    let static_file_provider = factory.static_file_provider();
+    insert_genesis_header::<DB>(&tx, &static_file_provider, chain.clone())?;
 
     insert_genesis_state::<DB>(&tx, genesis)?;
 
@@ -89,6 +90,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     }
 
     tx.commit()?;
+    static_file_provider.commit()?;
 
     Ok(hash)
 }
@@ -98,9 +100,10 @@ pub fn insert_genesis_state<DB: Database>(
     tx: &<DB as Database>::TXMut,
     genesis: &reth_primitives::Genesis,
 ) -> ProviderResult<()> {
-    let mut state_init: BundleStateInit = HashMap::new();
-    let mut reverts_init = HashMap::new();
-    let mut contracts: HashMap<B256, Bytecode> = HashMap::new();
+    let capacity = genesis.alloc.len();
+    let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
+    let mut reverts_init = HashMap::with_capacity(capacity);
+    let mut contracts: HashMap<B256, Bytecode> = HashMap::with_capacity(capacity);
 
     for (address, account) in &genesis.alloc {
         let bytecode_hash = if let Some(code) = &account.code {
@@ -209,7 +212,7 @@ pub fn insert_genesis_history<DB: Database>(
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<DB: Database>(
     tx: &<DB as Database>::TXMut,
-    static_file_provider: StaticFileProvider,
+    static_file_provider: &StaticFileProvider,
     chain: Arc<ChainSpec>,
 ) -> ProviderResult<()> {
     let (header, block_hash) = chain.sealed_genesis_header().split();
@@ -219,7 +222,6 @@ pub fn insert_genesis_header<DB: Database>(
             let (difficulty, hash) = (header.difficulty, block_hash);
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
             writer.append_header(header, difficulty, hash)?;
-            writer.commit()?;
         }
         Ok(Some(_)) => {}
         Err(e) => return Err(e),

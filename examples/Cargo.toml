@@ -27,8 +27,6 @@ futures.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 
-jemallocator = { version = "0.5.0", features = ["profiling"] }
-
 [[example]]
 name = "db-access"
 path = "db-access.rs"
@@ -40,4 +38,3 @@ path = "network.rs"
 [[example]]
 name = "network-txpool"
 path = "network-txpool.rs"
-

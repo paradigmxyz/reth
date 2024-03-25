@@ -609,7 +609,7 @@ where
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();
-    let mut buf = alloy_rlp::BytesMut::new();
+    let mut buf = Vec::new();
     alloy_rlp::encode_list(&local_transactions, &mut buf);
     info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
@@ -664,7 +664,6 @@ pub async fn backup_local_transactions_task<P>(
     drop(graceful_guard)
 }
 
-#[cfg(not(feature = "optimism"))]
 #[cfg(test)]
 mod tests {
     use super::*;

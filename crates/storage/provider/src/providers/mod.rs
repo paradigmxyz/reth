@@ -12,12 +12,13 @@ use reth_db::{
 };
 use reth_interfaces::{
     blockchain_tree::{
-        error::InsertBlockError, BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer,
-        CanonicalOutcome, InsertPayloadOk,
+        error::{CanonicalError, InsertBlockError},
+        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+        InsertPayloadOk,
     },
     consensus::ForkchoiceState,
     provider::ProviderResult,
-    RethError, RethResult,
+    RethResult,
 };
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
@@ -59,7 +60,7 @@ mod chain_info;
 use chain_info::ChainInfoTracker;
 
 mod consistent_view;
-pub use consistent_view::ConsistentDbView;
+pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
 /// The main type for interacting with the blockchain.
 ///
@@ -668,7 +669,7 @@ where
         self.tree.connect_buffered_blocks_to_canonical_hashes()
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
+    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         self.tree.make_canonical(block_hash)
     }
 
@@ -714,7 +715,7 @@ where
         self.tree.find_canonical_ancestor(hash)
     }
 
-    fn is_canonical(&self, hash: BlockHash) -> Result<bool, RethError> {
+    fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
         self.tree.is_canonical(hash)
     }
 

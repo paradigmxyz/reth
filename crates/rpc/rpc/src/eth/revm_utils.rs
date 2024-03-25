@@ -237,7 +237,7 @@ where
 ///  - `nonce` is set to `None`
 pub(crate) fn prepare_call_env<DB>(
     mut cfg: CfgEnvWithHandlerCfg,
-    block: BlockEnv,
+    mut block: BlockEnv,
     request: TransactionRequest,
     gas_limit: u64,
     db: &mut CacheDB<DB>,
@@ -260,24 +260,25 @@ where
     // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
     cfg.disable_base_fee = true;
 
-    let request_gas = request.gas;
-
-    let mut env = build_call_evm_env(cfg, block, request)?;
-    env.tx.nonce = None;
-
-    // apply state overrides
-    if let Some(state_overrides) = overrides.state {
-        apply_state_overrides(state_overrides, db)?;
-    }
-
-    // apply block overrides
+    // apply block overrides, we need to apply them first so that they take effect when we we create
+    // the evm env via `build_call_evm_env`, e.g. basefee
     if let Some(mut block_overrides) = overrides.block {
         if let Some(block_hashes) = block_overrides.block_hash.take() {
             // override block hashes
             db.block_hashes
                 .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
         }
-        apply_block_overrides(*block_overrides, &mut env.env.block);
+        apply_block_overrides(*block_overrides, &mut block);
+    }
+
+    let request_gas = request.gas;
+    let mut env = build_call_evm_env(cfg, block, request)?;
+    // set nonce to None so that the next nonce is used when transacting the call
+    env.tx.nonce = None;
+
+    // apply state overrides
+    if let Some(state_overrides) = overrides.state {
+        apply_state_overrides(state_overrides, db)?;
     }
 
     if request_gas.is_none() {
@@ -354,7 +355,7 @@ pub(crate) fn create_txn_env(
             block_env.get_blob_gasprice().map(U256::from),
         )?;
 
-    let gas_limit = gas.unwrap_or(block_env.gas_limit.min(U256::from(u64::MAX)));
+    let gas_limit = gas.unwrap_or_else(|| block_env.gas_limit.min(U256::from(u64::MAX)));
     let env = TxEnv {
         gas_limit: gas_limit.try_into().map_err(|_| RpcInvalidTransactionError::GasUintOverflow)?,
         nonce: nonce
@@ -366,7 +367,7 @@ pub(crate) fn create_txn_env(
         transact_to: to.map(TransactTo::Call).unwrap_or_else(TransactTo::create),
         value: value.unwrap_or_default(),
         data: input.try_into_unique_input()?.unwrap_or_default(),
-        chain_id: chain_id.map(|c| c.to()),
+        chain_id,
         access_list: access_list
             .map(reth_rpc_types::AccessList::into_flattened)
             .unwrap_or_default(),

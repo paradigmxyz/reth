@@ -18,10 +18,11 @@ reth-interfaces.workspace = true
 reth-db.workspace = true
 reth-codecs.workspace = true
 reth-provider.workspace = true
-reth-trie.workspace = true
+reth-trie = { workspace = true, features = ["metrics"] }
 reth-tokio-util.workspace = true
 reth-etl.workspace = true
 reth-static-file.workspace = true
+reth-config.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -65,7 +66,7 @@ itertools.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 assert_matches.workspace = true
 rand.workspace = true
-paste = "1.0"
+paste.workspace = true
 
 # Stage benchmarks
 pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }

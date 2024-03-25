@@ -458,7 +458,7 @@ mod tests {
         }
         let all = store.get_all(all_hashes.clone()).unwrap();
         for (tx, blob) in all {
-            assert!(blobs.contains(&(tx, blob)), "missing blob {:?}", tx);
+            assert!(blobs.contains(&(tx, blob)), "missing blob {tx:?}");
         }
 
         assert!(store.contains(all_hashes[0]).unwrap());

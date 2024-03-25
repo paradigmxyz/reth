@@ -18,18 +18,20 @@ use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    providers::BundleStateProvider, BundleStateDataProvider, BundleStateWithReceipts, Chain,
-    ExecutorFactory, StateRootProvider,
+    providers::{BundleStateProvider, ConsistentDbView},
+    BundleStateDataProvider, BundleStateWithReceipts, Chain, ExecutorFactory, ProviderError,
+    StateRootProvider,
 };
 use reth_trie::updates::TrieUpdates;
+use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut},
     time::Instant,
 };
 
-/// A chain if the blockchain tree, that has functionality to execute blocks and append them to the
-/// it self.
+/// A chain in the blockchain tree that has functionality to execute blocks and append them to
+/// itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AppendableChain {
     chain: Chain,
@@ -74,7 +76,7 @@ impl AppendableChain {
         block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockErrorKind>
     where
-        DB: Database,
+        DB: Database + Clone,
         EF: ExecutorFactory,
     {
         let state = BundleStateWithReceipts::default();
@@ -112,7 +114,7 @@ impl AppendableChain {
         block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockErrorKind>
     where
-        DB: Database,
+        DB: Database + Clone,
         EF: ExecutorFactory,
     {
         let parent_number = block.number - 1;
@@ -174,7 +176,7 @@ impl AppendableChain {
     ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
     where
         BSDP: BundleStateDataProvider,
-        DB: Database,
+        DB: Database + Clone,
         EVM: ExecutorFactory,
     {
         // some checks are done before blocks comes here.
@@ -182,8 +184,18 @@ impl AppendableChain {
 
         // get the state provider.
         let canonical_fork = bundle_state_data_provider.canonical_fork();
+
+        // SAFETY: For block execution and parallel state root computation below we open multiple
+        // independent database transactions. Upon opening the database transaction the consistent
+        // view will check a current tip in the database and throw an error if it doesn't match
+        // the one recorded during initialization.
+        // It is safe to use consistent view without any special error handling as long as
+        // we guarantee that plain state cannot change during processing of new payload.
+        // The usage has to be re-evaluated if that was ever to change.
+        let consistent_view =
+            ConsistentDbView::new_with_latest_tip(externals.provider_factory.clone())?;
         let state_provider =
-            externals.provider_factory.history_by_block_number(canonical_fork.number)?;
+            consistent_view.provider_ro()?.state_provider_by_block_number(canonical_fork.number)?;
 
         let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
 
@@ -199,11 +211,15 @@ impl AppendableChain {
             // calculate and check state root
             let start = Instant::now();
             let (state_root, trie_updates) = if block_attachment.is_canonical() {
-                provider
-                    .state_root_with_updates(&bundle_state)
-                    .map(|(root, updates)| (root, Some(updates)))?
+                let mut state = provider.bundle_state_data_provider.state().clone();
+                state.extend(bundle_state.clone());
+                let hashed_state = state.hash_state_slow();
+                ParallelStateRoot::new(consistent_view, hashed_state)
+                    .incremental_root_with_updates()
+                    .map(|(root, updates)| (root, Some(updates)))
+                    .map_err(ProviderError::from)?
             } else {
-                (provider.state_root(&bundle_state)?, None)
+                (provider.state_root(bundle_state.state())?, None)
             };
             if block.state_root != state_root {
                 return Err(ConsensusError::BodyStateRootDiff(
@@ -250,7 +266,7 @@ impl AppendableChain {
         block_validation_kind: BlockValidationKind,
     ) -> Result<(), InsertBlockErrorKind>
     where
-        DB: Database,
+        DB: Database + Clone,
         EF: ExecutorFactory,
     {
         let parent_block = self.chain.tip();

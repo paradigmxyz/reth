@@ -24,13 +24,13 @@ alloy-chains = { workspace = true, features = ["serde", "rlp"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { workspace = true, features = ["serde"] }
-ethers-core = { workspace = true, default-features = false, optional = true }
 nybbles = { workspace = true, features = ["serde", "rlp"] }
 alloy-genesis.workspace = true
 alloy-eips.workspace = true
+enr = { workspace = true, features = ["rust-secp256k1"] }
+
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
-
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
@@ -43,10 +43,11 @@ itertools.workspace = true
 modular-bitfield = "0.11.2"
 once_cell.workspace = true
 rayon.workspace = true
+serde_with.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2 = "0.10.7"
-tempfile.workspace = true
+sha2 = { version = "0.10.7", optional = true }
+tempfile = { workspace = true, optional = true }
 thiserror.workspace = true
 zstd = { version = "0.12", features = ["experimental"] }
 roaring = "0.10.2"
@@ -102,7 +103,7 @@ arbitrary = [
     "dep:proptest",
     "dep:proptest-derive",
 ]
-c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg"]
+c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:sha2", "dep:tempfile"]
 clap = ["dep:clap"]
 optimism = [
     "reth-codecs/optimism",
@@ -110,7 +111,7 @@ optimism = [
     "reth-ethereum-forks/optimism",
     "revm/optimism",
 ]
-test-utils = ["dep:plain_hasher", "dep:hash-db", "dep:ethers-core"]
+test-utils = ["dep:plain_hasher", "dep:hash-db"]
 
 [[bench]]
 name = "recover_ecdsa_crit"
@@ -118,7 +119,7 @@ harness = false
 
 [[bench]]
 name = "validate_blob_tx"
-required-features = ["arbitrary"]
+required-features = ["arbitrary", "c-kzg"]
 harness = false
 
 [[bench]]

@@ -1,4 +1,4 @@
-use crate::U8;
+use crate::{U64, U8};
 use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
@@ -36,27 +36,27 @@ pub enum TxType {
     #[default]
     Legacy = 0_isize,
     /// AccessList transaction
-    EIP2930 = 1_isize,
+    Eip2930 = 1_isize,
     /// Transaction with Priority fee
-    EIP1559 = 2_isize,
+    Eip1559 = 2_isize,
     /// Shard Blob Transactions - EIP-4844
-    EIP4844 = 3_isize,
+    Eip4844 = 3_isize,
     /// Optimism Deposit transaction.
     #[cfg(feature = "optimism")]
-    DEPOSIT = 126_isize,
+    Deposit = 126_isize,
 }
 
 impl TxType {
     /// The max type reserved by an EIP.
-    pub const MAX_RESERVED_EIP: TxType = Self::EIP4844;
+    pub const MAX_RESERVED_EIP: TxType = Self::Eip4844;
 
     /// Check if the transaction type has an access list.
     pub const fn has_access_list(&self) -> bool {
         match self {
             TxType::Legacy => false,
-            TxType::EIP2930 | TxType::EIP1559 | TxType::EIP4844 => true,
+            TxType::Eip2930 | TxType::Eip1559 | TxType::Eip4844 => true,
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => false,
+            TxType::Deposit => false,
         }
     }
 }
@@ -65,11 +65,11 @@ impl From<TxType> for u8 {
     fn from(value: TxType) -> Self {
         match value {
             TxType::Legacy => LEGACY_TX_TYPE_ID,
-            TxType::EIP2930 => EIP2930_TX_TYPE_ID,
-            TxType::EIP1559 => EIP1559_TX_TYPE_ID,
-            TxType::EIP4844 => EIP4844_TX_TYPE_ID,
+            TxType::Eip2930 => EIP2930_TX_TYPE_ID,
+            TxType::Eip1559 => EIP1559_TX_TYPE_ID,
+            TxType::Eip4844 => EIP4844_TX_TYPE_ID,
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => DEPOSIT_TX_TYPE_ID,
+            TxType::Deposit => DEPOSIT_TX_TYPE_ID,
         }
     }
 }
@@ -85,21 +85,38 @@ impl TryFrom<u8> for TxType {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         #[cfg(feature = "optimism")]
-        if value == TxType::DEPOSIT as u8 {
-            return Ok(TxType::DEPOSIT)
+        if value == TxType::Deposit as u8 {
+            return Ok(TxType::Deposit)
         }
 
         if value == TxType::Legacy as u8 {
             return Ok(TxType::Legacy)
-        } else if value == TxType::EIP2930 as u8 {
-            return Ok(TxType::EIP2930)
-        } else if value == TxType::EIP1559 as u8 {
-            return Ok(TxType::EIP1559)
-        } else if value == TxType::EIP4844 as u8 {
-            return Ok(TxType::EIP4844)
+        } else if value == TxType::Eip2930 as u8 {
+            return Ok(TxType::Eip2930)
+        } else if value == TxType::Eip1559 as u8 {
+            return Ok(TxType::Eip1559)
+        } else if value == TxType::Eip4844 as u8 {
+            return Ok(TxType::Eip4844)
         }
 
         Err("invalid tx type")
+    }
+}
+
+impl TryFrom<u64> for TxType {
+    type Error = &'static str;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        let value: u8 = value.try_into().map_err(|_| "invalid tx type")?;
+        Self::try_from(value)
+    }
+}
+
+impl TryFrom<U64> for TxType {
+    type Error = &'static str;
+
+    fn try_from(value: U64) -> Result<Self, Self::Error> {
+        value.to::<u64>().try_into()
     }
 }
 
@@ -110,9 +127,9 @@ impl Compact for TxType {
     {
         match self {
             TxType::Legacy => 0,
-            TxType::EIP2930 => 1,
-            TxType::EIP1559 => 2,
-            TxType::EIP4844 => {
+            TxType::Eip2930 => 1,
+            TxType::Eip1559 => 2,
+            TxType::Eip4844 => {
                 // Write the full transaction type to the buffer when encoding > 3.
                 // This allows compat decoding the [TyType] from a single byte as
                 // opposed to 2 bits for the backwards-compatible encoding.
@@ -120,7 +137,7 @@ impl Compact for TxType {
                 3
             }
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => {
+            TxType::Deposit => {
                 buf.put_u8(self as u8);
                 3
             }
@@ -134,18 +151,18 @@ impl Compact for TxType {
         (
             match identifier {
                 0 => TxType::Legacy,
-                1 => TxType::EIP2930,
-                2 => TxType::EIP1559,
+                1 => TxType::Eip2930,
+                2 => TxType::Eip1559,
                 3 => {
                     let extended_identifier = buf.get_u8();
                     match extended_identifier {
-                        EIP4844_TX_TYPE_ID => TxType::EIP4844,
+                        EIP4844_TX_TYPE_ID => TxType::Eip4844,
                         #[cfg(feature = "optimism")]
-                        DEPOSIT_TX_TYPE_ID => TxType::DEPOSIT,
-                        _ => panic!("Unsupported TxType identifier: {}", extended_identifier),
+                        DEPOSIT_TX_TYPE_ID => TxType::Deposit,
+                        _ => panic!("Unsupported TxType identifier: {extended_identifier}"),
                     }
                 }
-                _ => panic!("Unknown identifier for TxType: {}", identifier),
+                _ => panic!("Unknown identifier for TxType: {identifier}"),
             },
             buf,
         )
@@ -157,14 +174,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_u64_to_tx_type() {
+        // Test for Legacy transaction
+        assert_eq!(TxType::try_from(U64::from(0)).unwrap(), TxType::Legacy);
+
+        // Test for EIP2930 transaction
+        assert_eq!(TxType::try_from(U64::from(1)).unwrap(), TxType::Eip2930);
+
+        // Test for EIP1559 transaction
+        assert_eq!(TxType::try_from(U64::from(2)).unwrap(), TxType::Eip1559);
+
+        // Test for EIP4844 transaction
+        assert_eq!(TxType::try_from(U64::from(3)).unwrap(), TxType::Eip4844);
+
+        // Test for Deposit transaction
+        #[cfg(feature = "optimism")]
+        assert_eq!(TxType::try_from(U64::from(126)).unwrap(), TxType::Deposit);
+
+        // For transactions with unsupported values
+        assert!(TxType::try_from(U64::from(4)).is_err());
+    }
+
+    #[test]
     fn test_txtype_to_compat() {
         let cases = vec![
             (TxType::Legacy, 0, vec![]),
-            (TxType::EIP2930, 1, vec![]),
-            (TxType::EIP1559, 2, vec![]),
-            (TxType::EIP4844, 3, vec![EIP4844_TX_TYPE_ID]),
+            (TxType::Eip2930, 1, vec![]),
+            (TxType::Eip1559, 2, vec![]),
+            (TxType::Eip4844, 3, vec![EIP4844_TX_TYPE_ID]),
             #[cfg(feature = "optimism")]
-            (TxType::DEPOSIT, 3, vec![DEPOSIT_TX_TYPE_ID]),
+            (TxType::Deposit, 3, vec![DEPOSIT_TX_TYPE_ID]),
         ];
 
         for (tx_type, expected_identifier, expected_buf) in cases {
@@ -172,10 +211,9 @@ mod tests {
             let identifier = tx_type.to_compact(&mut buf);
             assert_eq!(
                 identifier, expected_identifier,
-                "Unexpected identifier for TxType {:?}",
-                tx_type
+                "Unexpected identifier for TxType {tx_type:?}",
             );
-            assert_eq!(buf, expected_buf, "Unexpected buffer for TxType {:?}", tx_type);
+            assert_eq!(buf, expected_buf, "Unexpected buffer for TxType {tx_type:?}");
         }
     }
 
@@ -183,24 +221,19 @@ mod tests {
     fn test_txtype_from_compact() {
         let cases = vec![
             (TxType::Legacy, 0, vec![]),
-            (TxType::EIP2930, 1, vec![]),
-            (TxType::EIP1559, 2, vec![]),
-            (TxType::EIP4844, 3, vec![EIP4844_TX_TYPE_ID]),
+            (TxType::Eip2930, 1, vec![]),
+            (TxType::Eip1559, 2, vec![]),
+            (TxType::Eip4844, 3, vec![EIP4844_TX_TYPE_ID]),
             #[cfg(feature = "optimism")]
-            (TxType::DEPOSIT, 3, vec![DEPOSIT_TX_TYPE_ID]),
+            (TxType::Deposit, 3, vec![DEPOSIT_TX_TYPE_ID]),
         ];
 
         for (expected_type, identifier, buf) in cases {
             let (actual_type, remaining_buf) = TxType::from_compact(&buf, identifier);
-            assert_eq!(
-                actual_type, expected_type,
-                "Unexpected TxType for identifier {}",
-                identifier
-            );
+            assert_eq!(actual_type, expected_type, "Unexpected TxType for identifier {identifier}",);
             assert!(
                 remaining_buf.is_empty(),
-                "Buffer not fully consumed for identifier {}",
-                identifier
+                "Buffer not fully consumed for identifier {identifier}",
             );
         }
     }

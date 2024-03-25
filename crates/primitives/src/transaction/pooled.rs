@@ -7,11 +7,11 @@
 use super::error::TransactionConversionError;
 use crate::{
     Address, BlobTransaction, BlobTransactionSidecar, Bytes, Signature, Transaction,
-    TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxHash, TxLegacy, B256,
-    EIP4844_TX_TYPE_ID,
+    TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash,
+    TxLegacy, B256, EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
-use bytes::{Buf, BytesMut};
+use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use reth_codecs::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
@@ -203,7 +203,7 @@ impl PooledTransactionsElement {
             let tx_type = *data.first().ok_or(RlpError::InputTooShort)?;
 
             if tx_type == EIP4844_TX_TYPE_ID {
-                // Recall that the blob transaction response `TranactionPayload` is encoded like
+                // Recall that the blob transaction response `TransactionPayload` is encoded like
                 // this: `rlp([tx_payload_body, blobs, commitments, proofs])`
                 //
                 // Note that `tx_payload_body` is a list:
@@ -302,9 +302,9 @@ impl PooledTransactionsElement {
     ///
     /// See also [TransactionSigned::encode_enveloped]
     pub fn envelope_encoded(&self) -> Bytes {
-        let mut buf = BytesMut::new();
+        let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
-        buf.freeze().into()
+        buf.into()
     }
 
     /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).
@@ -337,6 +337,89 @@ impl PooledTransactionsElement {
                 // `tx_type || rlp([transaction_payload_body, blobs, commitments, proofs]))`
                 blob_tx.encode_with_type_inner(out, false);
             }
+        }
+    }
+
+    /// Returns true if the transaction is an EIP-4844 transaction.
+    #[inline]
+    pub const fn is_eip4844(&self) -> bool {
+        matches!(self, Self::BlobTransaction(_))
+    }
+
+    /// Returns the [TxLegacy] variant if the transaction is a legacy transaction.
+    pub fn as_legacy(&self) -> Option<&TxLegacy> {
+        match self {
+            Self::Legacy { transaction, .. } => Some(transaction),
+            _ => None,
+        }
+    }
+
+    /// Returns the [TxEip2930] variant if the transaction is an EIP-2930 transaction.
+    pub fn as_eip2930(&self) -> Option<&TxEip2930> {
+        match self {
+            Self::Eip2930 { transaction, .. } => Some(transaction),
+            _ => None,
+        }
+    }
+
+    /// Returns the [TxEip1559] variant if the transaction is an EIP-1559 transaction.
+    pub fn as_eip1559(&self) -> Option<&TxEip1559> {
+        match self {
+            Self::Eip1559 { transaction, .. } => Some(transaction),
+            _ => None,
+        }
+    }
+
+    /// Returns the [TxEip4844] variant if the transaction is an EIP-4844 transaction.
+    pub fn as_eip4844(&self) -> Option<&TxEip4844> {
+        match self {
+            Self::BlobTransaction(tx) => Some(&tx.transaction),
+            _ => None,
+        }
+    }
+
+    /// Returns the blob gas used for all blobs of the EIP-4844 transaction if it is an EIP-4844
+    /// transaction.
+    ///
+    /// This is the number of blobs times the
+    /// [DATA_GAS_PER_BLOB](crate::constants::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
+    pub fn blob_gas_used(&self) -> Option<u64> {
+        self.as_eip4844().map(TxEip4844::blob_gas)
+    }
+
+    /// Max fee per blob gas for eip4844 transaction [TxEip4844].
+    ///
+    /// Returns `None` for non-eip4844 transactions.
+    ///
+    /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
+    pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        match self {
+            Self::BlobTransaction(tx) => Some(tx.transaction.max_fee_per_blob_gas),
+            _ => None,
+        }
+    }
+
+    /// Max priority fee per gas for eip1559 transaction, for legacy and eip2930 transactions this
+    /// is `None`
+    ///
+    /// This is also commonly referred to as the "Gas Tip Cap" (`GasTipCap`).
+    pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        match self {
+            Self::Legacy { .. } | Self::Eip2930 { .. } => None,
+            Self::Eip1559 { transaction, .. } => Some(transaction.max_priority_fee_per_gas),
+            Self::BlobTransaction(tx) => Some(tx.transaction.max_priority_fee_per_gas),
+        }
+    }
+
+    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price.
+    ///
+    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
+    pub fn max_fee_per_gas(&self) -> u128 {
+        match self {
+            Self::Legacy { transaction, .. } => transaction.gas_price,
+            Self::Eip2930 { transaction, .. } => transaction.gas_price,
+            Self::Eip1559 { transaction, .. } => transaction.max_fee_per_gas,
+            Self::BlobTransaction(tx) => tx.transaction.max_fee_per_gas,
         }
     }
 }
@@ -541,8 +624,6 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for PooledTransactionsElement {
     type Parameters = ();
-    type Strategy = proptest::strategy::BoxedStrategy<PooledTransactionsElement>;
-
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::{any, Strategy};
 
@@ -563,6 +644,8 @@ impl proptest::arbitrary::Arbitrary for PooledTransactionsElement {
             })
             .boxed()
     }
+
+    type Strategy = proptest::strategy::BoxedStrategy<PooledTransactionsElement>;
 }
 
 /// A signed pooled transaction with recovered signer.
@@ -595,7 +678,7 @@ impl PooledTransactionsElementEcRecovered {
         tx.into_ecrecovered_transaction(signer)
     }
 
-    /// Desolve Self to its component
+    /// Dissolve Self to its component
     pub fn into_components(self) -> (PooledTransactionsElement, Address) {
         (self.transaction, self.signer)
     }

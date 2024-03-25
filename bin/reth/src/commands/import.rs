@@ -13,7 +13,7 @@ use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
-use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
+use reth_db::{database::Database, init_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -79,7 +79,7 @@ impl ImportCommand {
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let config: Config = self.load_config(config_path.clone())?;
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
@@ -87,8 +87,7 @@ impl ImportCommand {
         let db_path = data_dir.db_path();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db =
-            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
+        let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
         let provider_factory =
             ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
@@ -108,19 +107,17 @@ impl ImportCommand {
         let tip = file_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            PruneModes::default(),
-        );
-
         let (mut pipeline, events) = self
             .build_import_pipeline(
                 config,
                 provider_factory.clone(),
                 &consensus,
                 file_client,
-                static_file_producer,
+                StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
             )
             .await?;
 
@@ -144,7 +141,7 @@ impl ImportCommand {
         tokio::select! {
             res = pipeline.run() => res?,
             _ = tokio::signal::ctrl_c() => {},
-        };
+        }
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
@@ -179,6 +176,7 @@ impl ImportCommand {
             reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
 
         let max_block = file_client.max_block().unwrap_or(0);
+
         let mut pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty
@@ -191,6 +189,7 @@ impl ImportCommand {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
+                    config.stages.etl,
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
@@ -222,7 +221,7 @@ impl ImportCommand {
     /// Loads the reth config
     fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
         confy::load_path::<Config>(config_path.clone())
-            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
+            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))
     }
 }
 

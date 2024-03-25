@@ -7,6 +7,7 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![allow(clippy::useless_let_if_seq)]
 
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
@@ -108,8 +109,7 @@ where
         db.merge_transitions(BundleRetention::PlainState);
 
         // calculate the state root
-        let bundle_state =
-            BundleStateWithReceipts::new(db.take_bundle(), Receipts::new(), block_number);
+        let bundle_state = db.take_bundle();
         let state_root = state.state_root(&bundle_state).map_err(|err| {
                 warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to calculate state root for empty payload");
                 err
@@ -313,7 +313,7 @@ where
             tx_type: tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
-            logs: result.logs().into_iter().map(Into::into).collect(),
+            logs: result.into_logs().into_iter().map(Into::into).collect(),
             ..Default::default()
         }));
 
@@ -349,7 +349,7 @@ where
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
-    let state_root = state_provider.state_root(&bundle)?;
+    let state_root = state_provider.state_root(bundle.state())?;
 
     // create the block header
     let transactions_root = proofs::calculate_transaction_root(&executed_txs);

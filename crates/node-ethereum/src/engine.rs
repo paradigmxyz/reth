@@ -1,5 +1,5 @@
 use reth_node_api::{
-    validate_version_specific_fields, AttributesValidationError, EngineApiMessageVersion,
+    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
     EngineTypes, PayloadOrAttributes,
 };
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
@@ -29,7 +29,7 @@ impl EngineTypes for EthEngineTypes {
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, EthPayloadAttributes>,
-    ) -> Result<(), AttributesValidationError> {
+    ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(chain_spec, version, payload_or_attrs)
     }
 }

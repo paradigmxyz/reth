@@ -377,9 +377,8 @@ impl TransactionFetcher {
         for hash in hashes.into_iter() {
             debug_assert!(
                 self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_some(),
-                "`%hash` in `@buffered_hashes` that's not in `@unknown_hashes`, `@buffered_hashes` should be a subset of keys in `@unknown_hashes`, broken invariant `@buffered_hashes` and `@unknown_hashes`,
-`%hash`: {hash},
-`@self`: {self:?}",
+                "`%hash` in `@buffered_hashes` that's not in `@hashes_fetch_inflight_and_pending_fetch`, `@buffered_hashes` should be a subset of keys in `@hashes_fetch_inflight_and_pending_fetch`, broken invariant `@buffered_hashes` and `@hashes_fetch_inflight_and_pending_fetch`,
+`%hash`: {hash}"
             );
 
             let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
@@ -676,10 +675,10 @@ impl TransactionFetcher {
                 true
             }(),
             "`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@buffered_hashes` and `@inflight_requests`,
-`%new_announced_hashes`: {:?},
-`@self`: {:?}",
-            new_announced_hashes, self
-        );
+`@hashes_fetch_inflight_and_pending_fetch` for `%new_announced_hashes`: {:?}",
+            new_announced_hashes.iter().map(|hash|
+                (*hash, self.hashes_fetch_inflight_and_pending_fetch.get(hash).cloned())
+            ).collect::<Vec<(TxHash, Option<TxFetchMetadata>)>>());
 
         let (response, rx) = oneshot::channel();
         let req: PeerRequest = PeerRequest::GetPooledTransactions {
@@ -692,10 +691,10 @@ impl TransactionFetcher {
         // try to send the request to the peer
         if let Err(err) = peer.request_tx.try_send(req) {
             // peer channel is full
-            match err {
+            return match err {
                 TrySendError::Full(_) | TrySendError::Closed(_) => {
                     self.metrics.egress_peer_channel_full.increment(1);
-                    return Some(new_announced_hashes)
+                    Some(new_announced_hashes)
                 }
             }
         } else {
@@ -910,12 +909,13 @@ impl TransactionFetcher {
         let GetPooledTxResponse { peer_id, mut requested_hashes, result } = response;
 
         debug_assert!(
-                self.active_peers.get(&peer_id).is_some(),
-                "`%peer_id` has been removed from `@active_peers` before inflight request(s) resolved, broken invariant `@active_peers` and `@inflight_requests`,
+            self.active_peers.get(&peer_id).is_some(),
+            "`%peer_id` has been removed from `@active_peers` before inflight request(s) resolved, broken invariant `@active_peers` and `@inflight_requests`,
 `%peer_id`: {},
-`@self`: {:?}",
-                peer_id, self
-            );
+`@hashes_fetch_inflight_and_pending_fetch` for `%requested_hashes`: {:?}",
+            peer_id, requested_hashes.iter().map(|hash|
+                (*hash, self.hashes_fetch_inflight_and_pending_fetch.get(hash).cloned())
+            ).collect::<Vec<(TxHash, Option<TxFetchMetadata>)>>());
 
         self.decrement_inflight_request_count_for(&peer_id);
 
@@ -944,7 +944,7 @@ impl TransactionFetcher {
                 let (verification_outcome, verified_payload) =
                     payload.verify(&requested_hashes, &peer_id);
 
-                if let VerificationOutcome::ReportPeer = verification_outcome {
+                if verification_outcome == VerificationOutcome::ReportPeer {
                     // todo: report peer for sending hashes that weren't requested
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
@@ -971,7 +971,7 @@ impl TransactionFetcher {
                 // passing the rlp encoded length down from active session along with the decoded
                 // tx.
 
-                if let FilterOutcome::ReportPeer = validation_outcome {
+                if validation_outcome == FilterOutcome::ReportPeer {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         unvalidated_payload_len=unvalidated_payload_len,
@@ -1071,7 +1071,7 @@ impl Default for TransactionFetcher {
 }
 
 /// Metadata of a transaction hash that is yet to be fetched.
-#[derive(Debug, Constructor)]
+#[derive(Debug, Constructor, Clone)]
 pub struct TxFetchMetadata {
     /// The number of times a request attempt has been made for the hash.
     retries: u8,
@@ -1528,7 +1528,7 @@ mod test {
             RequestTxHashes::new(request_hashes.into_iter().collect::<HashSet<_>>());
 
         // but response contains tx 1 + another tx
-        let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2.clone()]);
+        let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2]);
         let payload = UnverifiedPooledTransactions::new(response_txns);
 
         let (outcome, verified_payload) = payload.verify(&request_hashes, &PeerId::ZERO);

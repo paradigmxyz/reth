@@ -10,7 +10,7 @@ FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 
 BUILD_PATH = "target"
 
-# List of features to use when building. Can be overriden via the environment.
+# List of features to use when building. Can be overridden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
     FEATURES ?=
@@ -82,23 +82,29 @@ op-build-native-%:
 #
 # The resulting binaries will be created in the `target/` directory.
 
+# For aarch64, disable asm-keccak optimizations and set the page size for
+# jemalloc. When cross compiling, we must compile jemalloc with a large page
+# size, otherwise it will use the current system's page size which may not work
+# on other systems. JEMALLOC_SYS_WITH_LG_PAGE=16 tells jemalloc to use 64-KiB
+# pages. See: https://github.com/paradigmxyz/reth/issues/6742
+build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
+build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
+
+op-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
+op-build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
+
 # No jemalloc on Windows
 build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
-
-# Disable asm-keccak optimizations and jemalloc.
-# Some aarch64 systems use larger page sizes and jemalloc doesn't play well.
-# See: https://github.com/paradigmxyz/reth/issues/6742
-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak jemalloc jemalloc-prof,$(FEATURES))
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
 build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
- 		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 op-build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
- 		cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
+		cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
@@ -183,20 +189,28 @@ ef-tests: $(EF_TESTS_DIR) ## Runs Ethereum Foundation tests.
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --driver docker-container --name cross-builder`
-.PHONY: docker-build-latest
-docker-build-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
-	$(call build_docker_image,$(GIT_TAG),latest)
+.PHONY: docker-build-push
+docker-build-push: ## Build and push a cross-arch Docker image tagged with the latest git tag.
+	$(call docker_build_push,$(GIT_TAG),$(GIT_TAG))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: docker-build-push-latest
+docker-build-push-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
+	$(call docker_build_push,$(GIT_TAG),latest)
 
 # Note: This requires a buildx builder with emulation support. For example:
 #
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --name cross-builder`
-.PHONY: docker-build-nightly
-docker-build-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
-	$(call build_docker_image,$(GIT_TAG)-nightly,latest-nightly)
+.PHONY: docker-build-push-nightly
+docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
+	$(call docker_build_push,$(GIT_TAG)-nightly,latest-nightly)
 
 # Create a cross-arch Docker image with the given tags and push it
-define build_docker_image
+define docker_build_push
 	$(MAKE) build-x86_64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/amd64
 	cp $(BUILD_PATH)/x86_64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/amd64/reth
@@ -295,7 +309,8 @@ lint:
 	make lint-op-reth && \
 	make lint-other-targets
 
-rustdocs:
+.PHONY: rustdocs
+rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
 	RUSTDOCFLAGS="\
 	--cfg docsrs \
 	--show-type-layout \
@@ -332,9 +347,14 @@ test-other-targets:
 	--benches \
 	--all-features
 
+test-doc:
+	cargo test --doc --workspace --features "ethereum"
+	cargo test --doc --workspace --features "optimism"
+
 test:
 	make test-reth && \
 	make test-op-reth && \
+	make test-doc && \
 	make test-other-targets
 
 pr:

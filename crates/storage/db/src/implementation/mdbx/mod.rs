@@ -1,23 +1,30 @@
 //! Module that interacts with MDBX.
 
 use crate::{
+    cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
     metrics::DatabaseEnvMetrics,
-    tables::{TableType, Tables},
+    models::client_version::ClientVersion,
+    tables::{self, TableType, Tables},
+    transaction::{DbTx, DbTxMut},
     utils::default_page_size,
     DatabaseError,
 };
 use eyre::Context;
 use metrics::{gauge, Label};
-use once_cell::sync::Lazy;
 use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
     PageSize, SyncMode, RO, RW,
 };
 use reth_tracing::tracing::error;
-use std::{ops::Deref, path::Path, sync::Arc};
+use std::{
+    ops::Deref,
+    path::Path,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tx::Tx;
 
 pub mod cursor;
@@ -34,19 +41,6 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 #[cfg(not(windows))]
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
-#[cfg(not(windows))]
-static PROCESS_ID: Lazy<u32> = Lazy::new(|| {
-    #[cfg(unix)]
-    {
-        std::os::unix::process::parent_id()
-    }
-
-    #[cfg(not(unix))]
-    {
-        std::process::id()
-    }
-});
-
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
 pub enum DatabaseEnvKind {
@@ -56,9 +50,18 @@ pub enum DatabaseEnvKind {
     RW,
 }
 
+impl DatabaseEnvKind {
+    /// Returns `true` if the environment is read-write.
+    pub fn is_rw(&self) -> bool {
+        matches!(self, Self::RW)
+    }
+}
+
 /// Arguments for database initialization.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Clone, Debug)]
 pub struct DatabaseArguments {
+    /// Client version that accesses the database.
+    client_version: ClientVersion,
     /// Database log level. If [None], the default value is used.
     log_level: Option<LogLevel>,
     /// Maximum duration of a read transaction. If [None], the default value is used.
@@ -87,14 +90,24 @@ pub struct DatabaseArguments {
 }
 
 impl DatabaseArguments {
+    /// Create new database arguments with given client version.
+    pub fn new(client_version: ClientVersion) -> Self {
+        Self {
+            client_version,
+            log_level: None,
+            max_read_transaction_duration: None,
+            exclusive: None,
+        }
+    }
+
     /// Set the log level.
-    pub fn log_level(mut self, log_level: Option<LogLevel>) -> Self {
+    pub fn with_log_level(mut self, log_level: Option<LogLevel>) -> Self {
         self.log_level = log_level;
         self
     }
 
     /// Set the maximum duration of a read transaction.
-    pub fn max_read_transaction_duration(
+    pub fn with_max_read_transaction_duration(
         mut self,
         max_read_transaction_duration: Option<MaxReadTransactionDuration>,
     ) -> Self {
@@ -103,9 +116,14 @@ impl DatabaseArguments {
     }
 
     /// Set the mdbx exclusive flag.
-    pub fn exclusive(mut self, exclusive: Option<bool>) -> Self {
+    pub fn with_exclusive(mut self, exclusive: Option<bool>) -> Self {
         self.exclusive = exclusive;
         self
+    }
+
+    /// Returns the client version if any.
+    pub fn client_version(&self) -> &ClientVersion {
+        &self.client_version
     }
 }
 
@@ -255,11 +273,21 @@ impl DatabaseEnv {
         });
         #[cfg(not(windows))]
         {
-            let _ = *PROCESS_ID; // Initialize the process ID at the time of environment opening
+            fn is_current_process(id: u32) -> bool {
+                #[cfg(unix)]
+                {
+                    id == std::os::unix::process::parent_id() || id == std::process::id()
+                }
+
+                #[cfg(not(unix))]
+                {
+                    id == std::process::id()
+                }
+            }
             inner_env.set_handle_slow_readers(
                 |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
                     if space > MAX_SAFE_READER_SPACE {
-                        let message = if process_id == *PROCESS_ID {
+                        let message = if is_current_process(process_id) {
                             "Current process has a long-lived database transaction that grows the database file."
                         } else {
                             "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
@@ -379,6 +407,27 @@ impl DatabaseEnv {
 
         Ok(())
     }
+
+    /// Records version that accesses the database with write privileges.
+    pub fn record_client_version(&self, version: ClientVersion) -> Result<(), DatabaseError> {
+        if version.is_empty() {
+            return Ok(())
+        }
+
+        let tx = self.tx_mut()?;
+        let mut version_cursor = tx.cursor_write::<tables::VersionHistory>()?;
+
+        let last_version = version_cursor.last()?.map(|(_, v)| v);
+        if Some(&version) != last_version.as_ref() {
+            version_cursor.upsert(
+                SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+                version,
+            )?;
+            tx.commit()?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Deref for DatabaseEnv {
@@ -394,13 +443,12 @@ mod tests {
     use super::*;
     use crate::{
         abstraction::table::{Encode, Table},
-        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
+        cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         models::{AccountBeforeTx, ShardedKey},
         tables::{
             AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
         },
         test_utils::*,
-        transaction::{DbTx, DbTxMut},
         AccountChangeSets,
     };
     use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
@@ -419,8 +467,8 @@ mod tests {
 
     /// Create database for testing with specified path
     fn create_test_db_with_path(kind: DatabaseEnvKind, path: &Path) -> DatabaseEnv {
-        let env =
-            DatabaseEnv::open(path, kind, DatabaseArguments::default()).expect(ERROR_DB_CREATION);
+        let env = DatabaseEnv::open(path, kind, DatabaseArguments::new(ClientVersion::default()))
+            .expect(ERROR_DB_CREATION);
         env.create_tables().expect(ERROR_TABLE_CREATION);
         env
     }
@@ -455,7 +503,7 @@ mod tests {
         // GET
         let tx = env.tx().expect(ERROR_INIT_TX);
         let result = tx.get::<Headers>(key).expect(ERROR_GET);
-        assert!(result.expect(ERROR_RETURN_VALUE) == value);
+        assert_eq!(result.expect(ERROR_RETURN_VALUE), value);
         tx.commit().expect(ERROR_COMMIT);
     }
 
@@ -1045,8 +1093,12 @@ mod tests {
             assert_eq!(result.expect(ERROR_RETURN_VALUE), 200);
         }
 
-        let env = DatabaseEnv::open(&path, DatabaseEnvKind::RO, Default::default())
-            .expect(ERROR_DB_CREATION);
+        let env = DatabaseEnv::open(
+            &path,
+            DatabaseEnvKind::RO,
+            DatabaseArguments::new(ClientVersion::default()),
+        )
+        .expect(ERROR_DB_CREATION);
 
         // GET
         let result =
@@ -1079,9 +1131,9 @@ mod tests {
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
 
             // Notice that value11 and value22 have been ordered in the DB.
-            assert!(Some(value00) == cursor.next_dup_val().unwrap());
-            assert!(Some(value11) == cursor.next_dup_val().unwrap());
-            assert!(Some(value22) == cursor.next_dup_val().unwrap());
+            assert_eq!(Some(value00), cursor.next_dup_val().unwrap());
+            assert_eq!(Some(value11), cursor.next_dup_val().unwrap());
+            assert_eq!(Some(value22), cursor.next_dup_val().unwrap());
         }
 
         // Seek value with exact subkey

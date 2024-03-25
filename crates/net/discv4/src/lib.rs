@@ -37,13 +37,10 @@ use discv5::{
     },
     ConnectionDirection, ConnectionState,
 };
-use enr::{Enr, EnrBuilder};
+use enr::Enr;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
-use reth_primitives::{
-    bytes::{Bytes, BytesMut},
-    hex, ForkId, PeerId, B256,
-};
+use reth_primitives::{bytes::Bytes, hex, ForkId, PeerId, B256};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -90,7 +87,7 @@ pub use reth_net_nat::{external_ip, NatResolver};
 /// The default address for discv4 via UDP
 ///
 /// Note: the default TCP address is the same.
-pub const DEFAULT_DISCOVERY_ADDR: Ipv4Addr = Ipv4Addr::UNSPECIFIED;
+pub const DEFAULT_DISCOVERY_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
 /// The default port for discv4 via UDP
 ///
@@ -377,9 +374,7 @@ impl Discv4 {
     ///
     /// If the key already exists, this will update it.
     pub fn set_eip868_rlp(&self, key: Vec<u8>, value: impl alloy_rlp::Encodable) {
-        let mut buf = BytesMut::new();
-        value.encode(&mut buf);
-        self.set_eip868_rlp_pair(key, buf.freeze())
+        self.set_eip868_rlp_pair(key, Bytes::from(alloy_rlp::encode(&value)))
     }
 
     #[inline]
@@ -533,7 +528,7 @@ impl Discv4Service {
 
         // for EIP-868 construct an ENR
         let local_eip_868_enr = {
-            let mut builder = EnrBuilder::new("v4");
+            let mut builder = Enr::builder();
             builder.ip(local_node_record.address);
             if local_node_record.address.is_ipv4() {
                 builder.udp4(local_node_record.udp_port);
@@ -595,7 +590,7 @@ impl Discv4Service {
 
     /// Returns the current enr sequence of the local record.
     fn enr_seq(&self) -> Option<u64> {
-        (self.config.enable_eip868).then(|| self.local_eip_868_enr.seq())
+        self.config.enable_eip868.then(|| self.local_eip_868_enr.seq())
     }
 
     /// Sets the [Interval] used for periodically looking up targets over the network

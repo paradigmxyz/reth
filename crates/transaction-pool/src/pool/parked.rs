@@ -124,8 +124,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         assert!(
             self.last_sender_submission
                 .remove(&SubmissionSenderId::new(sender_id, removed_sender.last_submission_id)),
-            "last sender transaction not found {:?}",
-            sender_id
+            "last sender transaction not found {sender_id:?}"
         );
     }
 
@@ -591,17 +590,17 @@ mod tests {
         let d_sender = address!("000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
-        let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxType::EIP1559);
+        let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxType::Eip1559);
         let a = tx_set.clone().into_vec();
 
-        let b = MockTransactionSet::dependent(b_sender, 0, 3, TxType::EIP1559).into_vec();
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, TxType::Eip1559).into_vec();
         tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c = MockTransactionSet::dependent(c_sender, 0, 3, TxType::EIP1559).into_vec();
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, TxType::Eip1559).into_vec();
         tx_set.extend(c.clone());
 
-        let d = MockTransactionSet::dependent(d_sender, 0, 1, TxType::EIP1559).into_vec();
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, TxType::Eip1559).into_vec();
         tx_set.extend(d.clone());
 
         let all_txs = tx_set.into_vec();
@@ -665,7 +664,7 @@ mod tests {
         let a_sender = address!("000000000000000000000000000000000000000a");
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::EIP1559)
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::Eip1559)
             .into_iter()
             .map(|mut tx| {
                 tx.set_size(default_limits.max_size / 2 + 1);
@@ -696,19 +695,19 @@ mod tests {
 
         // create a chain of transactions by sender A, B, C
         let mut tx_set =
-            MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::EIP1559);
+            MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::Eip1559);
         let a = tx_set.clone().into_vec();
 
-        let b = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::EIP1559)
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::Eip1559)
             .into_vec();
         tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::EIP1559)
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::Eip1559)
             .into_vec();
         tx_set.extend(c.clone());
 
-        let d = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::EIP1559)
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::Eip1559)
             .into_vec();
         tx_set.extend(d.clone());
 

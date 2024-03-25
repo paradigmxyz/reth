@@ -49,7 +49,7 @@ where
         Ok(_) => {} // If the request is successful, do nothing
         Err(e) => {
             // If an error occurs, panic with the error message
-            panic!("Expected successful response, got error: {:?}", e);
+            panic!("Expected successful response, got error: {e:?}");
         }
     }
 }
@@ -61,7 +61,7 @@ where
     // Make the RPC request
     if let Ok(resp) = client.request::<R, _>(method_name, params).await {
         // Panic if an unexpected successful response is received
-        panic!("Expected error response, got successful response: {:?}", resp);
+        panic!("Expected error response, got successful response: {resp:?}");
     };
 }
 
@@ -141,9 +141,9 @@ where
     let node: NodeRecord = url.parse().unwrap();
 
     AdminApiClient::add_peer(client, node).await.unwrap();
-    AdminApiClient::remove_peer(client, node).await.unwrap();
-    AdminApiClient::add_trusted_peer(client, node).await.unwrap();
-    AdminApiClient::remove_trusted_peer(client, node).await.unwrap();
+    AdminApiClient::remove_peer(client, node.into()).await.unwrap();
+    AdminApiClient::add_trusted_peer(client, node.into()).await.unwrap();
+    AdminApiClient::remove_trusted_peer(client, node.into()).await.unwrap();
     AdminApiClient::node_info(client).await.unwrap();
 }
 
@@ -300,9 +300,9 @@ where
     assert!(is_unimplemented(
         OtterscanClient::get_internal_operations(client, tx_hash).await.err().unwrap()
     ));
-    assert!(is_unimplemented(
-        OtterscanClient::get_transaction_error(client, tx_hash).await.err().unwrap()
-    ));
+
+    OtterscanClient::get_transaction_error(client, tx_hash).await.unwrap();
+
     assert!(is_unimplemented(
         OtterscanClient::trace_transaction(client, tx_hash).await.err().unwrap()
     ));

@@ -15,7 +15,7 @@ pub fn validate_header_standalone(
     header: &SealedHeader,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    // Gas used needs to be less then gas limit. Gas used is going to be check after execution.
+    // Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
     if header.gas_used > header.gas_limit {
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
             gas_used: header.gas_used,
@@ -55,7 +55,7 @@ pub fn validate_header_standalone(
     Ok(())
 }
 
-/// Validate a transaction in regards to a block header.
+/// Validate a transaction with regard to a block header.
 ///
 /// The only parameter from the header that affects the transaction is `base_fee`.
 pub fn validate_transaction_regarding_header(
@@ -248,7 +248,7 @@ pub fn validate_block_standalone(
     Ok(())
 }
 
-/// Validate block in regards to chain (parent)
+/// Validate block with regard to chain (parent)
 ///
 /// Checks:
 ///  If we already know the block.
@@ -282,12 +282,10 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider
 ///  * `parent_beacon_block_root` exists as a header field
 ///  * `blob_gas_used` is less than or equal to `MAX_DATA_GAS_PER_BLOCK`
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
+///  * `excess_blob_gas` is a multiple of `DATA_GAS_PER_BLOB`
 pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), ConsensusError> {
     let blob_gas_used = header.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
-
-    if header.excess_blob_gas.is_none() {
-        return Err(ConsensusError::ExcessBlobGasMissing)
-    }
+    let excess_blob_gas = header.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
     if header.parent_beacon_block_root.is_none() {
         return Err(ConsensusError::ParentBeaconBlockRootMissing)
@@ -303,6 +301,15 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
     if blob_gas_used % DATA_GAS_PER_BLOB != 0 {
         return Err(ConsensusError::BlobGasUsedNotMultipleOfBlobGasPerBlob {
             blob_gas_used,
+            blob_gas_per_blob: DATA_GAS_PER_BLOB,
+        })
+    }
+
+    // `excess_blob_gas` must also be a multiple of `DATA_GAS_PER_BLOB`. This will be checked later
+    // (via `calculate_excess_blob_gas`), but it doesn't hurt to catch the problem sooner.
+    if excess_blob_gas % DATA_GAS_PER_BLOB != 0 {
+        return Err(ConsensusError::ExcessBlobGasNotMultipleOfBlobGasPerBlob {
+            excess_blob_gas,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,
         })
     }

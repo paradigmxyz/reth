@@ -5,7 +5,7 @@ use crate::{
 };
 use reth_db::database::Database;
 use reth_network::NetworkHandle;
-use reth_node_api::{evm::ConfigureEvm, primitives::NodePrimitives, EngineTypes};
+pub use reth_node_api::NodeTypes;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
@@ -32,19 +32,6 @@ pub trait Node<N>: NodeTypes + Clone {
     fn components(
         self,
     ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder>;
-}
-
-/// The type that configures stateless node types, the node's primitive types.
-pub trait NodeTypes: Send + Sync + 'static {
-    /// The node's primitive types.
-    type Primitives: NodePrimitives;
-    /// The node's engine types.
-    type Engine: EngineTypes;
-    /// The node's evm configuration.
-    type Evm: ConfigureEvm;
-
-    /// Returns the node's evm config.
-    fn evm_config(&self) -> Self::Evm;
 }
 
 /// A helper type that is downstream of the node types and adds stateful components to the node.

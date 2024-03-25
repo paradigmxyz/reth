@@ -132,8 +132,8 @@ where
 
 #[cfg(all(feature = "jemalloc", unix))]
 fn collect_memory_stats() {
-    use jemalloc_ctl::{epoch, stats};
     use metrics::gauge;
+    use tikv_jemalloc_ctl::{epoch, stats};
     use tracing::error;
 
     if epoch::advance().map_err(|error| error!(%error, "Failed to advance jemalloc epoch")).is_err()
