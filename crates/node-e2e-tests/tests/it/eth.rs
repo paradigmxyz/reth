@@ -55,6 +55,8 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let first_event = payload_event_stream.next().await.unwrap()?;
     if let reth::payload::Events::Attributes(attr) = first_event {
         assert_eq!(eth_attr.timestamp, attr.timestamp);
+    } else {
+        panic!("Expect first event as payload attributes.")
     }
 
     // second event is built payload
