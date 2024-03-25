@@ -48,17 +48,19 @@ where
 
     /// Handler for `ots_getTransactionError`
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>> {
-        self.eth
+        let maybe_revert = self
+            .eth
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
                 NoOpInspector,
                 |_tx_info, _inspector, res, _| match res.result {
-                    ExecutionResult::Revert { output, .. } => Ok(output),
-                    _ => Ok(Bytes::new()),
+                    ExecutionResult::Revert { output, .. } => Ok(Some(output)),
+                    _ => Ok(None),
                 },
             )
             .await
-            .map_err(|e| internal_rpc_err(e.to_string()))
+            .map(Option::flatten)?;
+        Ok(maybe_revert)
     }
 
     /// Handler for `ots_traceTransaction`
