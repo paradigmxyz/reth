@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn conversion_to_node_record_from_enr() {
-        const IP: &'static str = "::";
+        const IP: &str = "::";
         const TCP_PORT: u16 = 30303;
         const UDP_PORT: u16 = 9000;
 
