@@ -113,7 +113,12 @@ where
             return Err(internal_rpc_err("block is not full"));
         };
 
-        let mut transactions = transactions.clone();
+        // Crop page
+        let page_end = tx_len.saturating_sub(page_number * page_size);
+        let page_start = page_end.saturating_sub(page_size);
+
+        // Crop transactions
+        let mut transactions = transactions[page_start..page_end].to_vec();
 
         // The input field returns only the 4 bytes method selector instead of the entire
         // calldata byte blob.
@@ -122,13 +127,6 @@ where
                 tx.input = tx.input.slice(..4);
             }
         }
-
-        // Crop page
-        let page_end = tx_len.saturating_sub(page_number * page_size);
-        let page_start = page_end.saturating_sub(page_size);
-
-        // Crop transactions
-        transactions = transactions.drain(page_start..page_end).collect();
 
         let block = Block { transactions: BlockTransactions::Full(transactions), ..block.inner };
 
