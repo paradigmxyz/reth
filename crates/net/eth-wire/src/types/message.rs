@@ -559,9 +559,6 @@ mod tests {
         let raw_pair = &hex!("c5820539c20505")[..];
 
         let result = RequestPair::<Vec<u8>>::decode(&mut &*raw_pair);
-        assert!(matches!(
-            result,
-            Err(Error::Custom("Buffer did not consume exactly payload_length bytes",))
-        ));
+        assert!(matches!(result, Err(Error::UnexpectedLength)));
     }
 }
