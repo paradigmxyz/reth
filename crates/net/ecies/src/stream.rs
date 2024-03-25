@@ -104,9 +104,7 @@ where
 
         trace!("incoming ecies stream");
         let mut transport = ecies.framed(transport);
-        let msg = tokio::time::timeout(HANDSHAKE_TIMEOUT, transport.try_next())
-            .await
-            .map_err(|_| ECIESErrorImpl::StreamTimeout)??;
+        let msg = transport.try_next().await?;
 
         trace!("receiving ecies auth");
         let remote_id = match &msg {
