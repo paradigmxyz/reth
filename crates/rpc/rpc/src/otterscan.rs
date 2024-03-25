@@ -118,7 +118,7 @@ where
         let page_start = page_end.saturating_sub(page_size);
 
         // Crop transactions
-        let _ = transactions.drain(page_start..page_end).collect::<Vec<_>>();
+        *transactions = transactions.drain(page_start..page_end).collect::<Vec<_>>();
 
         // The input field returns only the 4 bytes method selector instead of the entire
         // calldata byte blob.
