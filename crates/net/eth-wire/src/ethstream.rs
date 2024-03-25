@@ -14,6 +14,7 @@ use reth_primitives::{
 use std::{
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 use tokio::time::timeout;
 use tokio_stream::Stream;
@@ -53,6 +54,27 @@ where
     /// handshake is completed successfully. This also returns the `Status` message sent by the
     /// remote peer.
     pub async fn handshake(
+        self,
+        status: Status,
+        fork_filter: ForkFilter,
+    ) -> Result<(EthStream<S>, Status), EthStreamError> {
+        self.handshake_with_timeout(status, fork_filter, HANDSHAKE_TIMEOUT).await
+    }
+
+    /// Wrapper around handshake which enforces a timeout.
+    pub async fn handshake_with_timeout(
+        self,
+        status: Status,
+        fork_filter: ForkFilter,
+        timeout_limit: Duration,
+    ) -> Result<(EthStream<S>, Status), EthStreamError> {
+        timeout(timeout_limit, Self::handshake_no_timeout(self, status, fork_filter))
+            .await
+            .map_err(|_| EthStreamError::StreamTimeout)?
+    }
+
+    /// Wrapper around handshake with no timeout.
+    pub async fn handshake_no_timeout(
         mut self,
         status: Status,
         fork_filter: ForkFilter,
@@ -158,17 +180,6 @@ where
                 ))
             }
         }
-    }
-
-    /// Wrapper around handshake which enforces a timeout.
-    pub async fn handshake_with_timeout(
-        self,
-        status: Status,
-        fork_filter: ForkFilter,
-    ) -> Result<(EthStream<S>, Status), EthStreamError> {
-        timeout(HANDSHAKE_TIMEOUT, Self::handshake(self, status, fork_filter))
-            .await
-            .map_err(|_| EthStreamError::StreamTimeout)?
     }
 }
 
@@ -680,7 +691,7 @@ mod tests {
         let fork_filter_clone = fork_filter.clone();
         let _handle = tokio::spawn(async move {
             // Delay accepting the connection for longer than the client's timeout period
-            tokio::time::sleep(Duration::from_secs(11)).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
@@ -697,7 +708,9 @@ mod tests {
         let sink = PassthroughCodec::default().framed(outgoing);
 
         // try to connect
-        let handshake_result = UnauthedEthStream::new(sink).handshake(status, fork_filter).await;
+        let handshake_result = UnauthedEthStream::new(sink)
+            .handshake_with_timeout(status, fork_filter, Duration::from_millis(100))
+            .await;
 
         // Assert that a timeout error occurred
         assert!(

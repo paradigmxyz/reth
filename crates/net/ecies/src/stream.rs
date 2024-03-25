@@ -47,6 +47,27 @@ where
         secret_key: SecretKey,
         remote_id: PeerId,
     ) -> Result<Self, ECIESError> {
+        Self::connect_with_timeout(transport, secret_key, remote_id, HANDSHAKE_TIMEOUT).await
+    }
+
+    /// Wrapper around connect which enforces a timeout.
+    pub async fn connect_with_timeout(
+        transport: Io,
+        secret_key: SecretKey,
+        remote_id: PeerId,
+        timeout_limit: Duration,
+    ) -> Result<Self, ECIESError> {
+        timeout(timeout_limit, Self::connect_no_timeout(transport, secret_key, remote_id))
+            .await
+            .map_err(|_| ECIESError::from(ECIESErrorImpl::StreamTimeout))?
+    }
+
+    /// Wrapper around connect with no timeout.
+    pub async fn connect_no_timeout(
+        transport: Io,
+        secret_key: SecretKey,
+        remote_id: PeerId,
+    ) -> Result<Self, ECIESError> {
         let ecies = ECIESCodec::new_client(secret_key, remote_id)
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "invalid handshake"))?;
 
@@ -105,17 +126,6 @@ where
         transport.send(EgressECIESValue::Ack).await?;
 
         Ok(Self { stream: transport, remote_id })
-    }
-
-    /// Wrapper around connect which enforces a timeout.
-    pub async fn connect_with_timeout(
-        transport: Io,
-        secret_key: SecretKey,
-        remote_id: PeerId,
-    ) -> Result<Self, ECIESError> {
-        timeout(HANDSHAKE_TIMEOUT, Self::connect(transport, secret_key, remote_id))
-            .await
-            .map_err(|_| ECIESError::from(ECIESErrorImpl::StreamTimeout))?
     }
 
     /// Get the remote id
@@ -210,7 +220,7 @@ mod tests {
 
         let _handle = tokio::spawn(async move {
             // Delay accepting the connection for longer than the client's timeout period
-            tokio::time::sleep(Duration::from_secs(11)).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
             let (incoming, _) = listener.accept().await.unwrap();
             let mut stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
 
@@ -226,7 +236,13 @@ mod tests {
         let outgoing = TcpStream::connect(addr).await.unwrap();
 
         // Attempt to connect, expecting a timeout due to the server's delayed response
-        let connect_result = ECIESStream::connect(outgoing, client_key, server_id).await;
+        let connect_result = ECIESStream::connect_with_timeout(
+            outgoing,
+            client_key,
+            server_id,
+            Duration::from_millis(100),
+        )
+        .await;
 
         // Assert that a timeout error occurred
         assert!(
