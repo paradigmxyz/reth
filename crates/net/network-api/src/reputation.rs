@@ -40,8 +40,13 @@ pub enum ReputationChangeKind {
 }
 
 impl ReputationChangeKind {
-    /// Returns true if the reputation change is a reset.
+    /// Returns true if the reputation change is a [ReputationChangeKind::Reset].
     pub fn is_reset(&self) -> bool {
         matches!(self, Self::Reset)
+    }
+
+    /// Returns true if the reputation change is [ReputationChangeKind::Dropped].
+    pub fn is_dropped(&self) -> bool {
+        matches!(self, Self::Dropped)
     }
 }

@@ -12,13 +12,12 @@ use reth_primitives::{
     StorageEntry, B256, U256,
 };
 use reth_trie::HashedPostState;
+pub use revm::db::states::OriginalValuesKnown;
 use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
 };
 use std::collections::HashMap;
-
-pub use revm::db::states::OriginalValuesKnown;
 
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -366,8 +365,7 @@ mod tests {
             EmptyDB,
         },
         primitives::{
-            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, HashMap,
-            StorageSlot,
+            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot,
         },
         DatabaseCommit, State,
     };

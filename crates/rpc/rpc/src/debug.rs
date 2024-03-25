@@ -79,6 +79,11 @@ where
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
     ) -> EthResult<Vec<TraceResult>> {
+        if transactions.is_empty() {
+            // nothing to trace
+            return Ok(Vec::new());
+        }
+
         // replay all transactions of the block
         let this = self.clone();
         self.inner

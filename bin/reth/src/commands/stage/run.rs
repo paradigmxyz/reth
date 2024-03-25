@@ -261,7 +261,7 @@ impl Command {
                 _ => return Ok(()),
             };
         if let Some(unwind_stage) = &unwind_stage {
-            assert!(exec_stage.type_id() == unwind_stage.type_id());
+            assert_eq!(exec_stage.type_id(), unwind_stage.type_id());
         }
 
         let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();

@@ -75,7 +75,6 @@ hyper.workspace = true
 tracing.workspace = true
 
 # crypto
-alloy-rlp.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 # async
@@ -103,7 +102,6 @@ optimism = [
     "reth-provider/optimism",
     "reth-network/optimism",
     "reth-network-api/optimism",
-    "reth-rpc-types/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-auto-seal-consensus/optimism",
     "reth-consensus-common/optimism",

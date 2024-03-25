@@ -234,7 +234,7 @@ impl proptest::arbitrary::Arbitrary for Receipt {
                     deposit_receipt_version
                 }
             }
-        };
+        }
         arbitrary_receipt().boxed()
     }
 

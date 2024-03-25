@@ -168,7 +168,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 return Ok(ExecOutput { checkpoint, done: false })
             }
         } else {
-            // Aggregate all changesets and and make list of storages that have been
+            // Aggregate all changesets and make list of storages that have been
             // changed.
             let lists = provider.changed_storages_with_range(from_block..=to_block)?;
             // iterate over plain state and get newest storage value.
@@ -287,7 +287,7 @@ mod tests {
                     input.checkpoint = Some(checkpoint);
                     continue
                 } else {
-                    assert!(checkpoint.block_number == previous_stage);
+                    assert_eq!(checkpoint.block_number, previous_stage);
                     assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
                         progress: EntitiesCheckpoint {
                             processed,

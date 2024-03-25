@@ -30,7 +30,7 @@ use tracing::{debug, info, warn};
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
-/// The current high-level state of the node, including the node's database environemt, network
+/// The current high-level state of the node, including the node's database environment, network
 /// connections, current processing stage, and the latest block information. It provides
 /// methods to handle different types of events that affect the node's state, such as pipeline
 /// events, network events, and consensus engine events.
@@ -87,6 +87,12 @@ impl<DB> NodeState<DB> {
                         _ => Eta::default(),
                     },
                     checkpoint,
+                    entities_checkpoint: match &self.current_stage {
+                        Some(current_stage) if current_stage.stage_id == stage_id => {
+                            current_stage.entities_checkpoint
+                        }
+                        _ => None,
+                    },
                     target,
                 };
 
@@ -111,6 +117,12 @@ impl<DB> NodeState<DB> {
                         _ => Eta::default(),
                     },
                     checkpoint,
+                    entities_checkpoint: match &self.current_stage {
+                        Some(current_stage) if current_stage.stage_id == stage_id => {
+                            current_stage.entities_checkpoint
+                        }
+                        _ => None,
+                    },
                     target,
                 };
 
@@ -146,11 +158,13 @@ impl<DB> NodeState<DB> {
 
                 if let Some(current_stage) = self.current_stage.as_mut() {
                     current_stage.checkpoint = checkpoint;
+                    current_stage.entities_checkpoint = checkpoint.entities();
                     current_stage.eta.update(stage_id, checkpoint);
 
                     let target = OptionalField(current_stage.target);
-                    let stage_progress =
-                        checkpoint.entities().and_then(|entities| entities.fmt_percentage());
+                    let stage_progress = current_stage
+                        .entities_checkpoint
+                        .and_then(|entities| entities.fmt_percentage());
                     let stage_eta = current_stage.eta.fmt_for_stage(stage_id);
 
                     let message =
@@ -219,17 +233,17 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
-                if status != ForkchoiceStatus::Valid ||
-                    (self.safe_block_hash != Some(safe_block_hash) &&
-                        self.finalized_block_hash != Some(finalized_block_hash))
+                if self.safe_block_hash != Some(safe_block_hash) &&
+                    self.finalized_block_hash != Some(finalized_block_hash)
                 {
-                    info!(
-                        ?head_block_hash,
-                        ?safe_block_hash,
-                        ?finalized_block_hash,
-                        ?status,
-                        "Forkchoice updated"
-                    );
+                    let msg = match status {
+                        ForkchoiceStatus::Valid => "Forkchoice updated",
+                        ForkchoiceStatus::Invalid => "Received invalid forkchoice updated message",
+                        ForkchoiceStatus::Syncing => {
+                            "Received forkchoice updated message when syncing"
+                        }
+                    };
+                    info!(?head_block_hash, ?safe_block_hash, ?finalized_block_hash, "{}", msg);
                 }
                 self.head_block_hash = Some(head_block_hash);
                 self.safe_block_hash = Some(safe_block_hash);
@@ -346,6 +360,10 @@ struct CurrentStage {
     stage_id: StageId,
     eta: Eta,
     checkpoint: StageCheckpoint,
+    /// The entities checkpoint for reporting the progress. If `None`, then the progress is not
+    /// available, probably because the stage didn't finish running and didn't update its
+    /// checkpoint yet.
+    entities_checkpoint: Option<EntitiesCheckpoint>,
     target: Option<BlockNumber>,
 }
 
@@ -446,36 +464,62 @@ where
         while this.info_interval.poll_tick(cx).is_ready() {
             let freelist = OptionalField(this.state.freelist());
 
-            if let Some(CurrentStage { stage_id, eta, checkpoint, target }) =
+            if let Some(CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target }) =
                 &this.state.current_stage
             {
-                let stage_progress = OptionalField(
-                    checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
-                );
+                let stage_progress =
+                    entities_checkpoint.and_then(|entities| entities.fmt_percentage());
+                let stage_eta = eta.fmt_for_stage(*stage_id);
 
-                if let Some(stage_eta) = eta.fmt_for_stage(*stage_id) {
-                    info!(
-                        target: "reth::cli",
-                        connected_peers = this.state.num_connected_peers(),
-                        %freelist,
-                        stage = %stage_id,
-                        checkpoint = checkpoint.block_number,
-                        target = %OptionalField(*target),
-                        %stage_progress,
-                        %stage_eta,
-                        "Status"
-                    );
-                } else {
-                    info!(
-                        target: "reth::cli",
-                        connected_peers = this.state.num_connected_peers(),
-                        %freelist,
-                        stage = %stage_id,
-                        checkpoint = checkpoint.block_number,
-                        target = %OptionalField(*target),
-                        %stage_progress,
-                        "Status"
-                    );
+                match (stage_progress, stage_eta) {
+                    (Some(stage_progress), Some(stage_eta)) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_progress,
+                            %stage_eta,
+                            "Status"
+                        )
+                    }
+                    (Some(stage_progress), None) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_progress,
+                            "Status"
+                        )
+                    }
+                    (None, Some(stage_eta)) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_eta,
+                            "Status"
+                        )
+                    }
+                    (None, None) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            "Status"
+                        )
+                    }
                 }
             } else if let Some(latest_block) = this.state.latest_block {
                 let now =

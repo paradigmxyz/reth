@@ -96,6 +96,7 @@ clippy.equatable_if_let = "deny"
 clippy.or_fun_call = "deny"
 clippy.branches_sharing_code = "deny"
 clippy.useless_let_if_seq = "deny"
+clippy.large_stack_frames = "deny"
 
 [workspace.package]
 version = "0.2.0-beta.3"
@@ -195,9 +196,9 @@ reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 
 # revm
-revm = { version = "7.1.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "3.0.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "f96bc1f" }
+revm = { version = "7.2.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "2b48b65" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
@@ -217,10 +218,6 @@ alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
 ethers-core = { version = "2.0.14", default-features = false }
 ethers-providers = { version = "2.0.14", default-features = false }
 
-# js
-boa_engine = "0.17"
-boa_gc = "0.17"
-
 # misc
 aquamarine = "0.5"
 bytes = "1.5"
@@ -233,6 +230,7 @@ tracing-appender = "0.2"
 thiserror = "1.0"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
+serde_with = "3.3.0"
 humantime-serde = "1.1"
 rand = "0.8.5"
 schnellru = "0.2"
@@ -248,6 +246,8 @@ syn = "2.0"
 nybbles = "0.2.1"
 smallvec = "1"
 dyn-clone = "1.0.17"
+sha2 = { version = "0.10", default-features = false }
+paste = "1.0"
 
 # proc-macros
 proc-macro2 = "1.0"
@@ -285,7 +285,7 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
 enr = { version = "=0.10.0", default-features = false, features = ["k256"] }
 
 # for eip-4844
-c-kzg = "0.4.2"
+c-kzg = "1.0.0"
 
 # config
 confy = "0.6"

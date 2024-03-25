@@ -86,9 +86,9 @@ pub trait PayloadBuilderConfig {
     /// Block extra data set by the payload builder.
     fn extradata(&self) -> Cow<'_, str>;
 
-    /// Returns the rlp-encoded extradata bytes.
-    fn extradata_rlp_bytes(&self) -> Bytes {
-        alloy_rlp::encode(self.extradata().as_bytes()).into()
+    /// Returns the extradata as bytes.
+    fn extradata_bytes(&self) -> Bytes {
+        self.extradata().as_bytes().to_vec().into()
     }
 
     /// The interval at which the job should build a new payload after the last.
