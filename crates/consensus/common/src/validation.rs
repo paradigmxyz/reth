@@ -65,6 +65,7 @@ pub fn validate_transaction_regarding_header(
     at_timestamp: u64,
     base_fee: Option<u64>,
 ) -> Result<(), ConsensusError> {
+    #[allow(unreachable_patterns)]
     let chain_id = match transaction {
         Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
@@ -120,8 +121,10 @@ pub fn validate_transaction_regarding_header(
 
             Some(*chain_id)
         }
-        #[cfg(feature = "optimism")]
-        Transaction::Deposit(_) => None,
+        _ => {
+            // Op Deposit
+            None
+        }
     };
     if let Some(chain_id) = chain_id {
         if chain_id != chain_spec.chain().id() {
