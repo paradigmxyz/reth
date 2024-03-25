@@ -84,7 +84,7 @@ async fn handshake_p2p(
     key: SecretKey,
 ) -> eyre::Result<(AuthedP2PStream, HelloMessage)> {
     let outgoing = TcpStream::connect((peer.address, peer.tcp_port)).await?;
-    let ecies_stream = ECIESStream::connect_with_timeout(outgoing, key, peer.id).await?;
+    let ecies_stream = ECIESStream::connect(outgoing, key, peer.id).await?;
 
     let our_peer_id = pk2id(&key.public_key(SECP256K1));
     let our_hello = HelloMessage::builder(our_peer_id).build();
@@ -107,7 +107,7 @@ async fn handshake_eth(p2p_stream: AuthedP2PStream) -> eyre::Result<(AuthedEthSt
 
     let status = Status { version: p2p_stream.shared_capabilities().eth()?.version(), ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
-    Ok(eth_unauthed.handshake_with_timeout(status, fork_filter).await?)
+    Ok(eth_unauthed.handshake(status, fork_filter).await?)
 }
 
 // Snoop by greedily capturing all broadcasts that the peer emits

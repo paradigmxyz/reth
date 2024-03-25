@@ -377,7 +377,7 @@ mod tests {
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
             let (_, their_status) = UnauthedEthStream::new(stream)
-                .handshake_with_timeout(status_clone, fork_filter_clone)
+                .handshake(status_clone, fork_filter_clone)
                 .await
                 .unwrap();
 
@@ -390,7 +390,7 @@ mod tests {
 
         // try to connect
         let (_, their_status) =
-            UnauthedEthStream::new(sink).handshake_with_timeout(status, fork_filter).await.unwrap();
+            UnauthedEthStream::new(sink).handshake(status, fork_filter).await.unwrap();
 
         // their status is a clone of our status, these should be equal
         assert_eq!(their_status, status);
@@ -424,7 +424,7 @@ mod tests {
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
             let (_, their_status) = UnauthedEthStream::new(stream)
-                .handshake_with_timeout(status_clone, fork_filter_clone)
+                .handshake(status_clone, fork_filter_clone)
                 .await
                 .unwrap();
 
@@ -437,7 +437,7 @@ mod tests {
 
         // try to connect
         let (_, their_status) =
-            UnauthedEthStream::new(sink).handshake_with_timeout(status, fork_filter).await.unwrap();
+            UnauthedEthStream::new(sink).handshake(status, fork_filter).await.unwrap();
 
         // their status is a clone of our status, these should be equal
         assert_eq!(their_status, status);
@@ -470,9 +470,8 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
-            let handshake_res = UnauthedEthStream::new(stream)
-                .handshake_with_timeout(status_clone, fork_filter_clone)
-                .await;
+            let handshake_res =
+                UnauthedEthStream::new(stream).handshake(status_clone, fork_filter_clone).await;
 
             // make sure the handshake fails due to td too high
             assert!(matches!(
@@ -487,8 +486,7 @@ mod tests {
         let sink = PassthroughCodec::default().framed(outgoing);
 
         // try to connect
-        let handshake_res =
-            UnauthedEthStream::new(sink).handshake_with_timeout(status, fork_filter).await;
+        let handshake_res = UnauthedEthStream::new(sink).handshake(status, fork_filter).await;
 
         // this handshake should also fail due to td too high
         assert!(matches!(
@@ -623,7 +621,7 @@ mod tests {
             let unauthed_stream = UnauthedP2PStream::new(stream);
             let (p2p_stream, _) = unauthed_stream.handshake(server_hello).await.unwrap();
             let (mut eth_stream, _) = UnauthedEthStream::new(p2p_stream)
-                .handshake_with_timeout(status_copy, fork_filter_clone)
+                .handshake(status_copy, fork_filter_clone)
                 .await
                 .unwrap();
 
@@ -651,10 +649,8 @@ mod tests {
         let unauthed_stream = UnauthedP2PStream::new(sink);
         let (p2p_stream, _) = unauthed_stream.handshake(client_hello).await.unwrap();
 
-        let (mut client_stream, _) = UnauthedEthStream::new(p2p_stream)
-            .handshake_with_timeout(status, fork_filter)
-            .await
-            .unwrap();
+        let (mut client_stream, _) =
+            UnauthedEthStream::new(p2p_stream).handshake(status, fork_filter).await.unwrap();
 
         client_stream.send(test_msg).await.unwrap();
 
@@ -689,7 +685,7 @@ mod tests {
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
             let (_, their_status) = UnauthedEthStream::new(stream)
-                .handshake_with_timeout(status_clone, fork_filter_clone)
+                .handshake(status_clone, fork_filter_clone)
                 .await
                 .unwrap();
 
@@ -701,8 +697,7 @@ mod tests {
         let sink = PassthroughCodec::default().framed(outgoing);
 
         // try to connect
-        let handshake_result =
-            UnauthedEthStream::new(sink).handshake_with_timeout(status, fork_filter).await;
+        let handshake_result = UnauthedEthStream::new(sink).handshake(status, fork_filter).await;
 
         // Assert that a timeout error occurred
         assert!(

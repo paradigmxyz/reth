@@ -945,7 +945,7 @@ async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr>(
     match direction {
         Direction::Incoming => ECIESStream::incoming(stream, secret_key).await,
         Direction::Outgoing(remote_peer_id) => {
-            ECIESStream::connect_with_timeout(stream, secret_key, remote_peer_id).await
+            ECIESStream::connect(stream, secret_key, remote_peer_id).await
         }
     }
 }
@@ -1003,18 +1003,17 @@ async fn authenticate_stream(
         // Before trying status handshake, set up the version to negotiated shared version
         status.set_eth_version(eth_version);
         let eth_unauthed = UnauthedEthStream::new(p2p_stream);
-        let (eth_stream, their_status) =
-            match eth_unauthed.handshake_with_timeout(status, fork_filter).await {
-                Ok(stream_res) => stream_res,
-                Err(err) => {
-                    return PendingSessionEvent::Disconnected {
-                        remote_addr,
-                        session_id,
-                        direction,
-                        error: Some(PendingSessionHandshakeError::Eth(err)),
-                    }
+        let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
+            Ok(stream_res) => stream_res,
+            Err(err) => {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::Eth(err)),
                 }
-            };
+            }
+        };
         (eth_stream.into(), their_status)
     } else {
         // Multiplex the stream with the extra protocols

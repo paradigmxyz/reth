@@ -494,10 +494,8 @@ mod tests {
             MuxDemuxStream::try_new(p2p_stream, main_cap.capability().into_owned(), shared_caps)
                 .expect("should start mxdmx stream");
 
-        let (mut main_stream, _) = UnauthedEthStream::new(proxy_server)
-            .handshake_with_timeout(status, fork_filter)
-            .await
-            .unwrap();
+        let (mut main_stream, _) =
+            UnauthedEthStream::new(proxy_server).handshake(status, fork_filter).await.unwrap();
 
         let protocol_proxy =
             main_stream.inner_mut().try_clone_stream(&CUSTOM_CAP).expect("should clone stream");

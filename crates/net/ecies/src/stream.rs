@@ -17,7 +17,10 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    time::timeout,
+};
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::codec::{Decoder, Framed};
 use tracing::{instrument, trace};
@@ -102,6 +105,17 @@ where
         transport.send(EgressECIESValue::Ack).await?;
 
         Ok(Self { stream: transport, remote_id })
+    }
+
+    /// Wrapper around connect which enforces a timeout.
+    pub async fn connect_with_timeout(
+        transport: Io,
+        secret_key: SecretKey,
+        remote_id: PeerId,
+    ) -> Result<Self, ECIESError> {
+        timeout(HANDSHAKE_TIMEOUT, Self::connect(transport, secret_key, remote_id))
+            .await
+            .map_err(|_| ECIESError::from(ECIESErrorImpl::StreamTimeout))?
     }
 
     /// Get the remote id
@@ -212,8 +226,7 @@ mod tests {
         let outgoing = TcpStream::connect(addr).await.unwrap();
 
         // Attempt to connect, expecting a timeout due to the server's delayed response
-        let connect_result =
-            ECIESStream::connect_with_timeout(outgoing, client_key, server_id).await;
+        let connect_result = ECIESStream::connect(outgoing, client_key, server_id).await;
 
         // Assert that a timeout error occurred
         assert!(
