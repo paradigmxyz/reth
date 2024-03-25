@@ -1,5 +1,5 @@
-use crate::{BlockNumReader, DatabaseProviderFactory, DatabaseProviderRO, ProviderError};
-use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
+use crate::{BlockNumReader, DatabaseProviderFactory, DatabaseProviderRO, HeaderProvider};
+use reth_db::database::Database;
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{GotExpected, B256};
 use std::marker::PhantomData;
@@ -40,24 +40,17 @@ where
 
     /// Creates new consistent database view with latest tip.
     pub fn new_with_latest_tip(provider: Provider) -> ProviderResult<Self> {
-        let tip = provider
-            .database_provider_ro()?
-            .tx_ref()
-            .cursor_read::<tables::CanonicalHeaders>()?
-            .last()?;
-        Ok(Self::new(provider, tip.map(|(_, hash)| hash)))
+        let provider_ro = provider.database_provider_ro()?;
+        let last_num = provider_ro.last_block_number()?;
+        let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
+        Ok(Self::new(provider, tip))
     }
 
     /// Creates new read-only provider and performs consistency checks on the current tip.
     pub fn provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         let provider_ro = self.provider.database_provider_ro()?;
-        let last_entry = provider_ro
-            .tx_ref()
-            .cursor_read::<tables::CanonicalHeaders>()
-            .and_then(|mut cursor| cursor.last())
-            .map_err(ProviderError::Database)?;
-
-        let tip = last_entry.map(|(_, hash)| hash);
+        let last_num = provider_ro.last_block_number()?;
+        let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
         if self.tip != tip {
             return Err(ConsistentViewError::Inconsistent {
                 tip: GotExpected { got: tip, expected: self.tip },
@@ -66,7 +59,7 @@ where
         }
 
         let best_block_number = provider_ro.best_block_number()?;
-        if last_entry.map(|(number, _)| number).unwrap_or_default() != best_block_number {
+        if last_num != best_block_number {
             return Err(ConsistentViewError::Syncing(best_block_number).into())
         }
 
