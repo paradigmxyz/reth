@@ -881,22 +881,12 @@ impl TransactionsProviderExt for StaticFileProvider {
         // chunks are too big, there will be idle threads waiting for work. Choosing an
         // arbitrary smaller value to make sure it doesn't happen.
         let chunk_size = 100;
+        let mut channels = Vec::new();
 
+        // iterator over the chunks
         let chunks = (tx_range.start..tx_range.end)
             .step_by(chunk_size)
-            .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end))
-            .collect::<Vec<Range<u64>>>();
-        let mut channels = Vec::with_capacity(chunk_size);
-
-        #[inline]
-        fn calculate_hash(
-            entry: (TxNumber, TransactionSignedNoHash),
-            rlp_buf: &mut Vec<u8>,
-        ) -> Result<(B256, TxNumber), Box<ProviderError>> {
-            let (tx_id, tx) = entry;
-            tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
-            Ok((keccak256(rlp_buf), tx_id))
-        }
+            .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end));
 
         for chunk_range in chunks {
             let (channel_tx, channel_rx) = mpsc::channel();
@@ -1152,4 +1142,15 @@ impl StatsReader for StaticFileProvider {
             _ => Err(ProviderError::UnsupportedProvider),
         }
     }
+}
+
+/// Calculates the tx hash for the given transaction and its id.
+#[inline]
+fn calculate_hash(
+    entry: (TxNumber, TransactionSignedNoHash),
+    rlp_buf: &mut Vec<u8>,
+) -> Result<(B256, TxNumber), Box<ProviderError>> {
+    let (tx_id, tx) = entry;
+    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+    Ok((keccak256(rlp_buf), tx_id))
 }
