@@ -92,11 +92,15 @@ where
         page_number: usize,
         page_size: usize,
     ) -> RpcResult<OtsBlockTransactions> {
+        // retrieve full block and its receipts
         let block = self.eth.block_by_number(block_number, true);
         let receipts = self.eth.block_receipts(BlockId::Number(block_number));
         let (block, receipts) = futures::try_join!(block, receipts)?;
+
         let block = block.ok_or_else(|| internal_rpc_err("block not found"))?;
         let mut receipts = receipts.ok_or_else(|| internal_rpc_err("receipts not found"))?;
+
+        // check if the number of transactions matches the number of receipts
         let tx_len = block.transactions.len();
         if tx_len != receipts.len() {
             return Err(internal_rpc_err(
@@ -104,6 +108,7 @@ where
             ));
         }
 
+        // make sure the block is full
         let BlockTransactions::Full(transactions) = &block.transactions else {
             return Err(internal_rpc_err("block is not full"));
         };
