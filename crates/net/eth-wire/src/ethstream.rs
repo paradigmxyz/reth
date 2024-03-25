@@ -73,7 +73,7 @@ where
             .map_err(|_| EthStreamError::StreamTimeout)?
     }
 
-    /// Wrapper around handshake with no timeout.
+    /// Handshake with no timeout
     pub async fn handshake_no_timeout(
         mut self,
         status: Status,
@@ -691,7 +691,7 @@ mod tests {
         let fork_filter_clone = fork_filter.clone();
         let _handle = tokio::spawn(async move {
             // Delay accepting the connection for longer than the client's timeout period
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(Duration::from_secs(11)).await;
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
@@ -709,7 +709,7 @@ mod tests {
 
         // try to connect
         let handshake_result = UnauthedEthStream::new(sink)
-            .handshake_with_timeout(status, fork_filter, Duration::from_millis(100))
+            .handshake_with_timeout(status, fork_filter, Duration::from_secs(1))
             .await;
 
         // Assert that a timeout error occurred

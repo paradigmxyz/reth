@@ -50,7 +50,7 @@ where
         Self::connect_with_timeout(transport, secret_key, remote_id, HANDSHAKE_TIMEOUT).await
     }
 
-    /// Wrapper around connect which enforces a timeout.
+    /// Wrapper around connect_no_timeout which enforces a timeout.
     pub async fn connect_with_timeout(
         transport: Io,
         secret_key: SecretKey,
@@ -62,7 +62,7 @@ where
             .map_err(|_| ECIESError::from(ECIESErrorImpl::StreamTimeout))?
     }
 
-    /// Wrapper around connect with no timeout.
+    /// Connect to an `ECIES` server with no timeout.
     pub async fn connect_no_timeout(
         transport: Io,
         secret_key: SecretKey,
@@ -220,7 +220,7 @@ mod tests {
 
         let _handle = tokio::spawn(async move {
             // Delay accepting the connection for longer than the client's timeout period
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(Duration::from_secs(11)).await;
             let (incoming, _) = listener.accept().await.unwrap();
             let mut stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
 
@@ -240,7 +240,7 @@ mod tests {
             outgoing,
             client_key,
             server_id,
-            Duration::from_millis(100),
+            Duration::from_secs(1),
         )
         .await;
 
