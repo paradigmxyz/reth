@@ -63,8 +63,9 @@ pub fn get_fields(data: &Data) -> FieldList {
                 assert_eq!(fields.len(), data_fields.named.len());
             }
             syn::Fields::Unnamed(ref data_fields) => {
-                assert!(
-                    data_fields.unnamed.len() == 1,
+                assert_eq!(
+                    data_fields.unnamed.len(),
+                    1,
                     "Compact only allows one unnamed field. Consider making it a struct."
                 );
                 load_field(&data_fields.unnamed[0], &mut fields, false);
@@ -80,8 +81,9 @@ pub fn get_fields(data: &Data) -> FieldList {
                         panic!("Not allowed to have Enum Variants with multiple named fields. Make it a struct instead.")
                     }
                     syn::Fields::Unnamed(data_fields) => {
-                        assert!(
-                            data_fields.unnamed.len() == 1,
+                        assert_eq!(
+                            data_fields.unnamed.len(),
+                            1,
                             "Compact only allows one unnamed field. Consider making it a struct."
                         );
                         load_field(&data_fields.unnamed[0], &mut fields, true);

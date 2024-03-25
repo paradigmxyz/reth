@@ -691,10 +691,10 @@ impl TransactionFetcher {
         // try to send the request to the peer
         if let Err(err) = peer.request_tx.try_send(req) {
             // peer channel is full
-            match err {
+            return match err {
                 TrySendError::Full(_) | TrySendError::Closed(_) => {
                     self.metrics.egress_peer_channel_full.increment(1);
-                    return Some(new_announced_hashes)
+                    Some(new_announced_hashes)
                 }
             }
         } else {
