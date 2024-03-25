@@ -78,9 +78,7 @@ where
 
         trace!("waiting for ecies ack ...");
 
-        let msg = tokio::time::timeout(HANDSHAKE_TIMEOUT, transport.try_next())
-            .await
-            .map_err(|_| ECIESErrorImpl::StreamTimeout)??;
+        let msg = transport.try_next().await?;
 
         // `Framed` returns `None` if the underlying stream is no longer readable, and the codec is
         // unable to decode another message from the (partially filled) buffer. This usually happens
