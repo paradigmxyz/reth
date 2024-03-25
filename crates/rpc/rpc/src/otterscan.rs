@@ -7,8 +7,8 @@ use revm_primitives::ExecutionResult;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_types::{
-    Block, BlockDetails, BlockTransactions, ContractCreator, InternalOperation,
-    OtsBlockTransactions, OtsTransactionReceipt, TraceEntry, Transaction, TransactionsWithReceipts,
+    BlockDetails, BlockTransactions, ContractCreator, InternalOperation, OtsBlockTransactions,
+    OtsTransactionReceipt, TraceEntry, Transaction, TransactionsWithReceipts,
 };
 
 use crate::{eth::EthTransactions, result::internal_rpc_err};
@@ -97,7 +97,7 @@ where
         let receipts = self.eth.block_receipts(BlockId::Number(block_number));
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
-        let block = block.ok_or_else(|| internal_rpc_err("block not found"))?;
+        let mut block = block.ok_or_else(|| internal_rpc_err("block not found"))?;
         let mut receipts = receipts.ok_or_else(|| internal_rpc_err("receipts not found"))?;
 
         // check if the number of transactions matches the number of receipts
@@ -109,7 +109,7 @@ where
         }
 
         // make sure the block is full
-        let BlockTransactions::Full(transactions) = &block.transactions else {
+        let BlockTransactions::Full(transactions) = &mut block.inner.transactions else {
             return Err(internal_rpc_err("block is not full"));
         };
 
@@ -118,17 +118,15 @@ where
         let page_start = page_end.saturating_sub(page_size);
 
         // Crop transactions
-        let mut transactions = transactions[page_start..page_end].to_vec();
+        let _ = transactions.drain(page_start..page_end).collect::<Vec<_>>();
 
         // The input field returns only the 4 bytes method selector instead of the entire
         // calldata byte blob.
-        for tx in &mut transactions {
+        for tx in transactions {
             if tx.input.len() > 4 {
                 tx.input = tx.input.slice(..4);
             }
         }
-
-        let block = Block { transactions: BlockTransactions::Full(transactions), ..block.inner };
 
         // Crop receipts and transform them into OtsTransactionReceipt
         let timestamp = u64::try_from(block.header.timestamp).unwrap_or(u64::MAX);
@@ -136,7 +134,7 @@ where
             .drain(page_start..page_end)
             .map(|receipt| OtsTransactionReceipt { receipt, timestamp })
             .collect();
-        Ok(OtsBlockTransactions { fullblock: block.into(), receipts })
+        Ok(OtsBlockTransactions { fullblock: block.inner.into(), receipts })
     }
 
     /// Handler for `searchTransactionsBefore`
