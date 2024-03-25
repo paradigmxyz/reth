@@ -17,11 +17,12 @@ reth-primitives.workspace = true
 reth-net-common.workspace = true
 
 # ethereum
-alloy-rlp.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
+alloy-rlp.workspace = true
 
 # async/futures
+futures.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "time"] }
 tokio-stream.workspace = true
 
@@ -42,6 +43,7 @@ serde_with = { version = "3.3.0", optional = true }
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 reth-tracing.workspace = true
 alloy-chains.workspace = true
+alloy-rlp.workspace = true
 
 [features]
 default = ["serde"]
