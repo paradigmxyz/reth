@@ -152,7 +152,7 @@ where
             return Err(P2PStreamError::MismatchedProtocolVersion(GotExpected {
                 got: their_hello.protocol_version,
                 expected: hello.protocol_version,
-            }));
+            }))
         }
 
         // determine shared capabilities (currently returns only one capability)
