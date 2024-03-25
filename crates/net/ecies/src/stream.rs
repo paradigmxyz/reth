@@ -17,10 +17,7 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    time::timeout,
-};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_stream::{Stream, StreamExt};
 use tokio_util::codec::{Decoder, Framed};
 use tracing::{instrument, trace};
@@ -42,7 +39,7 @@ where
 {
     /// Connect to an `ECIES` server
     #[instrument(skip(transport, secret_key), fields(peer=&*format!("{:?}", transport.remote_addr())))]
-    async fn connect(
+    pub async fn connect(
         transport: Io,
         secret_key: SecretKey,
         remote_id: PeerId,
@@ -57,7 +54,9 @@ where
 
         trace!("waiting for ecies ack ...");
 
-        let msg = transport.try_next().await?;
+        let msg = tokio::time::timeout(HANDSHAKE_TIMEOUT, transport.try_next())
+            .await
+            .map_err(|_| ECIESErrorImpl::StreamTimeout)??;
 
         // `Framed` returns `None` if the underlying stream is no longer readable, and the codec is
         // unable to decode another message from the (partially filled) buffer. This usually happens
@@ -83,7 +82,9 @@ where
 
         trace!("incoming ecies stream");
         let mut transport = ecies.framed(transport);
-        let msg = transport.try_next().await?;
+        let msg = tokio::time::timeout(HANDSHAKE_TIMEOUT, transport.try_next())
+            .await
+            .map_err(|_| ECIESErrorImpl::StreamTimeout)??;
 
         trace!("receiving ecies auth");
         let remote_id = match &msg {
@@ -101,17 +102,6 @@ where
         transport.send(EgressECIESValue::Ack).await?;
 
         Ok(Self { stream: transport, remote_id })
-    }
-
-    /// Wrapper around connect which enforces a timeout.
-    pub async fn connect_with_timeout(
-        transport: Io,
-        secret_key: SecretKey,
-        remote_id: PeerId,
-    ) -> Result<Self, ECIESError> {
-        timeout(HANDSHAKE_TIMEOUT, Self::connect(transport, secret_key, remote_id))
-            .await
-            .map_err(|_| ECIESError::from(ECIESErrorImpl::StreamTimeout))?
     }
 
     /// Get the remote id
@@ -191,7 +181,7 @@ mod tests {
         let client_key = SecretKey::new(&mut rand::thread_rng());
         let outgoing = TcpStream::connect(addr).await.unwrap();
         let mut client_stream =
-            ECIESStream::connect_with_timeout(outgoing, client_key, server_id).await.unwrap();
+            ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
         client_stream.send(Bytes::from("hello")).await.unwrap();
 
         // make sure the server receives the message and asserts before ending the test
