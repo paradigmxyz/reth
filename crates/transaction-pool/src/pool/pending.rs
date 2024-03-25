@@ -165,7 +165,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Updates the pool with the new blob fee. Removes
     /// from the subpool all transactions and their dependents that no longer satisfy the given
-    /// base fee (`tx.max_blob_fee < blob_fee`).
+    /// blob fee (`tx.max_blob_fee < blob_fee`).
     ///
     /// Note: the transactions are not returned in a particular order.
     ///
