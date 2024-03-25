@@ -328,7 +328,7 @@ pub struct FeeHistoryEntry {
     pub base_fee_per_blob_gas: Option<u128>,
     /// Blob gas used ratio for this block.
     ///
-    /// Calculated as the ratio pf blob gasUsed and the available blob data gas per block.
+    /// Calculated as the ratio of blob gas used and the available blob data gas per block.
     /// Will be zero if no blob gas was used or pre EIP-4844.
     pub blob_gas_used_ratio: f64,
     /// The excess blob gas of the block.
