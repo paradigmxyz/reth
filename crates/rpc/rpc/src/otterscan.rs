@@ -2,6 +2,7 @@ use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use revm::inspectors::NoOpInspector;
+use revm_inspectors::transfer::TransferInspector;
 use revm_primitives::ExecutionResult;
 
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
@@ -44,8 +45,16 @@ where
     }
 
     /// Handler for `ots_getInternalOperations`
-    async fn get_internal_operations(&self, _tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn get_internal_operations(&self, tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>> {
+        self.eth
+            .spawn_trace_transaction_in_block_with_inspector(
+                tx_hash,
+                TransferInspector::new(false),
+                |_tx_info, inspector, _, _| Ok(inspector.into_transfers()),
+            )
+            .await?
+            .map(|transfer_operations| transfer_operations.into_iter().map(Into::into).collect())
+            .ok_or_else(|| internal_rpc_err("failed to inspect transaction"))
     }
 
     /// Handler for `ots_getTransactionError`
