@@ -147,12 +147,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         std::mem::swap(&mut self.all_transactions.pending_fees.blob_fee, &mut pending_blob_fee);
         match (self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee), base_fee_update)
         {
-            (Ordering::Equal, Ordering::Equal) |
-            (Ordering::Equal, Ordering::Greater) => {
+            (Ordering::Equal, Ordering::Equal) | (Ordering::Equal, Ordering::Greater) => {
                 // fee unchanged, nothing to update
             }
-            (Ordering::Greater, Ordering::Equal) |
-            (Ordering::Greater, Ordering::Greater) => {
+            (Ordering::Greater, Ordering::Equal) | (Ordering::Greater, Ordering::Greater) => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
                 let removed =
                     self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
@@ -1446,8 +1444,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ///
     /// The pool enforces exclusivity of eip-4844 blob vs non-blob transactions on a per sender
     /// basis:
-    ///  - If the pool already includes a blob transaction from the `transaction`'s sender, then
-    ///    the `transaction` must also be a blob transaction
+    ///  - If the pool already includes a blob transaction from the `transaction`'s sender, then the
+    ///    `transaction` must also be a blob transaction
     ///  - If the pool already includes a non-blob transaction from the `transaction`'s sender, then
     ///    the `transaction` must _not_ be a blob transaction.
     ///
