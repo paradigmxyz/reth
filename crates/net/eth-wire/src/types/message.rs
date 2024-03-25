@@ -468,8 +468,20 @@ where
     T: Decodable,
 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let _header = Header::decode(buf)?;
-        Ok(Self { request_id: u64::decode(buf)?, message: T::decode(buf)? })
+        let header = Header::decode(buf)?;
+
+        let initial_length = buf.len();
+        let request_id = u64::decode(buf)?;
+        let message = T::decode(buf)?;
+
+        // Check that the buffer consumed exactly payload_length bytes after decoding the
+        // RequestPair
+        let consumed_len = initial_length - buf.len();
+        if consumed_len != header.payload_length {
+            return Err(alloy_rlp::Error::UnexpectedLength)
+        }
+
+        Ok(Self { request_id, message })
     }
 }
 
@@ -479,7 +491,7 @@ mod tests {
         errors::EthStreamError, types::message::RequestPair, EthMessage, EthMessageID, GetNodeData,
         NodeData, ProtocolMessage,
     };
-    use alloy_rlp::{Decodable, Encodable};
+    use alloy_rlp::{Decodable, Encodable, Error};
     use reth_primitives::hex;
 
     fn encode<T: Encodable>(value: T) -> Vec<u8> {
@@ -531,5 +543,22 @@ mod tests {
         let got = RequestPair::<Vec<u8>>::decode(&mut &*raw_pair).unwrap();
         assert_eq!(expected.length(), raw_pair.len());
         assert_eq!(expected, got);
+    }
+
+    #[test]
+    fn malicious_request_pair_decode() {
+        // A maliciously encoded request pair, where the len(full_list) is 5, but it
+        // actually consumes 6 bytes when decoding
+        //
+        // c5: start of list (c0) + len(full_list) (length is <55 bytes)
+        // 82: 0x80 + len(1337)
+        // 05 39: 1337 (request_id)
+        // === full_list ===
+        // c2: start of list (c0) + len(list) (length is <55 bytes)
+        // 05 05: 5 5(message)
+        let raw_pair = &hex!("c5820539c20505")[..];
+
+        let result = RequestPair::<Vec<u8>>::decode(&mut &*raw_pair);
+        assert!(matches!(result, Err(Error::UnexpectedLength)));
     }
 }
