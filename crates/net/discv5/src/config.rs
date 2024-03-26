@@ -200,7 +200,7 @@ impl<T> ConfigBuilder<T> {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let fork = fork.unwrap_or((ChainRef::ETH, MAINNET.latest_fork_id()));
+        let fork = fork.unwrap_or((NetworkRef::ETH, MAINNET.latest_fork_id()));
 
         let tcp_port = tcp_port.unwrap_or(DEFAULT_DISCOVERY_PORT);
 
@@ -298,9 +298,9 @@ pub trait IdentifyForkIdKVPair {
 
 /// Key of the [`ForkId`] kv-pair in an [`Enr`](discv5::enr::Enr).
 #[derive(Debug)]
-pub struct ChainRef;
+pub struct NetworkRef;
 
-impl IdentifyForkIdKVPair for ChainRef {}
+impl IdentifyForkIdKVPair for NetworkRef {}
 
 #[cfg(test)]
 mod test {

@@ -9,7 +9,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
-use reth_discv5::ChainRef;
+use reth_discv5::NetworkRef;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
@@ -550,12 +550,12 @@ impl NetworkConfigBuilder {
                 .discv5_config(discv5::Config::new(listen_config))
                 .add_boot_nodes(boot_nodes);
             if cfg!(feature = "optimism") {
-                builder = builder.fork(ChainRef::OPSTACK, status.forkid);
+                builder = builder.fork(NetworkRef::OPSTACK, status.forkid);
                 if chain_spec.chain == Chain::optimism_mainnet() {
                     builder = builder.add_optimism_mainnet_boot_nodes()
                 }
             } else {
-                builder = builder.fork(ChainRef::ETH, status.forkid)
+                builder = builder.fork(NetworkRef::ETH, status.forkid)
             }
             builder.build()
         });

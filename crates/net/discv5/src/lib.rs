@@ -25,7 +25,7 @@ pub mod metrics;
 
 pub use discv5::{self, IpMode};
 
-pub use config::{BootNode, ChainRef, Config, ConfigBuilder, IdentifyForkIdKVPair};
+pub use config::{BootNode, Config, ConfigBuilder, IdentifyForkIdKVPair, NetworkRef};
 pub use downgrade_v4::{DiscoveryUpdate, Discv5BCv4, MergedUpdateStream};
 pub use enr::uncompressed_id_from_enr_pk;
 pub use filter::{FilterDiscovered, FilterOutcome, MustIncludeFork, MustNotIncludeChains};
