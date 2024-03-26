@@ -3,8 +3,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Limits on how long one prune job can run before it's forced to stop and thereby yield the
-/// [`DatabaseProviderRW`] hook.
+/// Limits a pruner run by either the number of entries (rows in the database) that can be deleted
+/// or the time it can run.
 #[derive(Debug, Clone, Default)]
 pub struct PruneLimiter {
     /// Maximum entries (rows in the database) to delete from the database per block.
