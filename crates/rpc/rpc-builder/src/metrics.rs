@@ -12,7 +12,13 @@ use std::{
     time::Instant,
 };
 
-/// Metrics for the RPC server
+/// Metrics for the RPC server.
+///
+/// Metrics are divided into two categories:
+/// - Connection metrics: metrics for the connection (e.g. number of connections opened, relevant
+///   for WS and IPC)
+/// - Call metrics: metrics for each RPC method (e.g. number of calls started, time taken to process
+///   a call)
 #[derive(Default, Clone)]
 pub(crate) struct RpcServerMetrics {
     inner: Arc<RpcServerMetricsInner>,
