@@ -82,9 +82,20 @@ impl Default for MustIncludeChain {
 }
 
 /// Filter requiring that peers not advertise that they belong to some chains.
-#[derive(Debug, Constructor, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct MustNotIncludeChains {
     chains: DashSet<MustIncludeChain>,
+}
+
+impl MustNotIncludeChains {
+    /// Returns a new instance that disallows node records with a kv-pair that has any of the given 
+    /// chains as key.
+    pub fn new(disallow_chains: &[&'static [u8]]) -< Self {
+        let chains = DashSet::with_capacity(disallow_chains.len());
+        for chain in disallow_chains {
+            chains.push(chain)
+        }
+    }
 }
 
 impl FilterDiscovered for MustNotIncludeChains {
