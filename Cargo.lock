@@ -6822,6 +6822,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
