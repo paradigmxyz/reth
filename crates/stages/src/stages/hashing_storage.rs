@@ -24,6 +24,12 @@ use std::{
 };
 use tracing::*;
 
+/// Maximum number of channels that can exist in memory.
+const MAXIMUM_CHANNELS: usize = 10_000;
+
+/// Maximum number of storage entries to hash per rayon worker job.
+const WORKER_CHUNK_SIZE: usize = 100;
+
 /// Storage hashing stage hashes plain storage.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
 #[derive(Debug)]
@@ -84,13 +90,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             let mut storage_cursor = tx.cursor_read::<tables::PlainStorageState>()?;
             let mut collector =
                 Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
-            let mut channels = Vec::with_capacity(10_000);
+            let mut channels = Vec::with_capacity(MAXIMUM_CHANNELS);
 
-            // itertools chunks doesn't support enumerate, so we use a counter to know when to flush
-            // hashes from channels to disk.
-            let mut flush_counter = 1;
-
-            for chunk in &storage_cursor.walk(None)?.chunks(100) {
+            for chunk in &storage_cursor.walk(None)?.chunks(WORKER_CHUNK_SIZE) {
                 // An _unordered_ channel to receive results from a rayon job
                 let (tx, rx) = mpsc::channel();
                 channels.push(rx);
@@ -106,10 +108,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     }
                 });
 
-                flush_counter += 1;
-
-                // We flush at every 1_000_000th entry, capping at 10_000 maximum channels.
-                if flush_counter % 10_000 == 0 {
+                // Flush to ETL when channels length reaches MAXIMUM_CHANNELS
+                if !channels.is_empty() && channels.len() % MAXIMUM_CHANNELS == 0 {
                     collect(&mut channels, &mut collector)?;
                 }
             }
