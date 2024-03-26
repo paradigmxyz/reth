@@ -26,7 +26,7 @@ use tokio_stream::{wrappers::ReceiverStream, Stream};
 /// Listens for new discovered nodes and emits events for discovered nodes and their
 /// address.
 #[derive(Debug)]
-pub struct Discovery<N = NodeRecord> {
+pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///
     /// These nodes can be ephemeral and are updated via the discovery protocol.
@@ -40,7 +40,7 @@ pub struct Discovery<N = NodeRecord> {
     /// The handle to the spawned discv4 service
     _discv4_service: Option<JoinHandle<()>>,
     /// Handler to interact with the DNS discovery service
-    _dns_discovery: Option<DnsDiscoveryHandle<N>>,
+    _dns_discovery: Option<DnsDiscoveryHandle>,
     /// Updates from the DNS discovery service.
     dns_discovery_updates: Option<ReceiverStream<DnsNodeRecordUpdate>>,
     /// The handle to the spawned DNS discovery service
