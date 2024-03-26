@@ -1437,12 +1437,16 @@ where
                                     BlockchainTreeError::BlockHashNotFoundInChain { .. }
                                 )
                             ) {
-                                tracing::error!(
-                                    target: "consensus::engine",
-                                    "Unexpected error while making sync target canonical: {:?}, {:?}",
-                                    error,
-                                    hash
-                                )
+                                if error.is_fatal() {
+                                    error!(target: "consensus::engine", %error, "Encountered fatal error while making sync target canonical: {:?}, {:?}", error, hash);
+                                } else {
+                                    debug!(
+                                        target: "consensus::engine",
+                                        "Unexpected error while making sync target canonical: {:?}, {:?}",
+                                        error,
+                                        hash
+                                    )
+                                }
                             }
                         }
                     }
