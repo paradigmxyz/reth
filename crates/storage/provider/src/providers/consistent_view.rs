@@ -48,7 +48,14 @@ where
 
     /// Creates new read-only provider and performs consistency checks on the current tip.
     pub fn provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
+        // Create a new provider.
         let provider_ro = self.provider.database_provider_ro()?;
+
+        // Check that the latest stored header number matches the number
+        // that consistent view was initialized with.
+        // The mismatch can happen if a new block was appended while
+        // the view was being used.
+        // We compare block hashes instead of block numbers to account for reorgs.
         let last_num = provider_ro.last_block_number()?;
         let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
         if self.tip != tip {
@@ -58,6 +65,9 @@ where
             .into())
         }
 
+        // Check that the best block number is the same as the latest stored header.
+        // This ensures that the consistent view cannot be used for initializing new providers
+        // if the node fell back to the staged sync.
         let best_block_number = provider_ro.best_block_number()?;
         if last_num != best_block_number {
             return Err(ConsistentViewError::Syncing {
