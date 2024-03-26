@@ -21,6 +21,7 @@ mod account;
 pub mod basefee;
 mod block;
 mod chain;
+#[cfg(feature = "zstd-codec")]
 mod compression;
 pub mod constants;
 pub mod eip4844;
@@ -58,6 +59,7 @@ pub use chain::{
     ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, ForkTimestamps,
     NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
+#[cfg(feature = "zstd-codec")]
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
