@@ -68,13 +68,13 @@ where
         fork_filter: ForkFilter,
         timeout_limit: Duration,
     ) -> Result<(EthStream<S>, Status), EthStreamError> {
-        timeout(timeout_limit, Self::handshake_no_timeout(self, status, fork_filter))
+        timeout(timeout_limit, Self::handshake_without_timeout(self, status, fork_filter))
             .await
             .map_err(|_| EthStreamError::StreamTimeout)?
     }
 
     /// Handshake with no timeout
-    pub async fn handshake_no_timeout(
+    pub async fn handshake_without_timeout(
         mut self,
         status: Status,
         fork_filter: ForkFilter,

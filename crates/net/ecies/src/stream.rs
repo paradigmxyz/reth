@@ -57,13 +57,13 @@ where
         remote_id: PeerId,
         timeout_limit: Duration,
     ) -> Result<Self, ECIESError> {
-        timeout(timeout_limit, Self::connect_no_timeout(transport, secret_key, remote_id))
+        timeout(timeout_limit, Self::connect_without_timeout(transport, secret_key, remote_id))
             .await
             .map_err(|_| ECIESError::from(ECIESErrorImpl::StreamTimeout))?
     }
 
     /// Connect to an `ECIES` server with no timeout.
-    pub async fn connect_no_timeout(
+    pub async fn connect_without_timeout(
         transport: Io,
         secret_key: SecretKey,
         remote_id: PeerId,
