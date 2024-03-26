@@ -1,6 +1,7 @@
 use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
+use reth_config::config::EtlConfig;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_node_ethereum::EthEvmConfig;
@@ -106,12 +107,20 @@ async fn unwind_and_copy<DB: Database>(
     )?;
 
     // Bring hashes to TO
-    AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&provider, execute_input)
-        .unwrap();
-    StorageHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&provider, execute_input)
-        .unwrap();
+    AccountHashingStage {
+        clean_threshold: u64::MAX,
+        commit_threshold: u64::MAX,
+        etl_config: EtlConfig::default(),
+    }
+    .execute(&provider, execute_input)
+    .unwrap();
+    StorageHashingStage {
+        clean_threshold: u64::MAX,
+        commit_threshold: u64::MAX,
+        etl_config: EtlConfig::default(),
+    }
+    .execute(&provider, execute_input)
+    .unwrap();
 
     let unwind_inner_tx = provider.into_tx();
 

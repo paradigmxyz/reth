@@ -247,10 +247,10 @@ impl Command {
                     (Box::new(TransactionLookupStage::new(batch_size, etl_config, None)), None)
                 }
                 StageEnum::AccountHashing => {
-                    (Box::new(AccountHashingStage::new(1, batch_size)), None)
+                    (Box::new(AccountHashingStage::new(1, batch_size, etl_config)), None)
                 }
                 StageEnum::StorageHashing => {
-                    (Box::new(StorageHashingStage::new(1, batch_size)), None)
+                    (Box::new(StorageHashingStage::new(1, batch_size, etl_config)), None)
                 }
                 StageEnum::Merkle => (
                     Box::new(MerkleStage::default_execution()),
