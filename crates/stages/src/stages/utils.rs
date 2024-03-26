@@ -80,13 +80,12 @@ where
         if current_block_number != block_number {
             current_block_number = block_number;
             flush_counter += 1;
-            if flush_counter > DEFAULT_CACHE_THRESHOLD {    
+            if flush_counter > DEFAULT_CACHE_THRESHOLD {
                 collect(&cache)?;
                 cache.clear();
                 flush_counter = 0;
             }
         }
-        
     }
     collect(&cache)?;
 
