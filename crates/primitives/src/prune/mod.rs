@@ -152,14 +152,4 @@ impl PruneProgress {
     pub fn is_finished(&self) -> bool {
         matches!(self, Self::Finished)
     }
-
-    /// Returns `true` if prune run was interrupted by timeout.
-    pub fn is_timed_out(&self) -> bool {
-        matches!(self, Self::HasMoreData(reason) if reason.is_timeout())
-    }
-
-    /// Returns `true` if prune run was interrupted by reaching the limit on deleted entries.
-    pub fn is_entries_limit_reached(&self) -> bool {
-        matches!(self, Self::HasMoreData(reason) if reason.is_entries_limit_reached())
-    }
 }
