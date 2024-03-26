@@ -315,7 +315,7 @@ impl<T> Discv5<T> {
             let self_lookup_interval = Duration::from_secs(self_lookup_interval);
 
             let filter = filter_discovered_peer.clone();
-            let predicate = Box::new(move |enr: &discv5::Enr| -> bool {
+            /*let predicate = Box::new(move |enr: &discv5::Enr| -> bool {
                 match filter.filter(enr) {
                     FilterOutcome::Ok | FilterOutcome::OkReturnForkId(_) => true,
                     FilterOutcome::Ignore { reason } => {
@@ -328,7 +328,7 @@ impl<T> Discv5<T> {
                         false
                     }
                 }
-            });
+            });*/
             // todo: graceful shutdown
 
             async move {
@@ -337,14 +337,7 @@ impl<T> Discv5<T> {
                         self_lookup_interval=format!("{:#?}", self_lookup_interval),
                         "starting periodic lookup query"
                     );
-                    match discv5
-                        .find_node_predicate(
-                            local_node_id,
-                            predicate.clone() as Box<dyn Fn(&discv5::Enr) -> bool + Send>,
-                            discv5::kbucket::MAX_NODES_PER_BUCKET,
-                        )
-                        .await
-                    {
+                    match discv5.find_node(local_node_id).await {
                         Err(err) => trace!(target: "net::discv5",
                             self_lookup_interval=format!("{:#?}", self_lookup_interval),
                             %err,
