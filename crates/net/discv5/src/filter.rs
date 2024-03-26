@@ -19,20 +19,6 @@ pub trait FilterDiscovered {
     fn ignore_reason(&self) -> String;
 }
 
-/// Filter that lets all [`Enr`](discv5::Enr)s pass through.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct NoopFilter;
-
-impl FilterDiscovered for NoopFilter {
-    fn filter(&self, _enr: &discv5::Enr) -> FilterOutcome {
-        FilterOutcome::Ok
-    }
-
-    fn ignore_reason(&self) -> String {
-        unreachable!()
-    }
-}
-
 /// Outcome of applying filtering rules on node record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterOutcome {

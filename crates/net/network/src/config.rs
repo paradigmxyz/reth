@@ -9,6 +9,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
+use reth_discv5::ChainRef;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
@@ -44,7 +45,6 @@ pub struct NetworkConfig<C> {
     pub dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery.
     pub discovery_v4_config: Option<Discv4Config>,
-
     /// How to set up discovery version 5.
     pub discovery_v5_config: Option<reth_discv5::Config>,
     /// Address to use for discovery
@@ -178,7 +178,7 @@ pub struct NetworkConfigBuilder {
     dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery version 4.
     discovery_v4_builder: Option<Discv4ConfigBuilder>,
-
+    /// Whether to enable discovery version 5. Disabled by default.
     enable_discovery_v5: bool,
     /// All boot nodes to start network discovery with.
     boot_nodes: HashSet<NodeRecord>,
@@ -234,7 +234,7 @@ impl NetworkConfigBuilder {
             secret_key,
             dns_discovery_config: Some(Default::default()),
             discovery_v4_builder: Some(Default::default()),
-            enable_discovery_v5: true,
+            enable_discovery_v5: false,
             boot_nodes: Default::default(),
             discovery_addr: None,
             listener_addr: None,
@@ -424,10 +424,9 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Disable the Discv5 discovery.
-
-    pub fn disable_discv5_discovery(mut self) -> Self {
-        self.enable_discovery_v5 = false;
+    /// Enable the Discv5 discovery.
+    pub fn enable_discv5_discovery(mut self) -> Self {
+        self.enable_discovery_v5 = true;
         self
     }
 
@@ -494,7 +493,6 @@ impl NetworkConfigBuilder {
             secret_key,
             mut dns_discovery_config,
             discovery_v4_builder,
-
             enable_discovery_v5,
             boot_nodes,
             discovery_addr,
@@ -545,6 +543,29 @@ impl NetworkConfigBuilder {
             }
         }
 
+        let discovery_v5_config = enable_discovery_v5.then_some({
+            let listen_config =
+                discv5::ListenConfig::from_ip(discovery_addr.ip(), discovery_addr.port());
+            let mut builder = reth_discv5::Config::builder()
+                .discv5_config(discv5::Config::new(listen_config))
+                .add_boot_nodes(boot_nodes);
+            if cfg!(feature = "optimism") {
+                builder = builder.fork(ChainRef::OPSTACK, status.forkid);
+                if chain_spec.chain == Chain::optimism_mainnet() {
+                    builder = builder.add_optimism_mainnet_boot_nodes()
+                }
+            } else {
+                builder = builder.fork(ChainRef::ETH, status.forkid)
+            }
+            builder.build()
+        });
+
+        enable_discovery_v5
+            .then_some(reth_discv5::Config::builder().add_boot_nodes(boot_nodes).build());
+        // #[cfg(feature = "optimism")]
+        let discovery_v5_config =
+            reth_discv5::Config::builder().build().add_boot_nodes(boot_nodes).build();
+
         tracing::info!(enable_discovery_v5);
         NetworkConfig {
             client,
@@ -552,7 +573,6 @@ impl NetworkConfigBuilder {
             boot_nodes,
             dns_discovery_config,
             discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
-
             discovery_v5_config: enable_discovery_v5
                 .then_some(reth_discv5::Config::builder().build()),
             discovery_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),

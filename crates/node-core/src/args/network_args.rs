@@ -238,7 +238,7 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
 
-        if !self.disable_discovery && self.enable_discv5_discovery {
+        if !self.disable_discovery && (self.enable_discv5_discovery || cfg!(feature = "optimism")) {
             network_config_builder = network_config_builder.enable_discv5_discovery();
         }
         network_config_builder
@@ -257,8 +257,8 @@ impl Default for DiscoveryArgs {
         Self {
             disable_discovery: false,
             disable_dns_discovery: false,
-            disable_discv4_discovery: false,
-            enable_discv5_discovery: false,
+            disable_discv4_discovery: cfg!(feature = "optimism"),
+            enable_discv5_discovery: cfg!(feature = "optimism"),
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
         }

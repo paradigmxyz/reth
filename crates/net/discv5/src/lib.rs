@@ -462,13 +462,11 @@ mod tests {
     use rand::thread_rng;
     use tracing::trace;
 
-    use crate::filter::NoopFilter;
-
     use super::*;
 
     async fn start_discovery_node(
         udp_port_discv5: u16,
-    ) -> (Discv5<NoopFilter>, mpsc::Receiver<discv5::Event>, NodeRecord) {
+    ) -> (Discv5, mpsc::Receiver<discv5::Event>, NodeRecord) {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
@@ -476,7 +474,6 @@ mod tests {
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
         let discv5_config = Config::builder()
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
-            .filter(NoopFilter)
             .build();
 
         Discv5::start(&secret_key, discv5_config).await.expect("should build discv5")

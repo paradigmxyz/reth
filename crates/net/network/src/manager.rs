@@ -178,7 +178,6 @@ where
             client,
             secret_key,
             discovery_v4_config,
-
             discovery_v5_config,
             discovery_addr,
             listener_addr,
