@@ -15,7 +15,7 @@ pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;
 pub use sender_recovery::SenderRecovery;
 pub use set::SegmentSet;
-use std::{fmt::Debug, num::NonZeroUsize};
+use std::fmt::Debug;
 pub use storage_history::StorageHistory;
 pub use transaction_lookup::TransactionLookup;
 pub use transactions::Transactions;
@@ -24,13 +24,10 @@ use crate::PrunerError;
 use reth_db::database::Database;
 use reth_interfaces::{provider::ProviderResult, RethResult};
 use reth_primitives::{
-    BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
-    TxNumber,
+    BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
+    PruneSegment, TxNumber,
 };
-use reth_provider::{
-    providers::PruneLimiter, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
-    PruneLimiterBuilder,
-};
+use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter};
 use std::ops::RangeInclusive;
 use tracing::error;
 
@@ -62,16 +59,6 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
         checkpoint: PruneCheckpoint,
     ) -> ProviderResult<()> {
         provider.save_prune_checkpoint(self.segment(), checkpoint)
-    }
-
-    /// Gets the limiter for this specific segment, built from the limiter used in the parent
-    /// scope.
-    fn new_limiter_from_parent_scope_limiter(&self, limiter: &PruneLimiter) -> PruneLimiter {
-        PruneLimiterBuilder::floor_deleted_entries_limit_to_multiple_of(
-            limiter,
-            NonZeroUsize::new(1).unwrap(),
-        )
-        .build()
     }
 }
 
@@ -168,8 +155,6 @@ impl PruneInput {
 /// Segment pruning output, see [Segment::prune].
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct PruneOutput {
-    /// [`PruneProgress::Finished`] if pruning has been completed up to the target block, and
-    /// [`PruneProgress::HasMoreData`] if there's more data to prune in further runs.
     pub(crate) progress: PruneProgress,
     /// Number of entries pruned, i.e. deleted from the database.
     pub(crate) pruned: usize,
@@ -181,17 +166,20 @@ impl PruneOutput {
     /// Returns a [PruneOutput] with `done = true`, `pruned = 0` and `checkpoint = None`.
     /// Use when no pruning is needed.
     pub(crate) const fn done() -> Self {
-        Self { progress: PruneProgress::new_finished(), pruned: 0, checkpoint: None }
+        Self { progress: PruneProgress::Finished, pruned: 0, checkpoint: None }
     }
 
     /// Returns a [PruneOutput] with `done = false`, `pruned = 0` and `checkpoint = None`.
     /// Use when pruning is needed but cannot be done.
-    pub(crate) const fn not_done(reason: PruneInterruptReason) -> Self {
-        Self { progress: PruneProgress::HasMoreData(reason), pruned: 0, checkpoint: None }
+    pub(crate) const fn not_done(
+        reason: PruneInterruptReason,
+        checkpoint: Option<PruneOutputCheckpoint>,
+    ) -> Self {
+        Self { progress: PruneProgress::HasMoreData(reason), pruned: 0, checkpoint }
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub(crate) struct PruneOutputCheckpoint {
     /// Highest pruned block number. If it's [None], the pruning for block `0` is not finished yet.
     pub(crate) block_number: Option<BlockNumber>,
@@ -203,5 +191,11 @@ impl PruneOutputCheckpoint {
     /// Converts [PruneOutputCheckpoint] to [PruneCheckpoint] with the provided [PruneMode]
     pub(crate) fn as_prune_checkpoint(&self, prune_mode: PruneMode) -> PruneCheckpoint {
         PruneCheckpoint { block_number: self.block_number, tx_number: self.tx_number, prune_mode }
+    }
+}
+
+impl From<PruneCheckpoint> for PruneOutputCheckpoint {
+    fn from(checkpoint: PruneCheckpoint) -> Self {
+        Self { block_number: checkpoint.block_number, tx_number: checkpoint.tx_number }
     }
 }

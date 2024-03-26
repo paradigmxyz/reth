@@ -43,8 +43,9 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         }
         .into_inner();
         let tx_range = start..=
-            (Some(end)
-                .min(input.limiter.deleted_entries_limit().map(|limit| start + limit as u64 - 1)))
+            (Some(end).min(
+                input.limiter.deleted_entries_limit_left().map(|left| start + left as u64 - 1),
+            ))
             .unwrap();
         let tx_range_end = *tx_range.end();
 
@@ -63,21 +64,18 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             ))
         }
 
-        let mut last_pruned_transaction = None;
-        let (pruned, is_timed_out) = {
-            let (pruned, progress) = provider
-                .prune_table_with_iterator::<tables::TransactionHashNumbers>(
-                    hashes,
-                    input.limiter,
-                    |row| {
-                        last_pruned_transaction =
-                            Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
-                    },
-                )?;
+        let mut limiter = input.limiter;
 
-            (pruned, progress.is_timed_out())
-        };
-        let done = tx_range_end == end;
+        let mut last_pruned_transaction = None;
+        let (pruned, done) = provider.prune_table_with_iterator::<tables::TransactionHashNumbers>(
+            hashes,
+            &mut limiter,
+            |row| {
+                last_pruned_transaction = Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
+            },
+        )?;
+
+        let done = done && tx_range_end == end;
         trace!(target: "pruner", %pruned, %done, "Pruned transaction lookup");
 
         let last_pruned_transaction = last_pruned_transaction.unwrap_or(tx_range_end);
@@ -90,8 +88,10 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             // run.
             .checked_sub(if done { 0 } else { 1 });
 
+        let progress = PruneProgress::new(done, &limiter);
+
         Ok(PruneOutput {
-            progress: PruneProgress::new(done, is_timed_out),
+            progress,
             pruned,
             checkpoint: Some(PruneOutputCheckpoint {
                 block_number: last_pruned_block,
@@ -109,12 +109,13 @@ mod tests {
         FoldWhile::{Continue, Done},
         Itertools,
     };
-    use reth_db::{tables, DatabaseEnv};
+    use reth_db::tables;
     use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, TxNumber, B256,
+        BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
+        PruneSegment, TxNumber, B256,
     };
-    use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
+    use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
 
@@ -146,12 +147,7 @@ mod tests {
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let segment = TransactionLookup::new(prune_mode);
-            let job_limiter = PruneLimiterBuilder::default().deleted_entries_limit(10).build();
-            let limiter =
-                <TransactionLookup as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
-                    &segment,
-                    &job_limiter,
-                );
+            let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
             let input = PruneInput {
                 previous_checkpoint: db
                     .factory
@@ -160,7 +156,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::TransactionLookup)
                     .unwrap(),
                 to_block,
-                limiter,
+                limiter: limiter.clone(),
             };
 
             let next_tx_number_to_prune = db
@@ -200,11 +196,14 @@ mod tests {
 
             let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
+            limiter.increment_deleted_entries_count_by(result.pruned);
+
             assert_matches!(
                 result,
                 PruneOutput {progress, pruned, checkpoint: Some(_)}
                     if (progress, pruned) == expected_result
             );
+
             segment
                 .save_checkpoint(
                     &provider,
@@ -234,8 +233,11 @@ mod tests {
             );
         };
 
-        test_prune(6, (PruneProgress::new_entries_limit_reached(), 10));
-        test_prune(6, (PruneProgress::new_finished(), 2));
-        test_prune(10, (PruneProgress::new_finished(), 8));
+        test_prune(
+            6,
+            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 10),
+        );
+        test_prune(6, (PruneProgress::Finished, 2));
+        test_prune(10, (PruneProgress::Finished, 8));
     }
 }

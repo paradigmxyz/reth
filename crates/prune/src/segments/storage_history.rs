@@ -1,5 +1,3 @@
-use std::num::NonZeroUsize;
-
 use crate::{
     segments::{
         history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
@@ -11,8 +9,8 @@ use reth_db::{
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
     tables,
 };
-use reth_primitives::{PruneMode, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneLimiterBuilder};
+use reth_primitives::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
+use reth_provider::DatabaseProviderRW;
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -50,30 +48,32 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         };
         let range_end = *range.end();
 
-        let limiter = input.limiter.divide_deleted_entries_limit(NonZeroUsize::new(2).unwrap());
+        let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
+            input.limiter.set_deleted_entries_limit(limit / 2)
+        } else {
+            input.limiter
+        };
+        if limiter.is_limit_reached() {
+            return Ok(PruneOutput::not_done(
+                PruneInterruptReason::new(&limiter),
+                input.previous_checkpoint.map(|checkpoint| checkpoint.into()),
+            ))
+        }
 
         let mut last_changeset_pruned_block = None;
-        let (pruned_changesets, progress) = provider
+        let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
-                limiter,
+                &mut limiter,
                 |_| false,
                 |row| last_changeset_pruned_block = Some(row.0.block_number()),
             )?;
-        trace!(target: "pruner", deleted = %pruned_changesets, done = %progress.is_finished(), "Pruned storage history (changesets)");
+        trace!(target: "pruner", deleted = %pruned_changesets, %done, "Pruned storage history (changesets)");
 
         let last_changeset_pruned_block = last_changeset_pruned_block
             // If there's more storage storage changesets to prune, set the checkpoint block number
             // to previous, so we could finish pruning its storage changesets on the next run.
-            .map(
-                |block_number| {
-                    if progress.is_finished() {
-                        block_number
-                    } else {
-                        block_number.saturating_sub(1)
-                    }
-                },
-            )
+            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
             .unwrap_or(range_end);
 
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::StoragesHistory, _>(
@@ -82,7 +82,9 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
             |key| StorageShardedKey::last(key.address, key.sharded_key.key),
         )?;
-        trace!(target: "pruner", %processed, deleted = %pruned_indices, done = %progress.is_finished(), "Pruned storage history (history)" );
+        trace!(target: "pruner", %processed, deleted = %pruned_indices, %done, "Pruned storage history (history)");
+
+        let progress = PruneProgress::new(done, &limiter);
 
         Ok(PruneOutput {
             progress,
@@ -104,8 +106,10 @@ mod tests {
         generators,
         generators::{random_block_range, random_changeset_range, random_eoa_accounts},
     };
-    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, B256};
-    use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
+    use reth_primitives::{
+        BlockNumber, PruneCheckpoint, PruneLimiter, PruneMode, PruneProgress, PruneSegment, B256,
+    };
+    use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::{collections::BTreeMap, ops::AddAssign};
 
@@ -145,9 +149,13 @@ mod tests {
 
         let original_shards = db.table::<tables::StoragesHistory>().unwrap();
 
-        let test_prune = |to_block: BlockNumber, run: usize, expected_result: (bool, usize)| {
+        let test_prune = |to_block: BlockNumber,
+                          run: usize,
+                          expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let deleted_entries_limit = 1000;
+            let mut limiter =
+                PruneLimiter::default().set_deleted_entries_limit(deleted_entries_limit);
             let input = PruneInput {
                 previous_checkpoint: db
                     .factory
@@ -156,19 +164,20 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::StorageHistory)
                     .unwrap(),
                 to_block,
-                limiter: PruneLimiterBuilder::default()
-                    .deleted_entries_limit(deleted_entries_limit)
-                    .build(),
+                limiter: limiter.clone(),
             };
             let segment = StorageHistory::new(prune_mode);
 
             let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
+            limiter.increment_deleted_entries_count_by(result.pruned);
+
             assert_matches!(
                 result,
                 PruneOutput {progress, pruned, checkpoint: Some(_)}
-                    if (progress.is_finished(), pruned) == expected_result
+                    if (progress, pruned) == expected_result
             );
+
             segment
                 .save_checkpoint(
                     &provider,
@@ -256,8 +265,17 @@ mod tests {
             );
         };
 
-        test_prune(998, 1, (false, 500));
-        test_prune(998, 2, (true, 499));
-        test_prune(1200, 3, (true, 202));
+        test_prune(
+            998,
+            1,
+            (
+                PruneProgress::HasMoreData(
+                    reth_primitives::PruneInterruptReason::DeletedEntriesLimitReached,
+                ),
+                500,
+            ),
+        );
+        test_prune(998, 2, (PruneProgress::Finished, 499));
+        test_prune(1200, 3, (PruneProgress::Finished, 202));
     }
 }

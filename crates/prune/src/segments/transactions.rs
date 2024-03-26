@@ -3,7 +3,7 @@ use crate::{
     PrunerError,
 };
 use reth_db::{database::Database, tables};
-use reth_primitives::{PruneMode, PruneSegment};
+use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, TransactionsProvider};
 use tracing::{instrument, trace};
 
@@ -41,21 +41,25 @@ impl<DB: Database> Segment<DB> for Transactions {
             }
         };
 
+        let mut limiter = input.limiter;
+
         let mut last_pruned_transaction = *tx_range.end();
-        let (pruned, progress) = provider.prune_table_with_range::<tables::Transactions>(
+        let (pruned, done) = provider.prune_table_with_range::<tables::Transactions>(
             tx_range,
-            input.limiter,
+            &mut limiter,
             |_| false,
             |row| last_pruned_transaction = row.0,
         )?;
-        trace!(target: "pruner", %pruned, ?progress, "Pruned transactions");
+        trace!(target: "pruner", %pruned, %done, "Pruned transactions");
 
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
             .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
             // If there's more transactions to prune, set the checkpoint block number to previous,
             // so we could finish pruning its transactions on the next run.
-            .checked_sub(if progress.is_finished() { 0 } else { 1 });
+            .checked_sub(if done { 0 } else { 1 });
+
+        let progress = PruneProgress::new(done, &limiter);
 
         Ok(PruneOutput {
             progress,
@@ -76,12 +80,13 @@ mod tests {
         FoldWhile::{Continue, Done},
         Itertools,
     };
-    use reth_db::{tables, DatabaseEnv};
+    use reth_db::tables;
     use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneMode, PruneProgress, PruneSegment, TxNumber, B256,
+        BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
+        PruneSegment, TxNumber, B256,
     };
-    use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
+    use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
 
@@ -100,12 +105,7 @@ mod tests {
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let segment = Transactions::new(prune_mode);
-            let job_limiter = PruneLimiterBuilder::default().deleted_entries_limit(10).build();
-            let limiter =
-                <Transactions as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
-                    &segment,
-                    &job_limiter,
-                );
+            let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
             let input = PruneInput {
                 previous_checkpoint: db
                     .factory
@@ -114,7 +114,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Transactions)
                     .unwrap(),
                 to_block,
-                limiter,
+                limiter: limiter.clone(),
             };
 
             let next_tx_number_to_prune = db
@@ -129,11 +129,14 @@ mod tests {
 
             let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input.clone()).unwrap();
+            limiter.increment_deleted_entries_count_by(result.pruned);
+
             assert_matches!(
                 result,
                 PruneOutput {progress, pruned, checkpoint: Some(_)}
                     if (progress, pruned) == expected_result
             );
+
             segment
                 .save_checkpoint(
                     &provider,
@@ -186,7 +189,10 @@ mod tests {
             );
         };
 
-        test_prune(6, (PruneProgress::new_entries_limit_reached(), 10));
-        test_prune(6, (PruneProgress::new_finished(), 2));
+        test_prune(
+            6,
+            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 10),
+        );
+        test_prune(6, (PruneProgress::Finished, 2));
     }
 }

@@ -7,16 +7,13 @@ use crate::{
 };
 use reth_db::database::Database;
 use reth_primitives::{
-    BlockNumber, PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
-    StaticFileSegment,
+    BlockNumber, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PrunePurpose,
+    PruneSegment, StaticFileSegment,
 };
-use reth_provider::{
-    DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, PruneLimiter, PruneLimiterBuilder,
-};
+use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
 use reth_tokio_util::EventListeners;
 use std::{
     collections::BTreeMap,
-    num::NonZeroUsize,
     time::{Duration, Instant},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -88,7 +85,7 @@ impl<DB: Database> Pruner<DB> {
             self.previous_tip_block_number = Some(tip_block_number);
 
             debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PruneProgress::new_finished())
+            return Ok(PruneProgress::Finished)
         }
 
         self.listeners.notify(PrunerEvent::Started { tip_block_number });
@@ -111,23 +108,16 @@ impl<DB: Database> Pruner<DB> {
                 tip_block_number.saturating_sub(previous_tip_block_number) as usize
             }))
             .min(self.prune_max_blocks_per_run);
-        let limiter = {
-            let mut limiter_builder = PruneLimiterBuilder::default()
-                .deleted_entries_limit(self.delete_limit * blocks_since_last_run);
-            if let Some(timeout) = self.timeout {
-                limiter_builder = limiter_builder.job_timeout(timeout, start);
-            }
-            limiter_builder.build()
+
+        let mut limiter = PruneLimiter::default()
+            .set_deleted_entries_limit(self.delete_limit * blocks_since_last_run);
+        if let Some(timeout) = self.timeout {
+            limiter = limiter.set_time_limit(timeout);
         };
 
         let provider = self.provider_factory.provider_rw()?;
-        let segments_limiter = PruneLimiterBuilder::floor_deleted_entries_limit_to_multiple_of(
-            &limiter,
-            NonZeroUsize::new(1).unwrap(),
-        )
-        .build();
         let (stats, deleted_entries, progress) =
-            self.prune_segments(&provider, tip_block_number, segments_limiter)?;
+            self.prune_segments(&provider, tip_block_number, &mut limiter)?;
         provider.commit()?;
 
         self.previous_tip_block_number = Some(tip_block_number);
@@ -142,6 +132,9 @@ impl<DB: Database> Pruner<DB> {
             PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached) => {
                 "Pruner interrupted by limit on deleted entries"
             }
+            PruneProgress::HasMoreData(PruneInterruptReason::Unknown) => {
+                "Pruner interrupted by unknown reason"
+            }
             PruneProgress::Finished => "Pruner finished",
         };
 
@@ -149,9 +142,8 @@ impl<DB: Database> Pruner<DB> {
             target: "pruner",
             %tip_block_number,
             ?elapsed,
-            timeout=?limiter.timeout(),
             ?deleted_entries,
-            delete_limit=?limiter.deleted_entries_limit(),
+            ?limiter,
             ?progress,
             ?stats,
             "{message}",
@@ -165,25 +157,28 @@ impl<DB: Database> Pruner<DB> {
     /// Prunes the segments that the [Pruner] was initialized with, and the segments that needs to
     /// be pruned according to the highest static_files.
     ///
-    /// Returns [PrunerStats], `delete_limit` that remained after pruning all segments, and
-    /// [PruneProgress].
+    /// Returns [PrunerStats], total number of entries pruned, and [PruneProgress].
     fn prune_segments(
         &mut self,
         provider: &DatabaseProviderRW<DB>,
         tip_block_number: BlockNumber,
-        mut limiter: PruneLimiter,
+        limiter: &mut PruneLimiter,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
         let static_file_segments = self.static_file_segments();
-        let mut segments = static_file_segments
+        let segments = static_file_segments
             .iter()
             .map(|segment| (segment, PrunePurpose::StaticFile))
             .chain(self.segments.iter().map(|segment| (segment, PrunePurpose::User)));
 
-        let mut done = true;
         let mut stats = PrunerStats::new();
+        let mut pruned = 0;
+        let mut progress = PruneProgress::Finished;
 
-        while let (false, Some((segment, purpose))) = (limiter.is_limit_reached(), segments.next())
-        {
+        for (segment, purpose) in segments {
+            if limiter.is_limit_reached() {
+                break
+            }
+
             if let Some((to_block, prune_mode)) = segment
                 .mode()
                 .map(|mode| mode.prune_target_block(tip_block_number, segment.segment(), purpose))
@@ -201,10 +196,9 @@ impl<DB: Database> Pruner<DB> {
 
                 let segment_start = Instant::now();
                 let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
-                let segment_limiter = segment.new_limiter_from_parent_scope_limiter(&limiter);
                 let output = segment.prune(
                     provider,
-                    PruneInput { previous_checkpoint, to_block, limiter: segment_limiter },
+                    PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() },
                 )?;
                 if let Some(checkpoint) = output.checkpoint {
                     segment
@@ -220,8 +214,7 @@ impl<DB: Database> Pruner<DB> {
                     .highest_pruned_block
                     .set(to_block as f64);
 
-                done = done && output.progress.is_finished();
-                limiter.increment_deleted_entries_count_by(output.pruned);
+                progress = output.progress;
 
                 debug!(
                     target: "pruner",
@@ -234,9 +227,8 @@ impl<DB: Database> Pruner<DB> {
                 );
 
                 if output.pruned > 0 {
-                    // sets `is_timed_out`
-                    let _ = limiter.is_limit_reached();
-
+                    limiter.increment_deleted_entries_count_by(output.pruned);
+                    pruned += output.pruned;
                     stats.insert(segment.segment(), (output.progress, output.pruned));
                 }
             } else {
@@ -244,11 +236,7 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
-        Ok((
-            stats,
-            limiter.deleted_entries_count(),
-            PruneProgress::new(done, limiter.is_timed_out()),
-        ))
+        Ok((stats, pruned, progress))
     }
 
     /// Returns pre-configured segments that needs to be pruned according to the highest

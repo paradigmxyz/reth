@@ -74,8 +74,9 @@ pub use net::{
 };
 pub use peer::{AnyNode, PeerId, WithPeerId};
 pub use prune::{
-    PruneCheckpoint, PruneInterruptReason, PruneMode, PruneModes, PruneProgress, PrunePurpose,
-    PruneSegment, PruneSegmentError, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
+    PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneModes, PruneProgress,
+    PrunePurpose, PruneSegment, PruneSegmentError, PruneStepResult, ReceiptsLogPruneConfig,
+    MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use static_file::StaticFileSegment;

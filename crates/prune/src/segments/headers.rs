@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use crate::{
     segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
     PrunerError,
@@ -10,9 +12,8 @@ use reth_db::{
     transaction::DbTxMut,
 };
 
-use reth_primitives::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder};
-use std::num::NonZeroUsize;
+use reth_primitives::{BlockNumber, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
+use reth_provider::DatabaseProviderRW;
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -49,15 +50,6 @@ impl<DB: Database> Segment<DB> for Headers {
             }
         };
 
-        let mut limiter = input.limiter;
-        // todo: move this check to prune job start where limiter is made and update tests
-        // accordingly
-        if limiter.is_limit_reached() {
-            // Nothing to do, `input.delete_limit` is less than 3 so we can't prune all
-            // headers-related tables up to the same height
-            return Ok(PruneOutput::not_done(PruneInterruptReason::DeletedEntriesLimitReached))
-        }
-
         let last_pruned_block =
             if block_range_start == 0 { None } else { Some(block_range_start - 1) };
 
@@ -69,6 +61,9 @@ impl<DB: Database> Segment<DB> for Headers {
         let mut canonical_headers_cursor =
             provider.tx_ref().cursor_write::<tables::CanonicalHeaders>()?;
 
+        let mut limiter =
+            input.limiter.floor_deleted_entries_limit_to_multiple_of(NonZeroUsize::new(3).unwrap());
+
         let tables_iter = HeaderTablesIter::new(
             provider,
             &mut limiter,
@@ -78,13 +73,15 @@ impl<DB: Database> Segment<DB> for Headers {
         );
 
         let mut last_pruned_block: Option<u64> = None;
+        let mut pruned = 0;
         for res in tables_iter {
-            last_pruned_block = res?;
+            let HeaderTablesIterItem { pruned_block, entries_pruned } = res?;
+            last_pruned_block = Some(pruned_block);
+            pruned += entries_pruned;
         }
 
         let done = last_pruned_block.map_or(false, |block| block == block_range_end);
-        let progress = PruneProgress::new(done, limiter.is_timed_out());
-        let pruned = limiter.deleted_entries_count();
+        let progress = PruneProgress::new(done, &limiter);
 
         Ok(PruneOutput {
             progress,
@@ -94,16 +91,6 @@ impl<DB: Database> Segment<DB> for Headers {
                 tx_number: None,
             }),
         })
-    }
-
-    fn new_limiter_from_parent_scope_limiter(&self, limiter: &PruneLimiter) -> PruneLimiter {
-        // limit on entries must be multiple of three to prune headers, headers td and canonical
-        // headers tables up to the same height
-        PruneLimiterBuilder::floor_deleted_entries_limit_to_multiple_of(
-            limiter,
-            NonZeroUsize::new(3).unwrap(),
-        )
-        .build()
     }
 }
 
@@ -119,6 +106,11 @@ where
     headers_walker: Walker<'a, DB, tables::Headers>,
     header_tds_walker: Walker<'a, DB, tables::HeaderTerminalDifficulties>,
     canonical_headers_walker: Walker<'a, DB, tables::CanonicalHeaders>,
+}
+
+struct HeaderTablesIterItem {
+    pruned_block: BlockNumber,
+    entries_pruned: usize,
 }
 
 impl<'a, DB> HeaderTablesIter<'a, DB>
@@ -140,22 +132,22 @@ impl<'a, DB> Iterator for HeaderTablesIter<'a, DB>
 where
     DB: Database,
 {
-    type Item = Result<Option<u64>, PrunerError>;
+    type Item = Result<HeaderTablesIterItem, PrunerError>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.limiter.is_limit_reached() {
             return None
         }
 
-        let mut last_pruned_block_headers = None;
-        let mut last_pruned_block_td = None;
-        let mut last_pruned_block_canonical = None;
+        let mut pruned_block_headers = None;
+        let mut pruned_block_td = None;
+        let mut pruned_block_canonical = None;
         // todo: guarantee skip filter and delete callback are same for all header table types
 
         if let Err(err) = self.provider.step_prune_range(
             &mut self.headers_walker,
             self.limiter,
             &mut |_| false,
-            &mut |row| last_pruned_block_headers = Some(row.0),
+            &mut |row| pruned_block_headers = Some(row.0),
         ) {
             return Some(Err(err.into()))
         }
@@ -164,7 +156,7 @@ where
             &mut self.header_tds_walker,
             self.limiter,
             &mut |_| false,
-            &mut |row| last_pruned_block_td = Some(row.0),
+            &mut |row| pruned_block_td = Some(row.0),
         ) {
             return Some(Err(err.into()))
         }
@@ -173,38 +165,36 @@ where
             &mut self.canonical_headers_walker,
             self.limiter,
             &mut |_| false,
-            &mut |row| last_pruned_block_canonical = Some(row.0),
+            &mut |row| pruned_block_canonical = Some(row.0),
         ) {
             return Some(Err(err.into()))
         }
 
-        if ![last_pruned_block_headers, last_pruned_block_td, last_pruned_block_canonical]
-            .iter()
-            .all_equal()
-        {
+        if ![pruned_block_headers, pruned_block_td, pruned_block_canonical].iter().all_equal() {
             return Some(Err(PrunerError::InconsistentData(
                 "All headers-related tables should be pruned up to the same height",
             )))
         }
 
-        last_pruned_block_headers.map(move |block| Ok(Some(block)))
+        pruned_block_headers
+            .map(move |block| Ok(HeaderTablesIterItem { pruned_block: block, entries_pruned: 3 }))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_db::{tables, transaction::DbTx, DatabaseEnv};
+    use reth_db::{tables, transaction::DbTx};
     use reth_interfaces::test_utils::{generators, generators::random_header_range};
     use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
-        B256, U256,
+        BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
+        PruneSegment, B256, U256,
     };
-    use reth_provider::{PruneCheckpointReader, PruneLimiterBuilder};
+    use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestStageDB;
     use tracing::trace;
 
-    use crate::segments::{Headers, PruneInput, PruneOutput, Segment};
+    use crate::segments::{Headers, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment};
 
     #[test]
     fn prune() {
@@ -227,12 +217,7 @@ mod tests {
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
             let segment = Headers::new(prune_mode);
-            let job_limiter = PruneLimiterBuilder::default().deleted_entries_limit(10).build();
-            let limiter = <Headers as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
-                &segment,
-                &job_limiter,
-            );
-
+            let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
             let input = PruneInput {
                 previous_checkpoint: db
                     .factory
@@ -241,7 +226,7 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::Headers)
                     .unwrap(),
                 to_block,
-                limiter,
+                limiter: limiter.clone(),
             };
 
             let next_block_number_to_prune = db
@@ -256,12 +241,14 @@ mod tests {
 
             let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input.clone()).unwrap();
+            limiter.increment_deleted_entries_count_by(result.pruned);
             trace!(target: "pruner::test",
                 expected_prune_progress=?expected_result.0,
                 expected_pruned=?expected_result.1,
                 result=?result,
                 "PruneOutput"
             );
+
             assert_matches!(
                 result,
                 PruneOutput {progress, pruned, checkpoint: Some(_)}
@@ -303,8 +290,11 @@ mod tests {
             );
         };
 
-        test_prune(3, (PruneProgress::new_entries_limit_reached(), 9));
-        test_prune(3, (PruneProgress::new_finished(), 3));
+        test_prune(
+            3,
+            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 9),
+        );
+        test_prune(3, (PruneProgress::Finished, 3));
     }
 
     #[test]
@@ -312,11 +302,7 @@ mod tests {
         let db = TestStageDB::default();
 
         let segment = Headers::new(PruneMode::Full);
-        let job_limiter = PruneLimiterBuilder::default().deleted_entries_limit(0).build();
-        let limiter = <Headers as Segment<DatabaseEnv>>::new_limiter_from_parent_scope_limiter(
-            &segment,
-            &job_limiter,
-        );
+        let limiter = PruneLimiter::default().set_deleted_entries_limit(0);
 
         let input = PruneInput {
             previous_checkpoint: None,
@@ -327,6 +313,12 @@ mod tests {
 
         let provider = db.factory.provider_rw().unwrap();
         let result = segment.prune(&provider, input).unwrap();
-        assert_eq!(result, PruneOutput::not_done(PruneInterruptReason::DeletedEntriesLimitReached));
+        assert_eq!(
+            result,
+            PruneOutput::not_done(
+                PruneInterruptReason::DeletedEntriesLimitReached,
+                Some(PruneOutputCheckpoint::default())
+            )
+        );
     }
 }

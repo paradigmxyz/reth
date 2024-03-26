@@ -1,14 +1,18 @@
 mod checkpoint;
+mod limiter;
 mod mode;
 mod segment;
+mod step;
 mod target;
 
 use crate::{Address, BlockNumber};
 pub use checkpoint::PruneCheckpoint;
+pub use limiter::PruneLimiter;
 pub use mode::PruneMode;
 pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+pub use step::PruneStepResult;
 pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
@@ -103,15 +107,28 @@ pub enum PruneInterruptReason {
     Timeout,
     /// Limit on the number of deleted entries (rows in the database) per prune job was reached.
     DeletedEntriesLimitReached,
+    /// Unknown reason for stopping the pruner.
+    Unknown,
 }
 
 impl PruneInterruptReason {
-    /// Returns `true` if reason is timeout.
+    /// Creates new [PruneInterruptReason] based on the [PruneLimiter].
+    pub fn new(limiter: &PruneLimiter) -> Self {
+        if limiter.is_time_limit_reached() {
+            Self::Timeout
+        } else if limiter.is_deleted_entries_limit_reached() {
+            Self::DeletedEntriesLimitReached
+        } else {
+            Self::Unknown
+        }
+    }
+
+    /// Returns `true` if the reason is timeout.
     pub fn is_timeout(&self) -> bool {
         matches!(self, Self::Timeout)
     }
 
-    /// Returns `true` if reason is reaching limit on deleted entries.
+    /// Returns `true` if the reason is reaching the limit on deleted entries.
     pub fn is_entries_limit_reached(&self) -> bool {
         matches!(self, Self::DeletedEntriesLimitReached)
     }
@@ -122,31 +139,12 @@ impl PruneProgress {
     ///
     /// If `done == true`, returns [PruneProgress::Finished], otherwise
     /// [PruneProgress::HasMoreData] is returned.
-    pub fn new(done: bool, timeout: bool) -> Self {
+    pub fn new(done: bool, limiter: &PruneLimiter) -> Self {
         if done {
             Self::Finished
-        } else if timeout {
-            Self::new_timed_out()
         } else {
-            Self::new_entries_limit_reached()
+            Self::HasMoreData(PruneInterruptReason::new(limiter))
         }
-    }
-
-    /// Returns a new instance of variant [`Finished`](Self::Finished).
-    pub const fn new_finished() -> Self {
-        Self::Finished
-    }
-
-    /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
-    /// [`PruneInterruptReason::Timeout`].
-    pub const fn new_timed_out() -> Self {
-        Self::HasMoreData(PruneInterruptReason::Timeout)
-    }
-
-    /// Returns a new instance of variant [`HasMoreData`](Self::HasMoreData) with
-    /// [`PruneInterruptReason::DeletedEntriesLimitReached`].
-    pub const fn new_entries_limit_reached() -> Self {
-        Self::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached)
     }
 
     /// Returns `true` if prune job is finished.
