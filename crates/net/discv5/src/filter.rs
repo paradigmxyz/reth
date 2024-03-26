@@ -93,7 +93,7 @@ impl MustNotIncludeChains {
     pub fn new(disallow_chains: &[&'static [u8]]) -< Self {
         let chains = DashSet::with_capacity(disallow_chains.len());
         for chain in disallow_chains {
-            chains.push(chain)
+            chains.push(MustIncludeChain::new(chain))
         }
     }
 }
@@ -194,6 +194,35 @@ mod tests {
         // test
 
         assert!(matches!(filter.filter(&enr_1), FilterOutcome::OkReturnForkId(_)));
+        assert!(matches!(filter.filter(&enr_2), FilterOutcome::Ignore { .. }));
+    }
+
+    #[test]
+    fn must_not_include_chain_filter() {
+        // rig test
+
+        let filter = MustNotIncludeChains::new(&[b"eth", b"eth2"]);
+
+        // enr_1 advertises a fork from one of the chains configured in filter
+        let sk = CombinedKey::generate_secp256k1();
+        let enr_1 = Enr::builder()
+            .add_value_rlp(ChainRef::ETH as &[u8], Bytes::default())
+            .build(&sk)
+            .unwrap();
+
+        // enr_2 advertises a fork from one the other chain configured in filter
+        let sk = CombinedKey::generate_secp256k1();
+        let enr_2 = Enr::builder()
+            .add_value_rlp(
+                ChainRef::ETH2,
+                Bytes::default(),
+            )
+            .build(&sk)
+            .unwrap();
+
+        // test
+
+        assert!(matches!(filter.filter(&enr_1), FilterOutcome::Ignore { .. }));
         assert!(matches!(filter.filter(&enr_2), FilterOutcome::Ignore { .. }));
     }
 }
