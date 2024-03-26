@@ -544,10 +544,8 @@ impl NetworkConfigBuilder {
         }
 
         let discovery_v5_config = enable_discovery_v5.then_some({
-            let socket = discovery_addr.as_ref().unwrap_or(&DEFAULT_DISCOVERY_ADDRESS);
-            let listen_config = discv5::ListenConfig::from_ip(socket.ip(), socket.port());
             let mut builder = reth_discv5::Config::builder()
-                .discv5_config(discv5::ConfigBuilder::new(listen_config).build())
+                .tcp_port(listener_addr.port())
                 //.add_enode_boot_nodes(boot_nodes)
                 .filter(MustNotIncludeChains::new(&[NetworkRef::ETH2]));
             if cfg!(feature = "optimism") {
@@ -561,7 +559,6 @@ impl NetworkConfigBuilder {
             .build()
         });
 
-        tracing::info!(enable_discovery_v5);
         NetworkConfig {
             client,
             secret_key,
