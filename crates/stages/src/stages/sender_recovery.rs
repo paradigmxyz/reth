@@ -21,6 +21,14 @@ use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
 use tracing::*;
 
+/// Maximum amount of transactions to read from disk at one time before we flush their senders to
+/// disk. Since each rayon worker will hold at most 100 transactions (WORKER_CHUNK_SIZE), we
+/// effectively max limit each batch to 1000 channels in memory.
+const BATCH_SIZE: usize = 100_000;
+
+/// Maximum number of senders to recover per rayon worker job.
+const WORKER_CHUNK_SIZE: usize = 100;
+
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
 /// in [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
@@ -85,12 +93,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
 
-        // Handles 100_000 transactions at a time. Since each rayon worker will hold at most 100
-        // transactions, we effectively max limit each batch to 1000 channels in memory.
-        let batch_size = 100_000;
         let batch = (tx_range.start..tx_range.end)
-            .step_by(batch_size)
-            .map(|start| start..std::cmp::min(start + batch_size as u64, tx_range.end))
+            .step_by(BATCH_SIZE)
+            .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, tx_range.end))
             .collect::<Vec<Range<u64>>>();
 
         for range in batch {
@@ -136,14 +141,11 @@ fn recover_range<DB: Database>(
 ) -> Result<(), StageError> {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders batch");
 
-    // Each rayon worker will handle at most 100 transactions.
-    let chunk_size = 100;
-
     // Preallocate channels
     let (chunks, receivers): (Vec<_>, Vec<_>) = (tx_range.start..tx_range.end)
-        .step_by(chunk_size as usize)
+        .step_by(WORKER_CHUNK_SIZE)
         .map(|start| {
-            let range = start..std::cmp::min(start + chunk_size as u64, tx_range.end);
+            let range = start..std::cmp::min(start + WORKER_CHUNK_SIZE as u64, tx_range.end);
             let (tx, rx) = mpsc::channel();
             // Range and channel sender will be sent to rayon worker
             ((range, tx), rx)
