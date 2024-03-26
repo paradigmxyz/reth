@@ -22,7 +22,7 @@ pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 /// 0.1.0 (defa64b2)
 /// ```
 pub const SHORT_VERSION: &str =
-    concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")");
+    concat!(env!("CARGO_PKG_VERSION"), env!("RETH_DEV_STR"), " (", env!("VERGEN_GIT_SHA"), ")");
 
 /// The long version information for reth.
 ///
@@ -44,6 +44,7 @@ pub const SHORT_VERSION: &str =
 pub const LONG_VERSION: &str = const_str::concat!(
     "Version: ",
     env!("CARGO_PKG_VERSION"),
+    env!("RETH_DEV_STR"),
     "\n",
     "Commit SHA: ",
     env!("VERGEN_GIT_SHA"),
