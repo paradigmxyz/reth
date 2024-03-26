@@ -6786,7 +6786,7 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/evm-inspectors?rev=2b48b65#2b48b65f3880803f51883948c319012da09ecba7"
+source = "git+https://github.com/paradigmxyz/evm-inspectors?rev=b3082f3#b3082f3deca76e721ac72cee4a6857b4ff88e684"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-trace-types",
