@@ -18,7 +18,10 @@ use reth_primitives::{
     BufMut, StorageEntry, B256,
 };
 use reth_provider::{DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
-use std::{fmt::Debug, sync::mpsc};
+use std::{
+    fmt::Debug,
+    sync::mpsc::{self, Receiver},
+};
 use tracing::*;
 
 /// Storage hashing stage hashes plain storage.
@@ -77,11 +80,17 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         if to_block - from_block > self.clean_threshold || from_block == 1 {
             // clear table, load all accounts and hash it
             tx.clear::<tables::HashedStorages>()?;
-            let mut storage = tx.cursor_read::<tables::PlainStorageState>()?;
 
-            // channels used to return result of account hashing
-            let mut channels = Vec::new();
-            for chunk in &storage.walk(None)?.chunks(100) {
+            let mut storage_cursor = tx.cursor_read::<tables::PlainStorageState>()?;
+            let mut collector =
+                Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
+            let mut channels = Vec::with_capacity(10_000);
+
+            // itertools chunks doesn't support enumerate, so we use a counter to know when to flush
+            // hashes from channels to disk.
+            let mut flush_counter = 1;
+
+            for chunk in &storage_cursor.walk(None)?.chunks(100) {
                 // An _unordered_ channel to receive results from a rayon job
                 let (tx, rx) = mpsc::channel();
                 channels.push(rx);
@@ -89,11 +98,6 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
-                    if let (Some((start_address, _)), Some((end_address, _))) =
-                        (chunk.first(), chunk.last())
-                    {
-                        debug!(target: "sync::stages::hashing_storage",  "Hashing from {:#} to {:#}", start_address, end_address);
-                    }
                     for (address, slot) in chunk.into_iter() {
                         let mut addr_key = Vec::with_capacity(64);
                         addr_key.put_slice(keccak256(address).as_slice());
@@ -101,17 +105,16 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                         let _ = tx.send((addr_key, CompactU256::from(slot.value)));
                     }
                 });
-            }
 
-            let mut collector =
-                Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
+                flush_counter += 1;
 
-            // Iterate over channels and append the hashed accounts.
-            for channel in channels {
-                while let Ok((key, v)) = channel.recv() {
-                    collector.insert(key, v)?;
+                // We flush at every 1_000_000th entry, capping at 10_000 maximum channels.
+                if flush_counter % 10_000 == 0 {
+                    collect(&mut channels, &mut collector)?;
                 }
             }
+
+            collect(&mut channels, &mut collector)?;
 
             let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
             for item in collector.iter()? {
@@ -167,6 +170,21 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 .with_storage_hashing_stage_checkpoint(stage_checkpoint),
         })
     }
+}
+
+/// Flushes channels hashes to ETL collector.
+fn collect(
+    channels: &mut Vec<Receiver<(Vec<u8>, CompactU256)>>,
+    collector: &mut Collector<Vec<u8>, CompactU256>,
+) -> Result<(), StageError> {
+    for channel in channels.iter_mut() {
+        while let Ok((key, v)) = channel.recv() {
+            collector.insert(key, v)?;
+        }
+    }
+    debug!(target: "sync::stages::hashing_storage", "Hashed {} entries", collector.len());
+    channels.clear();
+    Ok(())
 }
 
 fn stage_checkpoint_progress<DB: Database>(

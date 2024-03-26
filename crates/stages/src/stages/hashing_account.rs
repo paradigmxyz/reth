@@ -163,7 +163,6 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             // clear table, load all accounts and hash it
             tx.clear::<tables::HashedAccounts>()?;
 
-            let start = None;
             let mut accounts_cursor = tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
             let mut collector =
                 Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
@@ -174,7 +173,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             let mut flush_counter = 1;
 
             // channels used to return result of account hashing
-            for chunk in &accounts_cursor.walk(start)?.chunks(100) {
+            for chunk in &accounts_cursor.walk(None)?.chunks(100) {
                 // An _unordered_ channel to receive results from a rayon job
                 let (tx, rx) = mpsc::channel();
                 channels.push(rx);
@@ -182,11 +181,6 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
-                    if let (Some((start_address, _)), Some((end_address, _))) =
-                        (chunk.first(), chunk.last())
-                    {
-                        debug!(target: "sync::stages::hashing_account",  "Hashing from {:#} to {:#}", start_address.key().unwrap(), end_address.key().unwrap());
-                    }
                     for (address, account) in chunk.into_iter() {
                         let address = address.key().unwrap();
                         let _ = tx.send((RawKey::new(keccak256(address)), account));
@@ -263,11 +257,12 @@ fn collect(
     channels: &mut Vec<Receiver<(RawKey<B256>, RawValue<Account>)>>,
     collector: &mut Collector<RawKey<B256>, RawValue<Account>>,
 ) -> Result<(), StageError> {
-    for channel in channels.into_iter() {
+    for channel in channels.iter_mut() {
         while let Ok((key, v)) = channel.recv() {
             collector.insert(key, v)?;
         }
     }
+    debug!(target: "sync::stages::hashing_account", "Hashed {} entries", collector.len());
     channels.clear();
     Ok(())
 }
