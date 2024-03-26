@@ -82,9 +82,22 @@ impl Default for MustIncludeChain {
 }
 
 /// Filter requiring that peers not advertise that they belong to some chains.
-#[derive(Debug, Constructor, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct MustNotIncludeChains {
     chains: DashSet<MustIncludeChain>,
+}
+
+impl MustNotIncludeChains {
+    /// Returns a new instance that disallows node records with a kv-pair that has any of the given
+    /// chains as key.
+    pub fn new(disallow_chains: &[&'static [u8]]) -> Self {
+        let chains = DashSet::with_capacity(disallow_chains.len());
+        for chain in disallow_chains {
+            _ = chains.insert(MustIncludeChain::new(chain));
+        }
+
+        MustNotIncludeChains { chains }
+    }
 }
 
 impl FilterDiscovered for MustNotIncludeChains {
@@ -152,6 +165,7 @@ impl Default for MustIncludeFork {
 
 #[cfg(test)]
 mod tests {
+    use alloy_rlp::Bytes;
     use discv5::enr::{CombinedKey, Enr};
 
     use super::*;
@@ -183,6 +197,30 @@ mod tests {
         // test
 
         assert!(matches!(filter.filter(&enr_1), FilterOutcome::OkReturnForkId(_)));
+        assert!(matches!(filter.filter(&enr_2), FilterOutcome::Ignore { .. }));
+    }
+
+    #[test]
+    fn must_not_include_chain_filter() {
+        // rig test
+
+        let filter = MustNotIncludeChains::new(&[b"eth", b"eth2"]);
+
+        // enr_1 advertises a fork from one of the chains configured in filter
+        let sk = CombinedKey::generate_secp256k1();
+        let enr_1 = Enr::builder()
+            .add_value_rlp(ChainRef::ETH as &[u8], Bytes::from("cancun"))
+            .build(&sk)
+            .unwrap();
+
+        // enr_2 advertises a fork from one the other chain configured in filter
+        let sk = CombinedKey::generate_secp256k1();
+        let enr_2 =
+            Enr::builder().add_value_rlp(ChainRef::ETH2, Bytes::from("deneb")).build(&sk).unwrap();
+
+        // test
+
+        assert!(matches!(filter.filter(&enr_1), FilterOutcome::Ignore { .. }));
         assert!(matches!(filter.filter(&enr_2), FilterOutcome::Ignore { .. }));
     }
 }
