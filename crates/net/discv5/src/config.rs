@@ -10,10 +10,7 @@ use itertools::Itertools;
 use multiaddr::{Multiaddr, Protocol};
 use reth_primitives::{AnyNode, Bytes, ForkId, NodeRecord, MAINNET};
 
-use crate::{
-    enr::uncompressed_to_multiaddr_id,
-    filter::{FilterDiscovered, MustNotIncludeChains},
-};
+use crate::{enr::uncompressed_to_multiaddr_id, filter::MustNotIncludeChains};
 
 /// L1 EL
 pub const ETH: &'static [u8] = b"eth";
@@ -36,7 +33,7 @@ const BOOT_NODES_OPTIMISM_MAINNET: &str = "enode://ca2774c3c401325850b2477fd7d0f
 
 /// Builds a [`Config`].
 #[derive(Debug, Default)]
-pub struct ConfigBuilder<Filter = MustNotIncludeChains> {
+pub struct ConfigBuilder {
     /// Config used by [`discv5::Discv5`]. Contains the discovery listen socket.
     discv5_config: Option<discv5::Config>,
     /// Nodes to boot from.
@@ -54,14 +51,14 @@ pub struct ConfigBuilder<Filter = MustNotIncludeChains> {
     /// Interval in seconds at which to run a lookup up query with local node ID as target, to
     /// populate kbuckets.
     self_lookup_interval: Option<u64>,
-    /// Optional filter rules to apply to a discovered peer in order to determine if it should be
+    /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to mempool or dropped.
-    filter_discovered_peer: Filter,
+    filter_discovered_peer: MustNotIncludeChains,
 }
 
-impl<T> ConfigBuilder<T> {
+impl ConfigBuilder {
     /// Returns a new builder, with all fields set like given instance.
-    pub fn new_from(discv5_config: Config<T>) -> Self {
+    pub fn new_from(discv5_config: Config) -> Self {
         let Config {
             discv5_config,
             bootstrap_nodes,
@@ -179,10 +176,7 @@ impl<T> ConfigBuilder<T> {
 
     /// Adds filter rules to apply to discovered peer to determine whether or not it should be
     /// passed to the mempool.
-    pub fn filter<F>(self, f: F) -> ConfigBuilder<F>
-    where
-        F: FilterDiscovered,
-    {
+    pub fn filter(self, f: MustNotIncludeChains) -> Self {
         let Self {
             discv5_config,
             bootstrap_nodes,
@@ -207,7 +201,7 @@ impl<T> ConfigBuilder<T> {
     }
 
     /// Returns a new [`Config`].
-    pub fn build(self) -> Config<T> {
+    pub fn build(self) -> Config {
         let Self {
             discv5_config,
             bootstrap_nodes,
@@ -244,7 +238,7 @@ impl<T> ConfigBuilder<T> {
 
 /// Config used to bootstrap [`discv5::Discv5`].
 #[derive(Debug)]
-pub struct Config<Filter = MustNotIncludeChains> {
+pub struct Config {
     /// Config used by [`discv5::Discv5`]. Contains the [`ListenConfig`], with the discovery listen
     /// socket.
     pub(super) discv5_config: discv5::Config,
@@ -261,9 +255,9 @@ pub struct Config<Filter = MustNotIncludeChains> {
     /// Interval in seconds at which to run a lookup up query with local node ID as target, to
     /// populate kbuckets.
     pub(super) self_lookup_interval: u64,
-    /// Optional filter rules to apply to a discovered peer in order to determine if it should be
+    /// custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to mempool or dropped.
-    pub(super) filter_discovered_peer: Filter,
+    pub(super) filter_discovered_peer: MustNotIncludeChains,
 }
 
 impl Config {
@@ -273,7 +267,7 @@ impl Config {
     }
 }
 
-impl<T> Config<T> {
+impl Config {
     /// Returns the discovery (UDP) socket contained in the [`discv5::Config`]. Returns the IPv6
     /// socket, if both IPv4 and v6 are configured. This socket will be advertised to peers in the
     /// local [`Enr`](discv5::enr::Enr).

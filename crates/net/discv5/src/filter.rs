@@ -8,17 +8,6 @@ use reth_primitives::{ForkId, MAINNET};
 
 use crate::config::{ETH, ETH2};
 
-/// Allows users to inject custom filtering rules on which peers to discover.
-pub trait FilterDiscovered {
-    /// Applies filtering rules on [`Enr`](discv5::Enr) data. Returns [`Ok`](FilterOutcome::Ok) if
-    /// peer should be included, otherwise [`Ignore`](FilterOutcome::Ignore).
-    fn filter(&self, enr: &discv5::Enr) -> FilterOutcome;
-
-    /// Message for [`FilterOutcome::Ignore`] should specify the reason for filtering out a node
-    /// record.
-    fn ignore_reason(&self) -> String;
-}
-
 /// Outcome of applying filtering rules on node record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterOutcome {
@@ -48,8 +37,8 @@ pub struct MustIncludeChain {
     chain: &'static [u8],
 }
 
-impl FilterDiscovered for MustIncludeChain {
-    fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
+impl MustIncludeChain {
+    pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
         if enr.get_raw_rlp(self.chain).is_none() {
             return FilterOutcome::Ignore { reason: self.ignore_reason() }
         }
@@ -86,8 +75,8 @@ impl MustNotIncludeChains {
     }
 }
 
-impl FilterDiscovered for MustNotIncludeChains {
-    fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
+impl MustNotIncludeChains {
+    pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
         for chain in self.chains.iter() {
             if matches!(chain.filter(enr), FilterOutcome::Ok) {
                 return FilterOutcome::Ignore { reason: self.ignore_reason() }
@@ -107,48 +96,6 @@ impl FilterDiscovered for MustNotIncludeChains {
     }
 }
 
-/// Filter requiring that peers advertise belonging to a certain fork.
-#[derive(Debug, Clone)]
-pub struct MustIncludeFork {
-    /// Filters chain which node record must advertise.
-    chain: MustIncludeChain,
-    /// Fork which node record must advertise.
-    fork_id: ForkId,
-}
-
-impl MustIncludeFork {
-    /// Returns a new instance.
-    pub fn new(chain: &'static [u8], fork_id: ForkId) -> Self {
-        Self { chain: MustIncludeChain::new(chain), fork_id }
-    }
-}
-
-impl FilterDiscovered for MustIncludeFork {
-    fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
-        let Some(mut fork_id_bytes) = enr.get_raw_rlp(self.chain.chain) else {
-            return FilterOutcome::Ignore { reason: self.chain.ignore_reason() }
-        };
-
-        if let Ok(fork_id) = ForkId::decode(&mut fork_id_bytes) {
-            if fork_id == self.fork_id {
-                return FilterOutcome::OkReturnForkId(fork_id)
-            }
-        }
-
-        FilterOutcome::Ignore { reason: self.ignore_reason() }
-    }
-
-    fn ignore_reason(&self) -> String {
-        format!("{} fork {:?} required", String::from_utf8_lossy(self.chain.chain), self.fork_id)
-    }
-}
-
-impl Default for MustIncludeFork {
-    fn default() -> Self {
-        Self { chain: MustIncludeChain::new(ETH), fork_id: MAINNET.latest_fork_id() }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloy_rlp::Bytes;
@@ -157,33 +104,6 @@ mod tests {
     use crate::config::ETH2;
 
     use super::*;
-
-    #[test]
-    fn fork_filter() {
-        // rig test
-
-        let fork = MAINNET.cancun_fork_id().unwrap();
-        let filter = MustIncludeFork::new(b"eth", fork);
-
-        // enr_1 advertises fork configured in filter
-        let sk = CombinedKey::generate_secp256k1();
-        let enr_1 = Enr::builder()
-            .add_value_rlp(ETH as &[u8], alloy_rlp::encode(fork).into())
-            .build(&sk)
-            .unwrap();
-
-        // enr_2 advertises an older fork
-        let sk = CombinedKey::generate_secp256k1();
-        let enr_2 = Enr::builder()
-            .add_value_rlp(ETH, alloy_rlp::encode(MAINNET.shanghai_fork_id().unwrap()).into())
-            .build(&sk)
-            .unwrap();
-
-        // test
-
-        assert!(matches!(filter.filter(&enr_1), FilterOutcome::OkReturnForkId(_)));
-        assert!(matches!(filter.filter(&enr_2), FilterOutcome::Ignore { .. }));
-    }
 
     #[test]
     fn must_not_include_chain_filter() {

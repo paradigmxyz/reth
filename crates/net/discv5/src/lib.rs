@@ -26,7 +26,7 @@ pub use discv5::{self, IpMode};
 
 pub use config::{BootNode, Config, ConfigBuilder};
 pub use enr::uncompressed_id_from_enr_pk;
-pub use filter::{FilterDiscovered, FilterOutcome, MustIncludeFork, MustNotIncludeChains};
+pub use filter::{FilterOutcome, MustNotIncludeChains};
 use metrics::Metrics;
 
 /// Errors from using [`discv5::Discv5`] handle.
@@ -66,13 +66,10 @@ pub enum Error {
 
 /// Use API of [`discv5::Discv5`].
 pub trait HandleDiscv5 {
-    /// Filter type is constrained by [`Config`].
-    type Filter;
-
     /// Exposes API of [`discv5::Discv5`].
     fn with_discv5<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&Discv5<Self::Filter>) -> R;
+        F: FnOnce(&Discv5) -> R;
 
     /// Returns the [`IpMode`] of the local node.
     fn ip_mode(&self) -> IpMode;
@@ -116,14 +113,12 @@ pub trait HandleDiscv5 {
 
     /// Applies filtering rules on an ENR. Returns [`Ok`](FilterOutcome::Ok) if peer should be
     /// passed up to app, and [`Ignore`](FilterOutcome::Ignore) if peer should instead be dropped.
-    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome
-    where
-        Self::Filter: FilterDiscovered;
+    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome;
 }
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Deref, DerefMut, Clone, Constructor)]
-pub struct Discv5<T = MustNotIncludeChains> {
+pub struct Discv5 {
     #[deref]
     #[deref_mut]
     discv5: Arc<discv5::Discv5>,
@@ -132,12 +127,12 @@ pub struct Discv5<T = MustNotIncludeChains> {
     // filtered out by default. allow_no_tcp_discovered_nodes: bool,
     fork_id_key: &'static [u8],
     /// Optionally filter discovered peers before passing up to app.
-    filter_discovered_peer: T,
+    filter_discovered_peer: MustNotIncludeChains,
     #[doc(hidden)]
     pub metrics: Metrics,
 }
 
-impl<T> Discv5<T> {
+impl Discv5 {
     fn add_node(&self, node_record: NodeFromExternalSource) -> Result<(), Error> {
         let NodeFromExternalSource::Enr(enr) = node_record else {
             unreachable!("cannot convert `NodeRecord` type to `Enr` type")
@@ -169,11 +164,8 @@ impl<T> Discv5<T> {
     /// [`Discv4`](reth_discv4::Discv4)).
     pub async fn start(
         sk: &SecretKey,
-        discv5_config: Config<T>,
-    ) -> Result<(Self, mpsc::Receiver<discv5::Event>, NodeRecord), Error>
-    where
-        T: FilterDiscovered + Clone + Send + 'static,
-    {
+        discv5_config: Config,
+    ) -> Result<(Self, mpsc::Receiver<discv5::Event>, NodeRecord), Error> {
         //
         // 1. make local enr from listen config
         //
@@ -371,13 +363,13 @@ impl<T> Discv5<T> {
     }
 }
 
-impl<T> fmt::Debug for Discv5<T> {
+impl fmt::Debug for Discv5 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         "{ .. }".fmt(f)
     }
 }
 
-impl<T> HandleDiscovery for Discv5<T> {
+impl HandleDiscovery for Discv5 {
     fn add_node_to_routing_table(
         &self,
         node_record: NodeFromExternalSource,
@@ -411,9 +403,7 @@ impl<T> HandleDiscovery for Discv5<T> {
     }
 }
 
-impl<T> HandleDiscv5 for Discv5<T> {
-    type Filter = T;
-
+impl HandleDiscv5 for Discv5 {
     fn with_discv5<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&Self) -> R,
@@ -429,11 +419,8 @@ impl<T> HandleDiscv5 for Discv5<T> {
         self.fork_id_key
     }
 
-    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome
-    where
-        Self::Filter: FilterDiscovered,
-    {
-        T::filter(&self.filter_discovered_peer, enr)
+    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome {
+        self.filter_discovered_peer.filter(enr)
     }
 }
 
