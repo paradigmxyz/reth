@@ -550,7 +550,7 @@ impl TransactionFetcher {
                 //
                 // remove any ended sessions, so that in case of a full cache, alive peers aren't
                 // removed in favour of lru dead peers
-                let mut ended_sessions = vec!();
+                let mut ended_sessions = vec![];
                 for &peer_id in fallback_peers.iter() {
                     if is_session_active(peer_id) {
                         ended_sessions.push(peer_id);
