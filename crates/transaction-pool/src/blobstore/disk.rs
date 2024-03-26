@@ -152,6 +152,7 @@ impl DiskFileBlobStoreInner {
         }
     }
 
+    /// Creates the directory where blobs will be stored on disk.
     fn create_blob_dir(&self) -> Result<(), DiskFileBlobStoreError> {
         debug!(target:"txpool::blob", blob_dir = ?self.blob_dir, "Creating blob store");
         fs::create_dir_all(&self.blob_dir)
@@ -170,6 +171,7 @@ impl DiskFileBlobStoreInner {
         Ok(())
     }
 
+    /// Ensures blob is in the blob cache and written to the disk.
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
         let mut buf = Vec::with_capacity(data.fields_len());
         data.encode(&mut buf);
@@ -181,6 +183,7 @@ impl DiskFileBlobStoreInner {
         Ok(())
     }
 
+    /// Ensures blobs are in the blob cache and written to the disk.
     fn insert_many(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
         let raw = txs
             .iter()
@@ -202,7 +205,9 @@ impl DiskFileBlobStoreInner {
         {
             let _lock = self.file_lock.write();
             for (path, data) in raw {
-                if let Err(err) = fs::write(&path, &data) {
+                if path.exists() {
+                    debug!(target:"txpool::blob", ?path, "Blob already exists");
+                } else if let Err(err) = fs::write(&path, &data) {
                     debug!(target:"txpool::blob", %err, ?path, "Failed to write blob file");
                 } else {
                     add += data.len();
@@ -243,7 +248,7 @@ impl DiskFileBlobStoreInner {
         self.blob_dir.join(format!("{tx:x}"))
     }
 
-    /// Retries the blob data for the given transaction hash.
+    /// Retrieves the blob data for the given transaction hash.
     #[inline]
     fn read_one(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
         let path = self.blob_disk_file(tx);
@@ -276,7 +281,7 @@ impl DiskFileBlobStoreInner {
             .collect()
     }
 
-    /// Retries the raw blob data for the given transaction hashes.
+    /// Retrieves the raw blob data for the given transaction hashes.
     ///
     /// Only returns the blobs that were found on file.
     #[inline]
@@ -297,18 +302,26 @@ impl DiskFileBlobStoreInner {
         res
     }
 
-    /// Retries the blob data for the given transaction hash.
+    /// Writes the blob data for the given transaction hash to the disk.
     #[inline]
     fn write_one_encoded(&self, tx: B256, data: &[u8]) -> Result<usize, DiskFileBlobStoreError> {
         trace!(target:"txpool::blob", "[{:?}] writing blob file", tx);
+        let mut add = 0;
         let path = self.blob_disk_file(tx);
         {
             let _lock = self.file_lock.write();
-            fs::write(&path, data).map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
+            if !path.exists() {
+                fs::write(&path, data).map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
+                add += data.len();
+            }
         }
-        Ok(data.len())
+        Ok(add)
     }
 
+    /// Retrieves blobs for the given transaction hashes from the blob cache or disk.
+    ///
+    /// This will not return an error if there are missing blobs. Therefore, the result may be a
+    /// subset of the request or an empty vector if none of the blobs were found.
     #[inline]
     fn get_all(
         &self,
@@ -342,6 +355,9 @@ impl DiskFileBlobStoreInner {
         Ok(res)
     }
 
+    /// Retrieves blobs for the given transaction hashes from the blob cache or disk.
+    ///
+    /// Returns an error if there are any missing blobs.
     #[inline]
     fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
         let mut res = Vec::with_capacity(txs.len());
