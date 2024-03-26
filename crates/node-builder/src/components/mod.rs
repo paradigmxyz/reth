@@ -9,6 +9,7 @@
 
 use crate::FullNodeTypes;
 pub use builder::*;
+pub use exex::*;
 pub use network::*;
 pub use payload::*;
 pub use pool::*;
@@ -17,6 +18,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 pub use traits::*;
 
 mod builder;
+mod exex;
 mod network;
 mod payload;
 mod pool;
