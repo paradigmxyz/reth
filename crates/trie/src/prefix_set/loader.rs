@@ -27,6 +27,7 @@ impl<'a, TX> PrefixSetLoader<'a, TX> {
 impl<'a, TX: DbTx> PrefixSetLoader<'a, TX> {
     /// Load all account and storage changes for the given block range.
     pub fn load(self, range: RangeInclusive<BlockNumber>) -> Result<TriePrefixSets, DatabaseError> {
+        tracing::debug!("Loading prefix sets for block range {:?}", range);
         // Initialize prefix sets.
         let mut account_prefix_set = PrefixSetMut::default();
         let mut storage_prefix_sets = HashMap::<B256, PrefixSetMut>::default();
@@ -39,6 +40,9 @@ impl<'a, TX: DbTx> PrefixSetLoader<'a, TX> {
             let (_, AccountBeforeTx { address, .. }) = account_entry?;
             let hashed_address = keccak256(address);
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            if account_prefix_set.len() % 1000 == 0 {
+                tracing::debug!("Loaded {} account prefixes", account_prefix_set.len());
+            }
 
             if account_plain_state_cursor.seek_exact(address)?.is_none() {
                 destroyed_accounts.insert(hashed_address);
@@ -53,10 +57,17 @@ impl<'a, TX: DbTx> PrefixSetLoader<'a, TX> {
             let (BlockNumberAddress((_, address)), StorageEntry { key, .. }) = storage_entry?;
             let hashed_address = keccak256(address);
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            if account_prefix_set.len() % 1000 == 0 {
+                tracing::debug!("Loaded {} account prefixes", account_prefix_set.len());
+            }
             storage_prefix_sets
                 .entry(hashed_address)
                 .or_default()
                 .insert(Nibbles::unpack(keccak256(key)));
+
+            if storage_prefix_sets.len() % 1000 == 0 {
+                tracing::debug!("Loaded {} storage prefix sets", storage_prefix_sets.len());
+            }
         }
 
         Ok(TriePrefixSets {
