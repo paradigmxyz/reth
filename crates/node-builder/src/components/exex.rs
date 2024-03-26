@@ -97,7 +97,7 @@ impl ExExManagerHandle {
     }
 }
 
-pub fn spawn_exexs(task_executor: ()) {
+pub fn spawn(task_executor: ()) -> Result<ExExManagerHandle, ()> {
     // create cahnnels
     // spawn manager
     // spawns exexs?
