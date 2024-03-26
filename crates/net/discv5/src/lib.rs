@@ -8,7 +8,7 @@ use derive_more::{Constructor, Deref, DerefMut};
 use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
-use reth_discv4::secp256k1::SecretKey;
+use secp256k1::SecretKey;
 use reth_net_common::discovery::{HandleDiscovery, NodeFromExternalSource};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
@@ -18,7 +18,6 @@ use tokio::{sync::mpsc, task};
 use tracing::{debug, error, trace};
 
 pub mod config;
-pub mod downgrade_v4;
 pub mod enr;
 pub mod filter;
 pub mod metrics;
@@ -26,7 +25,6 @@ pub mod metrics;
 pub use discv5::{self, IpMode};
 
 pub use config::{BootNode, Config, ConfigBuilder, IdentifyForkIdKVPair, NetworkRef};
-pub use downgrade_v4::{DiscoveryUpdate, Discv5BCv4, MergedUpdateStream};
 pub use enr::uncompressed_id_from_enr_pk;
 pub use filter::{FilterDiscovered, FilterOutcome, MustIncludeFork, MustNotIncludeChains};
 use metrics::Metrics;
