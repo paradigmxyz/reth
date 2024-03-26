@@ -116,7 +116,7 @@ impl FilterDiscovered for MustNotIncludeChains {
     fn ignore_reason(&self) -> String {
         format!(
             "{} forks not allowed",
-            self.chains.iter().map(|chain| String::from_utf8_lossy(chain.chain)).format("{},")
+            self.chains.iter().map(|chain| String::from_utf8_lossy(chain.chain)).format(",")
         )
     }
 }
