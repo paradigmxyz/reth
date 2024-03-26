@@ -618,7 +618,7 @@ mod tests {
     use super::*;
     use rand::thread_rng;
     use reth_dns_discovery::tree::LinkEntry;
-    use reth_primitives::{Chain, ForkHash};
+    use reth_primitives::ForkHash;
     use reth_provider::test_utils::NoopProvider;
     use std::collections::BTreeMap;
 

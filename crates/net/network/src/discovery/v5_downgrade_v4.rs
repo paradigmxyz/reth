@@ -160,7 +160,7 @@ where
 mod tests {
     use rand::thread_rng;
     use reth_discv4::{DiscoveryUpdate, Discv4ConfigBuilder};
-    use reth_discv5::{enr::EnrCombinedKeyWrapper, filter::NoopFilter, HandleDiscv5};
+    use reth_discv5::{enr::EnrCombinedKeyWrapper, HandleDiscv5};
     use reth_net_common::discovery::HandleDiscovery;
     use tracing::trace;
 
@@ -169,7 +169,7 @@ mod tests {
     async fn start_discovery_node(
         udp_port_discv4: u16,
         udp_port_discv5: u16,
-    ) -> Discovery<Discv5BCv4<NoopFilter>, MergedUpdateStream, enr::Enr<secp256k1::SecretKey>> {
+    ) -> Discovery<Discv5BCv4, MergedUpdateStream, enr::Enr<secp256k1::SecretKey>> {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv4_addr = format!("127.0.0.1:{udp_port_discv4}").parse().unwrap();
@@ -181,7 +181,6 @@ mod tests {
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
         let discv5_config = reth_discv5::Config::builder()
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
-            .filter(NoopFilter)
             .build();
 
         Discovery::start_discv5_with_v4_downgrade(

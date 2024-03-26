@@ -243,15 +243,14 @@ mod tests {
     use std::net::SocketAddr;
 
     use rand::thread_rng;
-    use reth_discv5::{enr::EnrCombinedKeyWrapper, filter::NoopFilter};
+    use reth_discv5::enr::EnrCombinedKeyWrapper;
     use tracing::trace;
 
     use super::*;
 
     async fn start_discovery_node(
         udp_port_discv5: u16,
-    ) -> Discovery<Discv5<NoopFilter>, ReceiverStream<discv5::Event>, enr::Enr<secp256k1::SecretKey>>
-    {
+    ) -> Discovery<Discv5, ReceiverStream<discv5::Event>, enr::Enr<secp256k1::SecretKey>> {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
@@ -259,7 +258,6 @@ mod tests {
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
         let discv5_config = DiscV5Config::builder()
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
-            .filter(NoopFilter)
             .build();
 
         Discovery::start_discv5(secret_key, discv5_config, None).await.expect("should build discv5")
