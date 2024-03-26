@@ -225,25 +225,58 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 }
             }
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie");
-            let (root, updates) =
-                StateRoot::incremental_root_with_updates(provider.tx_ref(), range)
-                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
-            updates.flush(provider.tx_ref())?;
+            let mut entities_checkpoint =
+                checkpoint.as_ref().filter(|c| c.target_block == to_block).and_then(|checkpoint| {
+                    debug!(
+                        target: "sync::stages::merkle::exec",
+                        current = ?current_block_number,
+                        target = ?to_block,
+                        last_account_key = ?checkpoint.last_account_key,
+                        "Continuing inner merkle checkpoint"
+                    );
 
-            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
-                provider.count_entries::<tables::HashedStorages>()?)
-                as u64;
+                    input.checkpoint().entities_stage_checkpoint()
+            })
+            .unwrap_or(EntitiesCheckpoint {
+                processed: 0,
+                total: (provider.count_entries::<tables::HashedAccounts>()? +
+                    provider.count_entries::<tables::HashedStorages>()?)
+                    as u64,
+            });
 
-            let entities_checkpoint = EntitiesCheckpoint {
-                // This is fine because `range` doesn't have an upper bound, so in this `else`
-                // branch we're just hashing all remaining accounts and storage slots we have in the
-                // database.
-                processed: total_hashed_entries,
-                total: total_hashed_entries,
-            };
+            let progress = StateRoot::from_tx(provider.tx_ref())
+                .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
+                .root_with_progress()
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            match progress {
+                StateRootProgress::Progress(state, hashed_entries_walked, updates) => {
+                    updates.flush(provider.tx_ref())?;
 
-            (root, entities_checkpoint)
+                    let checkpoint = MerkleCheckpoint::new(
+                        to_block,
+                        state.last_account_key,
+                        state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
+                        state.hash_builder.into(),
+                    );
+                    self.save_execution_checkpoint(provider, Some(checkpoint))?;
+
+                    entities_checkpoint.processed += hashed_entries_walked as u64;
+
+                    return Ok(ExecOutput {
+                        checkpoint: input
+                            .checkpoint()
+                            .with_entities_stage_checkpoint(entities_checkpoint),
+                        done: false,
+                    })
+                }
+                StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
+                    updates.flush(provider.tx_ref())?;
+
+                    entities_checkpoint.processed += hashed_entries_walked as u64;
+
+                    (root, entities_checkpoint)
+                }
+            }
         };
 
         // Reset the checkpoint
