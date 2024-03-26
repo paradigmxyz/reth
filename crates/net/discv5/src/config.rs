@@ -52,7 +52,7 @@ pub struct ConfigBuilder {
     /// populate kbuckets.
     self_lookup_interval: Option<u64>,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
-    /// passed up to mempool or dropped.
+    /// passed up to rlpx or dropped.
     filter_discovered_peer: MustNotIncludeChains,
 }
 
@@ -175,7 +175,7 @@ impl ConfigBuilder {
     }
 
     /// Adds filter rules to apply to discovered peer to determine whether or not it should be
-    /// passed to the mempool.
+    /// passed to the rlpx.
     pub fn filter(self, f: MustNotIncludeChains) -> Self {
         let Self {
             discv5_config,
@@ -246,7 +246,7 @@ pub struct Config {
     pub(super) bootstrap_nodes: HashSet<BootNode>,
     /// [`ForkId`] to set in local node record.
     pub(super) fork: (&'static [u8], ForkId),
-    /// Mempool TCP port to advertise.
+    /// rlpx TCP port to advertise.
     pub(super) tcp_port: u16,
     /// Additional kv-pairs to include in local node record.
     pub(super) other_enr_data: Vec<(&'static str, Bytes)>,
@@ -256,7 +256,7 @@ pub struct Config {
     /// populate kbuckets.
     pub(super) self_lookup_interval: u64,
     /// custom filter rules to apply to a discovered peer in order to determine if it should be
-    /// passed up to mempool or dropped.
+    /// passed up to rlpx or dropped.
     pub(super) filter_discovered_peer: MustNotIncludeChains,
 }
 
@@ -281,7 +281,7 @@ impl Config {
 
     /// Returns the RLPx (TCP) socket contained in the [`discv5::Config`]. This socket will be
     /// advertised to peers in the local [`Enr`](discv5::enr::Enr).
-    pub fn mempool_socket(&self) -> SocketAddr {
+    pub fn rlpx_socket(&self) -> SocketAddr {
         let port = self.tcp_port;
         match self.discv5_config.listen_config {
             ListenConfig::Ipv4 { ip, .. } => (ip, port).into(),

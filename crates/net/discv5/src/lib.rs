@@ -35,7 +35,7 @@ pub enum Error {
     /// Failure adding node to [`discv5::Discv5`].
     #[error("failed adding node to discv5, {0}")]
     AddNodeToDiscv5Failed(&'static str),
-    /// Missing key used to identify mempool network.
+    /// Missing key used to identify rlpx network.
     #[error("fork missing on enr, 'eth' key missing")]
     ForkMissing,
     /// Failed to decode [`ForkId`] rlp value.
@@ -44,15 +44,15 @@ pub enum Error {
     /// Peer is unreachable over discovery.
     #[error("discovery socket missing, ENR: {0:?}")]
     UnreachableDiscovery(discv5::Enr),
-    /// Peer is unreachable over mempool.
-    #[error("mempool TCP socket missing, ENR: {0:?}")]
-    UnreachableMempool(discv5::Enr),
+    /// Peer is unreachable over rlpx.
+    #[error("rlpx TCP socket missing, ENR: {0:?}")]
+    Unreachablerlpx(discv5::Enr),
     /// Peer is not using same IP version as local node in discovery.
     #[error("discovery socket is unsupported IP version, ENR: {0:?}, local ip mode: {1:?}")]
     IpVersionMismatchDiscovery(discv5::Enr, IpMode),
-    /// Peer is not using same IP version as local node in mempool.
-    #[error("mempool TCP socket is unsupported IP version, ENR: {0:?}, local ip mode: {1:?}")]
-    IpVersionMismatchMempool(discv5::Enr, IpMode),
+    /// Peer is not using same IP version as local node in rlpx.
+    #[error("rlpx TCP socket is unsupported IP version, ENR: {0:?}, local ip mode: {1:?}")]
+    IpVersionMismatchrlpx(discv5::Enr, IpMode),
     /// Failed to initialize [`discv5::Discv5`].
     #[error("init failed, {0}")]
     InitFailure(&'static str),
@@ -103,7 +103,7 @@ pub trait HandleDiscv5 {
             IpMode::Ip4 | IpMode::DualStack => enr.tcp4(),
             IpMode::Ip6 => enr.tcp6(),
         }) else {
-            return Err(Error::IpVersionMismatchMempool(enr, self.ip_mode()))
+            return Err(Error::IpVersionMismatchrlpx(enr, self.ip_mode()))
         };
 
         let id = uncompressed_id_from_enr_pk(&enr);
