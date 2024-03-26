@@ -4,7 +4,7 @@
 use metrics::Counter;
 use reth_metrics::Metrics;
 
-use crate::{IdentifyForkIdKVPair, NetworkRef};
+use crate::config::{ETH, ETH2, OPSTACK};
 
 /// Information tracked by [`Discv5`](crate::Discv5) and
 /// [`Discv5BCv4`](crate::Discv5BCv4).
@@ -76,14 +76,13 @@ impl DiscoveredPeersMetrics {
 #[derive(Metrics, Clone)]
 #[metrics(scope = "discv5")]
 pub struct AdvertisedChainMetrics {
-    /// Frequency of node records with a kv-pair with [`OPSTACK`](IdentifyForkIdKVPair::OPSTACK) as
-    /// key.
+    /// Frequency of node records with a kv-pair with [`OPSTACK`] as key.
     opstack: Counter,
 
-    /// Frequency of node records with a kv-pair with [`ETH`](IdentifyForkIdKVPair::ETH) as key.
+    /// Frequency of node records with a kv-pair with [`ETH`] as key.
     eth: Counter,
 
-    /// Frequency of node records with a kv-pair with [`ETH2`](IdentifyForkIdKVPair::ETH2) as key.
+    /// Frequency of node records with a kv-pair with [`ETH2`] as key.
     eth2: Counter,
 }
 
@@ -115,15 +114,15 @@ pub struct AdvertisedChainCounter {
 impl AdvertisedChainCounter {
     /// Counts each recognised chain type that is advertised on node record, once.
     pub fn increment_once_by_chain_type(&mut self, enr: &discv5::Enr) {
-        if enr.get_raw_rlp(NetworkRef::OPSTACK).is_some() {
+        if enr.get_raw_rlp(OPSTACK).is_some() {
             self.opstack = true
         }
 
-        if enr.get_raw_rlp(NetworkRef::ETH).is_some() {
+        if enr.get_raw_rlp(ETH).is_some() {
             self.eth = true
         }
 
-        if enr.get_raw_rlp(NetworkRef::ETH2).is_some() {
+        if enr.get_raw_rlp(ETH2).is_some() {
             self.eth2 = true
         }
     }

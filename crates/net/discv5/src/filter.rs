@@ -6,7 +6,7 @@ use derive_more::Constructor;
 use itertools::Itertools;
 use reth_primitives::{ForkId, MAINNET};
 
-use crate::{IdentifyForkIdKVPair, NetworkRef};
+use crate::config::{ETH, ETH2};
 
 /// Allows users to inject custom filtering rules on which peers to discover.
 pub trait FilterDiscovered {
@@ -63,7 +63,7 @@ impl FilterDiscovered for MustIncludeChain {
 
 impl Default for MustIncludeChain {
     fn default() -> Self {
-        Self { chain: NetworkRef::ETH }
+        Self { chain: ETH }
     }
 }
 
@@ -93,7 +93,7 @@ impl FilterDiscovered for MustNotIncludeChains {
                 return FilterOutcome::Ignore { reason: self.ignore_reason() }
             }
         }
-        if enr.get_raw_rlp(NetworkRef::ETH2).is_some() {
+        if enr.get_raw_rlp(ETH2).is_some() {
             return FilterOutcome::Ignore { reason: self.ignore_reason() }
         }
         FilterOutcome::Ok
@@ -145,7 +145,7 @@ impl FilterDiscovered for MustIncludeFork {
 
 impl Default for MustIncludeFork {
     fn default() -> Self {
-        Self { chain: MustIncludeChain::new(NetworkRef::ETH), fork_id: MAINNET.latest_fork_id() }
+        Self { chain: MustIncludeChain::new(ETH), fork_id: MAINNET.latest_fork_id() }
     }
 }
 
@@ -153,6 +153,8 @@ impl Default for MustIncludeFork {
 mod tests {
     use alloy_rlp::Bytes;
     use discv5::enr::{CombinedKey, Enr};
+
+    use crate::config::ETH2;
 
     use super::*;
 
@@ -166,17 +168,14 @@ mod tests {
         // enr_1 advertises fork configured in filter
         let sk = CombinedKey::generate_secp256k1();
         let enr_1 = Enr::builder()
-            .add_value_rlp(NetworkRef::ETH as &[u8], alloy_rlp::encode(fork).into())
+            .add_value_rlp(ETH as &[u8], alloy_rlp::encode(fork).into())
             .build(&sk)
             .unwrap();
 
         // enr_2 advertises an older fork
         let sk = CombinedKey::generate_secp256k1();
         let enr_2 = Enr::builder()
-            .add_value_rlp(
-                NetworkRef::ETH,
-                alloy_rlp::encode(MAINNET.shanghai_fork_id().unwrap()).into(),
-            )
+            .add_value_rlp(ETH, alloy_rlp::encode(MAINNET.shanghai_fork_id().unwrap()).into())
             .build(&sk)
             .unwrap();
 
@@ -194,17 +193,12 @@ mod tests {
 
         // enr_1 advertises a fork from one of the chains configured in filter
         let sk = CombinedKey::generate_secp256k1();
-        let enr_1 = Enr::builder()
-            .add_value_rlp(NetworkRef::ETH as &[u8], Bytes::from("cancun"))
-            .build(&sk)
-            .unwrap();
+        let enr_1 =
+            Enr::builder().add_value_rlp(ETH as &[u8], Bytes::from("cancun")).build(&sk).unwrap();
 
         // enr_2 advertises a fork from one the other chain configured in filter
         let sk = CombinedKey::generate_secp256k1();
-        let enr_2 = Enr::builder()
-            .add_value_rlp(NetworkRef::ETH2, Bytes::from("deneb"))
-            .build(&sk)
-            .unwrap();
+        let enr_2 = Enr::builder().add_value_rlp(ETH2, Bytes::from("deneb")).build(&sk).unwrap();
 
         // test
 

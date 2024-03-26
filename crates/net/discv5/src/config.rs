@@ -8,13 +8,23 @@ use std::{
 use discv5::ListenConfig;
 use itertools::Itertools;
 use multiaddr::{Multiaddr, Protocol};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_primitives::{AnyNode, Bytes, ForkId, NodeRecord, MAINNET};
 
 use crate::{
     enr::uncompressed_to_multiaddr_id,
     filter::{FilterDiscovered, MustNotIncludeChains},
 };
+
+/// L1 EL
+pub const ETH: &'static [u8] = b"eth";
+/// L1 CL
+pub const ETH2: &'static [u8] = b"eth2";
+/// Optimism
+pub const OPSTACK: &'static [u8] = b"opstack";
+/// The default tcp port for RLPx.
+///
+/// Note: the default udp discv4 port is the same.
+pub const DEFAULT_RLPX_PORT: u16 = 30303;
 
 /// Default interval in seconds at which to run a self-lookup up query.
 ///
@@ -212,9 +222,9 @@ impl<T> ConfigBuilder<T> {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let fork = fork.unwrap_or((NetworkRef::ETH, MAINNET.latest_fork_id()));
+        let fork = fork.unwrap_or((ETH, MAINNET.latest_fork_id()));
 
-        let tcp_port = tcp_port.unwrap_or(DEFAULT_DISCOVERY_PORT);
+        let tcp_port = tcp_port.unwrap_or(DEFAULT_RLPX_PORT);
 
         let self_lookup_interval =
             self_lookup_interval.unwrap_or(DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL);
@@ -296,23 +306,6 @@ pub enum BootNode {
     /// A signed node record.
     Enr(discv5::Enr),
 }
-
-/// Identifies a chain in an [`Enr`](discv5::enr::Enr). Used as key for the [`ForkId`] kv-pair in
-/// the [`Enr`](discv5::enr::Enr).
-pub trait IdentifyForkIdKVPair {
-    /// L1 EL
-    const ETH: &'static [u8] = b"eth";
-    /// L1 CL
-    const ETH2: &'static [u8] = b"eth2";
-    /// Optimism
-    const OPSTACK: &'static [u8] = b"opstack";
-}
-
-/// Key of the [`ForkId`] kv-pair in an [`Enr`](discv5::enr::Enr).
-#[derive(Debug)]
-pub struct NetworkRef;
-
-impl IdentifyForkIdKVPair for NetworkRef {}
 
 #[cfg(test)]
 mod test {
