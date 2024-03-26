@@ -151,7 +151,7 @@ fn recover_range<DB: Database>(
         .unzip();
 
     let static_file_provider = provider.static_file_provider().clone();
-    tokio::spawn(async move {
+    tokio::task::spawn_blocking(move || {
         for (chunk_range, recovered_senders_tx) in chunks {
             let static_file_provider = static_file_provider.clone();
 
