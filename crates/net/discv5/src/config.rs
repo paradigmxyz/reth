@@ -285,7 +285,7 @@ impl<T> Config<T> {
         }
     }
 
-    /// Returns the mempool (TCP) socket contained in the [`discv5::Config`]. This socket will be
+    /// Returns the RLPx (TCP) socket contained in the [`discv5::Config`]. This socket will be
     /// advertised to peers in the local [`Enr`](discv5::enr::Enr).
     pub fn mempool_socket(&self) -> SocketAddr {
         let port = self.tcp_port;
