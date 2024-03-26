@@ -7,7 +7,7 @@ use crate::{
         ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, NodeComponents,
         NodeComponentsBuilder, PoolBuilder,
     },
-    exex::{BoxedLaunchExEx, ExEx, ExExContext},
+    exex::{BoxedLaunchExEx, ExExContext},
     hooks::NodeHooks,
     node::{FullNode, FullNodeTypes, FullNodeTypesAdapter},
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
@@ -428,7 +428,7 @@ where
             + Send
             + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
-        E: ExEx,
+        E: Future<Output = eyre::Result<()>> + Send,
     {
         self.state.exexs.push(Box::new(exex));
         self

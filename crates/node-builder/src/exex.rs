@@ -1,27 +1,45 @@
 #![allow(dead_code)]
+// todo: expand this (examples, assumptions, invariants)
+//! Execution extensions (ExEx).
+//!
+//! An execution extension is a task that derives its state from Reth's state.
+//!
+//! Some examples of state such state derives are rollups, bridges, and indexers.
+//!
+//! An ExEx is a [`Future`] resolving to a `Result<()>` that is run indefinitely alongside Reth.
+//!
+//! ExEx's are initialized using an async closure that resolves to the ExEx; this closure gets
+//! passed an [`ExExContext`] where it is possible to spawn additional tasks and modify Reth.
+//!
+//! Most ExEx's will want to derive their state from the [`CanonStateNotification`] channel given in
+//! [`ExExContext`]. A new notification is emitted whenever blocks are executed in live and
+//! historical sync.
+//!
+//! # Pruning
+//!
+//! ExEx's **SHOULD** emit an [`ExExEvent::FinishedHeight`] event to signify what blocks have been
+//! processed. This event is used by Reth to determine what state can be pruned.
+//!
+//! An ExEx will not receive notifications for blocks less than the block emitted in the event. To
+//! clarify: if the ExEx emits `ExExEvent::FinishedHeight(0)` it will receive notifications for any
+//! `block_number >= 0`.
 
 use crate::FullNodeTypes;
-use futures::{future::BoxFuture, Future, FutureExt, Stream};
+use futures::{future::BoxFuture, FutureExt};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };
 use reth_primitives::{BlockNumber, Head};
 use reth_tasks::TaskExecutor;
-use std::{borrow::Cow, pin::Pin};
-
-/// An ExEx (Execution Extension) that processes new blocks and emits events on a stream.
-pub trait ExEx: Stream<Item = eyre::Result<ExExEvent>> + Send + 'static {
-    /// Returns the name of the ExEx. It will appear in logs and metrics.
-    fn name(&self) -> Cow<'static, str>;
-}
+use std::future::Future;
 
 /// Events emitted by an ExEx.
 #[derive(Debug)]
 pub enum ExExEvent {
     /// Highest block processed by the ExEx.
     ///
-    /// ExEx must guarantee that it will not require all earlier blocks in the future, meaning
+    /// The ExEx must guarantee that it will not require all earlier blocks in the future, meaning
     /// that Reth is allowed to prune them.
     ///
     /// On reorgs, it's possible for the height to go down.
@@ -50,12 +68,15 @@ pub struct ExExContext<Node: FullNodeTypes> {
 trait LaunchExEx<Node: FullNodeTypes>: Send {
     /// Launches the ExEx.
     ///
-    /// The ExEx should be able to run independently and emit events on the stream.
-    fn launch(self, ctx: ExExContext<Node>)
-        -> impl Future<Output = eyre::Result<impl ExEx>> + Send;
+    /// The ExEx should be able to run independently and emit events on the channels provided in
+    /// the [`ExExContext`].
+    fn launch(
+        self,
+        ctx: ExExContext<Node>,
+    ) -> impl Future<Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>> + Send;
 }
 
-type BoxExEx = Pin<Box<dyn ExEx + Send + 'static>>;
+type BoxExEx = BoxFuture<'static, eyre::Result<()>>;
 
 /// A version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
 pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
@@ -84,18 +105,19 @@ where
 }
 
 /// Implements `LaunchExEx` for any closure that takes an [ExExContext] and returns a future
-/// resolving to an [ExEx]
+/// resolving to an ExEx.
 impl<Node, F, Fut, E> LaunchExEx<Node> for F
 where
     Node: FullNodeTypes,
     F: FnOnce(ExExContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<E>> + Send,
-    E: ExEx,
+    E: Future<Output = eyre::Result<()>> + Send,
 {
     fn launch(
         self,
         ctx: ExExContext<Node>,
-    ) -> impl Future<Output = eyre::Result<impl ExEx>> + Send {
+    ) -> impl Future<Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>> + Send
+    {
         self(ctx)
     }
 }
