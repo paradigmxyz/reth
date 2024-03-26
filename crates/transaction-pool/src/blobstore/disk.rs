@@ -81,11 +81,12 @@ impl BlobStore for DiskFileBlobStore {
         debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
         for tx in txs_to_delete {
             let path = self.inner.blob_disk_file(tx);
-            let _ = fs::metadata(&path).map(|meta| {
-                subsize += meta.len();
-            });
+            let filesize = fs::metadata(&path).map_or(0, |meta| meta.len());
             match fs::remove_file(&path) {
-                Ok(_) => stat.delete_succeed += 1,
+                Ok(_) => {
+                    stat.delete_succeed += 1;
+                    subsize += filesize;
+                }
                 Err(e) => {
                     stat.delete_failed += 1;
                     let err = DiskFileBlobStoreError::DeleteFile(tx, path, e);
@@ -313,7 +314,7 @@ impl DiskFileBlobStoreInner {
             if !path.exists() {
                 fs::write(&path, data)
                     .map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
-                add += data.len();
+                add = data.len();
             }
         }
         Ok(add)
