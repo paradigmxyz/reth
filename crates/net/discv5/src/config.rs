@@ -81,7 +81,7 @@ impl<T> ConfigBuilder<T> {
         self
     }
 
-    /// Adds a boot node. Returns `true` if set didn't already contain the node.
+    /// Adds a boot node.
     pub fn add_boot_node(mut self, node: discv5::Enr) -> Self {
         self.bootstrap_nodes.insert(BootNode::Enr(node));
         self
