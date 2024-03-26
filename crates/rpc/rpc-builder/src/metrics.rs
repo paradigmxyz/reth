@@ -3,6 +3,7 @@ use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
 };
+use reth_rpc::AuthLayer;
 use std::{
     collections::HashMap,
     future::Future,
@@ -11,6 +12,7 @@ use std::{
     task::{Context, Poll},
     time::Instant,
 };
+use tower::Layer;
 
 /// Metrics for the RPC server.
 ///
@@ -37,21 +39,43 @@ impl RpcServerMetrics {
     }
 }
 
-/// A [RpcServiceT] middleware that captures RPC metrics for the server.
-#[derive(Default, Clone)]
-pub(crate) struct RpcServerMetricsLayer<S> {
+/// The layer that captures RPC metrics for the server.
+pub(crate) struct RpcServerMetricsLayer {
     metrics: RpcServerMetrics,
-    service: S,
 }
 
-impl<S> RpcServerMetricsLayer<S> {
-    pub(crate) fn new(service: S, metrics: RpcServerMetrics) -> Self {
-        Self { service, metrics }
+impl RpcServerMetricsLayer {
+    /// Creates a new instance of the metrics layer.
+    pub(crate) fn new(metrics: RpcServerMetrics) -> Self {
+        Self { metrics }
     }
 }
 
-// TODO: only do this for Call metrics
-impl<'a, S> RpcServiceT<'a> for RpcServerMetricsLayer<S>
+impl<S> Layer<S> for RpcServerMetricsLayer {
+    type Service = RpcServerMetricsService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        RpcServerMetricsService::new(inner, self.metrics.clone())
+    }
+}
+
+/// A [RpcServiceT] middleware that captures RPC metrics for the server.
+///
+/// This is created per connection and captures metrics for each request.
+#[derive(Default, Clone)]
+pub(crate) struct RpcServerMetricsService<S> {
+    metrics: RpcServerMetrics,
+    inner: S,
+}
+
+impl<S> RpcServerMetricsService<S> {
+    pub(crate) fn new(service: S, metrics: RpcServerMetrics) -> Self {
+        metrics.inner.connection_metrics.connections_opened.increment(1);
+        Self { inner: service, metrics }
+    }
+}
+
+impl<'a, S> RpcServiceT<'a> for RpcServerMetricsService<S>
 where
     S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
 {
@@ -64,11 +88,18 @@ where
             call_metrics.started.increment(1);
         }
         MeteredRequestFuture {
-            fut: self.service.call(req),
+            fut: self.inner.call(req),
             started_at: Instant::now(),
             metrics: self.metrics.clone(),
             method: call_metrics.map(|(method, _)| *method),
         }
+    }
+}
+
+impl<S> Drop for RpcServerMetricsService<S> {
+    fn drop(&mut self) {
+        // update connection metrics
+        self.metrics.inner.connection_metrics.connections_closed.increment(1);
     }
 }
 
