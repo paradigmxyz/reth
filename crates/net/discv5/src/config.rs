@@ -33,7 +33,7 @@ pub struct ConfigBuilder<Filter = MustNotIncludeChains> {
     bootstrap_nodes: HashSet<BootNode>,
     /// [`ForkId`] to set in local node record.
     fork: Option<(&'static [u8], ForkId)>,
-    /// Mempool TCP port to advertise. Note: so long as `reth_network` handles [`NodeRecord`]s as
+    /// RLPx TCP port to advertise. Note: so long as `reth_network` handles [`NodeRecord`]s as
     /// opposed to [`Enr`](enr::Enr)s, TCP is limited to same IP address as UDP, since
     /// [`NodeRecord`] doesn't supply an extra field for and alternative TCP address.
     tcp_port: Option<u16>,
