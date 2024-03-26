@@ -160,8 +160,7 @@ impl Discv5 {
 
     /// Spawns [`discv5::Discv5`]. Returns [`discv5::Discv5`] handle in reth compatible wrapper type
     /// [`Discv5`], a receiver of [`discv5::Event`]s from the underlying node, and the local
-    /// [`Enr`](discv5::Enr) converted into the reth compatible [`NodeRecord`] type (used in
-    /// [`Discv4`](reth_discv4::Discv4)).
+    /// [`Enr`](discv5::Enr) converted into the reth compatible [`NodeRecord`] type.
     pub async fn start(
         sk: &SecretKey,
         discv5_config: Config,

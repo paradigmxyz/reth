@@ -38,6 +38,7 @@ pub struct MustIncludeChain {
 }
 
 impl MustIncludeChain {
+    /// Returns `true` if [`Enr`](discv5::Enr) passes filtering rules.
     pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
         if enr.get_raw_rlp(self.chain).is_none() {
             return FilterOutcome::Ignore { reason: self.ignore_reason() }
@@ -76,6 +77,7 @@ impl MustNotIncludeChains {
 }
 
 impl MustNotIncludeChains {
+    /// Returns `true` if [`Enr`](discv5::Enr) passes filtering rules.
     pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
         for chain in self.chains.iter() {
             if matches!(chain.filter(enr), FilterOutcome::Ok) {

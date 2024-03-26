@@ -8,7 +8,7 @@ use secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
 const SECP256K1_SERIALIZED_UNCOMPRESSED_FLAG: u8 = 4;
 
 /// Extracts a [`CombinedPublicKey::Secp256k1`] from a [`discv5::Enr`] and converts it to a
-/// [`PeerId`] that can be used in [`Discv4`](reth_discv4::Discv4).
+/// [`PeerId`].
 pub fn uncompressed_id_from_enr_pk(enr: &discv5::Enr) -> PeerId {
     let pk = enr.public_key();
     debug_assert!(
@@ -20,7 +20,6 @@ pub fn uncompressed_id_from_enr_pk(enr: &discv5::Enr) -> PeerId {
 }
 
 /// Converts a [`CombinedPublicKey`] to a [`PeerId`] that can be used in
-/// [`Discv4`](reth_discv4::Discv4).
 pub fn pk_to_uncompressed_id(pk: &CombinedPublicKey) -> PeerId {
     let pk_bytes = pk.encode();
     let pk = discv5::enr::secp256k1::PublicKey::from_slice(&pk_bytes).unwrap();

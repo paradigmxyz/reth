@@ -1,13 +1,11 @@
-//! Tracks peer discovery for [`Discv5`](crate::Discv5) and
-//! [`Discv5BCv4`](crate::Discv5BCv4`).
+//! Tracks peer discovery for [`Discv5`](crate::Discv5).
 
 use metrics::Counter;
 use reth_metrics::Metrics;
 
 use crate::config::{ETH, ETH2, OPSTACK};
 
-/// Information tracked by [`Discv5`](crate::Discv5) and
-/// [`Discv5BCv4`](crate::Discv5BCv4).
+/// Information tracked by [`Discv5`](crate::Discv5).
 #[derive(Debug, Default, Clone)]
 pub struct Metrics {
     /// Frequency of chains advertised in discovered peers' node records.
@@ -16,15 +14,13 @@ pub struct Metrics {
     pub discovered_peers_by_protocol: DiscoveredPeersMetrics,
 }
 
-/// Tracks discovered peers by protocol version, that pass the configured
-/// [`FilterDiscovered`](crate::filter::FilterDiscovered).
+/// Tracks discovered peers by protocol version, that pass filtering.
 #[derive(Metrics, Clone)]
 #[metrics(scope = "discv5")]
 pub struct DiscoveredPeersMetrics {
     /// Total peers discovered by [`discv5::Discv5`].
     ///
-    /// Note: the definition of 'discovered' is not exactly synonymous in [`discv5::Discv5`] and
-    /// [`Discv4`](reth_discv4::Discv4).
+    /// Note: the definition of 'discovered' is not exactly synonymous in [`discv5::Discv5`].
     total_discovered_peers_discv5: Counter,
     /// Increments number of peers discovered by [`discv5::Discv5`] as part of a query, which local
     /// node is not able to make an outgoing connection to, as there is no socket advertised in
@@ -34,13 +30,6 @@ pub struct DiscoveredPeersMetrics {
     /// unreachable node records. Naturally, these will all be incoming sessions. These peers will
     /// never end up in [`discv5::Discv5`]'s kbuckets, so will never be included in queries.
     total_sessions_unreachable_v5: Counter,
-    /// Total peers discovered by [`Discv4`](reth_discv4::Discv4), running as service to support
-    /// backwards compatibility (not running at full capacity) in
-    /// [`Discv5BCv4`](crate::Discv5BCv4).
-    ///
-    /// Note: the definition of 'discovered' is not exactly synonymous in [`discv5::Discv5`] and
-    /// [`Discv4`](reth_discv4::Discv4).
-    total_discovered_peers_discv4_as_downgrade: Counter,
 }
 
 impl DiscoveredPeersMetrics {
@@ -60,12 +49,6 @@ impl DiscoveredPeersMetrics {
     /// unreachable node records.
     pub fn increment_sessions_unreachable_v5(&mut self, num: u64) {
         self.total_sessions_unreachable_v5.increment(num)
-    }
-
-    /// Counts peers discovered by [`Discv4`](reth_discv4::Discv4) as backwards compatibility
-    /// support in [`Discv5BCv4`](crate::Discv5BCv4).
-    pub fn increment_discovered_v4_as_downgrade(&mut self, num: u64) {
-        self.total_discovered_peers_discv4_as_downgrade.increment(num)
     }
 }
 
