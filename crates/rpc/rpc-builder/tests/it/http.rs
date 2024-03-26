@@ -297,12 +297,10 @@ where
 
     OtterscanClient::get_api_level(client).await.unwrap();
 
-    assert!(is_unimplemented(
-        OtterscanClient::get_internal_operations(client, tx_hash).await.err().unwrap()
-    ));
-    assert!(is_unimplemented(
-        OtterscanClient::get_transaction_error(client, tx_hash).await.err().unwrap()
-    ));
+    OtterscanClient::get_internal_operations(client, tx_hash).await.unwrap();
+
+    OtterscanClient::get_transaction_error(client, tx_hash).await.unwrap();
+
     assert!(is_unimplemented(
         OtterscanClient::trace_transaction(client, tx_hash).await.err().unwrap()
     ));
@@ -311,12 +309,11 @@ where
 
     OtterscanClient::get_block_details_by_hash(client, block_hash).await.unwrap();
 
-    assert!(is_unimplemented(
-        OtterscanClient::get_block_transactions(client, block_number, page_number, page_size,)
-            .await
-            .err()
-            .unwrap()
-    ));
+    OtterscanClient::get_block_transactions(client, block_number, page_number, page_size)
+        .await
+        .err()
+        .unwrap();
+
     assert!(is_unimplemented(
         OtterscanClient::search_transactions_before(client, address, block_number, page_size,)
             .await

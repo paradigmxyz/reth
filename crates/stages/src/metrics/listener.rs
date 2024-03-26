@@ -85,11 +85,9 @@ impl MetricsListener {
                     stage_metrics.entities_total.set(total as f64);
                 }
             }
-            MetricEvent::ExecutionStageGas { gas } => self
-                .sync_metrics
-                .execution_stage
-                .mgas_processed_total
-                .increment(gas as f64 / MGAS_TO_GAS as f64),
+            MetricEvent::ExecutionStageGas { gas } => {
+                self.sync_metrics.execution_stage.mgas_processed_total.increment(gas / MGAS_TO_GAS)
+            }
         }
     }
 }

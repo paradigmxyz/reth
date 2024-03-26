@@ -151,13 +151,13 @@ impl Encodable for TransactionKind {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             TransactionKind::Call(to) => to.encode(out),
-            TransactionKind::Create => ([]).encode(out),
+            TransactionKind::Create => [].encode(out),
         }
     }
     fn length(&self) -> usize {
         match self {
             TransactionKind::Call(to) => to.length(),
-            TransactionKind::Create => ([]).length(),
+            TransactionKind::Create => [].length(),
         }
     }
 }

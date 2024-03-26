@@ -49,7 +49,7 @@ serde_json.workspace = true
 sha2 = { version = "0.10.7", optional = true }
 tempfile = { workspace = true, optional = true }
 thiserror.workspace = true
-zstd = { version = "0.12", features = ["experimental"] }
+zstd = { version = "0.12", features = ["experimental"], optional = true }
 roaring = "0.10.2"
 cfg-if = "1.0.0"
 
@@ -90,7 +90,7 @@ pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterio
 secp256k1.workspace = true
 
 [features]
-default = ["c-kzg"]
+default = ["c-kzg", "zstd-codec"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "revm-primitives/arbitrary",
@@ -102,8 +102,12 @@ arbitrary = [
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",
+    "zstd-codec"
 ]
 c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:sha2", "dep:tempfile"]
+zstd-codec = [
+    "dep:zstd"
+]
 clap = ["dep:clap"]
 optimism = [
     "reth-codecs/optimism",

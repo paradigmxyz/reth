@@ -76,10 +76,6 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     #[arg(long, conflicts_with = "instance", global = true)]
     pub with_unused_ports: bool,
 
-    /// Overrides the KZG trusted setup by reading from the supplied file.
-    #[arg(long, value_name = "PATH")]
-    pub trusted_setup_file: Option<PathBuf>,
-
     /// All networking related arguments
     #[command(flatten)]
     pub network: NetworkArgs,
@@ -150,7 +146,6 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             config,
             chain,
             metrics,
-            trusted_setup_file,
             instance,
             with_unused_ports,
             network,
@@ -170,7 +165,6 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             chain,
             metrics,
             instance,
-            trusted_setup_file,
             network,
             rpc,
             txpool,

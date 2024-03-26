@@ -63,7 +63,7 @@ mod tests {
         let mut out = out.as_slice();
         let decoded = Receipts::decode(&mut out).unwrap();
 
-        assert!(receipts == decoded);
+        assert_eq!(receipts, decoded);
     }
 
     #[test]

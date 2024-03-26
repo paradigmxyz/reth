@@ -43,10 +43,9 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         }
         .into_inner();
         let tx_range = start..=
-            (Some(end).min(
-                input.limiter.deleted_entries_limit_left().map(|left| start + left as u64 - 1),
-            ))
-            .unwrap();
+            Some(end)
+                .min(input.limiter.deleted_entries_limit_left().map(|left| start + left as u64 - 1))
+                .unwrap();
         let tx_range_end = *tx_range.end();
 
         // Retrieve transactions in the range and calculate their hashes in parallel

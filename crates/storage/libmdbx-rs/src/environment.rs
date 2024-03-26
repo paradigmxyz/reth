@@ -146,7 +146,7 @@ impl Environment {
     where
         F: FnOnce(*mut ffi::MDBX_env) -> T,
     {
-        (f)(self.env_ptr())
+        f(self.env_ptr())
     }
 
     /// Flush the environment data buffers to disk.

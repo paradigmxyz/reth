@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, TxHash, B256};
 use reth_rpc_types::{
     BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
     Transaction, TransactionsWithReceipts,
@@ -25,7 +25,7 @@ pub trait Otterscan {
 
     /// Given a transaction hash, returns its raw revert reason.
     #[method(name = "getTransactionError")]
-    async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<String>;
+    async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>>;
 
     /// Extract all variations of calls, contract creation and self-destructs and returns a call
     /// tree.

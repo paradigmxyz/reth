@@ -550,7 +550,7 @@ impl TransactionFetcher {
                 //
                 // remove any ended sessions, so that in case of a full cache, alive peers aren't
                 // removed in favour of lru dead peers
-                let mut ended_sessions = vec!();
+                let mut ended_sessions = vec![];
                 for &peer_id in fallback_peers.iter() {
                     if is_session_active(peer_id) {
                         ended_sessions.push(peer_id);
@@ -691,10 +691,10 @@ impl TransactionFetcher {
         // try to send the request to the peer
         if let Err(err) = peer.request_tx.try_send(req) {
             // peer channel is full
-            match err {
+            return match err {
                 TrySendError::Full(_) | TrySendError::Closed(_) => {
                     self.metrics.egress_peer_channel_full.increment(1);
-                    return Some(new_announced_hashes)
+                    Some(new_announced_hashes)
                 }
             }
         } else {

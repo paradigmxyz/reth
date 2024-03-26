@@ -1,11 +1,8 @@
 //! Traits for the builder
 
-use crate::{
-    components::NodeComponents,
-    node::{FullNodeTypes, NodeTypes},
-    BuilderContext,
-};
+use crate::{components::NodeComponents, node::FullNodeTypes, BuilderContext};
 use reth_network::NetworkHandle;
+use reth_node_api::NodeTypes;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
