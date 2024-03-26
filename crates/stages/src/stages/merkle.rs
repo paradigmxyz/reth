@@ -225,8 +225,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 }
             }
         } else {
-            let mut entities_checkpoint =
-                checkpoint.as_ref().filter(|c| c.target_block == to_block).and_then(|checkpoint| {
+            let mut entities_checkpoint = checkpoint
+                .as_ref()
+                .filter(|c| c.target_block == to_block)
+                .and_then(|checkpoint| {
                     debug!(
                         target: "sync::stages::merkle::exec",
                         current = ?current_block_number,
@@ -236,13 +238,13 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     );
 
                     input.checkpoint().entities_stage_checkpoint()
-            })
-            .unwrap_or(EntitiesCheckpoint {
-                processed: 0,
-                total: (provider.count_entries::<tables::HashedAccounts>()? +
-                    provider.count_entries::<tables::HashedStorages>()?)
-                    as u64,
-            });
+                })
+                .unwrap_or(EntitiesCheckpoint {
+                    processed: 0,
+                    total: (provider.count_entries::<tables::HashedAccounts>()? +
+                        provider.count_entries::<tables::HashedStorages>()?)
+                        as u64,
+                });
 
             let progress = StateRoot::from_tx(provider.tx_ref())
                 .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
