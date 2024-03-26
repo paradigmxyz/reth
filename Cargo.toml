@@ -250,10 +250,10 @@ revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev =
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
-alloy-primitives = "0.6"
-alloy-dyn-abi = "0.6"
-alloy-sol-types = "0.6"
-alloy-rlp = "0.3"
+alloy-primitives = "0.6.4"
+alloy-dyn-abi = "0.6.4"
+alloy-sol-types = "0.6.4"
+alloy-rlp = "0.3.4"
 alloy-trie = "0.3"
 alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
 alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
