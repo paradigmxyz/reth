@@ -6043,6 +6043,7 @@ dependencies = [
  "reth-primitives",
  "reth-tracing",
  "rlp",
+ "serde_json",
  "thiserror",
  "tokio",
  "tokio-stream",

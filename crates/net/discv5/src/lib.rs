@@ -25,11 +25,11 @@ pub mod metrics;
 
 pub use discv5::{self, IpMode};
 
-pub use config::{BootNode, ChainRef, Config, ConfigBuilder, IdentifyForkIdKVPair};
+pub use config::{BootNode, Config, ConfigBuilder, IdentifyForkIdKVPair, NetworkRef};
 pub use downgrade_v4::{DiscoveryUpdate, Discv5BCv4, MergedUpdateStream};
 pub use enr::uncompressed_id_from_enr_pk;
 pub use filter::{FilterDiscovered, FilterOutcome, MustIncludeFork, MustNotIncludeChains};
-use metrics::{Metrics, UpdateMetrics};
+use metrics::Metrics;
 
 /// Errors from using [`discv5::Discv5`] handle.
 #[derive(thiserror::Error, Debug)]
@@ -136,7 +136,7 @@ pub struct Discv5<T = MustNotIncludeChains> {
     /// Optionally filter discovered peers before passing up to app.
     filter_discovered_peer: T,
     #[doc(hidden)]
-    metrics: Metrics,
+    pub metrics: Metrics,
 }
 
 impl<T> Discv5<T> {
@@ -314,7 +314,7 @@ impl<T> Discv5<T> {
             let local_node_id = discv5.local_enr().node_id();
             let self_lookup_interval = Duration::from_secs(self_lookup_interval);
 
-            let filter = filter_discovered_peer.clone();
+            /*let filter = filter_discovered_peer.clone();
             let predicate = Box::new(move |enr: &discv5::Enr| -> bool {
                 match filter.filter(enr) {
                     FilterOutcome::Ok | FilterOutcome::OkReturnForkId(_) => true,
@@ -328,7 +328,7 @@ impl<T> Discv5<T> {
                         false
                     }
                 }
-            });
+            });*/
             // todo: graceful shutdown
 
             async move {
@@ -337,14 +337,7 @@ impl<T> Discv5<T> {
                         self_lookup_interval=format!("{:#?}", self_lookup_interval),
                         "starting periodic lookup query"
                     );
-                    match discv5
-                        .find_node_predicate(
-                            local_node_id,
-                            predicate.clone() as Box<dyn Fn(&discv5::Enr) -> bool + Send>,
-                            discv5::kbucket::MAX_NODES_PER_BUCKET,
-                        )
-                        .await
-                    {
+                    match discv5.find_node(local_node_id).await {
                         Err(err) => trace!(target: "net::discv5",
                             self_lookup_interval=format!("{:#?}", self_lookup_interval),
                             %err,
@@ -446,15 +439,6 @@ impl<T> HandleDiscv5 for Discv5<T> {
     }
 }
 
-impl<T> UpdateMetrics for Discv5<T> {
-    fn with_metrics<R, F>(&mut self, f: F) -> R
-    where
-        F: Fn(&mut Metrics) -> R,
-    {
-        f(&mut self.metrics)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
@@ -462,13 +446,11 @@ mod tests {
     use rand::thread_rng;
     use tracing::trace;
 
-    use crate::filter::NoopFilter;
-
     use super::*;
 
     async fn start_discovery_node(
         udp_port_discv5: u16,
-    ) -> (Discv5<NoopFilter>, mpsc::Receiver<discv5::Event>, NodeRecord) {
+    ) -> (Discv5, mpsc::Receiver<discv5::Event>, NodeRecord) {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
@@ -476,7 +458,6 @@ mod tests {
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
         let discv5_config = Config::builder()
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
-            .filter(NoopFilter)
             .build();
 
         Discv5::start(&secret_key, discv5_config).await.expect("should build discv5")

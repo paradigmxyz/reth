@@ -33,6 +33,9 @@ futures.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
 
+# io
+serde_json.workspace = true
+
 # misc
 derive_more.workspace = true
 tracing.workspace = true

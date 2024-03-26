@@ -4,14 +4,7 @@
 use metrics::Counter;
 use reth_metrics::Metrics;
 
-use crate::{ChainRef, IdentifyForkIdKVPair};
-
-#[doc(hidden)]
-pub trait UpdateMetrics {
-    fn with_metrics<R, F>(&mut self, f: F) -> R
-    where
-        F: Fn(&mut Metrics) -> R;
-}
+use crate::{IdentifyForkIdKVPair, NetworkRef};
 
 /// Information tracked by [`Discv5`](crate::Discv5) and
 /// [`Discv5BCv4`](crate::Discv5BCv4).
@@ -122,15 +115,15 @@ pub struct AdvertisedChainCounter {
 impl AdvertisedChainCounter {
     /// Counts each recognised chain type that is advertised on node record, once.
     pub fn increment_once_by_chain_type(&mut self, enr: &discv5::Enr) {
-        if enr.get_raw_rlp(ChainRef::OPSTACK).is_some() {
+        if enr.get_raw_rlp(NetworkRef::OPSTACK).is_some() {
             self.opstack = true
         }
 
-        if enr.get_raw_rlp(ChainRef::ETH).is_some() {
+        if enr.get_raw_rlp(NetworkRef::ETH).is_some() {
             self.eth = true
         }
 
-        if enr.get_raw_rlp(ChainRef::ETH2).is_some() {
+        if enr.get_raw_rlp(NetworkRef::ETH2).is_some() {
             self.eth2 = true
         }
     }

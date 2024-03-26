@@ -31,7 +31,7 @@ use tracing::error;
 use crate::{
     config::Config,
     filter::{FilterDiscovered, FilterOutcome, MustNotIncludeChains},
-    metrics::{Metrics, UpdateMetrics},
+    metrics::Metrics,
     Discv5, HandleDiscv5,
 };
 
@@ -334,15 +334,6 @@ impl Stream for MergedUpdateStream {
     }
 }
 
-impl<T> UpdateMetrics for Discv5BCv4<T> {
-    fn with_metrics<R, F>(&mut self, f: F) -> R
-    where
-        F: Fn(&mut Metrics) -> R,
-    {
-        self.discv5.with_metrics(|metrics| f(metrics))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use discv5::enr::Enr;
@@ -350,14 +341,14 @@ mod tests {
     use reth_discv4::Discv4ConfigBuilder;
     use tracing::trace;
 
-    use crate::{enr::EnrCombinedKeyWrapper, filter::NoopFilter};
+    use crate::enr::EnrCombinedKeyWrapper;
 
     use super::*;
 
     async fn start_discovery_node(
         udp_port_discv4: u16,
         udp_port_discv5: u16,
-    ) -> (Discv5BCv4<NoopFilter>, MergedUpdateStream, NodeRecord) {
+    ) -> (Discv5BCv4, MergedUpdateStream, NodeRecord) {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv4_addr = format!("127.0.0.1:{udp_port_discv4}").parse().unwrap();
@@ -369,7 +360,6 @@ mod tests {
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
         let discv5_config = Config::builder()
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
-            .filter(NoopFilter)
             .build();
 
         Discv5BCv4::start(discv4_addr, secret_key, discv4_config, discv5_config)

@@ -6,7 +6,7 @@ use derive_more::Constructor;
 use itertools::Itertools;
 use reth_primitives::{ForkId, MAINNET};
 
-use crate::{ChainRef, IdentifyForkIdKVPair};
+use crate::{IdentifyForkIdKVPair, NetworkRef};
 
 /// Allows users to inject custom filtering rules on which peers to discover.
 pub trait FilterDiscovered {
@@ -17,20 +17,6 @@ pub trait FilterDiscovered {
     /// Message for [`FilterOutcome::Ignore`] should specify the reason for filtering out a node
     /// record.
     fn ignore_reason(&self) -> String;
-}
-
-/// Filter that lets all [`Enr`](discv5::Enr)s pass through.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct NoopFilter;
-
-impl FilterDiscovered for NoopFilter {
-    fn filter(&self, _enr: &discv5::Enr) -> FilterOutcome {
-        FilterOutcome::Ok
-    }
-
-    fn ignore_reason(&self) -> String {
-        unreachable!()
-    }
 }
 
 /// Outcome of applying filtering rules on node record.
@@ -77,7 +63,7 @@ impl FilterDiscovered for MustIncludeChain {
 
 impl Default for MustIncludeChain {
     fn default() -> Self {
-        Self { chain: ChainRef::ETH }
+        Self { chain: NetworkRef::ETH }
     }
 }
 
@@ -88,13 +74,15 @@ pub struct MustNotIncludeChains {
 }
 
 impl MustNotIncludeChains {
-    /// Returns a new instance that disallows node records with a kv-pair that has any of the given 
+    /// Returns a new instance that disallows node records with a kv-pair that has any of the given
     /// chains as key.
-    pub fn new(disallow_chains: &[&'static [u8]]) -< Self {
+    pub fn new(disallow_chains: &[&'static [u8]]) -> Self {
         let chains = DashSet::with_capacity(disallow_chains.len());
         for chain in disallow_chains {
-            chains.push(MustIncludeChain::new(chain))
+            _ = chains.insert(MustIncludeChain::new(chain));
         }
+
+        MustNotIncludeChains { chains }
     }
 }
 
@@ -105,7 +93,7 @@ impl FilterDiscovered for MustNotIncludeChains {
                 return FilterOutcome::Ignore { reason: self.ignore_reason() }
             }
         }
-        if enr.get_raw_rlp(ChainRef::ETH2).is_some() {
+        if enr.get_raw_rlp(NetworkRef::ETH2).is_some() {
             return FilterOutcome::Ignore { reason: self.ignore_reason() }
         }
         FilterOutcome::Ok
@@ -114,7 +102,7 @@ impl FilterDiscovered for MustNotIncludeChains {
     fn ignore_reason(&self) -> String {
         format!(
             "{} forks not allowed",
-            self.chains.iter().map(|chain| String::from_utf8_lossy(chain.chain)).format("{},")
+            self.chains.iter().map(|chain| String::from_utf8_lossy(chain.chain)).format(",")
         )
     }
 }
@@ -157,12 +145,13 @@ impl FilterDiscovered for MustIncludeFork {
 
 impl Default for MustIncludeFork {
     fn default() -> Self {
-        Self { chain: MustIncludeChain::new(ChainRef::ETH), fork_id: MAINNET.latest_fork_id() }
+        Self { chain: MustIncludeChain::new(NetworkRef::ETH), fork_id: MAINNET.latest_fork_id() }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use alloy_rlp::Bytes;
     use discv5::enr::{CombinedKey, Enr};
 
     use super::*;
@@ -177,7 +166,7 @@ mod tests {
         // enr_1 advertises fork configured in filter
         let sk = CombinedKey::generate_secp256k1();
         let enr_1 = Enr::builder()
-            .add_value_rlp(ChainRef::ETH as &[u8], alloy_rlp::encode(fork).into())
+            .add_value_rlp(NetworkRef::ETH as &[u8], alloy_rlp::encode(fork).into())
             .build(&sk)
             .unwrap();
 
@@ -185,7 +174,7 @@ mod tests {
         let sk = CombinedKey::generate_secp256k1();
         let enr_2 = Enr::builder()
             .add_value_rlp(
-                ChainRef::ETH,
+                NetworkRef::ETH,
                 alloy_rlp::encode(MAINNET.shanghai_fork_id().unwrap()).into(),
             )
             .build(&sk)
@@ -206,17 +195,14 @@ mod tests {
         // enr_1 advertises a fork from one of the chains configured in filter
         let sk = CombinedKey::generate_secp256k1();
         let enr_1 = Enr::builder()
-            .add_value_rlp(ChainRef::ETH as &[u8], Bytes::default())
+            .add_value_rlp(NetworkRef::ETH as &[u8], Bytes::from("cancun"))
             .build(&sk)
             .unwrap();
 
         // enr_2 advertises a fork from one the other chain configured in filter
         let sk = CombinedKey::generate_secp256k1();
         let enr_2 = Enr::builder()
-            .add_value_rlp(
-                ChainRef::ETH2,
-                Bytes::default(),
-            )
+            .add_value_rlp(NetworkRef::ETH2, Bytes::from("deneb"))
             .build(&sk)
             .unwrap();
 
