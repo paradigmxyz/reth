@@ -1,0 +1,46 @@
+[package]
+name = "reth-discv5"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Ethereum network discovery V5"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-discv4.workspace = true
+reth-primitives.workspace = true
+reth-net-common.workspace = true
+reth-metrics.workspace = true
+
+# ethereum
+alloy-rlp.workspace = true
+rlp = "0.5.2"
+discv5 = { workspace = true, features = ["libp2p"] }
+enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
+multiaddr = { version = "0.18", default-features = false }
+libp2p-identity = "0.2"
+
+# async/futures
+tokio.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+pin-project.workspace = true
+parking_lot.workspace = true
+
+# misc
+derive_more.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+itertools.workspace = true
+metrics.workspace = true
+dashmap = "5.5.3"
+
+[dev-dependencies]
+rand.workspace = true
+reth-tracing.workspace = true

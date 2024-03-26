@@ -2097,8 +2097,7 @@ dependencies = [
 [[package]]
 name = "discv5"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bac33cb3f99889a57e56a8c6ccb77aaf0cfc7787602b7af09783f736d77314e1"
+source = "git+https://github.com/sigp/discv5?rev=04ac004#04ac0042a345a9edf93b090007e5d31c008261ed"
 dependencies = [
  "aes 0.7.5",
  "aes-gcm",
@@ -5959,8 +5958,12 @@ dependencies = [
 name = "reth-net-common"
 version = "0.2.0-beta.3"
 dependencies = [
+ "alloy-rlp",
+ "derive_more",
+ "enr",
  "pin-project",
  "reth-primitives",
+ "secp256k1 0.27.0",
  "tokio",
 ]
 
