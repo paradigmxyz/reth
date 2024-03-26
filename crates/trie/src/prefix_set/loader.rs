@@ -42,6 +42,7 @@ impl<'a, TX: DbTx> PrefixSetLoader<'a, TX> {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
             if account_prefix_set.len() % 1000 == 0 {
                 tracing::debug!("Loaded {} account prefixes", account_prefix_set.len());
+                tracing::debug!("Loaded {} destroyed accounts", destroyed_accounts.len());
             }
 
             if account_plain_state_cursor.seek_exact(address)?.is_none() {
@@ -65,8 +66,15 @@ impl<'a, TX: DbTx> PrefixSetLoader<'a, TX> {
                 .or_default()
                 .insert(Nibbles::unpack(keccak256(key)));
 
-            if storage_prefix_sets.len() % 1000 == 0 {
+            if storage_prefix_sets.len() % 10000 == 0 {
                 tracing::debug!("Loaded {} storage prefix sets", storage_prefix_sets.len());
+                // calculate total number of prefixes in storage_prefix_sets
+                let total_storage_prefixes: usize = storage_prefix_sets
+                    .values()
+                    .map(|prefix_set| prefix_set.len())
+                    .sum();
+
+                tracing::debug!("Loaded {} storage prefixes", total_storage_prefixes);
             }
         }
 
