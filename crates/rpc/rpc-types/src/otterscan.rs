@@ -4,7 +4,6 @@ use crate::{
     serde_helpers::u64_hex, Block, BlockTransactions, Rich, Transaction, TransactionReceipt,
 };
 use alloy_primitives::{Address, Bytes, U256};
-use revm_inspectors::transfer::{TransferKind, TransferOperation};
 use serde::{Deserialize, Serialize};
 
 /// Operation type enum for `InternalOperation` struct
@@ -121,22 +120,5 @@ impl From<Rich<Block>> for BlockDetails {
             issuance: Default::default(),
             total_fees: U256::default(),
         }
-    }
-}
-
-impl From<TransferKind> for OperationType {
-    fn from(kind: TransferKind) -> Self {
-        match kind {
-            TransferKind::Call => Self::OpTransfer,
-            TransferKind::Create => Self::OpCreate,
-            TransferKind::Create2 => Self::OpCreate2,
-            TransferKind::SelfDestruct => Self::OpSelfDestruct,
-        }
-    }
-}
-
-impl From<TransferOperation> for InternalOperation {
-    fn from(op: TransferOperation) -> Self {
-        Self { r#type: op.kind.into(), from: op.from, to: op.to, value: op.value }
     }
 }
