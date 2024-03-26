@@ -311,7 +311,8 @@ impl DiskFileBlobStoreInner {
         {
             let _lock = self.file_lock.write();
             if !path.exists() {
-                fs::write(&path, data).map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
+                fs::write(&path, data)
+                    .map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
                 add += data.len();
             }
         }
