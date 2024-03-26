@@ -39,10 +39,9 @@ use reth_primitives::{
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Head, Header, PruneCheckpoint, PruneLimiter, PruneModes,
-    PruneSegment, PruneStepResult, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, StorageEntry, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
-    Withdrawals, B256, U256,
+    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
+    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -899,37 +898,38 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 break false
             }
 
-            let result = self.step_prune_range(
+            let done = self.prune_table_with_range_step(
                 &mut walker,
                 limiter,
                 &mut skip_filter,
                 &mut delete_callback,
             )?;
 
-            match result {
-                PruneStepResult::Finished => break true,
-                PruneStepResult::MaybeMoreData => {
-                    deleted_entries += 1;
-                }
+            if done {
+                break true
+            } else {
+                deleted_entries += 1;
             }
         };
 
         Ok((deleted_entries, done))
     }
 
-    /// Steps once with the given walker and prunes the entry at the destination.
+    /// Steps once with the given walker and prunes the entry in the table.
+    ///
+    /// Returns `true` if the walker is finished, `false` if it may has more data to prune.
     ///
     /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
     /// pruning different tables concurrently, by letting them step to the same height before
     /// timing out.
-    pub fn step_prune_range<T: Table>(
+    pub fn prune_table_with_range_step<T: Table>(
         &self,
         walker: &mut RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>,
         limiter: &mut PruneLimiter,
         skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
         delete_callback: &mut impl FnMut(TableRow<T>),
-    ) -> Result<PruneStepResult, DatabaseError> {
-        let Some(res) = walker.next() else { return Ok(PruneStepResult::Finished) };
+    ) -> Result<bool, DatabaseError> {
+        let Some(res) = walker.next() else { return Ok(true) };
 
         let row = res?;
 
@@ -943,7 +943,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             );
         }
 
-        Ok(PruneStepResult::MaybeMoreData)
+        Ok(false)
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or

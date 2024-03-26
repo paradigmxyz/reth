@@ -143,7 +143,7 @@ where
         let mut pruned_block_canonical = None;
         // todo: guarantee skip filter and delete callback are same for all header table types
 
-        if let Err(err) = self.provider.step_prune_range(
+        if let Err(err) = self.provider.prune_table_with_range_step(
             &mut self.headers_walker,
             self.limiter,
             &mut |_| false,
@@ -152,7 +152,7 @@ where
             return Some(Err(err.into()))
         }
 
-        if let Err(err) = self.provider.step_prune_range(
+        if let Err(err) = self.provider.prune_table_with_range_step(
             &mut self.header_tds_walker,
             self.limiter,
             &mut |_| false,
@@ -161,7 +161,7 @@ where
             return Some(Err(err.into()))
         }
 
-        if let Err(err) = self.provider.step_prune_range(
+        if let Err(err) = self.provider.prune_table_with_range_step(
             &mut self.canonical_headers_walker,
             self.limiter,
             &mut |_| false,

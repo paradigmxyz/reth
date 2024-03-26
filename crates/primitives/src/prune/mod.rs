@@ -2,7 +2,6 @@ mod checkpoint;
 mod limiter;
 mod mode;
 mod segment;
-mod step;
 mod target;
 
 use crate::{Address, BlockNumber};
@@ -12,7 +11,6 @@ pub use mode::PruneMode;
 pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-pub use step::PruneStepResult;
 pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
