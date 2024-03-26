@@ -919,7 +919,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
     /// Steps once with the given walker and prunes the entry at the destination.
     ///
-    /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune job that's
+    /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
     /// pruning different tables concurrently, by letting them step to the same height before
     /// timing out.
     pub fn step_prune_range<T: Table>(

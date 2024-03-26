@@ -24,8 +24,8 @@ pub struct PrunerBuilder {
 }
 
 impl PrunerBuilder {
-    /// Default timeout on a prune job.
-    pub const DEFAULT_DURATION_PRUNE_JOB: Duration = Duration::from_millis(100);
+    /// Default timeout for a prune run.
+    pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(100);
 
     /// Creates a new [PrunerBuilder] from the given [PruneConfig].
     pub fn new(pruner_config: PruneConfig) -> Self {
@@ -86,7 +86,7 @@ impl Default for PrunerBuilder {
             segments: PruneModes::none(),
             max_reorg_depth: 64,
             prune_delete_limit: MAINNET.prune_delete_limit,
-            timeout: Some(Self::DEFAULT_DURATION_PRUNE_JOB),
+            timeout: Some(Self::DEFAULT_TIMEOUT),
         }
     }
 }

@@ -69,7 +69,7 @@ pub struct PruneInput {
     pub(crate) previous_checkpoint: Option<PruneCheckpoint>,
     /// Target block up to which the pruning needs to be done, inclusive.
     pub(crate) to_block: BlockNumber,
-    /// Limits pruning of segment in prune job.
+    /// Limits pruning of a segment.
     pub(crate) limiter: PruneLimiter,
 }
 

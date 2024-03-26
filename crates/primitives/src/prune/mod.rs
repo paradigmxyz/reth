@@ -100,14 +100,14 @@ pub enum PruneProgress {
     Finished,
 }
 
-/// Reason for interrupting a prune job.
+/// Reason for interrupting a prune run.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PruneInterruptReason {
-    /// Prune job timed out.
+    /// Prune run timed out.
     Timeout,
-    /// Limit on the number of deleted entries (rows in the database) per prune job was reached.
+    /// Limit on the number of deleted entries (rows in the database) per prune run was reached.
     DeletedEntriesLimitReached,
-    /// Unknown reason for stopping the pruner.
+    /// Unknown reason for stopping prune run.
     Unknown,
 }
 
@@ -135,10 +135,11 @@ impl PruneInterruptReason {
 }
 
 impl PruneProgress {
-    /// Creates new [PruneProgress] that summarises prune job.
+    /// Creates new [PruneProgress].
     ///
     /// If `done == true`, returns [PruneProgress::Finished], otherwise
-    /// [PruneProgress::HasMoreData] is returned.
+    /// [PruneProgress::HasMoreData] is returned with [PruneInterruptReason] according to the passed
+    /// limiter.
     pub fn new(done: bool, limiter: &PruneLimiter) -> Self {
         if done {
             Self::Finished
@@ -147,17 +148,17 @@ impl PruneProgress {
         }
     }
 
-    /// Returns `true` if prune job is finished.
+    /// Returns `true` if prune run is finished.
     pub fn is_finished(&self) -> bool {
         matches!(self, Self::Finished)
     }
 
-    /// Returns `true` if prune job was interrupted by timeout.
+    /// Returns `true` if prune run was interrupted by timeout.
     pub fn is_timed_out(&self) -> bool {
         matches!(self, Self::HasMoreData(reason) if reason.is_timeout())
     }
 
-    /// Returns `true` if prune job was interrupted by reaching limit on deleted entries.
+    /// Returns `true` if prune run was interrupted by reaching the limit on deleted entries.
     pub fn is_entries_limit_reached(&self) -> bool {
         matches!(self, Self::HasMoreData(reason) if reason.is_entries_limit_reached())
     }
