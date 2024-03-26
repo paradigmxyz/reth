@@ -314,8 +314,8 @@ impl<T> Discv5<T> {
             let local_node_id = discv5.local_enr().node_id();
             let self_lookup_interval = Duration::from_secs(self_lookup_interval);
 
-            let filter = filter_discovered_peer.clone();
-            /*let predicate = Box::new(move |enr: &discv5::Enr| -> bool {
+            /*let filter = filter_discovered_peer.clone();
+            let predicate = Box::new(move |enr: &discv5::Enr| -> bool {
                 match filter.filter(enr) {
                     FilterOutcome::Ok | FilterOutcome::OkReturnForkId(_) => true,
                     FilterOutcome::Ignore { reason } => {
