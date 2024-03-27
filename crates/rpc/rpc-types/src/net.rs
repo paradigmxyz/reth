@@ -182,12 +182,12 @@ impl TryFrom<&Enr<SecretKey>> for NodeRecord {
             return Err(NodeRecordParseError::InvalidUrl("ip missing".to_string()))
         };
 
-        let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
-            return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
-        };
-
         let Some(udp_port) = enr.udp4().or_else(|| enr.udp6()) else {
             return Err(NodeRecordParseError::InvalidUrl("udp port missing".to_string()))
+        };
+
+        let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
+            return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
         };
 
         let id = pk_to_id(&enr.public_key());
