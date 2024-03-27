@@ -76,6 +76,7 @@ serde_json.workspace = true
 test-fuzz.workspace = true
 toml.workspace = true
 triehash = "0.8"
+enr.workspace = true
 
 hash-db = "~0.15"
 plain_hasher = "0.2"

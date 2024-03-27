@@ -738,6 +738,12 @@ impl ChainSpec {
         self.hardfork_fork_id(Hardfork::Cancun)
     }
 
+    /// Convenience method to get the latest fork id from the chainspec.
+    #[inline]
+    pub fn latest_fork_id(&self) -> ForkId {
+        self.hardfork_fork_id(*self.hardforks().last_key_value().unwrap().0).unwrap()
+    }
+
     /// Get the fork condition for the given fork.
     pub fn fork(&self, fork: Hardfork) -> ForkCondition {
         self.hardforks.get(&fork).copied().unwrap_or(ForkCondition::Never)
@@ -1893,7 +1899,7 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Hardfork::Constantinople,
-                    ForkId { hash: ForkHash([0x66, 0x8d, 0xb0, 0xaf]), next: 9069000 },
+                    ForkId { hash: ForkHash([0x66, 0x8d, 0xb0, 0xaf]), next: 9069000 }, /* todo: are these really the same constantinople and petersburg? */
                 ),
                 (
                     Hardfork::Petersburg,
@@ -1921,7 +1927,7 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Hardfork::GrayGlacier,
-                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 }, /* todo: what about paris? */
                 ),
                 (
                     Hardfork::Shanghai,
@@ -2121,6 +2127,14 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
+    fn latest_eth_mainnet_fork_id() {
+        assert_eq!(
+            ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+            MAINNET.latest_fork_id()
+        )
+    }
+
+    #[test]
     fn holesky_forkids() {
         test_fork_ids(
             &HOLESKY,
@@ -2283,6 +2297,15 @@ Post-merge hard forks (timestamp based):
                 ),
             ],
         );
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn latest_op_mainnet_fork_id() {
+        assert_eq!(
+            ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 0 },
+            BASE_MAINNET.latest_fork_id()
+        )
     }
 
     #[cfg(feature = "optimism")]

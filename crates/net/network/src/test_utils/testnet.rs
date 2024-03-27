@@ -574,8 +574,7 @@ where
         NetworkConfigBuilder::new(secret_key)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
-            .disable_dns_discovery()
-            .disable_discv4_discovery()
+            .disable_discovery()
     }
 }
 

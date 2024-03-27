@@ -34,6 +34,9 @@ parking_lot.workspace = true
 rand = { workspace = true, optional = true }
 generic-array = "0.14"
 serde = { workspace = true, optional = true }
+itertools.workspace = true
+smallvec.workspace = true
+derive_more.workspace = true
 
 [dev-dependencies]
 rand.workspace = true

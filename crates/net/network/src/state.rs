@@ -2,7 +2,7 @@
 
 use crate::{
     cache::LruCache,
-    discovery::{Discovery, DiscoveryEvent},
+    discovery::version::HandleDiscoveryServices,
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     manager::DiscoveredEvent,
     message::{
@@ -10,10 +10,10 @@ use crate::{
         PeerResponseResult,
     },
     peers::{PeerAction, PeersManager},
-    FetchClient,
+    Discovery, DiscoveryEvent, FetchClient,
 };
+use futures::StreamExt;
 use rand::seq::SliceRandom;
-
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
@@ -403,7 +403,7 @@ where
                 return Poll::Ready(message)
             }
 
-            while let Poll::Ready(discovery) = self.discovery.poll(cx) {
+            while let Poll::Ready(Some(discovery)) = self.discovery.poll_next_unpin(cx) {
                 self.on_discovery_event(discovery);
             }
 
@@ -529,8 +529,8 @@ pub(crate) enum StateAction {
 #[cfg(test)]
 mod tests {
     use crate::{
-        discovery::Discovery, fetch::StateFetcher, message::PeerRequestSender, peers::PeersManager,
-        state::NetworkState, PeerRequest,
+        discovery::Discovery as Discovery4, fetch::StateFetcher, message::PeerRequestSender,
+        peers::PeersManager, state::NetworkState, Discovery, PeerRequest,
     };
     use reth_eth_wire::{
         capability::{Capabilities, Capability},
@@ -555,7 +555,7 @@ mod tests {
             peers_manager: Default::default(),
             queued_messages: Default::default(),
             client: NoopProvider::default(),
-            discovery: Discovery::noop(),
+            discovery: Discovery::V4(Discovery4::noop()),
             state_fetcher: StateFetcher::new(handle, Default::default()),
         }
     }

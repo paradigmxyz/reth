@@ -1251,11 +1251,13 @@ impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
         });
 
         #[cfg(debug_assertions)]
-        trace!(target: "net::tx",
-            peer_id=format!("{_peer_id:#}"),
-            tx_hashes_not_requested=?tx_hashes_not_requested,
-            "transactions in `PooledTransactions` response from peer were not requested"
-        );
+        if tx_hashes_not_requested.is_empty() {
+            trace!(target: "net::tx",
+                peer_id=format!("{_peer_id:#}"),
+                tx_hashes_not_requested=?tx_hashes_not_requested,
+                "transactions in `PooledTransactions` response from peer were not requested"
+            );
+        }
 
         (verification_outcome, VerifiedPooledTransactions::new(txns))
     }

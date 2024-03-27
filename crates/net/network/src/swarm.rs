@@ -254,6 +254,12 @@ where
                 }
                 // Insert peer only if no fork id or a valid fork id
                 if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
+                    trace!(target: "net::swarm",
+                        peer_id=format!("{:#}", peer_id),
+                        %socket_addr,
+                        ?fork_id,
+                        "adding new peer to network"
+                    );
                     self.state_mut().peers_mut().add_peer(peer_id, socket_addr, fork_id);
                 }
             }

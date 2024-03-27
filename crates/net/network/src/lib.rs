@@ -25,8 +25,8 @@
 //!
 //!        * Responds to incoming ETH related requests: `Headers`, `Bodies`
 //!
-//!    - `Discovery Task`: is a spawned [`Discv4`](reth_discv4::Discv4) future that handles peer
-//!      discovery and emits new peers to the `Network`
+//!    - `Discovery Task`: is a spawned [`Discv4`] future that handles peer discovery and emits new
+//!      peers to the `Network`
 //!
 //!    - [`NetworkManager`] task advances the state of the `Network`, which includes:
 //!
@@ -118,7 +118,7 @@ mod budget;
 mod builder;
 mod cache;
 pub mod config;
-mod discovery;
+pub mod discovery;
 pub mod error;
 pub mod eth_requests;
 mod fetch;
@@ -138,17 +138,21 @@ pub mod transactions;
 
 pub use builder::NetworkBuilder;
 pub use config::{NetworkConfig, NetworkConfigBuilder};
-pub use discovery::{Discovery, DiscoveryEvent};
+pub use discovery::{
+    version::{Discovery, DiscoveryHandle},
+    DiscoveryEvent,
+};
 pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
 pub use network::{NetworkEvents, NetworkHandle, NetworkProtocols};
 pub use peers::PeersConfig;
+pub use reth_discv4::Discv4;
+pub use reth_discv5::{filter, Config, ConfigBuilder, Discv5, Discv5BCv4};
+pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
 pub use session::{
     ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
     PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
     SessionLimits, SessionManager, SessionsConfig,
 };
 pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
-
-pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};

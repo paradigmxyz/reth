@@ -20,7 +20,7 @@ jobs:
           - binary: reth
             network: ethereum
           - binary: op-reth
-            network: optimism
+            network: optimism # tests discv5 feature too
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@clippy
@@ -32,7 +32,7 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
 
-  clippy:
+  clippy-other-targets:
     name: clippy
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -124,7 +124,7 @@ jobs:
     name: lint success
     runs-on: ubuntu-latest
     if: always()
-    needs: [clippy-binaries, clippy, crate-checks, docs, fmt, grafana]
+    needs: [clippy-binaries, clippy-other-targets, crate-checks, docs, fmt, grafana]
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

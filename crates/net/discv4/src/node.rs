@@ -1,9 +1,10 @@
+use derive_more::AsRef;
 use generic_array::GenericArray;
 use reth_primitives::{keccak256, NodeRecord, PeerId};
 
 /// The key type for the table.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub(crate) struct NodeKey(pub(crate) PeerId);
+#[derive(Debug, Copy, Clone, Eq, PartialEq, AsRef)]
+pub struct NodeKey(pub(crate) PeerId);
 
 impl From<PeerId> for NodeKey {
     fn from(value: PeerId) -> Self {

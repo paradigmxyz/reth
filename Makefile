@@ -261,7 +261,7 @@ update-book-cli: ## Update book cli documentation.
 
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
+	RUSTFLAGS="-C target-cpu=native -Z threads=8" cargo build --profile maxperf --features jemalloc,asm-keccak
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
@@ -270,6 +270,54 @@ maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus t
 
 fmt:
 	cargo +nightly fmt
+
+fix-lint-reth:
+	cargo +nightly clippy \
+	--workspace \
+	--bin "reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "ethereum $(BIN_OTHER_FEATURES)" \
+	--fix \
+	--allow-staged \
+	--allow-dirty \
+	-- -D warnings
+
+# will check discv5 feature
+fix-lint-op-reth:
+	cargo +nightly clippy \
+	--workspace \
+	--bin "op-reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "optimism $(BIN_OTHER_FEATURES)" \
+	--fix \
+	--allow-staged \
+	--allow-dirty \
+	-- -D warnings
+
+fix-lint-other-targets:
+	cargo +nightly clippy \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--all-features \
+	--fix \
+	--allow-staged \
+	--allow-dirty \
+	-- -D warnings
+
+fix-lint:
+	make lint-reth && \
+	make lint-op-reth && \
+	make lint-other-targets && \
+	make fmt
 
 lint-reth:
 	cargo +nightly clippy \
@@ -282,6 +330,7 @@ lint-reth:
 	--features "ethereum $(BIN_OTHER_FEATURES)" \
 	-- -D warnings
 
+# will check discv5 feature
 lint-op-reth:
 	cargo +nightly clippy \
 	--workspace \
@@ -304,10 +353,10 @@ lint-other-targets:
 	-- -D warnings
 
 lint:
-	make fmt && \
 	make lint-reth && \
 	make lint-op-reth && \
-	make lint-other-targets
+	make lint-other-targets && \
+	make fmt
 
 .PHONY: rustdocs
 rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
@@ -318,7 +367,7 @@ rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc
 	--enable-index-page -Zunstable-options -D warnings" \
 	cargo +nightly docs \
 	--document-private-items
-
+	
 test-reth:
 	cargo test \
 	--workspace \
@@ -345,11 +394,11 @@ test-other-targets:
 	--examples \
 	--tests \
 	--benches \
-	--all-features
 
 test-doc:
 	cargo test --doc --workspace --features "ethereum"
 	cargo test --doc --workspace --features "optimism"
+	cargo test --doc --all --all-features
 
 test:
 	make test-reth && \
