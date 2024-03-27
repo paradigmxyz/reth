@@ -1,4 +1,9 @@
+use alloy_rlp::Decodable;
 pub use reth_rpc_types::{pk_to_id, NodeRecord, NodeRecordParseError};
+
+use enr::Enr;
+
+use crate::ForkId;
 
 // <https://github.com/ledgerwatch/erigon/blob/610e648dc43ec8cd6563313e28f06f534a9091b3/params/bootnodes.go>
 
@@ -64,6 +69,19 @@ pub fn holesky_nodes() -> Vec<NodeRecord> {
 /// Parses all the nodes
 pub fn parse_nodes(nodes: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<NodeRecord> {
     nodes.into_iter().map(|s| s.as_ref().parse().unwrap()).collect()
+}
+
+/// Tries to read the [`ForkId`] from given [`Enr`].
+pub fn get_fork_id(enr: &Enr<secp256k1::SecretKey>) -> Result<ForkId, NodeRecordParseError> {
+    let Some(mut maybe_fork_id) = enr.get(b"eth") else {
+        return Err(NodeRecordParseError::EthForkIdMissing)
+    };
+
+    let Ok(fork_id) = ForkId::decode(&mut maybe_fork_id) else {
+        return Err(NodeRecordParseError::ForkIdDecodeError(maybe_fork_id.to_vec()))
+    };
+
+    Ok(fork_id)
 }
 
 #[cfg(test)]

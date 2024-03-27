@@ -131,6 +131,12 @@ pub enum NodeRecordParseError {
     /// Conversion from type [`Enr<SecretKey>`] failed.
     #[error("failed to convert enr into node record")]
     ConversionFromEnrFailed,
+    /// Missing key used to identify an execution layer enr on Ethereum network.
+    #[error("fork id missing on enr, 'eth' key missing")]
+    EthForkIdMissing,
+    /// Failed to decode fork ID rlp value.
+    #[error("failed to decode fork id, 'eth': {0:?}")]
+    ForkIdDecodeError(Vec<u8>),
 }
 
 impl FromStr for NodeRecord {

@@ -10,7 +10,6 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
@@ -22,12 +21,11 @@ use crate::{
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
-use reth_primitives::{ForkId, NodeRecord, PeerId};
+use reth_primitives::{get_fork_id, ForkId, NodeRecord, NodeRecordParseError};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
-    net::IpAddr,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -392,22 +390,33 @@ pub enum DnsDiscoveryEvent {
 
 /// Converts an [Enr] into a [NodeRecord]
 fn convert_enr_node_record(enr: Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
-    use alloy_rlp::Decodable;
-
     let node_record = match NodeRecord::try_from(&enr) {
         Ok(node_record) => node_record,
         Err(err) => {
             trace!(target: "disc::dns",
                 %err,
-                "can't convert enr to node_record"
+                "can't convert enr to dns update"
             );
 
             return None
         }
     };
 
-    let mut maybe_fork_id = enr.get(b"eth")?;
-    let fork_id = ForkId::decode(&mut maybe_fork_id).ok();
+    let fork_id = match get_fork_id(&enr) {
+        Ok(fork_id) => Some(fork_id),
+        Err(err) => {
+            if matches!(err, NodeRecordParseError::EthForkIdMissing) {
+                trace!(target: "disc::dns",
+                    %err,
+                    "can't convert enr to dns update"
+                );
+
+                return None
+            }
+
+            None // enr fork could be badly configured in node record, peer could still be useful
+        }
+    };
 
     Some(DnsNodeRecordUpdate { node_record, fork_id, enr })
 }
