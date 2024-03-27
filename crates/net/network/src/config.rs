@@ -512,7 +512,7 @@ impl NetworkConfigBuilder {
             transactions_manager_config,
         } = self;
 
-        let listener_addr = listener_addr.unwrap_or("0.0.0.0::44444".parse().unwrap());
+        let listener_addr = listener_addr.unwrap_or("0.0.0.0:44444".parse().unwrap());
 
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
