@@ -15,7 +15,8 @@ use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
-    mainnet_nodes, sepolia_nodes, Chain, ChainSpec, ForkFilter, Head, NamedChain, NodeRecord, PeerId, MAINNET
+    mainnet_nodes, sepolia_nodes, Chain, ChainSpec, ForkFilter, Head, NamedChain, NodeRecord,
+    PeerId, MAINNET,
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
