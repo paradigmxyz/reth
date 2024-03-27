@@ -548,7 +548,7 @@ impl NetworkConfigBuilder {
                 .tcp_port(listener_addr.port())
                 .discv5_config(
                     discv5::ConfigBuilder::new(ListenConfig::from(
-                        "0.0.0.0:33333".parse::<SocketAddr>().unwrap(),
+                        "0.0.0.0:33339".parse::<SocketAddr>().unwrap(),
                     ))
                     .build(),
                 )
