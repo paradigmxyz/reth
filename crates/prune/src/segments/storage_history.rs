@@ -13,6 +13,9 @@ use reth_primitives::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegme
 use reth_provider::DatabaseProviderRW;
 use tracing::{instrument, trace};
 
+/// Number of storage history tables to prune in one step
+const STORAGE_HISTORY_TABLES_TO_PRUNE: usize = 2;
+
 #[derive(Debug)]
 pub struct StorageHistory {
     mode: PruneMode,
@@ -49,7 +52,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         let range_end = *range.end();
 
         let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
-            input.limiter.set_deleted_entries_limit(limit / 2)
+            input.limiter.set_deleted_entries_limit(limit / STORAGE_HISTORY_TABLES_TO_PRUNE)
         } else {
             input.limiter
         };
@@ -99,7 +102,10 @@ impl<DB: Database> Segment<DB> for StorageHistory {
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneOutput, Segment, StorageHistory};
+    use crate::segments::{
+        storage_history::STORAGE_HISTORY_TABLES_TO_PRUNE, PruneInput, PruneOutput, Segment,
+        StorageHistory,
+    };
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
     use reth_interfaces::test_utils::{
@@ -201,7 +207,8 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip_while(|(i, (block_number, _, _))| {
-                    *i < deleted_entries_limit / 2 * run && *block_number <= to_block as usize
+                    *i < deleted_entries_limit / STORAGE_HISTORY_TABLES_TO_PRUNE * run &&
+                        *block_number <= to_block as usize
                 })
                 .next()
                 .map(|(i, _)| i)

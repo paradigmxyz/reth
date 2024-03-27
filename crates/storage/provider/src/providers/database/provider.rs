@@ -917,7 +917,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
     /// Steps once with the given walker and prunes the entry in the table.
     ///
-    /// Returns `true` if the walker is finished, `false` if it may has more data to prune.
+    /// Returns `true` if the walker is finished, `false` if it may have more data to prune.
     ///
     /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
     /// pruning different tables concurrently, by letting them step to the same height before

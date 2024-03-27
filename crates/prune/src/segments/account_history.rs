@@ -9,6 +9,9 @@ use reth_primitives::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegme
 use reth_provider::DatabaseProviderRW;
 use tracing::{instrument, trace};
 
+/// Number of account history tables to prune in one step
+const ACCOUNT_HISTORY_TABLES_TO_PRUNE: usize = 2;
+
 #[derive(Debug)]
 pub struct AccountHistory {
     mode: PruneMode,
@@ -45,7 +48,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         let range_end = *range.end();
 
         let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
-            input.limiter.set_deleted_entries_limit(limit / 2)
+            input.limiter.set_deleted_entries_limit(limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE)
         } else {
             input.limiter
         };
@@ -95,7 +98,10 @@ impl<DB: Database> Segment<DB> for AccountHistory {
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{AccountHistory, PruneInput, PruneOutput, Segment};
+    use crate::segments::{
+        account_history::ACCOUNT_HISTORY_TABLES_TO_PRUNE, AccountHistory, PruneInput, PruneOutput,
+        Segment,
+    };
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
     use reth_interfaces::test_utils::{
@@ -195,7 +201,8 @@ mod tests {
                     .iter()
                     .enumerate()
                     .skip_while(|(i, (block_number, _))| {
-                        *i < deleted_entries_limit / 2 * run && *block_number <= to_block as usize
+                        *i < deleted_entries_limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE * run &&
+                            *block_number <= to_block as usize
                     })
                     .next()
                     .map(|(i, _)| i)

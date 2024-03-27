@@ -45,7 +45,7 @@ impl PruneTimeLimit {
     }
 
     fn is_limit_reached(&self) -> bool {
-        self.start.elapsed() >= self.limit
+        self.start.elapsed() > self.limit
     }
 }
 

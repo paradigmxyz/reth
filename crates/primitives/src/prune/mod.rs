@@ -122,12 +122,12 @@ impl PruneInterruptReason {
     }
 
     /// Returns `true` if the reason is timeout.
-    pub fn is_timeout(&self) -> bool {
+    pub const fn is_timeout(&self) -> bool {
         matches!(self, Self::Timeout)
     }
 
     /// Returns `true` if the reason is reaching the limit on deleted entries.
-    pub fn is_entries_limit_reached(&self) -> bool {
+    pub const fn is_entries_limit_reached(&self) -> bool {
         matches!(self, Self::DeletedEntriesLimitReached)
     }
 }
@@ -147,7 +147,7 @@ impl PruneProgress {
     }
 
     /// Returns `true` if prune run is finished.
-    pub fn is_finished(&self) -> bool {
+    pub const fn is_finished(&self) -> bool {
         matches!(self, Self::Finished)
     }
 }
