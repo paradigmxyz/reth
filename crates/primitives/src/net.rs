@@ -1,7 +1,7 @@
 use alloy_rlp::Decodable;
-pub use reth_rpc_types::{pk_to_id, NodeRecord, NodeRecordParseError};
-
 use enr::Enr;
+pub use reth_rpc_types::{pk_to_id, NodeRecord, NodeRecordParseError};
+use thiserror::Error;
 
 use crate::ForkId;
 
@@ -71,14 +71,26 @@ pub fn parse_nodes(nodes: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<Node
     nodes.into_iter().map(|s| s.as_ref().parse().unwrap()).collect()
 }
 
+/// Error thrown when network can't be identified on a node record.
+#[non_exhaustive]
+#[derive(Debug, Error)]
+pub enum NetworkIdError {
+    /// Missing key used to identify an execution layer enr on Ethereum network.
+    #[error("fork id missing on enr, 'eth' key missing")]
+    EthForkIdMissing,
+    /// Failed to decode fork ID rlp value.
+    #[error("failed to decode fork id, 'eth': {0:?}")]
+    ForkIdDecodeError(Vec<u8>),
+}
+
 /// Tries to read the [`ForkId`] from given [`Enr`].
-pub fn get_fork_id(enr: &Enr<secp256k1::SecretKey>) -> Result<ForkId, NodeRecordParseError> {
+pub fn get_fork_id(enr: &Enr<secp256k1::SecretKey>) -> Result<ForkId, NetworkIdError> {
     let Some(mut maybe_fork_id) = enr.get(b"eth") else {
-        return Err(NodeRecordParseError::EthForkIdMissing)
+        return Err(NetworkIdError::EthForkIdMissing)
     };
 
     let Ok(fork_id) = ForkId::decode(&mut maybe_fork_id) else {
-        return Err(NodeRecordParseError::ForkIdDecodeError(maybe_fork_id.to_vec()))
+        return Err(NetworkIdError::ForkIdDecodeError(maybe_fork_id.to_vec()))
     };
 
     Ok(fork_id)
