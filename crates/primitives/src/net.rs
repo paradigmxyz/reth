@@ -2,7 +2,6 @@ use alloy_rlp::Decodable;
 pub use reth_rpc_types::{pk_to_id, NodeRecord, NodeRecordParseError};
 
 use enr::Enr;
-
 use crate::ForkId;
 
 // <https://github.com/ledgerwatch/erigon/blob/610e648dc43ec8cd6563313e28f06f534a9091b3/params/bootnodes.go>
