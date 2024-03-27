@@ -237,7 +237,9 @@ impl PeersManager {
             return Err(InboundConnectionError::IpBanned)
         }
 
-        if self.connection_info.max_inbound == 0 && self.trusted_peer_ids.is_empty() {
+        if (!self.connection_info.has_in_capacity() || self.connection_info.max_inbound == 0) &&
+            self.trusted_peer_ids.is_empty()
+        {
             // if we don't have any inbound slots and no trusted peers, we don't accept any new
             // connections
             return Err(InboundConnectionError::ExceedsCapacity)
@@ -1522,7 +1524,7 @@ impl Default for PeerBackoffDurations {
 }
 
 /// Error thrown when a incoming connection is rejected right away
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum InboundConnectionError {
     /// The remote's ip address is banned
     IpBanned,
@@ -1544,7 +1546,7 @@ mod tests {
         peers::{
             manager::{ConnectionInfo, PeerBackoffDurations, PeerConnectionState},
             reputation::DEFAULT_REPUTATION,
-            PeerAction,
+            InboundConnectionError, PeerAction,
         },
         session::PendingSessionHandshakeError,
         PeersConfig,
@@ -2099,6 +2101,9 @@ mod tests {
     async fn accept_incoming_trusted_unknown_peer_address() {
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 99)), 8008);
         let mut peers = PeersManager::new(PeersConfig::test().with_max_inbound(2));
+        // try to connect trusted peer
+        let trusted = PeerId::random();
+        peers.add_trusted_peer_id(trusted);
 
         // saturate the inbound slots
         for i in 0..peers.connection_info.max_inbound {
@@ -2135,10 +2140,6 @@ mod tests {
             }
             _ => unreachable!(),
         }
-
-        // try to connect trusted peer
-        let trusted = PeerId::random();
-        peers.add_trusted_peer_id(trusted);
 
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 100)), 8008);
         assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
@@ -2609,6 +2610,25 @@ mod tests {
         assert_eq!(peers.connection_info.num_pending_in, 0);
         assert_eq!(peers.connection_info.num_inbound, 1);
         assert!(peers.peers.contains_key(&basic_peer));
+    }
+
+    #[tokio::test]
+    async fn test_incoming_at_capacity() {
+        let mut config = PeersConfig::test();
+        config.connection_info.max_inbound = 1;
+        let mut peers = PeersManager::new(config);
+
+        let peer = PeerId::random();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
+
+        peers.on_incoming_session_established(peer, addr);
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        assert_eq!(
+            peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
+            InboundConnectionError::ExceedsCapacity
+        );
     }
 
     #[tokio::test]
