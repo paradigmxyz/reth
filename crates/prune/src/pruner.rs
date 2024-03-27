@@ -7,8 +7,8 @@ use crate::{
 };
 use reth_db::database::Database;
 use reth_primitives::{
-    BlockNumber, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PrunePurpose,
-    PruneSegment, StaticFileSegment,
+    BlockNumber, PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
+    StaticFileSegment,
 };
 use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
 use reth_tokio_util::EventListeners;
@@ -40,7 +40,7 @@ pub struct Pruner<DB> {
     /// conjunction with `min_block_interval` to determine when the pruning needs to be initiated.
     previous_tip_block_number: Option<BlockNumber>,
     /// Maximum total entries to prune (delete from database) per block.
-    delete_limit: usize,
+    delete_limit_per_block: usize,
     /// Maximum number of blocks to be pruned per run, as an additional restriction to
     /// `previous_tip_block_number`.
     prune_max_blocks_per_run: usize,
@@ -66,7 +66,7 @@ impl<DB: Database> Pruner<DB> {
             segments,
             min_block_interval,
             previous_tip_block_number: None,
-            delete_limit,
+            delete_limit_per_block: delete_limit,
             prune_max_blocks_per_run,
             timeout,
             metrics: Metrics::default(),
@@ -111,7 +111,7 @@ impl<DB: Database> Pruner<DB> {
             .min(self.prune_max_blocks_per_run);
 
         let mut limiter = PruneLimiter::default()
-            .set_deleted_entries_limit(self.delete_limit * blocks_since_last_run);
+            .set_deleted_entries_limit(self.delete_limit_per_block * blocks_since_last_run);
         if let Some(timeout) = self.timeout {
             limiter = limiter.set_time_limit(timeout);
         };

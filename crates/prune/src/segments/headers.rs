@@ -16,6 +16,9 @@ use reth_primitives::{BlockNumber, PruneLimiter, PruneMode, PruneProgress, Prune
 use reth_provider::DatabaseProviderRW;
 use tracing::{instrument, trace};
 
+/// Number of header tables to prune in one step
+const HEADER_TABLES_TO_PRUNE: usize = 3;
+
 #[derive(Debug)]
 pub struct Headers {
     mode: PruneMode,
@@ -61,8 +64,9 @@ impl<DB: Database> Segment<DB> for Headers {
         let mut canonical_headers_cursor =
             provider.tx_ref().cursor_write::<tables::CanonicalHeaders>()?;
 
-        let mut limiter =
-            input.limiter.floor_deleted_entries_limit_to_multiple_of(NonZeroUsize::new(3).unwrap());
+        let mut limiter = input.limiter.floor_deleted_entries_limit_to_multiple_of(
+            NonZeroUsize::new(HEADER_TABLES_TO_PRUNE).unwrap(),
+        );
 
         let tables_iter = HeaderTablesIter::new(
             provider,
@@ -175,8 +179,9 @@ where
             )))
         }
 
-        pruned_block_headers
-            .map(move |block| Ok(HeaderTablesIterItem { pruned_block: block, entries_pruned: 3 }))
+        pruned_block_headers.map(move |block| {
+            Ok(HeaderTablesIterItem { pruned_block: block, entries_pruned: HEADER_TABLES_TO_PRUNE })
+        })
     }
 }
 
@@ -193,7 +198,10 @@ mod tests {
     use reth_stages::test_utils::TestStageDB;
     use tracing::trace;
 
-    use crate::segments::{Headers, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment};
+    use crate::segments::{
+        headers::HEADER_TABLES_TO_PRUNE, Headers, PruneInput, PruneOutput, PruneOutputCheckpoint,
+        Segment,
+    };
 
     #[test]
     fn prune() {
@@ -263,8 +271,8 @@ mod tests {
 
             let last_pruned_block_number = to_block.min(
                 next_block_number_to_prune +
-                    input.limiter.deleted_entries_limit().unwrap() as BlockNumber / 3 -
-                    1,
+                    (input.limiter.deleted_entries_limit().unwrap() / HEADER_TABLES_TO_PRUNE - 1)
+                        as u64,
             );
 
             assert_eq!(
