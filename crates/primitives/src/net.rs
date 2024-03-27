@@ -223,7 +223,7 @@ mod tests {
             .build(&key)
             .unwrap();
 
-        let node_record = NodeRecord::try_from(enr.clone()).unwrap();
+        let node_record = NodeRecord::try_from(&enr).unwrap();
 
         assert_eq!(
             NodeRecord {

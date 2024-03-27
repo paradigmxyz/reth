@@ -129,8 +129,8 @@ pub enum NodeRecordParseError {
     #[error("Failed to discport query: {0}")]
     Discport(ParseIntError),
     /// Conversion from type [`Enr<SecretKey>`] failed.
-    #[error("failed to convert enr into dns node record, enr: {0}")]
-    ConversionFromEnrFailed(Enr<SecretKey>),
+    #[error("failed to convert enr into node record")]
+    ConversionFromEnrFailed,
 }
 
 impl FromStr for NodeRecord {
@@ -170,21 +170,21 @@ impl FromStr for NodeRecord {
     }
 }
 
-impl TryFrom<Enr<SecretKey>> for NodeRecord {
+impl TryFrom<&Enr<SecretKey>> for NodeRecord {
     type Error = NodeRecordParseError;
 
-    fn try_from(enr: Enr<SecretKey>) -> Result<Self, Self::Error> {
+    fn try_from(enr: &Enr<SecretKey>) -> Result<Self, Self::Error> {
         let Some(address) = enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))
         else {
-            return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
+            return Err(NodeRecordParseError::ConversionFromEnrFailed)
         };
 
         let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
-            return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
+            return Err(NodeRecordParseError::ConversionFromEnrFailed)
         };
 
         let Some(udp_port) = enr.udp4().or_else(|| enr.udp6()) else {
-            return Err(NodeRecordParseError::ConversionFromEnrFailed(enr))
+            return Err(NodeRecordParseError::ConversionFromEnrFailed)
         };
 
         let id = pk_to_id(&enr.public_key());

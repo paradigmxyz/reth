@@ -241,7 +241,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     }
 
     fn on_resolved_enr(&mut self, enr: Enr<SecretKey>) {
-        if let Some(record) = convert_enr_node_record(&enr) {
+        if let Some(record) = convert_enr_node_record(enr.clone()) {
             self.notify(record);
         }
         self.queued_events.push_back(DnsDiscoveryEvent::Enr(enr))
@@ -391,21 +391,25 @@ pub enum DnsDiscoveryEvent {
 }
 
 /// Converts an [Enr] into a [NodeRecord]
-fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
+fn convert_enr_node_record(enr: Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
     use alloy_rlp::Decodable;
 
-    let node_record = NodeRecord {
-        address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
-        tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
-        udp_port: enr.udp4().or_else(|| enr.udp6())?,
-        id: PeerId::from_slice(&enr.public_key().serialize_uncompressed()[1..]),
-    }
-    .into_ipv4_mapped();
+    let node_record = match NodeRecord::try_from(&enr) {
+        Ok(node_record) => node_record,
+        Err(err) => {
+            trace!(target: "disc::dns",
+                %err,
+                "can't convert enr to node_record"
+            );
+
+            return None
+        }
+    };
 
     let mut maybe_fork_id = enr.get(b"eth")?;
     let fork_id = ForkId::decode(&mut maybe_fork_id).ok();
 
-    Some(DnsNodeRecordUpdate { node_record, fork_id, enr: enr.clone() })
+    Some(DnsNodeRecordUpdate { node_record, fork_id, enr })
 }
 
 #[cfg(test)]
