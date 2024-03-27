@@ -1,10 +1,9 @@
 //! Predicates to constraint peer lookups.
 
-use alloy_rlp::Decodable;
 use dashmap::DashSet;
 use derive_more::Constructor;
 use itertools::Itertools;
-use reth_primitives::{ForkId, MAINNET};
+use reth_primitives::ForkId;
 
 use crate::config::{ETH, ETH2};
 

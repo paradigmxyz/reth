@@ -273,9 +273,9 @@ impl Discv5 {
                 BootNode::Enode(enode) => enr_requests.push(task::spawn({
                     let discv5 = discv5.clone();
                     async move {
-                        if let Err(err) = discv5.request_enr(enode.clone()).await {
+                        if let Err(err) = discv5.request_enr(enode.to_string()).await {
                             debug!(target: "net::discv5",
-                                enode,
+                                ?enode,
                                 %err,
                                 "failed adding boot node"
                             );
@@ -398,7 +398,7 @@ impl HandleDiscovery for Discv5 {
 
     fn node_record(&self) -> NodeRecord {
         let enr: Enr<_> = EnrCombinedKeyWrapper(self.local_enr()).into();
-        enr.try_into().unwrap()
+        (&enr).try_into().unwrap()
     }
 }
 

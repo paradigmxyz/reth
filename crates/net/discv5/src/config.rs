@@ -5,19 +5,20 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
+use derive_more::Display;
 use discv5::ListenConfig;
 use itertools::Itertools;
 use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{AnyNode, Bytes, ForkId, NodeRecord, MAINNET};
+use reth_primitives::{Bytes, ForkId, NodeRecord, MAINNET};
 
 use crate::{enr::uncompressed_to_multiaddr_id, filter::MustNotIncludeChains};
 
 /// L1 EL
-pub const ETH: &'static [u8] = b"eth";
+pub const ETH: &[u8] = b"eth";
 /// L1 CL
-pub const ETH2: &'static [u8] = b"eth2";
+pub const ETH2: &[u8] = b"eth2";
 /// Optimism
-pub const OPSTACK: &'static [u8] = b"opstack";
+pub const OPSTACK: &[u8] = b"opstack";
 /// The default tcp port for RLPx.
 ///
 /// Note: the default udp discv4 port is the same.
@@ -28,8 +29,11 @@ pub const DEFAULT_RLPX_PORT: u16 = 30303;
 /// Default is 60 seconds.
 const DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL: u64 = 60;
 
-/// Optimism mainnet boot nodes.
-const BOOT_NODES_OPTIMISM_MAINNET: &str = "enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305,enode://dd751a9ef8912be1bfa7a5e34e2c3785cc5253110bd929f385e07ba7ac19929fb0e0c5d93f77827291f4da02b2232240fbc47ea7ce04c46e333e452f8656b667@34.65.107.0:30305,enode://c5d289b56a77b6a2342ca29956dfd07aadf45364dde8ab20d1dc4efd4d1bc6b4655d902501daea308f4d8950737a4e93a4dfedd17b49cd5760ffd127837ca965@34.65.202.239:30305,enode://87a32fd13bd596b2ffca97020e31aef4ddcc1bbd4b95bb633d16c1329f654f34049ed240a36b449fda5e5225d70fe40bc667f53c304b71f8e68fc9d448690b51@3.231.138.188:30301,enode://ca21ea8f176adb2e229ce2d700830c844af0ea941a1d8152a9513b966fe525e809c3a6c73a2c18a12b74ed6ec4380edf91662778fe0b79f6a591236e49e176f9@184.72.129.189:30301,enode://acf4507a211ba7c1e52cdf4eef62cdc3c32e7c9c47998954f7ba024026f9a6b2150cd3f0b734d9c78e507ab70d59ba61dfe5c45e1078c7ad0775fb251d7735a2@3.220.145.177:30301,enode://8a5a5006159bf079d06a04e5eceab2a1ce6e0f721875b2a9c96905336219dbe14203d38f70f3754686a6324f786c2f9852d8c0dd3adac2d080f4db35efc678c5@3.231.11.52:30301,enode://cdadbe835308ad3557f9a1de8db411da1a260a98f8421d62da90e71da66e55e98aaa8e90aa7ce01b408a54e4bd2253d701218081ded3dbe5efbbc7b41d7cef79@54.198.153.150:30301";
+/// Optimism mainnet and base mainnet boot nodes.
+const BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET: &str = "enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305,enode://dd751a9ef8912be1bfa7a5e34e2c3785cc5253110bd929f385e07ba7ac19929fb0e0c5d93f77827291f4da02b2232240fbc47ea7ce04c46e333e452f8656b667@34.65.107.0:30305,enode://c5d289b56a77b6a2342ca29956dfd07aadf45364dde8ab20d1dc4efd4d1bc6b4655d902501daea308f4d8950737a4e93a4dfedd17b49cd5760ffd127837ca965@34.65.202.239:30305,enode://87a32fd13bd596b2ffca97020e31aef4ddcc1bbd4b95bb633d16c1329f654f34049ed240a36b449fda5e5225d70fe40bc667f53c304b71f8e68fc9d448690b51@3.231.138.188:30301,enode://ca21ea8f176adb2e229ce2d700830c844af0ea941a1d8152a9513b966fe525e809c3a6c73a2c18a12b74ed6ec4380edf91662778fe0b79f6a591236e49e176f9@184.72.129.189:30301,enode://acf4507a211ba7c1e52cdf4eef62cdc3c32e7c9c47998954f7ba024026f9a6b2150cd3f0b734d9c78e507ab70d59ba61dfe5c45e1078c7ad0775fb251d7735a2@3.220.145.177:30301,enode://8a5a5006159bf079d06a04e5eceab2a1ce6e0f721875b2a9c96905336219dbe14203d38f70f3754686a6324f786c2f9852d8c0dd3adac2d080f4db35efc678c5@3.231.11.52:30301,enode://cdadbe835308ad3557f9a1de8db411da1a260a98f8421d62da90e71da66e55e98aaa8e90aa7ce01b408a54e4bd2253d701218081ded3dbe5efbbc7b41d7cef79@54.198.153.150:30301";
+
+/// Optimism sepolia and base sepolia boot nodes.
+const BOOT_NODES_OP_SEPOLIA_AND_BASE_SEPOLIA: &str = "enode://09d1a6110757b95628cc54ab6cc50a29773075ed00e3a25bd9388807c9a6c007664e88646a6fefd82baad5d8374ba555e426e8aed93f0f0c517e2eb5d929b2a2@34.65.21.188:30304?discport=30303";
 
 /// Builds a [`Config`].
 #[derive(Debug, Default)]
@@ -94,15 +98,19 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds multiple boot nodes.
-    pub fn add_boot_nodes(mut self, nodes: impl IntoIterator<Item = discv5::Enr>) -> Self {
+    /// Adds multiple boot nodes from a list of [`Enr`](discv5::Enr)s.
+    pub fn add_boot_nodes_sigp_type(
+        mut self,
+        nodes: impl IntoIterator<Item = discv5::Enr>,
+    ) -> Self {
         self.bootstrap_nodes.extend(nodes.into_iter().map(BootNode::Enr));
         self
     }
 
     /// Parses a comma-separated list of serialized [`Enr`](discv5::Enr)s, signed node records, and
-    /// adds any successfully deserialized records to boot nodes.
-    pub fn add_serialized_boot_nodes(mut self, enrs: &str) -> Self {
+    /// adds any successfully deserialized records to boot nodes. Note: this type is serialized in
+    /// CL format since [`discv5`] is originally a CL library.
+    pub fn add_cl_serialized_boot_nodes(mut self, enrs: &str) -> Self {
         let bootstrap_nodes = &mut self.bootstrap_nodes;
         for node in enrs.split(&[',']).flat_map(|record| record.trim().parse::<discv5::Enr>()) {
             bootstrap_nodes.insert(BootNode::Enr(node));
@@ -110,24 +118,13 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds a comma-separated list of enodes, unsigned node records, to boot nodes.
-    pub fn add_enode_boot_nodes(mut self, enodes: &str) -> Self {
+    /// Adds a comma-separated list of enodes, serialized unsigned node records, to boot nodes.
+    pub fn add_serialized_boot_nodes(mut self, enodes: &str) -> Self {
         let bootstrap_nodes = &mut self.bootstrap_nodes;
 
         for node in enodes.split(&[',']) {
-            if let Ok(AnyNode::NodeRecord(NodeRecord { address, udp_port, id, .. })) = node.parse()
-            {
-                let mut multi_address = Multiaddr::empty();
-                match address {
-                    IpAddr::V4(ip) => multi_address.push(Protocol::Ip4(ip)),
-                    IpAddr::V6(ip) => multi_address.push(Protocol::Ip6(ip)),
-                }
-
-                multi_address.push(Protocol::Udp(udp_port));
-                let id = uncompressed_to_multiaddr_id(id);
-                multi_address.push(Protocol::P2p(id));
-
-                bootstrap_nodes.insert(BootNode::Enode(multi_address.to_string()));
+            if let Ok(node_record) = node.parse() {
+                bootstrap_nodes.insert(BootNode::from_unsigned(node_record));
             }
         }
         self
@@ -135,7 +132,7 @@ impl ConfigBuilder {
 
     /// Adds boot nodes in the form a list of [`NodeRecord`]s, parsed enodes.
     pub fn add_deserialized_enode_boot_nodes(self, enodes: Vec<NodeRecord>) -> Self {
-        self.add_enode_boot_nodes(&format!(
+        self.add_serialized_boot_nodes(&format!(
             "{}",
             enodes
                 .iter()
@@ -144,9 +141,14 @@ impl ConfigBuilder {
         ))
     }
 
-    /// Default optimism mainnet configuration.
+    /// Add optimism mainnet boot nodes.
     pub fn add_optimism_mainnet_boot_nodes(self) -> Self {
-        self.add_enode_boot_nodes(BOOT_NODES_OPTIMISM_MAINNET)
+        self.add_serialized_boot_nodes(BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET)
+    }
+
+    /// Add optimism sepolia boot nodes.
+    pub fn add_optimism_sepolia_boot_nodes(self) -> Self {
+        self.add_serialized_boot_nodes(BOOT_NODES_OP_SEPOLIA_AND_BASE_SEPOLIA)
     }
 
     /// Set [`ForkId`], and key used to identify it, to set in local [`Enr`](discv5::enr::Enr).
@@ -246,7 +248,7 @@ pub struct Config {
     pub(super) bootstrap_nodes: HashSet<BootNode>,
     /// [`ForkId`] to set in local node record.
     pub(super) fork: (&'static [u8], ForkId),
-    /// rlpx TCP port to advertise.
+    /// RLPx TCP port to advertise.
     pub(super) tcp_port: u16,
     /// Additional kv-pairs to include in local node record.
     pub(super) other_enr_data: Vec<(&'static str, Bytes)>,
@@ -255,7 +257,7 @@ pub struct Config {
     /// Interval in seconds at which to run a lookup up query with local node ID as target, to
     /// populate kbuckets.
     pub(super) self_lookup_interval: u64,
-    /// custom filter rules to apply to a discovered peer in order to determine if it should be
+    /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
     pub(super) filter_discovered_peer: MustNotIncludeChains,
 }
@@ -293,13 +295,51 @@ impl Config {
 
 /// A boot node can be added either as a string in either 'enode' URL scheme or serialized from
 /// [`Enr`](discv5::Enr) type.
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Display)]
 pub enum BootNode {
     /// An unsigned node record.
-    Enode(String),
+    #[display(fmt = "{_0}")]
+    Enode(Multiaddr),
     /// A signed node record.
+    #[display(fmt = "{_0:?}")]
     Enr(discv5::Enr),
 }
+
+impl BootNode {
+    /// Parses a [`NodeRecord`] and serializes according to CL format. Note: [`discv5`] is
+    /// originally a CL library hence needs this format to add the node.
+    pub fn from_unsigned(node_record: NodeRecord) -> Self {
+        let NodeRecord { address, udp_port, id, .. } = node_record;
+        let mut multi_address = Multiaddr::empty();
+        match address {
+            IpAddr::V4(ip) => multi_address.push(Protocol::Ip4(ip)),
+            IpAddr::V6(ip) => multi_address.push(Protocol::Ip6(ip)),
+        }
+
+        multi_address.push(Protocol::Udp(udp_port));
+        let id = uncompressed_to_multiaddr_id(id);
+        multi_address.push(Protocol::P2p(id));
+
+        Self::Enode(multi_address)
+    }
+}
+
+/// Identifies a chain in an [`Enr`](discv5::enr::Enr). Used as key for the [`ForkId`] kv-pair in
+/// the [`Enr`](discv5::enr::Enr).
+pub trait IdentifyForkIdKVPair {
+    /// L1 EL
+    const ETH: &'static [u8] = b"eth";
+    /// L1 CL
+    const ETH2: &'static [u8] = b"eth2";
+    /// Optimism
+    const OPSTACK: &'static [u8] = b"opstack";
+}
+
+/// Key of the [`ForkId`] kv-pair in an [`Enr`](discv5::enr::Enr).
+#[derive(Debug)]
+pub struct NetworkRef;
+
+impl IdentifyForkIdKVPair for NetworkRef {}
 
 #[cfg(test)]
 mod test {
@@ -309,15 +349,14 @@ mod test {
 
     use super::*;
 
-    const OP_MAINNET_EL_BOOTNODES: &str = "enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305,enode://dd751a9ef8912be1bfa7a5e34e2c3785cc5253110bd929f385e07ba7ac19929fb0e0c5d93f77827291f4da02b2232240fbc47ea7ce04c46e333e452f8656b667@34.65.107.0:30305,enode://c5d289b56a77b6a2342ca29956dfd07aadf45364dde8ab20d1dc4efd4d1bc6b4655d902501daea308f4d8950737a4e93a4dfedd17b49cd5760ffd127837ca965@34.65.202.239:30305,enode://87a32fd13bd596b2ffca97020e31aef4ddcc1bbd4b95bb633d16c1329f654f34049ed240a36b449fda5e5225d70fe40bc667f53c304b71f8e68fc9d448690b51@3.231.138.188:30301,enode://ca21ea8f176adb2e229ce2d700830c844af0ea941a1d8152a9513b966fe525e809c3a6c73a2c18a12b74ed6ec4380edf91662778fe0b79f6a591236e49e176f9@184.72.129.189:30301,enode://acf4507a211ba7c1e52cdf4eef62cdc3c32e7c9c47998954f7ba024026f9a6b2150cd3f0b734d9c78e507ab70d59ba61dfe5c45e1078c7ad0775fb251d7735a2@3.220.145.177:30301,enode://8a5a5006159bf079d06a04e5eceab2a1ce6e0f721875b2a9c96905336219dbe14203d38f70f3754686a6324f786c2f9852d8c0dd3adac2d080f4db35efc678c5@3.231.11.52:30301,enode://cdadbe835308ad3557f9a1de8db411da1a260a98f8421d62da90e71da66e55e98aaa8e90aa7ce01b408a54e4bd2253d701218081ded3dbe5efbbc7b41d7cef79@54.198.153.150:30301";
-
     const MULTI_ADDRESSES: &str = "/ip4/184.72.129.189/udp/30301/p2p/16Uiu2HAmSG2hdLwyQHQmG4bcJBgD64xnW63WMTLcrNq6KoZREfGb,/ip4/3.231.11.52/udp/30301/p2p/16Uiu2HAmMy4V8bi3XP7KDfSLQcLACSvTLroRRwEsTyFUKo8NCkkp,/ip4/54.198.153.150/udp/30301/p2p/16Uiu2HAmSVsb7MbRf1jg3Dvd6a3n5YNqKQwn1fqHCFgnbqCsFZKe,/ip4/3.220.145.177/udp/30301/p2p/16Uiu2HAm74pBDGdQ84XCZK27GRQbGFFwQ7RsSqsPwcGmCR3Cwn3B,/ip4/3.231.138.188/udp/30301/p2p/16Uiu2HAmMnTiJwgFtSVGV14ZNpwAvS1LUoF4pWWeNtURuV6C3zYB";
 
     #[test]
     fn parse_boot_nodes() {
         const OP_SEPOLIA_CL_BOOTNODES: &str ="enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg,enr:-J64QFa3qMsONLGphfjEkeYyF6Jkil_jCuJmm7_a42ckZeUQGLVzrzstZNb1dgBp1GGx9bzImq5VxJLP-BaptZThGiWGAYrTytOvgmlkgnY0gmlwhGsV-zeHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDahfSECTIS_cXyZ8IyNf4leANlZnrsMEWTkEYxf4GMCmDdGNwgiQGg3VkcIIkBg";
 
-        let config = Config::builder().add_serialized_boot_nodes(OP_SEPOLIA_CL_BOOTNODES).build();
+        let config =
+            Config::builder().add_cl_serialized_boot_nodes(OP_SEPOLIA_CL_BOOTNODES).build();
 
         let socket_1 = "18.210.176.114:9222".parse::<SocketAddrV4>().unwrap();
         let socket_2 = "107.21.251.55:9222".parse::<SocketAddrV4>().unwrap();
@@ -335,28 +374,15 @@ mod test {
 
     #[test]
     fn parse_enodes() {
-        let config = Config::builder().add_enode_boot_nodes(OP_MAINNET_EL_BOOTNODES).build();
+        let config = Config::builder()
+            .add_serialized_boot_nodes(BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET)
+            .build();
+
+        let bootstrap_nodes =
+            config.bootstrap_nodes.into_iter().map(|node| format!("{node}")).collect::<Vec<_>>();
 
         for node in MULTI_ADDRESSES.split(&[',']) {
-            assert!(config.bootstrap_nodes.contains(&BootNode::Enode(node.to_string())));
+            assert!(bootstrap_nodes.contains(&node.to_string()));
         }
     }
-
-    /*#[test]
-    fn deserialized_enodes() {
-
-        // todo: parse node records excluding query to convert OP_MAINNET_EL_BOOTNODES to
-        // `NodeRecord`
-
-        let deserialized  = OP_MAINNET_EL_BOOTNODES.split(&[',']).map(|node| serde_json::from_str(node).unwrap()).collect::<Vec<NodeRecord>>();
-
-        let config = Config::builder().add_deserialized_enode_boot_nodes(deserialized).build();
-
-
-        const MULTI_ADDRESSES: &str = "/ip4/184.72.129.189/udp/30301/p2p/16Uiu2HAmSG2hdLwyQHQmG4bcJBgD64xnW63WMTLcrNq6KoZREfGb,/ip4/3.231.11.52/udp/30301/p2p/16Uiu2HAmMy4V8bi3XP7KDfSLQcLACSvTLroRRwEsTyFUKo8NCkkp,/ip4/54.198.153.150/udp/30301/p2p/16Uiu2HAmSVsb7MbRf1jg3Dvd6a3n5YNqKQwn1fqHCFgnbqCsFZKe,/ip4/3.220.145.177/udp/30301/p2p/16Uiu2HAm74pBDGdQ84XCZK27GRQbGFFwQ7RsSqsPwcGmCR3Cwn3B,/ip4/3.231.138.188/udp/30301/p2p/16Uiu2HAmMnTiJwgFtSVGV14ZNpwAvS1LUoF4pWWeNtURuV6C3zYB";
-
-        for node in MULTI_ADDRESSES.split(&[',']) {
-            assert!(config.bootstrap_nodes.contains(&BootNode::Enode(node.to_string())));
-        }
-    }*/
 }
