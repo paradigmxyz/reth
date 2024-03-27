@@ -61,6 +61,7 @@ type RethFullProviderType<DB, Evm> =
 type RethFullAdapter<DB, N> =
     FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>;
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
 ///
 /// [`NodeBuilder`] provides a [builder-like interface][builder] for composing
@@ -112,6 +113,26 @@ type RethFullAdapter<DB, N> =
 /// custom rpc modules into the rpc server before it is launched. See also [RpcContext]
 /// All hooks accept a closure that is then invoked at the appropriate time in the node's launch
 /// process.
+///
+/// ## Flow
+///
+/// The [NodeBuilder] is intended to sit behind a CLI that provides the necessary [NodeConfig]
+/// input: [NodeBuilder::new]
+///
+/// From there the builder is configured with the node's types, components, and hooks, then launched
+/// with the [NodeBuilder::launch] method. On launch all the builtin internals, such as the
+/// `Database` and its providers [BlockchainProvider] are initialized before the configured
+/// [NodeComponentsBuilder] is invoked with the [BuilderContext] to create the transaction pool,
+/// network, and payload builder components. When the RPC is configured, the corresponding hooks are
+/// invoked to allow for custom rpc modules to be injected into the rpc server:
+/// [NodeBuilder::extend_rpc_modules]
+///
+/// Finally all components are created and all services are launched and a [NodeHandle] is returned
+/// that can be used to interact with the node: [FullNode]
+///
+/// The following diagram shows the flow of the node builder from CLI to a launched node.
+///
+/// include_mmd!("docs/mermaid/builder.mmd")
 ///
 /// ## Internals
 ///
