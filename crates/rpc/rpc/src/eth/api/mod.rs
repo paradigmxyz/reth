@@ -337,11 +337,6 @@ where
                 }
             }
 
-            // if we're currently syncing, we're unable to build a pending block
-            if this.network().is_syncing() {
-                return Ok(None)
-            }
-
             // we rebuild the block
             let pending_block = match pending.build_block(this.provider(), this.pool()) {
                 Ok(block) => block,
