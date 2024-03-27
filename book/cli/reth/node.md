@@ -434,6 +434,11 @@ Database:
           - trace:   Enables logging for trace debug-level messages
           - extra:   Enables logging for extra debug-level messages
 
+      --db.exclusive <EXCLUSIVE>
+          Exclusion mode enabled or not
+          
+          [possible values: true, false]
+
 Dev testnet:
       --dev
           Start the node in dev mode

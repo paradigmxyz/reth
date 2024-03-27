@@ -14,7 +14,7 @@ pub struct DatabaseArgs {
     pub log_level: Option<LogLevel>,
     /// Open environment in exclusive/monopolistic mode. Enabling allows nfs volumes
     #[arg(long = "db.exclusive", exclusive = false)]
-    pub exclusive: Option<bool>
+    pub exclusive: Option<bool>,
 }
 
 impl DatabaseArgs {
