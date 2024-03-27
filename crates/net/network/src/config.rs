@@ -556,7 +556,9 @@ impl NetworkConfigBuilder {
                 //.add_enode_boot_nodes(boot_nodes)
                 .filter(MustNotIncludeChains::new(&[NetworkRef::ETH2]));
             if cfg!(feature = "optimism") {
-                if chain_spec.chain == Chain::optimism_mainnet() {
+                if chain_spec.chain == Chain::optimism_mainnet() ||
+                    chain_spec.chain == Chain::base_mainnet()
+                {
                     builder = builder.add_optimism_mainnet_boot_nodes()
                 } else if chain_spec.chain == Chain::from_named(NamedChain::OptimismSepolia) {
                     builder = builder.add_optimism_sepolia_boot_nodes()
