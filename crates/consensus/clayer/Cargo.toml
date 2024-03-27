@@ -64,6 +64,9 @@ thiserror.workspace = true
 config = "0.10.1"
 crossbeam-channel = "0.5"
 
+ethers-contract="2.0.14"
+ethers-core.workspace = true
+
 [dev-dependencies]
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth.workspace = true

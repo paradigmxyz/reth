@@ -112,10 +112,6 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     pub config: Option<PathBuf>,
 
-    /// The path to the configuration file to use.
-    #[arg(long, value_name = "MEMBERS_DIR", verbatim_doc_comment)]
-    pub membersdir: Option<PathBuf>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -209,7 +205,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         let Self {
             datadir,
             config,
-            membersdir,
             chain,
             metrics,
             trusted_setup_file,
@@ -230,7 +225,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         NodeCommand {
             datadir,
             config,
-            membersdir,
             chain,
             metrics,
             instance,
@@ -470,8 +464,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 .await?;
 
             // ===============================================================================
-            let membersdir = self.membersdir.clone();
-            let membersdir = membersdir.expect("Missing membersdir");
             // extract the jwt secret from the args if possible
             let consensus_db = ConsensusProvider::new(provider_factory.clone())?;
 
@@ -487,7 +479,6 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
                 clayer_consensus_messaging_agent,
                 consensus_db,
                 auth_config,
-                membersdir,
             )
             .build();
             let pipeline_events = pipeline.events();

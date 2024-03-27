@@ -1,11 +1,14 @@
 use crate::consensus::{
-    clayer_block_from_header, clayer_block_from_seal, ClayerConsensusMessagingAgent, PbftConfig,
-    PbftError, PbftMode, PbftState,
+    assemble_peer_id, clayer_block_from_header, clayer_block_from_seal,
+    ClayerConsensusMessagingAgent, PbftConfig, PbftError, PbftMode, PbftState,
 };
 
 use crate::engine_api::ApiService;
 use crate::engine_pbft::{handle_consensus_event, parse_consensus_message, ConsensusEvent};
-use crate::{consensus::ClayerConsensusEngine, timing};
+use crate::{
+    consensus::{ClayerConsensusEngine, ELECT_VOTING_ADDRESS},
+    timing,
+};
 use crate::{create_sync_api, AuthHttpConfig};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_interfaces::clayer::{ClayerConsensusEvent, ClayerConsensusMessageAgentTrait};
@@ -15,8 +18,8 @@ use reth_provider::{
     BlockReaderIdExt, CanonChainTracker, ConsensusNumberReader, ConsensusNumberWriter,
     StateProviderFactory,
 };
-
 use reth_stages::PipelineEvent;
+use secp256k1::SecretKey;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::sleep;
 use std::{
@@ -50,12 +53,11 @@ pub struct ClTask<Client, CDB> {
     consensus_agent: ClayerConsensusMessagingAgent,
     ///
     storages: Arc<CDB>,
-    pbft_config: PbftConfig,
-    pbft_state: Arc<parking_lot::RwLock<PbftState>>,
     pbft_running_state: Arc<AtomicBool>,
     startup_latest_header: SealedHeader,
     consensus_engine_task_handle: Option<std::thread::JoinHandle<()>>,
     auth_config: AuthHttpConfig,
+    secret: SecretKey,
 }
 
 impl<Client, CDB> ClTask<Client, CDB>
@@ -65,17 +67,17 @@ where
 {
     /// Creates a new instance of the task
     pub(crate) fn new(
+        secret: SecretKey,
         chain_spec: Arc<ChainSpec>,
         client: Client,
         auth_config: AuthHttpConfig,
         network: NetworkHandle,
         consensus_agent: ClayerConsensusMessagingAgent,
         storages: CDB,
-        pbft_config: PbftConfig,
-        pbft_state: PbftState,
         startup_latest_header: SealedHeader,
     ) -> Self {
         Self {
+            secret,
             chain_spec,
             client,
             insert_task: None,
@@ -86,8 +88,6 @@ where
             network,
             consensus_agent,
             storages: Arc::new(storages),
-            pbft_config,
-            pbft_state: Arc::new(parking_lot::RwLock::new(pbft_state)),
             pbft_running_state: Arc::new(AtomicBool::new(false)),
             startup_latest_header,
             consensus_engine_task_handle: None,
@@ -103,17 +103,29 @@ where
         let consensus_agent = self.consensus_agent.clone();
         let auth_config = self.auth_config.clone();
 
-        let pbft_state = self.pbft_state.clone();
-        let pbft_config = self.pbft_config.clone();
-
         let cdb = self.storages.clone();
         let client = self.client.clone();
+        let secret = self.secret.clone();
 
         let startup_latest_header = self.startup_latest_header.clone();
         let thread_join_handle = std::thread::spawn(move || {
-            let state = &mut *pbft_state.write();
-
             let api = create_sync_api(&auth_config);
+            let n = api.get_block_by_number("latest".to_string());
+            println!("{:?}", n);
+            let validator_datas = api
+                .query_validators(ELECT_VOTING_ADDRESS.to_string())
+                .expect("query validators failed");
+            let peers = assemble_peer_id(validator_datas).expect("parse peer id failed");
+
+            let mut pbft_config = PbftConfig::default();
+            pbft_config.members.clone_from(&peers);
+            let mut pbft_state = PbftState::new(
+                secret,
+                startup_latest_header.number,
+                startup_latest_header.timestamp,
+                &pbft_config,
+            );
+            let state = &mut pbft_state;
             let mut consensus_engine = ClayerConsensusEngine::new(
                 consensus_agent.clone(),
                 ApiService::new(Arc::new(api)),

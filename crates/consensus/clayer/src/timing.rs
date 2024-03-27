@@ -1,6 +1,7 @@
 use serde_derive::{Deserialize, Serialize};
 use std::{
     task::{Context, Poll},
+    thread::sleep,
     time::Duration,
 };
 
@@ -97,5 +98,32 @@ impl Timeout {
 
     pub fn is_active(&self) -> bool {
         self.state == TimeoutState::Active
+    }
+}
+
+/// With exponential backoff, repeatedly try the callback until the result is `Ok`
+pub fn retry_until_ok<T, E, F: FnMut() -> Result<T, E>>(
+    base: Duration,
+    max: Duration,
+    mut callback: F,
+) -> T {
+    let mut delay = base;
+    loop {
+        match callback() {
+            Ok(res) => return res,
+            Err(_) => {
+                sleep(delay);
+                // Only increase delay if it's less than the max
+                if delay < max {
+                    delay = delay
+                        .checked_mul(2)
+                        .unwrap_or_else(|| Duration::from_millis(std::u64::MAX));
+                    // Make sure the max isn't exceeded
+                    if delay > max {
+                        delay = max;
+                    }
+                }
+            }
+        }
     }
 }

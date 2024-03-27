@@ -214,4 +214,13 @@ impl PbftState {
     pub fn at_forced_view_change(&self) -> bool {
         self.seq_num % self.forced_view_change_interval == 0
     }
+
+    pub fn update_members(&mut self, members: &Vec<PeerId>) {
+        self.validators.update(members);
+        let f = (self.validators.len() - 1) / 3;
+        if f == 0 {
+            panic!("This network no longer contains enough nodes to be fault tolerant");
+        }
+        self.f = f as u64;
+    }
 }

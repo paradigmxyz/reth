@@ -113,6 +113,74 @@ impl HttpJsonRpcSync {
         }
     }
 
+    pub fn query_validators(&self, contract_address: String) -> Result<Vec<Vec<u8>>, ClRpcError> {
+        use ethers_contract::BaseContract;
+        let abi = match ethers_core::abi::parse_abi(&[
+            "function getValidators() public view returns (bytes32[] memory)",
+        ]) {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(ClRpcError::RequestFailed(format!("getValidators::parse_abi: {:?}", e)))
+            }
+        };
+
+        let abi = BaseContract::from(abi);
+        let method_bytes = match abi.encode("getValidators", ()) {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(ClRpcError::RequestFailed(format!(
+                    "getValidators::abi.encode: {:?}",
+                    e
+                )))
+            }
+        };
+        let method_signatue = ethers_core::utils::hex::encode_prefixed(method_bytes);
+        let data_bytes = match self.eth_call(contract_address, method_signatue) {
+            Ok(encoded_data) => {
+                let data_bytes = match ethers_core::utils::hex::decode(encoded_data) {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        return Err(ClRpcError::RequestFailed(format!(
+                            "getValidators::data.decode: {:?}",
+                            e
+                        )))
+                    }
+                };
+                data_bytes
+            }
+            Err(e) => {
+                tracing::error!(target:"consensus::cl","getValidators::rpc_request {:?}",e);
+                return Err(ClRpcError::RequestFailed(format!(
+                    "query_validator::rpc_request {:?}",
+                    e
+                )));
+            }
+        };
+        let return_data: Vec<Vec<u8>> = match abi.decode_output("getValidators", data_bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(target:"consensus::cl","getValidators::decode_output: {:?}",e);
+                return Err(ClRpcError::RequestFailed(format!(
+                    "query_validators::decode_output: {:?}",
+                    e
+                )));
+            }
+        };
+        // for item in return_data.iter() {
+        //     println!("{:?}", ethers_core::utils::hex::encode_prefixed(item));
+        // }
+        return Ok(return_data);
+    }
+
+    pub fn eth_call(
+        &self,
+        contract_address: String,
+        method_signatue: String,
+    ) -> Result<String, ClRpcError> {
+        let params = serde_json::json!([{"to": contract_address, "data": method_signatue}]);
+        self.rpc_request(ETH_CALL, params, ETH_CALL_TIMEOUT * self.execution_timeout_multiplier)
+    }
+
     pub fn block_number(&self) -> Result<U256, ClRpcError> {
         let params = json!([]);
         self.rpc_request(

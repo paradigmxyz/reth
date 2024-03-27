@@ -9,7 +9,6 @@ use crate::engine_api::{
     http::HttpJsonRpc,
 };
 pub use consensus::{ClayerConsensusEngine, ClayerConsensusMessagingAgent};
-use consensus::{PbftConfig, PbftState};
 use engine_api::http_blocking::HttpJsonRpcSync;
 pub use engine_api::AuthHttpConfig;
 
@@ -59,13 +58,12 @@ pub fn create_sync_api(config: &AuthHttpConfig) -> HttpJsonRpcSync {
 }
 
 pub struct ConsensusBuilder<Client, CDB> {
+    secret: SecretKey,
     chain_spec: Arc<ChainSpec>,
     client: Client,
     network: NetworkHandle,
     consensus_agent: ClayerConsensusMessagingAgent,
     storages: CDB,
-    config: PbftConfig,
-    state: PbftState,
     latest_header: SealedHeader,
     auth_config: AuthHttpConfig,
 }
@@ -83,7 +81,6 @@ where
         clayer_consensus_messaging_agent: ClayerConsensusMessagingAgent,
         storages: CDB,
         auth_config: AuthHttpConfig,
-        validators_dir: std::path::PathBuf,
     ) -> Self {
         let latest_header = client
             .latest_header()
@@ -91,16 +88,13 @@ where
             .flatten()
             .unwrap_or_else(|| chain_spec.sealed_genesis_header());
 
-        let config = PbftConfig::new(validators_dir);
-        let state = PbftState::new(secret, latest_header.number, latest_header.timestamp, &config);
         Self {
+            secret,
             chain_spec,
             client,
             network,
             consensus_agent: clayer_consensus_messaging_agent,
             storages,
-            config,
-            state,
             latest_header,
             auth_config,
         }
@@ -113,26 +107,23 @@ where
         Client: BlockReaderIdExt + Clone + 'static,
     {
         let Self {
+            secret,
             chain_spec,
             client,
-
             network,
             consensus_agent,
             storages,
-            config,
-            state,
             latest_header,
             auth_config,
         } = self;
         let task = ClTask::new(
+            secret,
             Arc::clone(&chain_spec),
             client,
             auth_config,
             network.clone(),
             consensus_agent,
             storages,
-            config,
-            state,
             latest_header,
         );
         task

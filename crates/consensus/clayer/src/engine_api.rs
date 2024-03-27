@@ -27,6 +27,9 @@ pub const JSONRPC_VERSION: &str = "2.0";
 
 pub const RETURN_FULL_TRANSACTION_OBJECTS: bool = false;
 
+pub const ETH_CALL: &str = "eth_call";
+pub const ETH_CALL_TIMEOUT: Duration = Duration::from_secs(2);
+
 pub const ETH_BLOCK_NUMBER: &str = "eth_blockNumber";
 pub const ETH_BLOCK_NUMBER_TIMEOUT: Duration = Duration::from_secs(1);
 pub const ETH_GET_BLOCK_BY_NUMBER: &str = "eth_getBlockByNumber";
@@ -487,5 +490,18 @@ impl ApiService {
 
         self.latest_committed_id = Some(block_id);
         return Ok(());
+    }
+
+    pub fn query_validators(
+        &mut self,
+        contract_address: String,
+    ) -> Result<Vec<Vec<u8>>, ApiServiceError> {
+        let validator_datas = match self.api.query_validators(contract_address) {
+            Ok(x) => x,
+            Err(e) => {
+                return Err(ApiServiceError::ApiError(format!("query_validators: {:?}", e)));
+            }
+        };
+        Ok(validator_datas)
     }
 }

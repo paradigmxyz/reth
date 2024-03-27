@@ -36,8 +36,10 @@ use tracing::*;
 
 use crate::{
     engine_api::{ApiService, ExecutionPayloadWrapperV2},
-    timing::Timeout,
+    timing::{retry_until_ok, Timeout},
 };
+
+pub const ELECT_VOTING_ADDRESS: &str = "0x0000000000000000000000000000000000001000";
 
 pub struct ClayerConsensusMessagingAgent {
     pub inner: Arc<parking_lot::RwLock<ClayerConsensusMessagingAgentInner>>,
@@ -1036,9 +1038,18 @@ where
         let latest_number = if let Some(latest_header) = latest_header {
             latest_header.header.number
         } else {
-            return Err(PbftError::InternalError(format!(
-                "Failed to get latest header with catch-up"
-            )));
+            // Commit the block, stop the idle timeout, and skip straight to Finishing
+            let payload = self.service.commit_block(seal.block_id.clone()).map_err(|err| {
+                PbftError::ServiceError(
+                    format!(
+                        "Failed to commit block with catch-up {:?} / {:?}",
+                        state.seq_num,
+                        hex::encode(&seal.block_id)
+                    ),
+                    err.to_string(),
+                )
+            })?;
+            payload.execution_payload.payload_inner.timestamp
         };
 
         let header = self.client.header_by_id(BlockId::from(seal.block_id.clone())).ok().flatten();
@@ -1227,7 +1238,18 @@ where
     fn update_membership(&mut self, block_id: B256, state: &mut PbftState) {
         trace!(target: "consensus::cl","Updating membership for block {}",block_id);
 
-        let on_chain_members = state.validators.member_ids().clone();
+        // let on_chain_members = state.validators.member_ids().clone();
+
+        let on_chain_members =
+            retry_until_ok(state.exponential_retry_base, state.exponential_retry_max, || {
+                self.service.query_validators(ELECT_VOTING_ADDRESS.to_string())
+            });
+
+        let on_chain_members: Vec<PeerId> =
+            assemble_peer_id(on_chain_members).unwrap_or_else(|err| {
+                error!(target: "consensus::cl","Failed to parse members on-chain: {}", err);
+                state.validators.member_ids().clone()
+            });
 
         if !state.validators.is_same(&on_chain_members) {
             info!(target: "consensus::cl","Updating membership: {:?}", on_chain_members);
@@ -1712,7 +1734,13 @@ where
         // network at the time this block was voted on.
         trace!(target: "consensus::cl","Getting members for block {} to verify seal",previous_id);
         // get previous_id setting
-        let members = state.validators.member_ids();
+        // let members = state.validators.member_ids();
+
+        let on_chain_validators =
+            retry_until_ok(state.exponential_retry_base, state.exponential_retry_max, || {
+                self.service.query_validators(ELECT_VOTING_ADDRESS.to_string())
+            });
+        let members: Vec<PeerId> = assemble_peer_id(on_chain_validators)?;
 
         // Verify that the seal's signer is a PBFT member
         if !members.contains(&seal.info.signer_id) {
@@ -2265,6 +2293,36 @@ pub fn clayer_block_from_seal(header: &SealedHeader, seal: PbftSeal) -> ClayerBl
     let message_bytes = reth_primitives::Bytes::copy_from_slice(msg_out.as_slice());
 
     ClayerBlock { info, block, seal_bytes: message_bytes, payload_id: B64::ZERO }
+}
+
+pub fn assemble_peer_id(datas: Vec<Vec<u8>>) -> Result<Vec<PeerId>, PbftError> {
+    if datas.is_empty() {
+        error!(target: "consensus::cl","The number of elect contract returns must be not 0");
+        return Err(PbftError::FaultyPrimary(format!(
+            "The number of elect contract returns must be not 0"
+        )));
+    }
+    if datas.len() % 2 != 0 {
+        error!(target: "consensus::cl","The number of elect contract returns must be even");
+        return Err(PbftError::FaultyPrimary(format!(
+            "The number of elect contract returns must be even"
+        )));
+        // panic!("The number of elect contract returns must be even");
+    }
+    let mut peers = Vec::new();
+    let mut bytes = Vec::new();
+    for (i, item) in datas.iter().enumerate() {
+        if i % 2 == 0 {
+            bytes.extend_from_slice(item);
+        } else {
+            bytes.extend_from_slice(item);
+            let id = PeerId::from_slice(&bytes);
+            // println!("{}", id);
+            peers.push(id);
+            bytes.clear();
+        }
+    }
+    Ok(peers)
 }
 
 #[cfg(test)]
