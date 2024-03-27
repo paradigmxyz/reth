@@ -223,7 +223,7 @@ mod tests {
             .build(&key)
             .unwrap();
 
-        let node_record_with_fork_id = NodeRecord::try_from(enr.clone()).unwrap();
+        let node_record = NodeRecord::try_from(enr.clone()).unwrap();
 
         assert_eq!(
             NodeRecord {
@@ -232,7 +232,7 @@ mod tests {
                 udp_port: UDP_PORT,
                 id: pk_to_id(&enr.public_key())
             },
-            node_record_with_fork_id
+            node_record
         )
     }
 }
