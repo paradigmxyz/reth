@@ -1,9 +1,4 @@
-use alloy_rlp::Decodable;
-use enr::Enr;
-pub use reth_rpc_types::{pk_to_id, NodeRecord, NodeRecordParseError};
-use thiserror::Error;
-
-use crate::ForkId;
+pub use reth_rpc_types::NodeRecord;
 
 // <https://github.com/ledgerwatch/erigon/blob/610e648dc43ec8cd6563313e28f06f534a9091b3/params/bootnodes.go>
 
@@ -71,31 +66,6 @@ pub fn parse_nodes(nodes: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<Node
     nodes.into_iter().map(|s| s.as_ref().parse().unwrap()).collect()
 }
 
-/// Error thrown when network can't be identified on a node record.
-#[non_exhaustive]
-#[derive(Debug, Error)]
-pub enum NetworkIdError {
-    /// Missing key used to identify an execution layer enr on Ethereum network.
-    #[error("fork id missing on enr, 'eth' key missing")]
-    EthForkIdMissing,
-    /// Failed to decode fork ID rlp value.
-    #[error("failed to decode fork id, 'eth': {0:?}")]
-    ForkIdDecodeError(Vec<u8>),
-}
-
-/// Tries to read the [`ForkId`] from given [`Enr`].
-pub fn get_fork_id(enr: &Enr<secp256k1::SecretKey>) -> Result<ForkId, NetworkIdError> {
-    let Some(mut maybe_fork_id) = enr.get(b"eth") else {
-        return Err(NetworkIdError::EthForkIdMissing)
-    };
-
-    let Ok(fork_id) = ForkId::decode(&mut maybe_fork_id) else {
-        return Err(NetworkIdError::ForkIdDecodeError(maybe_fork_id.to_vec()))
-    };
-
-    Ok(fork_id)
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -103,14 +73,10 @@ mod tests {
         str::FromStr,
     };
 
-    use crate::MAINNET;
-
     use super::*;
-    use alloy_rlp::Encodable;
+    use alloy_rlp::Decodable;
     use rand::{thread_rng, Rng, RngCore};
-    use reth_ethereum_forks::Hardfork;
     use reth_rpc_types::PeerId;
-    use secp256k1::SecretKey;
 
     #[test]
     fn test_mapped_ipv6() {
@@ -230,38 +196,5 @@ mod tests {
             udp_port: 30301u16,
             id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
         })
-    }
-
-    #[test]
-    fn conversion_to_node_record_from_enr() {
-        const IP: &str = "::";
-        const TCP_PORT: u16 = 30303;
-        const UDP_PORT: u16 = 9000;
-
-        let mut rng = thread_rng();
-        let key = SecretKey::new(&mut rng);
-
-        let mut buf = Vec::new();
-        let fork_id = MAINNET.hardfork_fork_id(Hardfork::Frontier);
-        fork_id.unwrap().encode(&mut buf);
-
-        let enr = Enr::builder()
-            .ip6(IP.parse().unwrap())
-            .udp6(UDP_PORT)
-            .tcp6(TCP_PORT)
-            .build(&key)
-            .unwrap();
-
-        let node_record = NodeRecord::try_from(&enr).unwrap();
-
-        assert_eq!(
-            NodeRecord {
-                address: IP.parse().unwrap(),
-                tcp_port: TCP_PORT,
-                udp_port: UDP_PORT,
-                id: pk_to_id(&enr.public_key())
-            },
-            node_record
-        )
     }
 }
