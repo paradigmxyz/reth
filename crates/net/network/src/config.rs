@@ -557,6 +557,8 @@ impl NetworkConfigBuilder {
             if cfg!(feature = "optimism") {
                 if chain_spec.chain == Chain::optimism_mainnet() {
                     builder = builder.add_optimism_mainnet_boot_nodes()
+                } else if chain_spec.chain == Chain::optimism_sepolia() {
+                    builder = builder.add_optimism_sepolia_boot_nodes()
                 }
                 builder.fork(NetworkRef::OPSTACK, status.forkid)
             } else {
