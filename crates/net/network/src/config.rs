@@ -8,6 +8,7 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
+use discv5::ListenConfig;
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::{IdentifyForkIdKVPair, MustNotIncludeChains, NetworkRef};
 use reth_dns_discovery::DnsDiscoveryConfig;
@@ -370,7 +371,6 @@ impl NetworkConfigBuilder {
     }
 
     /// Allows discv5 discovery.
-
     pub fn discovery_v5(mut self) -> Self {
         self.enable_discovery_v5 = true;
         self
@@ -546,6 +546,12 @@ impl NetworkConfigBuilder {
         let discovery_v5_config = enable_discovery_v5.then_some({
             let mut builder = reth_discv5::Config::builder()
                 .tcp_port(listener_addr.port())
+                .discv5_config(
+                    discv5::ConfigBuilder::new(ListenConfig::from(
+                        "0.0.0.0:33333".parse::<SocketAddr>().unwrap(),
+                    ))
+                    .build(),
+                )
                 //.add_enode_boot_nodes(boot_nodes)
                 .filter(MustNotIncludeChains::new(&[NetworkRef::ETH2]));
             if cfg!(feature = "optimism") {

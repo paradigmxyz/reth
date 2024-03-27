@@ -10,7 +10,7 @@ use crate::{
     utils::get_single_header,
 };
 use backon::{ConstantBuilder, Retryable};
-use clap::{Parser, Subcommand};
+use clap::{value_parser, Parser, Subcommand};
 use reth_config::Config;
 use reth_db::create_db;
 use reth_discv4::NatResolver;
@@ -73,6 +73,19 @@ pub struct Command {
     #[arg(long, default_value = "any")]
     nat: NatResolver,
 
+    /// Add a new instance of a node.
+    ///
+    /// Configures the ports of the node to avoid conflicts with the defaults.
+    /// This is useful for running multiple nodes on the same machine.
+    ///
+    /// Max number of instances is 200. It is chosen in a way so that it's not possible to have
+    /// port numbers that conflict with each other.
+    ///
+    /// Changes to the following port numbers:
+    /// - DISCOVERY_PORT: default + `instance` - 1
+    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
+    instance: u16,
+
     #[command(flatten)]
     db: DatabaseArgs,
 
@@ -122,8 +135,10 @@ impl Command {
         let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
         let p2p_secret_key = get_secret_key(&secret_key_path)?;
 
-        let mut network_config_builder =
-            config.network_config(self.nat, None, p2p_secret_key).chain_spec(self.chain.clone());
+        let mut network_config_builder = config
+            .network_config(self.nat, None, p2p_secret_key)
+            .chain_spec(self.chain.clone())
+            .discovery_v5();
 
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 
