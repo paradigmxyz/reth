@@ -147,7 +147,7 @@ impl PruneProgress {
     }
 
     /// Returns `true` if prune run is finished.
-    pub fn is_finished(&self) -> bool {
+    pub const fn is_finished(&self) -> bool {
         matches!(self, Self::Finished)
     }
 }
