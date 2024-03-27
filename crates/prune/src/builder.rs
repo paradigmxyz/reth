@@ -58,7 +58,10 @@ impl PrunerBuilder {
         self
     }
 
-    /// Sets the timeout for pruner, per job.
+    /// Sets the timeout for pruner, per run.
+    ///
+    /// CAUTION: Account and Storage History prune segments treat this timeout as a soft limit,
+    /// meaning they can go beyond it.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
