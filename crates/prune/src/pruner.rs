@@ -127,15 +127,7 @@ impl<DB: Database> Pruner<DB> {
         self.metrics.duration_seconds.record(elapsed);
 
         let message = match progress {
-            PruneProgress::HasMoreData(PruneInterruptReason::Timeout) => {
-                "Pruner interrupted by timeout"
-            }
-            PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached) => {
-                "Pruner interrupted by limit on deleted entries"
-            }
-            PruneProgress::HasMoreData(PruneInterruptReason::Unknown) => {
-                "Pruner interrupted by unknown reason"
-            }
+            PruneProgress::HasMoreData(_) => "Pruner interrupted and has more data to prune",
             PruneProgress::Finished => "Pruner finished",
         };
 
