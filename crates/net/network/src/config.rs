@@ -570,7 +570,7 @@ impl NetworkConfigBuilder {
             secret_key,
             boot_nodes,
             dns_discovery_config,
-            discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
+            discovery_v4_config: None,
             discovery_v5_config,
             discovery_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
             listener_addr,
