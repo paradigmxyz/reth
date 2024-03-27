@@ -12,7 +12,8 @@ pub struct DatabaseArgs {
     /// Database logging level. Levels higher than "notice" require a debug build.
     #[arg(long = "db.log-level", value_enum)]
     pub log_level: Option<LogLevel>,
-    /// Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume.
+    /// Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an
+    /// NFS volume.
     #[arg(long = "db.exclusive", exclusive = false)]
     pub exclusive: Option<bool>,
 }
