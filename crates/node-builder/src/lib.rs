@@ -37,3 +37,5 @@ pub use reth_node_core::node_config::NodeConfig;
 
 // re-export API types for convenience
 pub use reth_node_api::*;
+
+use aquamarine as _;
