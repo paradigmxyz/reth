@@ -523,14 +523,14 @@ where
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
 
-        let ctx = BuilderContext {
+        let ctx = BuilderContext::new(
             head,
-            provider: blockchain_db,
+            blockchain_db,
             executor,
             data_dir,
             config,
             reth_config,
-        };
+        );
 
         debug!(target: "reth::cli", "creating components");
         let NodeComponents { transaction_pool, network, payload_builder } =
@@ -1083,6 +1083,25 @@ pub struct BuilderContext<Node: FullNodeTypes> {
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
+    /// Create a new instance of [BuilderContext]
+    pub fn new(
+        head: Head,
+        provider: Node::Provider,
+        executor: TaskExecutor,
+        data_dir: ChainPath<DataDirPath>,
+        config: NodeConfig,
+        reth_config: reth_config::Config,
+    ) -> Self {
+        Self {
+            head,
+            provider,
+            executor,
+            data_dir,
+            config,
+            reth_config,
+        }
+    }
+
     /// Returns the configured provider to interact with the blockchain.
     pub fn provider(&self) -> &Node::Provider {
         &self.provider
