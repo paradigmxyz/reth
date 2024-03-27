@@ -6571,6 +6571,7 @@ dependencies = [
  "alloy-rpc-types",
  "arbitrary",
  "bytes",
+ "enr",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "jsonrpsee-types",
