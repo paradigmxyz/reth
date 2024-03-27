@@ -71,6 +71,19 @@ pub fn parse_nodes(nodes: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<Node
     nodes.into_iter().map(|s| s.as_ref().parse().unwrap()).collect()
 }
 
+/// Tries to read the [`ForkId`] from given [`Enr`].
+pub fn get_fork_id(enr: &Enr<secp256k1::SecretKey>) -> Result<ForkId, NodeRecordParseError> {
+    let Some(mut maybe_fork_id) = enr.get(b"eth") else {
+        return Err(NodeRecordParseError::EthForkIdMissing)
+    };
+
+    let Ok(fork_id) = ForkId::decode(&mut maybe_fork_id) else {
+        return Err(NodeRecordParseError::ForkIdDecodeError(maybe_fork_id.to_vec()))
+    };
+
+    Ok(fork_id)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
