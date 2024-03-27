@@ -51,8 +51,7 @@ impl PruneTimeLimit {
 
 impl PruneLimiter {
     /// Sets the limit on the number of deleted entries (rows in the database).
-    /// If the limit was already set, it will be updated and the number of already deleted entries
-    /// will not be reset.
+    /// If the limit was already set, it will be overwritten.
     pub fn set_deleted_entries_limit(mut self, limit: usize) -> Self {
         if let Some(deleted_entries_limit) = self.deleted_entries_limit.as_mut() {
             deleted_entries_limit.limit = limit;
