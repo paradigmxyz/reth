@@ -22,6 +22,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     // if on a tag: v0.2.0-beta.3
     let not_on_tag = env::var("VERGEN_GIT_DESCRIBE")?.ends_with(&format!("-g{sha}"));
     let is_dev = is_dirty || not_on_tag;
-    println!("cargo:rustc-env=RETH_DEV_STR={}", if is_dev { "-dev" } else { "" });
+    println!("cargo:rustc-env=RETH_VERSION_SUFFIX={}", if is_dev { "-dev" } else { "" });
     Ok(())
 }
