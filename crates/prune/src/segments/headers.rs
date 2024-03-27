@@ -141,7 +141,6 @@ where
         let mut pruned_block_headers = None;
         let mut pruned_block_td = None;
         let mut pruned_block_canonical = None;
-        // todo: guarantee skip filter and delete callback are same for all header table types
 
         if let Err(err) = self.provider.prune_table_with_range_step(
             &mut self.headers_walker,
