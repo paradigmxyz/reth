@@ -156,7 +156,8 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Prunes the segments that the [Pruner] was initialized with, and the segments that needs to
-    /// be pruned according to the highest static_files.
+    /// be pruned according to the highest static_files. Segments are parts of the database that represent one or 
+    /// more tables.
     ///
     /// Returns [PrunerStats], total number of entries pruned, and [PruneProgress].
     fn prune_segments(
