@@ -94,8 +94,7 @@ mod tests {
     use crate::MAINNET;
 
     use super::*;
-    use alloy_rlp::{Decodable, Encodable};
-    use enr::Enr;
+    use alloy_rlp::Encodable;
     use rand::{thread_rng, Rng, RngCore};
     use reth_ethereum_forks::Hardfork;
     use reth_rpc_types::PeerId;
