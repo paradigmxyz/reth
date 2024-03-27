@@ -77,7 +77,7 @@ fn fill(
 
     // let chain_id = signed_tx.chain_id().map(U64::from);
     let chain_id = signed_tx.chain_id();
-    let mut blob_versioned_hashes = Vec::new();
+    let mut blob_versioned_hashes = None;
 
     #[allow(unreachable_patterns)]
     let access_list = match &mut signed_tx.transaction {
@@ -104,7 +104,7 @@ fn fill(
         )),
         PrimitiveTransaction::Eip4844(tx) => {
             // extract the blob hashes from the transaction
-            blob_versioned_hashes = std::mem::take(&mut tx.blob_versioned_hashes);
+            blob_versioned_hashes = Some(std::mem::take(&mut tx.blob_versioned_hashes));
 
             Some(AccessList(
                 tx.access_list
@@ -148,7 +148,7 @@ fn fill(
         transaction_index,
         // EIP-4844 fields
         max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas().map(U256::from),
-        blob_versioned_hashes: Some(blob_versioned_hashes),
+        blob_versioned_hashes,
         // Optimism fields
         #[cfg(feature = "optimism")]
         other: OptimismTransactionFields {
