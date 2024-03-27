@@ -692,7 +692,7 @@ where
             let nonce =
                 self.get_transaction_count(from, Some(BlockId::Number(BlockNumberOrTag::Pending)))?;
             // note: `.to()` can't panic because the nonce is constructed from a `u64`
-            request.nonce = Some(U64::from(nonce.to::<u64>()));
+            request.nonce = Some(nonce.to::<u64>());
         }
 
         let chain_id = self.chain_id();
@@ -731,7 +731,7 @@ where
             // gas price required
             (Some(_), None, None, None, None, None) => {
                 Some(TypedTransactionRequest::Legacy(LegacyTransactionRequest {
-                    nonce: nonce.unwrap_or_default(),
+                    nonce: U64::from(nonce.unwrap_or_default()),
                     gas_price: gas_price.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
                     value: value.unwrap_or_default(),
@@ -747,7 +747,7 @@ where
             // if only accesslist is set, and no eip1599 fees
             (_, None, Some(access_list), None, None, None) => {
                 Some(TypedTransactionRequest::EIP2930(EIP2930TransactionRequest {
-                    nonce: nonce.unwrap_or_default(),
+                    nonce: U64::from(nonce.unwrap_or_default()),
                     gas_price: gas_price.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
                     value: value.unwrap_or_default(),
@@ -767,7 +767,7 @@ where
             (None, _, _, None, None, None) => {
                 // Empty fields fall back to the canonical transaction schema.
                 Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
-                    nonce: nonce.unwrap_or_default(),
+                    nonce: U64::from(nonce.unwrap_or_default()),
                     max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
                     max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
@@ -794,7 +794,7 @@ where
                 // As per the EIP, we follow the same semantics as EIP-1559.
                 Some(TypedTransactionRequest::EIP4844(EIP4844TransactionRequest {
                     chain_id: 0,
-                    nonce: nonce.unwrap_or_default(),
+                    nonce: U64::from(nonce.unwrap_or_default()),
                     max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
                     max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
                     gas_limit: gas.unwrap_or_default(),
@@ -1519,7 +1519,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 
     #[allow(clippy::needless_update)]
     let mut res_receipt = TransactionReceipt {
-        transaction_hash: Some(meta.tx_hash),
+        transaction_hash: meta.tx_hash,
         transaction_index: U64::from(meta.index),
         block_hash: Some(meta.block_hash),
         block_number: Some(U256::from(meta.block_number)),

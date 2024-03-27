@@ -246,21 +246,21 @@ reth-trie-parallel = { path = "crates/trie-parallel" }
 # revm
 revm = { version = "7.2.0", features = ["std", "secp256k1"], default-features = false }
 revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "b3082f3" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "0ad0338" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
-alloy-primitives = "0.6"
-alloy-dyn-abi = "0.6"
-alloy-sol-types = "0.6"
-alloy-rlp = "0.3"
+alloy-primitives = "0.6.4"
+alloy-dyn-abi = "0.6.4"
+alloy-sol-types = "0.6.4"
+alloy-rlp = "0.3.4"
 alloy-trie = "0.3"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
-alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
 
 # TODO: Remove
 ethers-core = { version = "2.0.14", default-features = false }
