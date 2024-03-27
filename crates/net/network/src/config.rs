@@ -15,7 +15,7 @@ use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
-    mainnet_nodes, sepolia_nodes, Chain, ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET,
+    mainnet_nodes, sepolia_nodes, Chain, ChainSpec, ForkFilter, Head, NamedChain, NodeRecord, PeerId, MAINNET
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -557,7 +557,7 @@ impl NetworkConfigBuilder {
             if cfg!(feature = "optimism") {
                 if chain_spec.chain == Chain::optimism_mainnet() {
                     builder = builder.add_optimism_mainnet_boot_nodes()
-                } else if chain_spec.chain == Chain::optimism_sepolia() {
+                } else if chain_spec.chain == Chain::from_named(NamedChain::OptimismSepolia) {
                     builder = builder.add_optimism_sepolia_boot_nodes()
                 }
                 builder.fork(NetworkRef::OPSTACK, status.forkid)
