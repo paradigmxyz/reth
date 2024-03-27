@@ -6100,6 +6100,7 @@ dependencies = [
 name = "reth-node-builder"
 version = "0.2.0-beta.4"
 dependencies = [
+ "aquamarine",
  "confy",
  "eyre",
  "fdlimit",
