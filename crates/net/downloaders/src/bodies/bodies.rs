@@ -263,6 +263,13 @@ where
         }
         None
     }
+
+    /// Returns true if a new request can be submitted
+    fn can_submit_new_request(&self) -> bool {
+        self.queued_bodies.len() < 2 * self.stream_batch_size &&
+            self.has_buffer_capacity() &&
+            self.in_progress_queue.len() < self.concurrent_request_limit()
+    }
 }
 
 impl<B, Provider> BodiesDownloader<B, Provider>
@@ -370,10 +377,7 @@ where
             // Loop exit condition
             let mut new_request_submitted = false;
             // Submit new requests
-            let concurrent_requests_limit = this.concurrent_request_limit();
-            'inner: while this.in_progress_queue.len() < concurrent_requests_limit &&
-                this.has_buffer_capacity()
-            {
+            'inner: while this.can_submit_new_request() {
                 match this.next_headers_request() {
                     Ok(Some(request)) => {
                         this.metrics.in_flight_requests.increment(1.);
