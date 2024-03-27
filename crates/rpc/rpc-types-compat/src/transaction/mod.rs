@@ -7,11 +7,11 @@ use alloy_rpc_types::{
 };
 use reth_primitives::{
     BlockNumber, Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
-    TransactionSignedEcRecovered, TxType, B256, U128, U256, U64,
+    TransactionSignedEcRecovered, TxType, B256, U128, U256, U8,
 };
 #[cfg(feature = "optimism")]
 use reth_rpc_types::optimism::OptimismTransactionFields;
-use reth_rpc_types::{AccessListItem, Transaction};
+use reth_rpc_types::{AccessList, AccessListItem, Transaction};
 use signature::from_primitive_signature;
 pub use typed::*;
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
@@ -75,13 +75,14 @@ fn fill(
         }
     };
 
-    let chain_id = signed_tx.chain_id().map(U64::from);
+    // let chain_id = signed_tx.chain_id().map(U64::from);
+    let chain_id = signed_tx.chain_id();
     let mut blob_versioned_hashes = Vec::new();
 
     #[allow(unreachable_patterns)]
     let access_list = match &mut signed_tx.transaction {
         PrimitiveTransaction::Legacy(_) => None,
-        PrimitiveTransaction::Eip2930(tx) => Some(
+        PrimitiveTransaction::Eip2930(tx) => Some(AccessList(
             tx.access_list
                 .0
                 .iter()
@@ -90,8 +91,8 @@ fn fill(
                     storage_keys: item.storage_keys.iter().map(|key| key.0.into()).collect(),
                 })
                 .collect(),
-        ),
-        PrimitiveTransaction::Eip1559(tx) => Some(
+        )),
+        PrimitiveTransaction::Eip1559(tx) => Some(AccessList(
             tx.access_list
                 .0
                 .iter()
@@ -100,12 +101,12 @@ fn fill(
                     storage_keys: item.storage_keys.iter().map(|key| key.0.into()).collect(),
                 })
                 .collect(),
-        ),
+        )),
         PrimitiveTransaction::Eip4844(tx) => {
             // extract the blob hashes from the transaction
             blob_versioned_hashes = std::mem::take(&mut tx.blob_versioned_hashes);
 
-            Some(
+            Some(AccessList(
                 tx.access_list
                     .0
                     .iter()
@@ -114,7 +115,7 @@ fn fill(
                         storage_keys: item.storage_keys.iter().map(|key| key.0.into()).collect(),
                     })
                     .collect(),
-            )
+            ))
         }
         _ => {
             // OP deposit tx
@@ -127,27 +128,27 @@ fn fill(
 
     Transaction {
         hash: signed_tx.hash(),
-        nonce: U64::from(signed_tx.nonce()),
+        nonce: signed_tx.nonce(),
         from: signer,
         to,
         value: signed_tx.value(),
-        gas_price,
-        max_fee_per_gas,
-        max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas().map(U128::from),
+        gas_price: gas_price.map(U256::from),
+        max_fee_per_gas: max_fee_per_gas.map(U256::from),
+        max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas().map(U256::from),
         signature: Some(signature),
         gas: U256::from(signed_tx.gas_limit()),
         input: signed_tx.input().clone(),
         chain_id,
         access_list,
-        transaction_type: Some(U64::from(signed_tx.tx_type() as u8)),
+        transaction_type: Some(U8::from(signed_tx.tx_type() as u8)),
 
         // These fields are set to None because they are not stored as part of the transaction
         block_hash,
         block_number: block_number.map(U256::from),
         transaction_index,
         // EIP-4844 fields
-        max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas().map(U128::from),
-        blob_versioned_hashes,
+        max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas().map(U256::from),
+        blob_versioned_hashes: Some(blob_versioned_hashes),
         // Optimism fields
         #[cfg(feature = "optimism")]
         other: OptimismTransactionFields {
@@ -208,7 +209,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         gas: Some(U256::from(gas)),
         value: Some(value),
         input: TransactionInput::new(input),
-        nonce: Some(U64::from(nonce)),
+        nonce: Some(nonce),
         chain_id,
         access_list,
         max_fee_per_blob_gas: max_fee_per_blob_gas.map(U256::from),

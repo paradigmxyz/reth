@@ -7,7 +7,7 @@ use reth_primitives::{
 };
 use reth_rpc_types::{
     engine::{OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId},
-    withdrawal::Withdrawal,
+    Withdrawal,
 };
 
 /// Represents a built payload type that contains a built [SealedBlock] and can be converted into
