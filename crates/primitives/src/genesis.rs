@@ -15,7 +15,7 @@ mod allocator {
         rand::{thread_rng, RngCore},
         KeyPair, Secp256k1,
     };
-    use std::collections::{hash_map::Entry, HashMap};
+    use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
     /// This helps create a custom genesis alloc by making it easy to add funded accounts with known
     /// signers to the genesis block.
@@ -109,7 +109,7 @@ mod allocator {
         pub fn new_funded_account_with_storage(
             &mut self,
             balance: U256,
-            storage: HashMap<B256, B256>,
+            storage: BTreeMap<B256, B256>,
         ) -> (KeyPair, Address) {
             let secp = Secp256k1::new();
             let pair = KeyPair::new(&secp, &mut self.rng);
@@ -129,7 +129,7 @@ mod allocator {
         pub fn new_account_with_code_and_storage(
             &mut self,
             code: Bytes,
-            storage: HashMap<B256, B256>,
+            storage: BTreeMap<B256, B256>,
         ) -> (KeyPair, Address) {
             let secp = Secp256k1::new();
             let pair = KeyPair::new(&secp, &mut self.rng);
