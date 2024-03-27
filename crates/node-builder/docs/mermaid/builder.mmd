@@ -12,7 +12,7 @@ graph TD;
         database("database init")-->tree("blockchain tree init")
         tree--BuilderContext-->components{"build_components"}
         subgraph components
-            componentsbuilder--"first creates"-->Pool
+            ComponentsBuilder--"first creates"-->Pool
             Pool--"then creates"-->PayloadService
             Pool--"then creates"-->Network
         end
