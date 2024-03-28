@@ -3,6 +3,7 @@ use criterion::{
     async_executor::FuturesExecutor, criterion_group, criterion_main, measurement::WallTime,
     BenchmarkGroup, Criterion,
 };
+#[cfg(not(target_os = "windows"))]
 use pprof::criterion::{Output, PProfProfiler};
 use reth_config::config::EtlConfig;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
@@ -18,11 +19,20 @@ use std::{ops::RangeInclusive, sync::Arc};
 mod setup;
 use setup::StageRange;
 
+#[cfg(not(target_os = "windows"))]
 criterion_group! {
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
     targets = transaction_lookup, account_hashing, senders, merkle
 }
+
+#[cfg(target_os = "windows")]
+criterion_group! {
+    name = benches;
+    config = Criterion::default();
+    targets = transaction_lookup, account_hashing, senders, merkle
+}
+
 criterion_main!(benches);
 
 const DEFAULT_NUM_BLOCKS: u64 = 10_000;
