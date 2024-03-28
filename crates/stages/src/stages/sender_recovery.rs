@@ -234,7 +234,7 @@ fn recover_sender(
     // large `s` values, so using [Signature::recover_signer] here would not be
     // backwards-compatible.
     let sender = tx
-        .recover_signer_unchecked_with_buffer(rlp_buf)
+        .encode_and_recover_unchecked(rlp_buf)
         .ok_or(SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id }))?;
 
     Ok((tx_id, sender))

@@ -875,7 +875,7 @@ impl TransactionSignedNoHash {
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
     /// [Signature::recover_signer_unchecked].
-    pub fn recover_signer_unchecked_with_buffer(&self, buffer: &mut Vec<u8>) -> Option<Address> {
+    pub fn encode_and_recover_unchecked(&self, buffer: &mut Vec<u8>) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
