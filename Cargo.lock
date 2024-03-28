@@ -6749,6 +6749,7 @@ dependencies = [
  "metrics",
  "once_cell",
  "proptest",
+ "rayon",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",

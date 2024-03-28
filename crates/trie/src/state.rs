@@ -4,6 +4,7 @@ use crate::{
     updates::TrieUpdates,
     StateRoot,
 };
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_db::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
@@ -39,17 +40,27 @@ impl HashedPostState {
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
         let mut this = Self::default();
-        for (address, account) in state {
-            let hashed_address = keccak256(address);
-            this.accounts.insert(hashed_address, account.info.clone().map(into_reth_acc));
 
-            let hashed_storage = HashedStorage::from_iter(
-                account.status.was_destroyed(),
-                account.storage.iter().map(|(key, value)| {
-                    (keccak256(B256::new(key.to_be_bytes())), value.present_value)
-                }),
-            );
-            this.storages.insert(hashed_address, hashed_storage);
+        let changes = state
+            .into_iter()
+            .collect::<Vec<(&'a Address, &'a BundleAccount)>>()
+            .into_par_iter()
+            .map(|(address, account)| {
+                let hashed_address = keccak256(address);
+                let hashed_account = account.info.clone().map(into_reth_acc);
+                let hashed_storage = HashedStorage::from_iter(
+                    account.status.was_destroyed(),
+                    account.storage.iter().map(|(key, value)| {
+                        (keccak256(B256::new(key.to_be_bytes())), value.present_value)
+                    }),
+                );
+                (hashed_address, (hashed_account, hashed_storage))
+            })
+            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
+
+        for (address, (account, storage)) in changes {
+            this.accounts.insert(address, account);
+            this.storages.insert(address, storage);
         }
         this
     }
@@ -325,6 +336,12 @@ pub struct HashedStorageSorted {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_db::{database::Database, test_utils::create_test_rw_db};
+    use revm::{
+        db::states::BundleState,
+        primitives::{AccountInfo, HashMap},
+    };
+    use std::str::FromStr;
 
     #[test]
     fn hashed_state_wiped_extension() {
@@ -398,5 +415,36 @@ mod tests {
             Some(&updated_slot_value)
         );
         assert_eq!(account_storage.map(|st| st.wiped), Some(true));
+    }
+
+    #[test]
+    fn from_bundle_state_with_rayon() {
+        let address1 = Address::with_last_byte(1);
+        let address2 = Address::with_last_byte(2);
+        let slot1 = U256::from(1015);
+        let slot2 = U256::from(2015);
+
+        let account1 = AccountInfo { nonce: 1, ..Default::default() };
+        let account2 = AccountInfo { nonce: 2, ..Default::default() };
+
+        let bundle_state = BundleState::builder(2..=2)
+            .state_present_account_info(address1, account1)
+            .state_present_account_info(address2, account2)
+            .state_storage(address1, HashMap::from([(slot1, (U256::ZERO, U256::from(10)))]))
+            .state_storage(address2, HashMap::from([(slot2, (U256::ZERO, U256::from(20)))]))
+            .build();
+        assert_eq!(bundle_state.reverts.len(), 1);
+
+        let post_state = HashedPostState::from_bundle_state(&bundle_state.state);
+        assert_eq!(post_state.accounts.len(), 2);
+        assert_eq!(post_state.storages.len(), 2);
+
+        let db = create_test_rw_db();
+        let tx = db.tx().expect("failed to create transaction");
+        assert_eq!(
+            post_state.state_root(&tx).unwrap(),
+            B256::from_str("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
+                .unwrap()
+        );
     }
 }
