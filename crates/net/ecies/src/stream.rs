@@ -175,7 +175,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::pk2id;
+    use reth_primitives::pk2id;
     use secp256k1::SECP256K1;
     use tokio::net::{TcpListener, TcpStream};
 

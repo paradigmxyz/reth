@@ -6,7 +6,7 @@ use crate::{
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
-use reth_primitives::{hex, ForkHash, ForkId, NodeRecord, B256};
+use reth_primitives::{hex, pk2id, ForkHash, ForkId, NodeRecord, B256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},
@@ -49,7 +49,7 @@ impl MockDiscovery {
         let mut rng = thread_rng();
         let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
         let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-        let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+        let id = pk2id(&pk);
         let socket = Arc::new(UdpSocket::bind(socket).await?);
         let local_addr = socket.local_addr()?;
         let local_enr = NodeRecord {
@@ -241,7 +241,7 @@ pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4S
     let mut rng = thread_rng();
     let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
     let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-    let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+    let id = pk2id(&pk);
     let local_enr =
         NodeRecord { address: socket.ip(), tcp_port: socket.port(), udp_port: socket.port(), id };
     Discv4::bind(socket, local_enr, secret_key, config).await.unwrap()

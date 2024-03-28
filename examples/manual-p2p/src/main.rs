@@ -11,13 +11,13 @@ use std::time::Duration;
 use futures::StreamExt;
 use once_cell::sync::Lazy;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
-use reth_ecies::{stream::ECIESStream, util::pk2id};
+use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     EthMessage, EthStream, HelloMessage, P2PStream, Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_network::config::rng_secret_key;
 use reth_primitives::{
-    mainnet_nodes, Chain, Hardfork, Head, NodeRecord, MAINNET, MAINNET_GENESIS_HASH,
+    mainnet_nodes, pk2id, Chain, Hardfork, Head, NodeRecord, MAINNET, MAINNET_GENESIS_HASH,
 };
 use secp256k1::{SecretKey, SECP256K1};
 use tokio::net::TcpStream;

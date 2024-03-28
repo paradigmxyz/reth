@@ -345,8 +345,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::UnauthedEthStream;
     use crate::{
         errors::{EthHandshakeError, EthStreamError},
@@ -357,9 +355,10 @@ mod tests {
     use alloy_chains::NamedChain;
     use futures::{SinkExt, StreamExt};
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_ecies::{stream::ECIESStream, util::pk2id};
-    use reth_primitives::{ForkFilter, Head, B256, U256};
+    use reth_ecies::stream::ECIESStream;
+    use reth_primitives::{pk2id, ForkFilter, Head, B256, U256};
     use secp256k1::{SecretKey, SECP256K1};
+    use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 

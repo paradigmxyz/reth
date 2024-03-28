@@ -37,8 +37,8 @@ impl HelloMessageWithProtocols {
     /// Starts a new `HelloMessageProtocolsBuilder`
     ///
     /// ```
-    /// use reth_ecies::util::pk2id;
     /// use reth_eth_wire::HelloMessageWithProtocols;
+    /// use reth_primitives::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
     /// let secret_key = SecretKey::new(&mut rand::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
@@ -119,8 +119,8 @@ impl HelloMessage {
     /// Starts a new `HelloMessageBuilder`
     ///
     /// ```
-    /// use reth_ecies::util::pk2id;
     /// use reth_eth_wire::HelloMessage;
+    /// use reth_primitives::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
     /// let secret_key = SecretKey::new(&mut rand::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
@@ -209,7 +209,7 @@ impl HelloMessageBuilder {
 mod tests {
     use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_ecies::util::pk2id;
+    use reth_primitives::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
 
     use crate::{

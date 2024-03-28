@@ -5,8 +5,7 @@ use crate::{
 };
 use alloy_chains::Chain;
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_ecies::util::pk2id;
-use reth_primitives::{ForkFilter, Head, B256, U256};
+use reth_primitives::{pk2id, ForkFilter, Head, B256, U256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
