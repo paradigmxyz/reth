@@ -17,12 +17,16 @@
 //!
 //! # Pruning
 //!
-//! ExEx's **SHOULD** emit an [`ExExEvent::FinishedHeight`] event to signify what blocks have been
+//! ExEx's **SHOULD** emit an `ExExEvent::FinishedHeight` event to signify what blocks have been
 //! processed. This event is used by Reth to determine what state can be pruned.
 //!
 //! An ExEx will not receive notifications for blocks less than the block emitted in the event. To
 //! clarify: if the ExEx emits `ExExEvent::FinishedHeight(0)` it will receive notifications for any
 //! `block_number >= 0`.
+//!
+//! [`Future`]: std::future::Future
+//! [`ExExContext`]: crate::exex::ExExContext
+//! [`CanonStateNotification`]: reth_provider::CanonStateNotification
 
 use crate::FullNodeTypes;
 use futures::{future::BoxFuture, FutureExt};
