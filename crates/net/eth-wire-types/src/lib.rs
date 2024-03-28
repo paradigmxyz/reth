@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod status;
-pub use status::Status;
+pub use status::{Status, StatusBuilder};
 
 pub mod version;
 pub use version::EthVersion;

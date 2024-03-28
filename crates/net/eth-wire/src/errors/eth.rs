@@ -2,8 +2,9 @@
 
 use crate::{
     errors::{MuxDemuxError, P2PStreamError},
+    message::MessageError,
     version::ParseVersionError,
-    DisconnectReason, EthMessageID, EthVersion,
+    DisconnectReason,
 };
 use alloy_chains::Chain;
 use reth_primitives::{GotExpected, GotExpectedBoxed, ValidationError, B256};
@@ -24,9 +25,9 @@ pub enum EthStreamError {
     #[error(transparent)]
     /// Failed Ethereum handshake.
     EthHandshakeError(#[from] EthHandshakeError),
-    #[error("message id {1:?} is invalid for version {0:?}")]
+    #[error(transparent)]
     /// Flags an unrecognized message ID for a given protocol version.
-    EthInvalidMessageError(EthVersion, EthMessageID),
+    EthInvalidMessageError(MessageError),
     #[error("message size ({0}) exceeds max length (10MB)")]
     /// Received a message whose size exceeds the standard limit.
     MessageTooBig(usize),
@@ -62,7 +63,7 @@ impl EthStreamError {
     /// Returns the [io::Error] if it was caused by IO
     pub fn as_io(&self) -> Option<&io::Error> {
         if let EthStreamError::P2PStreamError(P2PStreamError::Io(io)) = self {
-            return Some(io)
+            return Some(io);
         }
         None
     }
