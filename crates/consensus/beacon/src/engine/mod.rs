@@ -1639,7 +1639,7 @@ where
                     warn!(target: "consensus::engine", invalid_hash=?bad_block.hash(), invalid_number=?bad_block.number, "Bad block detected in unwind");
 
                     // update the `invalid_headers` cache with the new invalid headers
-                    self.invalid_headers.insert(*bad_block);
+                    // self.invalid_headers.insert(*bad_block);
                     return None
                 }
 

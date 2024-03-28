@@ -582,9 +582,12 @@ where
                 .get_highest_static_file_block(StaticFileSegment::Receipts)
                 .unwrap_or(0);
 
+            let missing_block = static_file_provider.header_by_number(last_block + 1)?.unwrap_or_default().seal_slow();
             let missing_block = Box::new(
-                tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
+                missing_block,
             );
+
+            tracing::info!(?missing_block, "MISSING BLOCK");
 
             return Err(StageError::MissingStaticFileData {
                 block: missing_block,
