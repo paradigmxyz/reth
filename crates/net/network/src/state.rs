@@ -23,7 +23,6 @@ use reth_provider::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, AtomicUsize},
         Arc,
@@ -141,7 +140,7 @@ where
                 capabilities,
                 request_tx,
                 pending_response: None,
-                blocks: LruCache::new(NonZeroUsize::new(PEER_BLOCK_CACHE_LIMIT).unwrap()),
+                blocks: LruCache::new(PEER_BLOCK_CACHE_LIMIT),
             },
         );
     }

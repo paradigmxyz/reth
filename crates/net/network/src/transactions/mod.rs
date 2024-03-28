@@ -36,7 +36,6 @@ use reth_transaction_pool::{
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    num::NonZeroUsize,
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -284,9 +283,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             pending_pool_imports_info: PendingPoolImportsInfo::new(
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             ),
-            bad_imports: LruCache::new(
-                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS).unwrap(),
-            ),
+            bad_imports: LruCache::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
@@ -1494,9 +1491,7 @@ impl PeerMetadata {
     /// Returns a new instance of [`PeerMetadata`].
     fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
         Self {
-            seen_transactions: LruCache::new(
-                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER).expect("infallible"),
-            ),
+            seen_transactions: LruCache::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER),
             request_tx,
             version,
             client_version,
@@ -1637,8 +1632,7 @@ mod tests {
     }
 
     pub(super) fn default_cache<T: hash::Hash + Eq>() -> LruCache<T> {
-        let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into()).unwrap();
-        LruCache::new(limit)
+        LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into())
     }
 
     // Returns (peer, channel-to-send-get-pooled-tx-response-on).
