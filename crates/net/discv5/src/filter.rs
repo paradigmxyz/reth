@@ -3,7 +3,6 @@
 use dashmap::DashSet;
 use derive_more::Constructor;
 use itertools::Itertools;
-use reth_primitives::ForkId;
 
 use crate::config::{ETH, ETH2};
 
@@ -12,9 +11,6 @@ use crate::config::{ETH, ETH2};
 pub enum FilterOutcome {
     /// ENR passes filter rules.
     Ok,
-    /// ENR passes filter rules. [`ForkId`] is a by-product of filtering, and is returned to avoid
-    /// rlp decoding it twice.
-    OkReturnForkId(ForkId),
     /// ENR doesn't pass filter rules, for the given reason.
     Ignore {
         /// Reason for filtering out node record.
@@ -105,8 +101,6 @@ impl Default for MustNotIncludeChains {
 mod tests {
     use alloy_rlp::Bytes;
     use discv5::enr::{CombinedKey, Enr};
-
-    use crate::config::ETH2;
 
     use super::*;
 

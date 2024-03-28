@@ -1,6 +1,5 @@
 //! Tracks peer discovery for [`Discv5`](crate::Discv5).
-
-use metrics::Counter;
+use metrics::{Counter, Gauge};
 use reth_metrics::Metrics;
 
 use crate::config::{ETH, ETH2, OPSTACK};
@@ -8,54 +7,87 @@ use crate::config::{ETH, ETH2, OPSTACK};
 /// Information tracked by [`Discv5`](crate::Discv5).
 #[derive(Debug, Default, Clone)]
 pub struct Metrics {
-    /// Frequency of chains advertised in discovered peers' node records.
-    pub discovered_peers_chain_type: AdvertisedChainMetrics,
-    /// Tracks discovered peers by protocol version.
-    pub discovered_peers_by_protocol: DiscoveredPeersMetrics,
+    /// Frequency of networks advertised in discovered peers' node records.
+    pub discovered_peers_advertised_networks: AdvertisedChainMetrics,
+    /// Tracks discovered peers.
+    pub discovered_peers: DiscoveredPeersMetrics,
 }
 
-/// Tracks discovered peers by protocol version, that pass filtering.
+/// Tracks discovered peers.
 #[derive(Metrics, Clone)]
 #[metrics(scope = "discv5")]
 pub struct DiscoveredPeersMetrics {
-    /// Total peers discovered by [`discv5::Discv5`].
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    // Kbuckets
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    /// Total peers currently in [`discv5::Discv5`]'s kbuckets.
+    total_kbucket_peers_raw: Gauge,
+    /// Total discovered peers that are inserted into [`discv5::Discv5`]'s kbuckets.
     ///
-    /// Note: the definition of 'discovered' is not exactly synonymous in [`discv5::Discv5`].
-    total_discovered_peers_discv5: Counter,
-    /// Increments number of peers discovered by [`discv5::Discv5`] as part of a query, which local
-    /// node is not able to make an outgoing connection to, as there is no socket advertised in
-    /// peer's node record that is reachable from the local node.
-    total_discovered_unreachable_v5: Counter,
-    /// Total number of sessions that [`discv5::Discv5`] has established with peers with
-    /// unreachable node records. Naturally, these will all be incoming sessions. These peers will
-    /// never end up in [`discv5::Discv5`]'s kbuckets, so will never be included in queries.
-    total_sessions_unreachable_v5: Counter,
+    /// This is a subset of the total established sessions, in which all peers advertise a udp
+    /// socket in their node record which is reachable from the local node. Only these peers make
+    /// it into [`discv5::Discv5`]'s kbuckets and will hence be included in queries.
+    ///
+    /// Note: the definition of 'discovered' is not exactly synonymous in `reth_discv4::Discv4`.
+    total_inserted_kbucket_peers_raw: Counter,
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    // Sessions
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    /// Total peers currently connected to [`discv5::Discv5`].
+    total_sessions_raw: Gauge,
+    /// Total number of sessions established by [`discv5::Discv5`].
+    total_established_sessions_raw: Counter,
+    /// Total number of sessions established by [`discv5::Discv5`], with peers that don't advertise
+    /// a socket which is reachable from the local node in their node record.
+    ///
+    /// These peers can't make it into [`discv5::Discv5`]'s kbuckets, and hence won't be part of
+    /// queries (neither shared with peers in NODES responses, nor queried for peers with FINDNODE
+    /// requests).
+    total_established_sessions_unreachable_enr: Counter,
+    /// Total number of sessions established by [`discv5::Discv5`], that pass configured
+    /// [`filter`](crate::filter) rules.
+    total_established_sessions_custom_filtered: Counter,
 }
 
 impl DiscoveredPeersMetrics {
-    /// Increments peers discovered by [`discv5::Discv5`].
-    pub fn increment_discovered_v5(&mut self, num: u64) {
-        self.total_discovered_peers_discv5.increment(num)
+    /// Sets current total number of peers in [`discv5::Discv5`]'s kbuckets.
+    pub fn set_total_kbucket_peers(&mut self, num: usize) {
+        self.total_kbucket_peers_raw.set(num as f64)
     }
 
-    /// Increments number of peers discovered by [`discv5::Discv5`] as part of a query, which local
-    /// node is not able to make an outgoing connection to, as there is no socket advertised in
-    /// peer's node record that is reachable from the local node.
-    pub fn increment_discovered_unreachable_v5(&mut self, num: u64) {
-        self.total_discovered_unreachable_v5.increment(num)
+    /// Increments the number of kbucket insertions in [`discv5::Discv5`].
+    pub fn increment_kbucket_insertions(&mut self, num: u64) {
+        self.total_inserted_kbucket_peers_raw.increment(num)
     }
 
-    /// Increments the number of sessions that [`discv5::Discv5`] has established with peers with
-    /// unreachable node records.
-    pub fn increment_sessions_unreachable_v5(&mut self, num: u64) {
-        self.total_sessions_unreachable_v5.increment(num)
+    /// Sets current total number of peers connected to [`discv5::Discv5`].
+    pub fn set_total_sessions(&mut self, num: usize) {
+        self.total_sessions_raw.set(num as f64)
+    }
+
+    /// Increments number of sessions established by [`discv5::Discv5`].
+    pub fn increment_established_sessions_raw(&mut self, num: u64) {
+        self.total_established_sessions_raw.increment(num)
+    }
+
+    /// Increments number of sessions established by [`discv5::Discv5`], with peers that don't have
+    /// a reachable node record.
+    pub fn increment_established_sessions_unreachable_enr(&mut self, num: u64) {
+        self.total_established_sessions_unreachable_enr.increment(num)
+    }
+
+    /// Increments number of sessions established by [`discv5::Discv5`], that pass configured
+    /// [`filter`](crate::filter) rules.
+    pub fn increment_established_sessions_filtered(&mut self, num: u64) {
+        self.total_established_sessions_custom_filtered.increment(num)
     }
 }
 
-/// Tracks frequency of chains that are advertised by discovered peers. Peers advertise the chain
-/// they belong to in their node record. Indirectly measure number of unusable discovered peers,
-/// since, if a node advertises both 'eth' and 'eth2', it will be counted as advertising 'eth' not
-/// 'eth2'.
+/// Tracks frequency of networks that are advertised by discovered peers.
+///
+/// Peers advertise the chain they belong to as a kv-pair in their node record, using the network
+/// as key.
 #[derive(Metrics, Clone)]
 #[metrics(scope = "discv5")]
 pub struct AdvertisedChainMetrics {
@@ -70,43 +102,16 @@ pub struct AdvertisedChainMetrics {
 }
 
 impl AdvertisedChainMetrics {
-    /// Counts each recognised chain type that is advertised on node record, once.
-    pub fn increment_once_by_chain_type(&mut self, counter: AdvertisedChainCounter) {
-        let AdvertisedChainCounter { opstack, eth, eth2 } = counter;
-
-        if opstack {
+    /// Counts each recognised network type that is advertised on node record, once.
+    pub fn increment_once_by_network_type(&mut self, enr: &discv5::Enr) {
+        if enr.get_raw_rlp(OPSTACK).is_some() {
             self.opstack.increment(1u64)
         }
-        if eth {
+        if enr.get_raw_rlp(ETH).is_some() {
             self.eth.increment(1u64)
         }
-        if eth2 {
-            self.eth2.increment(1u64)
-        }
-    }
-}
-
-/// Aggregates chain type data from one node record.
-#[derive(Debug, Default)]
-pub struct AdvertisedChainCounter {
-    opstack: bool,
-    eth: bool,
-    eth2: bool,
-}
-
-impl AdvertisedChainCounter {
-    /// Counts each recognised chain type that is advertised on node record, once.
-    pub fn increment_once_by_chain_type(&mut self, enr: &discv5::Enr) {
-        if enr.get_raw_rlp(OPSTACK).is_some() {
-            self.opstack = true
-        }
-
-        if enr.get_raw_rlp(ETH).is_some() {
-            self.eth = true
-        }
-
         if enr.get_raw_rlp(ETH2).is_some() {
-            self.eth2 = true
+            self.eth2.increment(1u64)
         }
     }
 }
