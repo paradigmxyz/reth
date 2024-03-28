@@ -2,27 +2,67 @@
 use std::{
     collections::VecDeque,
     future::Future,
+    pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::Receiver,
         Arc,
     },
+    task::{Context, Poll},
 };
 
 use reth_exex::ExExEvent;
 use reth_primitives::BlockNumber;
 use reth_provider::{CanonStateNotification, CanonStateNotifications};
-use tokio::sync::{mpsc::UnboundedSender, watch};
-use tokio_stream::wrappers::UnboundedReceiverStream;
-use tokio_util::sync::PollSender;
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender},
+    watch,
+};
+use tokio_util::sync::{PollSendError, PollSender};
 
-// todo
+// todo: we need to figure out how to keep track of some of these things per exex
+// currently, the only path forward seems to be adding an exex id to every event, since we only
+// have one receiver for ExExEvents
+//
+// things to track:
 // - exex height
 // - exex channel size
 // - manager buffer metrics
 // - throughput
-pub struct ExExMetrics;
+#[derive(Debug)]
+struct ExExMetrics;
 
+#[derive(Debug)]
+struct ExExSender {
+    sender: PollSender<CanonStateNotification>,
+    next_notification_id: usize,
+}
+
+impl ExExSender {
+    /// Reserves a slot in the `PollSender` channel and sends the notification if the slot was
+    /// successfully reserved.
+    ///
+    /// When the notification is sent, it is considered delivered.
+    fn send(
+        &mut self,
+        cx: &mut Context<'_>,
+        (event_id, notification): &(usize, CanonStateNotification),
+    ) -> Poll<Result<(), PollSendError<CanonStateNotification>>> {
+        match self.sender.poll_reserve(cx) {
+            Poll::Ready(Ok(())) => (),
+            other => return other,
+        }
+
+        match self.sender.send_item(notification.clone()) {
+            Ok(()) => {
+                self.next_notification_id = event_id + 1;
+                Poll::Ready(Ok(()))
+            }
+            Err(err) => Poll::Ready(Err(err)),
+        }
+    }
+}
+
+// todo: if event is sent to exex it is considered delivered
 /// The execution extension manager.
 ///
 /// The manager is responsible for:
@@ -34,22 +74,31 @@ pub struct ExExMetrics;
 /// - Monitoring
 ///
 /// TBD
+#[derive(Debug)]
 pub struct ExExManager {
     /// Channels from the manager to execution extensions.
-    exex_tx: Vec<PollSender<CanonStateNotification>>,
+    // todo(onbjerg): we should document that these notifications can include blocks the exex does
+    // not care about if a longer chain segment is sent - filtering is up to the exex. where do
+    // we document it, though?
+    exex_tx: Vec<ExExSender>,
     /// Channels from execution extensions to the manager.
+    // todo(onbjerg): should this be unbounded?
     exex_rx: Receiver<ExExEvent>,
 
-    /// [`CanonStateNotification`] channel from the execution stage.
-    exec_rx: UnboundedReceiverStream<CanonStateNotification>,
+    /// [`CanonStateNotification`] channel from the [`ExExManagerHandle`]s.
+    handle_rx: UnboundedReceiver<CanonStateNotification>,
     /// [`CanonStateNotification`] channel from the blockchain tree.
     tree_rx: CanonStateNotifications,
 
+    /// The minimum notification ID currently present in the buffer.
+    min_id: usize,
+    /// Monotonically increasing ID for [`CanonStateNotification`]s.
+    next_id: usize,
     /// Internal buffer of [`CanonStateNotification`]s.
-    buffer: VecDeque<CanonStateNotification>,
-    /// Max internal buffer size.
+    buffer: VecDeque<(usize, CanonStateNotification)>,
+    /// Max size of the internal state notifications buffer.
     max_capacity: usize,
-    /// Current buffer capacity.
+    /// Current state notifications buffer capacity.
     ///
     /// Used to inform the execution stage of possible batch sizes.
     current_capacity: Arc<AtomicUsize>,
@@ -58,27 +107,146 @@ pub struct ExExManager {
     is_ready: watch::Sender<bool>,
 
     /// block number for pruner/exec stage (tbd)
-    /// todo: this is inclusive, note that in exex too, maybe rename FinishedHeight
+    /// todo(onbjerg): this is inclusive, note that in exex too, maybe rename FinishedHeight
     block: watch::Sender<BlockNumber>,
+
+    /// tbd
+    handle: ExExManagerHandle,
+}
+
+impl ExExManager {
+    /// Create a new [`ExExManager`].
+    ///
+    /// You must provide:
+    /// - The sending side of a bounded MPSC channel for each ExEx
+    /// - The receiving side of an MPSC channel that receives events from ExEx's
+    /// - The receiving side of [`CanonStateNotification`]s from the blockchain tree
+    /// - The maximum capacity of the notification buffer in the manager
+    pub fn new(
+        exex_tx: Vec<Sender<CanonStateNotification>>,
+        exex_rx: Receiver<ExExEvent>,
+        tree_rx: CanonStateNotifications,
+        max_capacity: usize,
+    ) -> Self {
+        let num_exexs = exex_tx.len();
+
+        let (handle_tx, handle_rx) = mpsc::unbounded_channel();
+        let (is_ready_tx, is_ready_rx) = watch::channel(true);
+        let (block_tx, block_rx) = watch::channel(0);
+
+        let current_capacity = Arc::new(AtomicUsize::new(max_capacity));
+
+        Self {
+            exex_tx: exex_tx
+                .into_iter()
+                .map(|tx| ExExSender { sender: PollSender::new(tx), next_notification_id: 0 })
+                .collect(),
+            exex_rx,
+
+            handle_rx,
+            tree_rx,
+
+            min_id: 0,
+            next_id: 0,
+            buffer: VecDeque::with_capacity(max_capacity),
+            max_capacity,
+            current_capacity: Arc::clone(&current_capacity),
+
+            is_ready: is_ready_tx,
+            block: block_tx,
+
+            handle: ExExManagerHandle {
+                exex_tx: handle_tx,
+                num_exexs,
+                is_ready: is_ready_rx,
+                current_capacity,
+                block: block_rx,
+            },
+        }
+    }
+
+    /// Returns the handle to the manager.
+    pub fn handle(&self) -> ExExManagerHandle {
+        self.handle.clone()
+    }
+
+    /// Updates the current buffer capacity and notifies all `is_ready` watchers of the manager's
+    /// readiness to receive notifications.
+    fn update_capacity(&mut self) {
+        let capacity = self.max_capacity.saturating_sub(self.buffer.len());
+        self.current_capacity.store(capacity, Ordering::Relaxed);
+
+        // we can safely ignore if the channel is closed, since the manager always holds it open
+        // internally
+        let _ = self.is_ready.send(capacity > 0);
+    }
+
+    /// Pushes a new notification into the managers internal buffer, assigning the notification a
+    /// unique ID.
+    fn push_notification(&mut self, notification: CanonStateNotification) {
+        let next_id = self.next_id;
+        self.buffer.push_back((next_id, notification));
+        self.next_id += 1;
+    }
 }
 
 impl Future for ExExManager {
     // todo
     type Output = Result<(), ()>;
 
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        todo!()
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // drain handle notifications
+        'notifications: while self.buffer.len() < self.max_capacity {
+            if let Poll::Ready(Some(notification)) = self.handle_rx.poll_recv(cx) {
+                self.push_notification(notification);
+                continue 'notifications
+            }
+            break
+        }
+
+        // todo: drain blockchain tree notifications
+        // update capacity
+        self.update_capacity();
+
+        // advance all poll senders
+        let mut min_id = usize::MAX;
+        for idx in (0..self.exex_tx.len()).rev() {
+            let mut exex = self.exex_tx.swap_remove(idx);
+
+            // it is a logic error for this to ever underflow since the manager manages the
+            // notification IDs
+            let notification_id = exex
+                .next_notification_id
+                .checked_sub(self.min_id)
+                .expect("exex expected notification ID outside the manager's range");
+            if let Some(notification) = self.buffer.get(notification_id) {
+                if let Poll::Ready(Err(_)) = exex.send(cx, notification) {
+                    // the channel was closed, which is irrecoverable for the manager
+                    return Poll::Ready(Err(()))
+                }
+            }
+            min_id = min_id.min(exex.next_notification_id);
+        }
+
+        // remove processed buffered events
+        self.buffer.retain(|&(id, _)| id < min_id);
+        self.min_id = min_id;
+
+        // update capacity
+        self.update_capacity();
+
+        // todo: handle incoming exex events
+        // this requires keeping track of exex id -> finished block number, and updating the block
+        // watch channel iff all exex's have sent this event at least once
+
+        Poll::Pending
     }
 }
 
 /// TBD
-/// note: this is cloneable, should it be
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ExExManagerHandle {
-    to_exex: UnboundedSender<CanonStateNotification>,
+    exex_tx: UnboundedSender<CanonStateNotification>,
     num_exexs: usize,
     is_ready: watch::Receiver<bool>,
     current_capacity: Arc<AtomicUsize>,
@@ -86,6 +254,16 @@ pub struct ExExManagerHandle {
 }
 
 impl ExExManagerHandle {
+    /// Whether we should send a notification for a given block number.
+    ///
+    /// This checks that:
+    ///
+    /// - The block number is interesting to at least one ExEx.
+    /// - That the manager has capacity in its internal buffer for the notification
+    /// - That there are any ExEx's currently running
+    ///
+    /// For [`CanonStateNotification`]s with more than one block, pass the highest block in the
+    /// chain.
     pub fn should_send(&mut self, block_number: BlockNumber) -> bool {
         let has_exexs = self.num_exexs > 0;
         let within_threshold = block_number >= *self.block.borrow_and_update();
@@ -93,6 +271,10 @@ impl ExExManagerHandle {
         has_exexs && within_threshold && self.has_capacity()
     }
 
+    /// Whether there is capacity in the ExEx manager's internal notification buffer.
+    ///
+    /// If this returns `false`, the owner of the handle should **NOT** send new notifications over
+    /// the channel until the manager is ready again, as this can lead to unbounded memory growth.
     pub fn has_capacity(&self) -> bool {
         self.current_capacity.load(Ordering::Relaxed) > 0
     }
@@ -102,10 +284,20 @@ impl ExExManagerHandle {
     }
 }
 
-pub fn spawn(task_executor: ()) -> Result<ExExManagerHandle, ()> {
-    // create cahnnels
-    // spawn manager
-    // spawns exexs?
-    // return handle
-    todo!()
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn delivers_events() {}
+
+    #[tokio::test]
+    async fn capacity() {}
+
+    #[tokio::test]
+    async fn updates_block_height() {}
+
+    #[tokio::test]
+    async fn slow_exex() {}
+
+    #[tokio::test]
+    async fn is_ready() {}
 }
