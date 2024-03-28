@@ -151,7 +151,7 @@ impl Default for Status {
 ///
 /// # Example
 /// ```
-/// use reth_eth_wire::{types::Status, EthVersion};
+/// use reth_eth_wire_types::{EthVersion, Status};
 /// use reth_primitives::{Chain, Hardfork, B256, MAINNET, MAINNET_GENESIS_HASH, U256};
 ///
 /// // this is just an example status message!
