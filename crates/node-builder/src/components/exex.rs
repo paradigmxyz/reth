@@ -1,15 +1,19 @@
+#![allow(dead_code)]
 use std::{
     collections::VecDeque,
     future::Future,
     sync::{
         atomic::{AtomicUsize, Ordering},
+        mpsc::Receiver,
         Arc,
     },
 };
 
+use reth_exex::ExExEvent;
 use reth_primitives::BlockNumber;
 use reth_provider::{CanonStateNotification, CanonStateNotifications};
 use tokio::sync::{mpsc::UnboundedSender, watch};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::PollSender;
 
 // todo
@@ -17,7 +21,7 @@ use tokio_util::sync::PollSender;
 // - exex channel size
 // - manager buffer metrics
 // - throughput
-struct ExExMetrics;
+pub struct ExExMetrics;
 
 /// The execution extension manager.
 ///
@@ -30,13 +34,14 @@ struct ExExMetrics;
 /// - Monitoring
 ///
 /// TBD
-struct ExExManager {
-    // todo: exex receiver - get exex events
+pub struct ExExManager {
     /// Channels from the manager to execution extensions.
     exex_tx: Vec<PollSender<CanonStateNotification>>,
+    /// Channels from execution extensions to the manager.
+    exex_rx: Receiver<ExExEvent>,
 
     /// [`CanonStateNotification`] channel from the execution stage.
-    exec_rx: (), //UnboundedReceiverStream<CanonStateNotification>,
+    exec_rx: UnboundedReceiverStream<CanonStateNotification>,
     /// [`CanonStateNotification`] channel from the blockchain tree.
     tree_rx: CanonStateNotifications,
 
