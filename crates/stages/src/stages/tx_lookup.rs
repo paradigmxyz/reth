@@ -104,7 +104,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut hash_collector: Collector<TxHash, TxNumber> =
             Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
 
-        debug!(
+        info!(
             target: "sync::stages::transaction_lookup",
             tx_range = ?input.checkpoint().block_number..=input.target(),
             "Updating transaction lookup"
@@ -116,7 +116,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
             let end_block = *block_range.end();
 
-            debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Calculating transaction hashes");
+            info!(target: "sync::stages::transaction_lookup", ?tx_range, "Calculating transaction hashes");
 
             for (key, value) in provider.transaction_hashes_by_range(tx_range)? {
                 hash_collector.insert(key, value)?;
@@ -139,7 +139,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                 for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
                     let (hash, number) = hash_to_number?;
                     if index > 0 && index % interval == 0 {
-                        debug!(
+                        info!(
                             target: "sync::stages::transaction_lookup",
                             ?append_only,
                             progress = format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
