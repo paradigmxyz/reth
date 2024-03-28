@@ -37,7 +37,7 @@ pub struct MustIncludeChain {
 }
 
 impl MustIncludeChain {
-    /// Returns `true` if [`Enr`](discv5::Enr) passes filtering rules.
+    /// Returns [`FilterOutcome::Ok`] if [`Enr`](discv5::Enr) passes filtering rules.
     pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
         if enr.get_raw_rlp(self.chain).is_none() {
             return FilterOutcome::Ignore { reason: self.ignore_reason() }
@@ -57,7 +57,7 @@ impl Default for MustIncludeChain {
 }
 
 /// Filter requiring that peers not advertise that they belong to some chains.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MustNotIncludeChains {
     chains: DashSet<MustIncludeChain>,
 }
@@ -83,9 +83,7 @@ impl MustNotIncludeChains {
                 return FilterOutcome::Ignore { reason: self.ignore_reason() }
             }
         }
-        if enr.get_raw_rlp(ETH2).is_some() {
-            return FilterOutcome::Ignore { reason: self.ignore_reason() }
-        }
+
         FilterOutcome::Ok
     }
 
@@ -94,6 +92,12 @@ impl MustNotIncludeChains {
             "{} forks not allowed",
             self.chains.iter().map(|chain| String::from_utf8_lossy(chain.chain)).format(",")
         )
+    }
+}
+
+impl Default for MustNotIncludeChains {
+    fn default() -> Self {
+        Self::new(&[ETH2])
     }
 }
 
