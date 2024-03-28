@@ -262,7 +262,7 @@ fn collect(
             collector.insert(key, v)?;
         }
     }
-    debug!(target: "sync::stages::hashing_account", "Hashed {} entries", collector.len());
+    info!(target: "sync::stages::hashing_account", "Hashed {} entries", collector.len());
     channels.clear();
     Ok(())
 }
