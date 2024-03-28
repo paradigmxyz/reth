@@ -110,8 +110,9 @@ where
         let startup_latest_header = self.startup_latest_header.clone();
         let thread_join_handle = std::thread::spawn(move || {
             let api = create_sync_api(&auth_config);
-            let n = api.get_block_by_number("latest".to_string());
-            println!("{:?}", n);
+            let execution_block =
+                api.get_block_by_number("latest".to_string()).expect("get latest block error");
+            info!(target: "consensus::cl","latest block: {:?}", execution_block);
             let validator_datas = api
                 .query_validators(ELECT_VOTING_ADDRESS.to_string())
                 .expect("query validators failed");

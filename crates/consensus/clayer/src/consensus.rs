@@ -2317,7 +2317,7 @@ pub fn assemble_peer_id(datas: Vec<Vec<u8>>) -> Result<Vec<PeerId>, PbftError> {
         } else {
             bytes.extend_from_slice(item);
             let id = PeerId::from_slice(&bytes);
-            // println!("{}", id);
+            info!(target: "consensus::cl","peer id: {}",  id);
             peers.push(id);
             bytes.clear();
         }
