@@ -14,7 +14,7 @@ pub struct DatabaseArgs {
     pub log_level: Option<LogLevel>,
     /// Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an
     /// NFS volume.
-    #[arg(long = "db.exclusive", exclusive = false)]
+    #[arg(long = "db.exclusive")]
     pub exclusive: Option<bool>,
 }
 
