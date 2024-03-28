@@ -9,8 +9,10 @@ use crate::{
 };
 use clap::{Parser, Subcommand};
 use reth_db::{cursor::DbCursorRO, database::Database, open_db, tables, transaction::DbTx};
-use reth_primitives::{BlockHashOrNumber, ChainSpec};
-use reth_provider::{BlockExecutionWriter, ProviderFactory};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes};
+use reth_provider::ProviderFactory;
+use reth_stages::Pipeline;
+use reth_static_file::StaticFileProducer;
 use std::{ops::RangeInclusive, sync::Arc};
 
 /// `reth stage unwind` command
@@ -56,7 +58,7 @@ impl Command {
             eyre::bail!("Database {db_path:?} does not exist.")
         }
 
-        let db = open_db(db_path.as_ref(), self.db.database_args())?;
+        let db = Arc::new(open_db(db_path.as_ref(), self.db.database_args())?);
 
         let range = self.command.unwind_range(&db)?;
 
@@ -64,16 +66,23 @@ impl Command {
             eyre::bail!("Cannot unwind genesis block")
         }
 
-        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files_path())?;
-        let provider = factory.provider_rw()?;
+        let provider_factory =
+            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
-        let blocks_and_execution = provider
-            .take_block_and_execution_range(&self.chain, range)
-            .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
+        let pipeline_builder = Pipeline::builder();
 
-        provider.commit()?;
+        let mut pipeline = pipeline_builder.build(
+            provider_factory.clone(),
+            StaticFileProducer::new(
+                provider_factory.clone(),
+                provider_factory.static_file_provider(),
+                PruneModes::default(),
+            ),
+        );
 
-        println!("Unwound {} blocks", blocks_and_execution.len());
+        pipeline.unwind(*range.start(), None)?;
+
+        println!("Unwound {} blocks", range.count());
 
         Ok(())
     }
