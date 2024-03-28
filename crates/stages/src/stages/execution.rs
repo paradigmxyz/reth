@@ -19,12 +19,14 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
+    BlockReader, CanonStateNotification, Chain, DatabaseProviderRW, ExecutorFactory,
+    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader,
+    TransactionVariant,
 };
 use std::{
     cmp::Ordering,
     ops::RangeInclusive,
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::*;
@@ -155,6 +157,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut cumulative_gas = 0;
         let batch_start = Instant::now();
 
+        // TODO(onbjerg): capacity
+        let mut blocks = Vec::new();
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -193,6 +197,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             stage_checkpoint.progress.processed += block.gas_used;
 
+            blocks.push(block);
+
             // Check if we should commit now
             let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
             if self.thresholds.is_end_of_batch(
@@ -207,6 +213,18 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let time = Instant::now();
         let state = executor.take_output_state();
         let write_preparation_duration = time.elapsed();
+
+        // todo(onbjerg): this is expensive (cpu + mem)
+        let chain = Arc::new(Chain::new(
+            blocks.into_iter().map(|block| {
+                let hash = block.header.hash_slow();
+                block.seal(hash)
+            }),
+            state.clone(),
+            None,
+        ));
+        let notif = CanonStateNotification::Commit { new: chain };
+        // todo(onbjerg): send notif if we have a channel
 
         let time = Instant::now();
         // write output

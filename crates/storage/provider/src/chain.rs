@@ -14,19 +14,21 @@ use std::{borrow::Cow, collections::BTreeMap, fmt};
 ///
 /// The chain contains the state of accounts after execution of its blocks,
 /// changesets for those blocks (and their transactions), as well as the blocks themselves.
-///
-/// Used inside the BlockchainTree.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Chain {
-    /// All blocks in this chain.
+    /// All blocks in this chain segment.
     blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
-    /// The state of all accounts after execution of the _all_ blocks in this chain's range from
-    /// [Chain::first] to [Chain::tip], inclusive.
+    /// The state of all accounts after execution of the _all_ blocks in this chain segment, from
+    /// [Chain::first] to [Chain::tip] (inclusive).
     ///
     /// This state also contains the individual changes that lead to the current state.
     state: BundleStateWithReceipts,
     /// State trie updates after block is added to the chain.
-    /// NOTE: Currently, trie updates are present only if the block extends canonical chain.
+    ///
+    /// # Note
+    ///
+    /// Trie updates are only available if the chain originates from [BlockchainTree] and if the
+    /// chain extends the canonical chain.
     trie_updates: Option<TrieUpdates>,
 }
 
