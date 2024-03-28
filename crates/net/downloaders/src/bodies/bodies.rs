@@ -272,7 +272,7 @@ where
         // requests are issued in order but not necessarily finished in order, so the queued bodies
         // can grow large if a certain request is slow, so we limit the followup requests if the
         // queued bodies grew too large
-        self.queued_bodies.len() < 2 * self.stream_batch_size &&
+        self.queued_bodies.len() < 4 * self.stream_batch_size &&
             self.has_buffer_capacity() &&
             self.in_progress_queue.len() < self.concurrent_request_limit()
     }
