@@ -269,6 +269,9 @@ where
     ///
     /// Returns true if a new request can be submitted
     fn can_submit_new_request(&self) -> bool {
+        // requests are issued in order but not necessarily finished in order, so the queued bodies
+        // can grow large if a certain request is slow, so we limit the followup requests if the
+        // queued bodies grew too large
         self.queued_bodies.len() < 2 * self.stream_batch_size &&
             self.has_buffer_capacity() &&
             self.in_progress_queue.len() < self.concurrent_request_limit()
@@ -310,7 +313,7 @@ where
         // Check if the range is valid.
         if range.is_empty() {
             tracing::error!(target: "downloaders::bodies", ?range, "Bodies download range is invalid (empty)");
-            return Err(DownloadError::InvalidBodyRange { range });
+            return Err(DownloadError::InvalidBodyRange { range })
         }
 
         // Check if the provided range is the subset of the existing range.
@@ -319,7 +322,7 @@ where
         if is_current_range_subset {
             tracing::trace!(target: "downloaders::bodies", ?range, "Download range already in progress");
             // The current range already includes requested.
-            return Ok(());
+            return Ok(())
         }
 
         // Check if the provided range is the next expected range.
@@ -330,7 +333,7 @@ where
             tracing::trace!(target: "downloaders::bodies", ?range, "New download range set");
             info!(target: "downloaders::bodies", count, ?range, "Downloading bodies");
             self.download_range = range;
-            return Ok(());
+            return Ok(())
         }
 
         // The block range is reset. This can happen either after unwind or after the bodies were
