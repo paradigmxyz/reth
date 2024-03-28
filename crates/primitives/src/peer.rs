@@ -8,12 +8,14 @@ pub use reth_rpc_types::PeerId;
 
 /// Converts a [secp256k1::PublicKey] to a [PeerId] by stripping the
 /// SECP256K1_TAG_PUBKEY_UNCOMPRESSED tag and storing the rest of the slice in the [PeerId].
+#[inline]
 pub fn pk2id(pk: &PublicKey) -> PeerId {
     PeerId::from_slice(&pk.serialize_uncompressed()[1..])
 }
 
 /// Converts a [PeerId] to a [secp256k1::PublicKey] by prepending the [PeerId] bytes with the
 /// SECP256K1_TAG_PUBKEY_UNCOMPRESSED tag.
+#[inline]
 pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
     // NOTE: B512 is used as a PeerId not because it represents a hash, but because 512 bits is
     // enough to represent an uncompressed public key.
@@ -43,9 +45,7 @@ impl AnyNode {
     pub fn peer_id(&self) -> PeerId {
         match self {
             AnyNode::NodeRecord(record) => record.id,
-            AnyNode::Enr(enr) => {
-                PeerId::from_slice(&enr.public_key().serialize_uncompressed()[1..])
-            }
+            AnyNode::Enr(enr) => pk2id(&enr.public_key()),
             AnyNode::PeerId(peer_id) => *peer_id,
         }
     }
@@ -59,7 +59,7 @@ impl AnyNode {
                     address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
                     tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
                     udp_port: enr.udp4().or_else(|| enr.udp6())?,
-                    id: PeerId::from_slice(&enr.public_key().serialize_uncompressed()[1..]),
+                    id: pk2id(&enr.public_key()),
                 }
                 .into_ipv4_mapped();
                 Some(node_record)
