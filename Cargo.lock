@@ -5912,7 +5912,7 @@ dependencies = [
  "futures",
  "parking_lot 0.12.1",
  "rand 0.8.5",
- "reth-eth-wire",
+ "reth-eth-wire-types",
  "reth-network-api",
  "reth-primitives",
  "reth-rpc-types",
