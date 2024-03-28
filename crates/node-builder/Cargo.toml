@@ -35,14 +35,13 @@ reth-prune.workspace = true
 reth-stages.workspace = true
 reth-config.workspace = true
 
-
 ## async
 futures.workspace = true
 tokio = { workspace = true, features = [
-    "sync",
-    "macros",
-    "time",
-    "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "rt-multi-thread",
 ] }
 
 ## misc

@@ -1,0 +1,18 @@
+[package]
+name = "reth-exex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Execution extensions for Reth"
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-primitives.workspace = true
+reth-provider.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true

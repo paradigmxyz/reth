@@ -9,6 +9,7 @@ members = [
     "crates/consensus/common/",
     "crates/ethereum-forks/",
     "crates/etl",
+    "crates/exex",
     "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
@@ -244,8 +245,13 @@ reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 
 # revm
-revm = { version = "7.2.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
+revm = { version = "7.2.0", features = [
+    "std",
+    "secp256k1",
+], default-features = false }
+revm-primitives = { version = "3.1.0", features = [
+    "std",
+], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "0ad0338" }
 
 # eth

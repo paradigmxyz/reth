@@ -5879,6 +5879,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-exex"
+version = "0.2.0-beta.4"
+dependencies = [
+ "reth-primitives",
+ "reth-provider",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "reth-interfaces"
 version = "0.2.0-beta.4"
 dependencies = [
