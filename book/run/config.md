@@ -179,7 +179,7 @@ The merkle stage uses the indexes built in the hashing stages (storage and accou
 # The threshold in number of blocks before the stage starts from scratch
 # and re-computes the state root, discarding the trie that has already been built,
 # as opposed to incrementally updating the trie.
-clean_threshold = 50000
+clean_threshold = 5000
 ```
 
 ### `transaction_lookup`
