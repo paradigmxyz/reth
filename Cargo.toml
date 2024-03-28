@@ -320,9 +320,9 @@ discv5 = "0.4"
 igd-next = "0.14.3"
 
 # rpc
-jsonrpsee = "0.20"
-jsonrpsee-core = "0.20"
-jsonrpsee-types = "0.20"
+jsonrpsee = "0.22"
+jsonrpsee-core = "0.22"
+jsonrpsee-types = "0.22"
 
 # crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [
