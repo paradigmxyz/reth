@@ -4,7 +4,7 @@ use crate::{
 };
 use reth_db::{database::Database, tables};
 use reth_primitives::{
-    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
+    PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
     MINIMUM_PRUNING_DISTANCE,
 };
 use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
@@ -113,8 +113,10 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             "Calculated block ranges and filtered addresses",
         );
 
-        let mut limit = input.delete_limit;
+        let mut limiter = input.limiter;
+
         let mut done = true;
+        let mut pruned = 0;
         let mut last_pruned_transaction = None;
         for (start_block, end_block, num_addresses) in block_ranges {
             let block_range = start_block..=end_block;
@@ -138,7 +140,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             let deleted;
             (deleted, done) = provider.prune_table_with_range::<tables::Receipts>(
                 tx_range,
-                limit,
+                &mut limiter,
                 |(tx_num, receipt)| {
                     let skip = num_addresses > 0 &&
                         receipt.logs.iter().any(|log| {
@@ -152,9 +154,10 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                 },
                 |row| last_pruned_transaction = Some(row.0),
             )?;
+
             trace!(target: "pruner", %deleted, %done, ?block_range, "Pruned receipts");
 
-            limit = limit.saturating_sub(deleted);
+            pruned += deleted;
 
             // For accurate checkpoints we need to know that we have checked every transaction.
             // Example: we reached the end of the range, and the last receipt is supposed to skip
@@ -172,7 +175,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                     .saturating_sub(if done { 0 } else { 1 }),
             );
 
-            if limit == 0 {
+            if limiter.is_limit_reached() {
                 done &= end_block == to_block;
                 break
             }
@@ -203,7 +206,9 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             },
         )?;
 
-        Ok(PruneOutput { done, pruned: input.delete_limit - limit, checkpoint: None })
+        let progress = PruneProgress::new(done, &limiter);
+
+        Ok(PruneOutput { progress, pruned, checkpoint: None })
     }
 }
 
@@ -216,13 +221,15 @@ mod tests {
         generators,
         generators::{random_block_range, random_eoa_account, random_log, random_receipt},
     };
-    use reth_primitives::{PruneMode, PruneSegment, ReceiptsLogPruneConfig, B256};
+    use reth_primitives::{PruneLimiter, PruneMode, PruneSegment, ReceiptsLogPruneConfig, B256};
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::collections::BTreeMap;
 
     #[test]
     fn prune_receipts_by_logs() {
+        reth_tracing::init_test_tracing();
+
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
@@ -268,6 +275,8 @@ mod tests {
             let receipts_log_filter =
                 ReceiptsLogPruneConfig(BTreeMap::from([(deposit_contract_addr, prune_mode)]));
 
+            let limiter = PruneLimiter::default().set_deleted_entries_limit(10);
+
             let result = ReceiptsByLogs::new(receipts_log_filter).prune(
                 &provider,
                 PruneInput {
@@ -278,7 +287,7 @@ mod tests {
                         .get_prune_checkpoint(PruneSegment::ContractLogs)
                         .unwrap(),
                     to_block: tip,
-                    delete_limit: 10,
+                    limiter,
                 },
             );
             provider.commit().expect("commit");
@@ -304,7 +313,7 @@ mod tests {
                     ((pruned_tx + 1) - unprunable) as usize
             );
 
-            output.done
+            output.progress.is_finished()
         };
 
         while !run_prune() {}

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::{segments::SegmentSet, Pruner};
 use reth_config::PruneConfig;
 use reth_db::database::Database;
@@ -17,9 +19,14 @@ pub struct PrunerBuilder {
     /// the amount of blocks between pruner runs to account for the difference in amount of new
     /// data coming in.
     pub prune_delete_limit: usize,
+    /// Time a pruner job can run before timing out.
+    pub timeout: Option<Duration>,
 }
 
 impl PrunerBuilder {
+    /// Default timeout for a prune run.
+    pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(100);
+
     /// Creates a new [PrunerBuilder] from the given [PruneConfig].
     pub fn new(pruner_config: PruneConfig) -> Self {
         PrunerBuilder::default()
@@ -51,6 +58,15 @@ impl PrunerBuilder {
         self
     }
 
+    /// Sets the timeout for pruner, per run.
+    ///
+    /// CAUTION: Account and Storage History prune segments treat this timeout as a soft limit,
+    /// meaning they can go beyond it.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
     /// Builds a [Pruner] from the current configuration.
     pub fn build<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> Pruner<DB> {
         let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
@@ -61,6 +77,7 @@ impl PrunerBuilder {
             self.block_interval,
             self.prune_delete_limit,
             self.max_reorg_depth,
+            self.timeout,
         )
     }
 }
@@ -72,6 +89,7 @@ impl Default for PrunerBuilder {
             segments: PruneModes::none(),
             max_reorg_depth: 64,
             prune_delete_limit: MAINNET.prune_delete_limit,
+            timeout: Some(Self::DEFAULT_TIMEOUT),
         }
     }
 }
