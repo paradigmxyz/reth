@@ -12,6 +12,10 @@ pub struct DatabaseArgs {
     /// Database logging level. Levels higher than "notice" require a debug build.
     #[arg(long = "db.log-level", value_enum)]
     pub log_level: Option<LogLevel>,
+    /// Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an
+    /// NFS volume.
+    #[arg(long = "db.exclusive")]
+    pub exclusive: Option<bool>,
 }
 
 impl DatabaseArgs {
@@ -19,6 +23,7 @@ impl DatabaseArgs {
     pub fn database_args(&self) -> reth_db::mdbx::DatabaseArguments {
         reth_db::mdbx::DatabaseArguments::new(default_client_version())
             .with_log_level(self.log_level)
+            .with_exclusive(self.exclusive)
     }
 }
 
