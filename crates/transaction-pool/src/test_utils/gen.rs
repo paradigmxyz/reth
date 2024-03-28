@@ -93,7 +93,8 @@ impl<R: Rng> TransactionGenerator<R> {
 
     /// Creates a new transaction with a random signer
     pub fn gen_eip4844(&mut self) -> TransactionSigned {
-        self.transaction().into_eip4844()
+        // `to` is required for EIP-4844
+        self.transaction().to(Default::default()).into_eip4844()
     }
 
     /// Generates and returns a pooled EIP-1559 transaction with a random signer.
@@ -182,7 +183,7 @@ impl TransactionBuilder {
                 gas_limit: self.gas_limit,
                 max_fee_per_gas: self.max_fee_per_gas,
                 max_priority_fee_per_gas: self.max_priority_fee_per_gas,
-                to: self.to,
+                to: self.to.to().expect("EIP4844 tx must have `to`"),
                 value: self.value,
                 access_list: self.access_list,
                 input: self.input,
