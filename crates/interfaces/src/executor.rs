@@ -88,9 +88,12 @@ pub enum BlockExecutionError {
     /// Pruning error, transparently wrapping `PruneSegmentError`
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
-    /// Error representing a provider error
-    #[error("provider error")]
-    ProviderError,
+    #[error("error on header completion and state root calculation")]
+    /// Block execution error on header completion with inner details
+    HeaderCompletionError {
+        /// The inner error message
+        inner: String,
+    },
     /// Transaction error on revert with inner details
     #[error("transaction error on revert: {inner}")]
     CanonicalRevert {
@@ -141,6 +144,9 @@ pub enum OptimismBlockExecutionError {
     /// Thrown when a blob transaction is included in a sequencer's block.
     #[error("blob transaction included in sequencer block")]
     BlobTransactionRejected,
+    /// Thrown when caching a depositor prior to the state transition for the deposit nonce fails.
+    #[error("failed to add depositor account to the cache")]
+    CachingDepositorFailed { inner: String },
 }
 
 impl BlockExecutionError {

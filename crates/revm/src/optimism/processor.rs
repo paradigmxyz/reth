@@ -145,7 +145,9 @@ where
                         .map(|acc| acc.account_info().unwrap_or_default())
                 })
                 .transpose()
-                .map_err(|_| BlockExecutionError::ProviderError)?;
+                .map_err(|e| OptimismBlockExecutionError::CachingDepositorFailed {
+                    inner: e.to_string(),
+                })?;
 
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, *sender)?;

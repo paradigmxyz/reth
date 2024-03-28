@@ -409,7 +409,7 @@ impl StorageInner {
         // calculate the state root
         let state_root = client
             .latest()
-            .map_err(|_| BlockExecutionError::ProviderError)?
+            .map_err(|e| BlockExecutionError::HeaderCompletionError { inner: (e.to_string()) })?
             .state_root(bundle_state.state())
             .unwrap();
         header.state_root = state_root;
