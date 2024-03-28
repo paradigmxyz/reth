@@ -146,7 +146,7 @@ pub enum OptimismBlockExecutionError {
     BlobTransactionRejected,
     /// Thrown when caching a depositor prior to the state transition for the deposit nonce fails.
     #[error("failed to add depositor account to the cache")]
-    CachingDepositorFailed { inner: String },
+    CachingDepositorError { inner: String },
 }
 
 impl BlockExecutionError {

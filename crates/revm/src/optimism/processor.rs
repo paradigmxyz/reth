@@ -145,7 +145,7 @@ where
                         .map(|acc| acc.account_info().unwrap_or_default())
                 })
                 .transpose()
-                .map_err(|e| OptimismBlockExecutionError::CachingDepositorFailed {
+                .map_err(|e| OptimismBlockExecutionError::CachingDepositorError {
                     inner: e.to_string(),
                 })?;
 
