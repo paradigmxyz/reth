@@ -5824,6 +5824,7 @@ dependencies = [
  "reth-codecs",
  "reth-discv4",
  "reth-ecies",
+ "reth-eth-wire-types",
  "reth-metrics",
  "reth-net-common",
  "reth-primitives",
