@@ -94,7 +94,7 @@ pub trait HandleDiscv5 {
         if enr.udp4_socket().is_none() && enr.udp6_socket().is_none() {
             return Err(Error::UnreachableDiscovery)
         }
-        let Some(udp_socket) = self.ip_mode().get_contactable_addr(&enr) else {
+        let Some(udp_socket) = self.ip_mode().get_contactable_addr(enr) else {
             return Err(Error::IpVersionMismatchDiscovery(self.ip_mode()))
         };
         // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
@@ -106,7 +106,7 @@ pub trait HandleDiscv5 {
             return Err(Error::IpVersionMismatchRlpx(self.ip_mode()))
         };
 
-        let id = uncompressed_id_from_enr_pk(&enr);
+        let id = uncompressed_id_from_enr_pk(enr);
 
         Ok(NodeRecord { address: udp_socket.ip(), tcp_port, udp_port: udp_socket.port(), id })
     }
@@ -402,8 +402,8 @@ impl Discv5 {
                 return None
             }
         };
-        let fork_id = match self.discovered_peer_filter.filter(&enr) {
-            FilterOutcome::Ok => self.get_fork_id(&enr).ok(),
+        let fork_id = match self.discovered_peer_filter.filter(enr) {
+            FilterOutcome::Ok => self.get_fork_id(enr).ok(),
             FilterOutcome::Ignore { reason } => {
                 trace!(target: "net::discovery::discv5",
                     ?enr,
