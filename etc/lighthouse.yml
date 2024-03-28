@@ -4,7 +4,7 @@ name: reth
 services:
   lighthouse:
     restart: unless-stopped
-    image: sigp/lighthouse
+    image: sigp/lighthouse:v5.0.0-modern
     depends_on:
       - reth
     ports:
