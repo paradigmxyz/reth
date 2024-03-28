@@ -868,8 +868,8 @@ impl TransactionSignedNoHash {
     }
 
     /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
-    /// value_. 
-    /// 
+    /// value_.
+    ///
     /// Re-uses a given buffer to avoid numerous reallocations when recovering batches.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also

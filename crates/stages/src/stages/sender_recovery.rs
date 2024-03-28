@@ -9,10 +9,8 @@ use reth_db::{
 };
 use reth_interfaces::consensus;
 use reth_primitives::{
-    keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Address, PruneSegment, StaticFileSegment, Transaction, TransactionSignedNoHash, TxDeposit,
-    TxNumber,
+    Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
