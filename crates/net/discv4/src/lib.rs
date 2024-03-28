@@ -41,6 +41,8 @@ use enr::Enr;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{bytes::Bytes, hex, ForkId, PeerId, B256};
+// re-export key type used to help with using reth discv4 as dep outside of workspace
+pub use secp256k1;
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
