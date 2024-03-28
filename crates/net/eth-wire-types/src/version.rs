@@ -1,5 +1,4 @@
-//! Support for representing the version of the `eth`. [`Capability`](crate::capability::Capability)
-//! and [Protocol](crate::protocol::Protocol).
+//! Support for representing the version of the `eth`
 
 use std::str::FromStr;
 
