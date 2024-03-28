@@ -856,8 +856,37 @@ impl TransactionSignedNoHash {
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
     pub fn recover_signer(&self) -> Option<Address> {
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        #[cfg(feature = "optimism")]
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
+        }
+
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
+    }
+
+    /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
+    /// value_.
+    ///
+    /// Re-uses a given buffer to avoid numerous reallocations when recovering batches. **Clears the
+    /// buffer before use.**
+    ///
+    /// Returns `None` if the transaction's signature is invalid, see also
+    /// [Signature::recover_signer_unchecked].
+    pub fn encode_and_recover_unchecked(&self, buffer: &mut Vec<u8>) -> Option<Address> {
+        buffer.clear();
+        self.transaction.encode_without_signature(buffer);
+
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        #[cfg(feature = "optimism")]
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
+        }
+
+        self.signature.recover_signer_unchecked(keccak256(buffer))
     }
 
     /// Converts into a transaction type with its hash: [`TransactionSigned`].
