@@ -1,7 +1,6 @@
 //! Connection tests
 
 use alloy_node_bindings::Geth;
-use ethers_providers::{Http, Middleware, Provider};
 use futures::StreamExt;
 use reth_discv4::Discv4Config;
 use reth_eth_wire::DisconnectReason;
@@ -319,10 +318,10 @@ async fn test_incoming_node_id_blacklist() {
         let temp_dir = tempfile::tempdir().unwrap().into_path();
         let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
-        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+        let provider = Provider::new(&format!("http://{geth_endpoint}"));
 
         // get the peer id we should be expecting
-        let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
+        let geth_peer_id = provider.peer_id().await.unwrap();
 
         let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
         let peer_config = PeersConfig::default().with_ban_list(ban_list);
@@ -371,10 +370,10 @@ async fn test_incoming_connect_with_single_geth() {
         let temp_dir = tempfile::tempdir().unwrap().into_path();
         let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
-        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+        let provider = Provider::new(&format!("http://{geth_endpoint}"));
 
         // get the peer id we should be expecting
-        let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
+        let geth_peer_id = provider.peer_id().await.unwrap();
 
         let config = NetworkConfigBuilder::new(secret_key)
             .listener_port(0)
@@ -431,10 +430,10 @@ async fn test_outgoing_connect_with_single_geth() {
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+        let provider = Provider::new(&format!("http://{geth_endpoint}"));
 
         // get the peer id we should be expecting
-        let geth_peer_id: PeerId = enr_to_peer_id(provider.node_info().await.unwrap().enr);
+        let geth_peer_id = provider.peer_id().await.unwrap();
 
         // add geth as a peer then wait for a `SessionEstablished` event
         handle.add_peer(geth_peer_id, geth_socket);
@@ -475,10 +474,10 @@ async fn test_geth_disconnect() {
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+        let provider = Provider::new(&format!("http://{geth_endpoint}"));
 
         // get the peer id we should be expecting
-        let geth_peer_id: PeerId = enr_to_peer_id(provider.node_info().await.unwrap().enr);
+        let geth_peer_id = provider.peer_id().await.unwrap();
 
         // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
         handle.add_peer(geth_peer_id, geth_socket);
@@ -697,5 +696,23 @@ async fn test_connect_many() {
     // check that all the peers are connected
     for peer in handle.peers() {
         assert_eq!(peer.network().num_connected_peers(), 4);
+    }
+}
+
+struct Provider(alloy_rpc_client::RpcClient<alloy_transport_http::Http<reqwest::Client>>);
+
+impl Provider {
+    fn new(url: &str) -> Self {
+        Self(alloy_rpc_client::RpcClient::new_http(url.parse().unwrap()))
+    }
+
+    async fn peer_id(&self) -> Result<PeerId, Box<dyn std::error::Error>> {
+        let req: serde_json::Value = self.0.request("admin_nodeInfo", ()).await?;
+        let enr = req.get("enr").ok_or("no .enr")?.as_str().ok_or(".enr not a string")?.parse()?;
+        Ok(enr_to_peer_id(enr))
+    }
+
+    async fn add_peer(&self, enode: String) -> Result<(), impl std::error::Error> {
+        self.0.request("admin_addPeer", (enode,)).await
     }
 }

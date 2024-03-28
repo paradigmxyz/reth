@@ -260,11 +260,9 @@ alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e39
 alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
 alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
 alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
 alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
-
-# TODO: Remove
-ethers-core = { version = "2.0.14", default-features = false }
-ethers-providers = { version = "2.0.14", default-features = false }
 
 # misc
 aquamarine = "0.5"
@@ -314,9 +312,10 @@ futures-util = "0.3.25"
 hyper = "0.14.25"
 tower = "0.4"
 tower-http = "0.4"
+reqwest = "0.12"
 
 # p2p
-discv5 = "0.4"
+discv5 = "0.4.1"
 igd-next = "0.14.3"
 
 # rpc
@@ -325,11 +324,11 @@ jsonrpsee-core = "0.20"
 jsonrpsee-types = "0.20"
 
 # crypto
-secp256k1 = { version = "0.27.0", default-features = false, features = [
+secp256k1 = { version = "0.28", default-features = false, features = [
     "global-context",
     "recovery",
 ] }
-enr = { version = "=0.10.0", default-features = false, features = ["k256"] }
+enr = { version = "0.11", default-features = false, features = ["k256"] }
 
 # for eip-4844
 c-kzg = "1.0.0"
@@ -349,3 +348,7 @@ proptest-derive = "0.4"
 serial_test = "3"
 similar-asserts = "1.5.0"
 test-fuzz = "5"
+
+[patch.crates-io]
+discv5 = { git = "https://github.com/sigp/discv5" }
+enr = { git = "https://github.com/danipopes/enr", branch = "advance-decode-buffer" }

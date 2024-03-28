@@ -78,11 +78,12 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
-alloy-node-bindings.workspace = true
-ethers-core = { workspace = true, default-features = false }
-ethers-providers = { workspace = true, default-features = false, features = ["ws"] }
-
 enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
+
+alloy-node-bindings.workspace = true
+alloy-rpc-client.workspace = true
+alloy-transport-http = { workspace = true, features = ["reqwest"] }
+reqwest = { workspace = true, features = ["json"] }
 
 # misc
 serial_test.workspace = true
@@ -102,11 +103,7 @@ test-utils = [
     "reth-transaction-pool/test-utils",
 ]
 geth-tests = []
-optimism = [
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-network-api/optimism",
-]
+optimism = ["reth-primitives/optimism", "reth-provider/optimism", "reth-network-api/optimism"]
 
 [[bench]]
 name = "bench"

@@ -402,8 +402,8 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
     }
     .into_ipv4_mapped();
 
-    let mut maybe_fork_id = enr.get(b"eth")?;
-    let fork_id = ForkId::decode(&mut maybe_fork_id).ok();
+    let maybe_fork_id = enr.get(b"eth")?;
+    let fork_id = ForkId::decode(&mut &maybe_fork_id[..]).ok();
 
     Some(DnsNodeRecordUpdate { node_record, fork_id, enr: enr.clone() })
 }
