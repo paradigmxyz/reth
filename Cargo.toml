@@ -327,7 +327,6 @@ jsonrpsee-types = "0.20"
 # crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [
     "global-context",
-    "rand-std",
     "recovery",
 ] }
 enr = { version = "=0.10.0", default-features = false, features = ["k256"] }
