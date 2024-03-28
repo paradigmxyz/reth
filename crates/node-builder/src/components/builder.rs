@@ -94,7 +94,7 @@ where
     where
         PB: PoolBuilder<Node>,
     {
-        let Self { payload_builder, network_builder, _marker, .. } = self;
+        let Self { pool_builder: _, payload_builder, network_builder, _marker } = self;
         ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
     }
 }
@@ -112,7 +112,7 @@ where
     where
         NB: NetworkBuilder<Node, PoolB::Pool>,
     {
-        let Self { payload_builder, pool_builder, _marker, .. } = self;
+        let Self { pool_builder, payload_builder, network_builder: _, _marker } = self;
         ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
     }
 
@@ -124,7 +124,7 @@ where
     where
         PB: PayloadServiceBuilder<Node, PoolB::Pool>,
     {
-        let Self { pool_builder, network_builder, _marker, .. } = self;
+        let Self { pool_builder, payload_builder: _, network_builder, _marker } = self;
         ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
     }
 }

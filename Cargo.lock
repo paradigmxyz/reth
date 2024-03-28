@@ -6199,6 +6199,7 @@ name = "reth-node-ethereum"
 version = "0.2.0-beta.4"
 dependencies = [
  "eyre",
+ "futures",
  "reth-basic-payload-builder",
  "reth-db",
  "reth-ethereum-payload-builder",
