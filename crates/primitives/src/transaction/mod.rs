@@ -870,11 +870,12 @@ impl TransactionSignedNoHash {
     /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
     /// value_.
     ///
-    /// Re-uses a given buffer to avoid numerous reallocations when recovering batches.
+    /// Re-uses a given buffer to avoid numerous reallocations when recovering batches. **Clears the
+    /// buffer before use.**
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
     /// [Signature::recover_signer_unchecked].
-    pub fn recover_signer_unchecked_with_buffer(&self, rlp_buf: &mut Vec<u8>) -> Option<Address> {
+    pub fn recover_signer_unchecked_with_buffer(&self, buffer: &mut Vec<u8>) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
@@ -882,9 +883,10 @@ impl TransactionSignedNoHash {
             return Some(from)
         }
 
-        self.transaction.encode_without_signature(rlp_buf);
+        buffer.clear();
+        self.transaction.encode_without_signature(buffer);
 
-        self.signature.recover_signer_unchecked(keccak256(rlp_buf))
+        self.signature.recover_signer_unchecked(keccak256(buffer))
     }
 
     /// Converts into a transaction type with its hash: [`TransactionSigned`].
