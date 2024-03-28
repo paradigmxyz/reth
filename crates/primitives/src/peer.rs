@@ -1,9 +1,29 @@
 use enr::Enr;
 use reth_rpc_types::NodeRecord;
-use secp256k1::SecretKey;
+use secp256k1::{PublicKey, SecretKey};
 use std::{net::IpAddr, str::FromStr};
+
 // Re-export PeerId for ease of use.
 pub use reth_rpc_types::PeerId;
+
+/// Converts a [secp256k1::PublicKey] to a [PeerId] by stripping the
+/// SECP256K1_TAG_PUBKEY_UNCOMPRESSED tag and storing the rest of the slice in the [PeerId].
+pub fn pk2id(pk: &PublicKey) -> PeerId {
+    PeerId::from_slice(&pk.serialize_uncompressed()[1..])
+}
+
+/// Converts a [PeerId] to a [secp256k1::PublicKey] by prepending the [PeerId] bytes with the
+/// SECP256K1_TAG_PUBKEY_UNCOMPRESSED tag.
+pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
+    // NOTE: B512 is used as a PeerId not because it represents a hash, but because 512 bits is
+    // enough to represent an uncompressed public key.
+    let mut s = [0u8; 65];
+    // SECP256K1_TAG_PUBKEY_UNCOMPRESSED = 0x04
+    // see: https://github.com/bitcoin-core/secp256k1/blob/master/include/secp256k1.h#L211
+    s[0] = 4;
+    s[1..].copy_from_slice(id.as_slice());
+    PublicKey::from_slice(&s)
+}
 
 /// A peer that can come in ENR or [NodeRecord] form.
 #[derive(
@@ -151,6 +171,7 @@ impl<T> WithPeerId<Option<T>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secp256k1::SECP256K1;
 
     #[test]
     fn test_node_record_parse() {
@@ -189,5 +210,12 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(node.to_string(), url);
+    }
+
+    #[test]
+    fn pk2id2pk() {
+        let prikey = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let pubkey = PublicKey::from_secret_key(SECP256K1, &prikey);
+        assert_eq!(pubkey, id2pk(pk2id(&pubkey)).unwrap());
     }
 }
