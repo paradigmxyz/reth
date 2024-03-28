@@ -42,17 +42,17 @@ pub enum Error {
     #[error("failed to decode fork id, 'eth': {0:?}")]
     ForkIdDecodeError(#[from] alloy_rlp::Error),
     /// Peer is unreachable over discovery.
-    #[error("discovery socket missing, ENR: {0:?}")]
-    UnreachableDiscovery(discv5::Enr),
+    #[error("discovery socket missing")]
+    UnreachableDiscovery,
     /// Peer is unreachable over rlpx.
-    #[error("rlpx TCP socket missing, ENR: {0:?}")]
-    Unreachablerlpx(discv5::Enr),
+    #[error("rlpx TCP socket missing")]
+    UnreachableRlpx,
     /// Peer is not using same IP version as local node in discovery.
-    #[error("discovery socket is unsupported IP version, ENR: {0:?}, local ip mode: {1:?}")]
-    IpVersionMismatchDiscovery(discv5::Enr, IpMode),
+    #[error("discovery socket is unsupported IP version, local ip mode: {0:?}")]
+    IpVersionMismatchDiscovery(IpMode),
     /// Peer is not using same IP version as local node in rlpx.
-    #[error("rlpx TCP socket is unsupported IP version, ENR: {0:?}, local ip mode: {1:?}")]
-    IpVersionMismatchrlpx(discv5::Enr, IpMode),
+    #[error("rlpx TCP socket is unsupported IP version, local ip mode: {0:?}")]
+    IpVersionMismatchRlpx(IpMode),
     /// Failed to initialize [`discv5::Discv5`].
     #[error("init failed, {0}")]
     InitFailure(&'static str),
@@ -89,13 +89,13 @@ pub trait HandleDiscv5 {
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
     /// w.r.t. local [`IpMode`].
-    fn try_into_reachable(&self, enr: discv5::Enr) -> Result<NodeRecord, Error> {
+    fn try_into_reachable(&self, enr: &discv5::Enr) -> Result<NodeRecord, Error> {
         // todo: track unreachable with metrics
         if enr.udp4_socket().is_none() && enr.udp6_socket().is_none() {
-            return Err(Error::UnreachableDiscovery(enr))
+            return Err(Error::UnreachableDiscovery)
         }
         let Some(udp_socket) = self.ip_mode().get_contactable_addr(&enr) else {
-            return Err(Error::IpVersionMismatchDiscovery(enr, self.ip_mode()))
+            return Err(Error::IpVersionMismatchDiscovery(self.ip_mode()))
         };
         // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
         // too
@@ -103,7 +103,7 @@ pub trait HandleDiscv5 {
             IpMode::Ip4 | IpMode::DualStack => enr.tcp4(),
             IpMode::Ip6 => enr.tcp6(),
         }) else {
-            return Err(Error::IpVersionMismatchrlpx(enr, self.ip_mode()))
+            return Err(Error::IpVersionMismatchRlpx(self.ip_mode()))
         };
 
         let id = uncompressed_id_from_enr_pk(&enr);
@@ -127,7 +127,7 @@ pub struct Discv5 {
     // filtered out by default. allow_no_tcp_discovered_nodes: bool,
     fork_id_key: &'static [u8],
     /// Optionally filter discovered peers before passing up to app.
-    filter_discovered_peer: MustNotIncludeChains,
+    discovered_peer_filter: MustNotIncludeChains,
     #[doc(hidden)]
     pub metrics: Metrics,
 }
@@ -296,32 +296,23 @@ impl Discv5 {
             "added boot nodes"
         );
 
+        let metrics = Metrics::default();
+
         // initiate regular lookups to populate kbuckets
         task::spawn({
             let discv5 = discv5.clone();
-
             let local_node_id = discv5.local_enr().node_id();
             let self_lookup_interval = Duration::from_secs(self_lookup_interval);
-
-            /*let filter = filter_discovered_peer.clone();
-            let predicate = Box::new(move |enr: &discv5::Enr| -> bool {
-                match filter.filter(enr) {
-                    FilterOutcome::Ok | FilterOutcome::OkReturnForkId(_) => true,
-                    FilterOutcome::Ignore { reason } => {
-                        trace!(target: "net::discv5",
-                            ?enr,
-                            reason,
-                            "filtered out peer from lookup query"
-                        );
-
-                        false
-                    }
-                }
-            });*/
+            let mut metrics = metrics.discovered_peers.clone();
             // todo: graceful shutdown
 
             async move {
                 loop {
+                    metrics.set_total_sessions(discv5.metrics().active_sessions);
+                    metrics.set_total_kbucket_peers(
+                        discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
+                    );
+
                     trace!(target: "net::discv5",
                         self_lookup_interval=format!("{:#?}", self_lookup_interval),
                         "starting periodic lookup query"
@@ -355,10 +346,84 @@ impl Discv5 {
         });
 
         Ok((
-            Discv5::new(discv5, ip_mode, chain, filter_discovered_peer, Metrics::default()),
+            Discv5::new(discv5, ip_mode, chain, filter_discovered_peer, metrics),
             discv5_updates,
             bc_enr,
         ))
+    }
+
+    /// Process an event from the underlying [`discv5::Discv5`] node.
+    pub fn on_discv5_update(&mut self, update: discv5::Event) -> Option<DiscoveredPeer> {
+        match update {
+            discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
+            // `EnrAdded` not used in discv5 codebase
+            discv5::Event::EnrAdded { .. } |
+            // `Discovered` not unique discovered peers
+            discv5::Event::Discovered(_) => None,
+            discv5::Event::NodeInserted { replaced: _, .. } => {
+
+                // node has been inserted into kbuckets
+
+                // `replaced` covers `reth_discv4::DiscoveryUpdate::Removed(_)` .. but we can't get 
+                // a `PeerId` from a `NodeId`
+
+                self.metrics.discovered_peers.increment_kbucket_insertions(1);
+
+                None
+            }
+            discv5::Event::SessionEstablished(enr, _remote_socket) => {
+                // covers `reth_discv4::DiscoveryUpdate` equivalents `DiscoveryUpdate::Added(_)` 
+                // and `DiscoveryUpdate::DiscoveredAtCapacity(_)
+
+                // peer has been discovered as part of query, or, by incoming session (peer has 
+                // discovered us)
+
+                self.metrics.discovered_peers_advertised_networks.increment_once_by_network_type(&enr);
+
+                self.metrics.discovered_peers.increment_established_sessions_raw(1);
+
+                self.on_discovered_peer(&enr)
+            }
+        }
+    }
+
+    /// Processes a discovered peer. Returns `true` if peer is added to
+    fn on_discovered_peer(&mut self, enr: &discv5::Enr) -> Option<DiscoveredPeer> {
+        let node_record = match self.try_into_reachable(enr) {
+            Ok(enr_bc) => enr_bc,
+            Err(err) => {
+                trace!(target: "net::discovery::discv5",
+                    %err,
+                    "discovered peer is unreachable"
+                );
+
+                self.metrics.discovered_peers.increment_established_sessions_unreachable_enr(1);
+
+                return None
+            }
+        };
+        let fork_id = match self.discovered_peer_filter.filter(&enr) {
+            FilterOutcome::Ok => self.get_fork_id(&enr).ok(),
+            FilterOutcome::Ignore { reason } => {
+                trace!(target: "net::discovery::discv5",
+                    ?enr,
+                    reason,
+                    "filtered out discovered peer"
+                );
+
+                self.metrics.discovered_peers.increment_established_sessions_filtered(1);
+
+                return None
+            }
+        };
+
+        trace!(target: "net::discovery::discv5",
+            ?fork_id,
+            ?enr,
+            "discovered peer"
+        );
+
+        Some(DiscoveredPeer { node_record, fork_id })
     }
 }
 
@@ -419,8 +484,17 @@ impl HandleDiscv5 for Discv5 {
     }
 
     fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome {
-        self.filter_discovered_peer.filter(enr)
+        self.discovered_peer_filter.filter(enr)
     }
+}
+
+/// Result of successfully processing a peer discovered by [`discv5::Discv5`].
+#[derive(Debug)]
+pub struct DiscoveredPeer {
+    /// A discovery v4 backwards compatible ENR.
+    pub node_record: NodeRecord,
+    /// [`ForkId`] extracted from ENR w.r.t. configured
+    pub fork_id: Option<ForkId>,
 }
 
 #[cfg(test)]

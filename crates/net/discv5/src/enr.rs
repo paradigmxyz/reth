@@ -22,7 +22,7 @@ pub fn uncompressed_id_from_enr_pk(enr: &discv5::Enr) -> PeerId {
 /// Converts a [`CombinedPublicKey`] to a [`PeerId`] that can be used in
 pub fn pk_to_uncompressed_id(pk: &CombinedPublicKey) -> PeerId {
     let pk_bytes = pk.encode();
-    let pk = discv5::enr::secp256k1::PublicKey::from_slice(&pk_bytes).unwrap();
+    let pk = secp256k1::PublicKey::from_slice(&pk_bytes).unwrap();
 
     PeerId::from_slice(&pk.serialize_uncompressed()[1..])
 }
@@ -74,7 +74,9 @@ impl From<EnrCombinedKeyWrapper> for Enr<SecretKey> {
 
 #[cfg(test)]
 mod tests {
+    use alloy_rlp::Encodable;
     use discv5::enr::{CombinedKey, EnrKey};
+    use reth_primitives::{pk_to_id, Hardfork, NodeRecord, MAINNET};
 
     use super::*;
 
@@ -89,5 +91,38 @@ mod tests {
         let discv5_peer_id_from_discv4_peer_id = uncompressed_to_compressed_id(discv4_peer_id);
 
         assert_eq!(discv5_peer_id, discv5_peer_id_from_discv4_peer_id)
+    }
+
+    #[test]
+    fn conversion_to_node_record_from_enr() {
+        const IP: &str = "::";
+        const TCP_PORT: u16 = 30303;
+        const UDP_PORT: u16 = 9000;
+
+        let key = CombinedKey::generate_secp256k1();
+
+        let mut buf = Vec::new();
+        let fork_id = MAINNET.hardfork_fork_id(Hardfork::Frontier);
+        fork_id.unwrap().encode(&mut buf);
+
+        let enr = Enr::builder()
+            .ip6(IP.parse().unwrap())
+            .udp6(UDP_PORT)
+            .tcp6(TCP_PORT)
+            .build(&key)
+            .unwrap();
+
+        let enr = EnrCombinedKeyWrapper(enr).into();
+        let node_record = NodeRecord::try_from(&enr).unwrap();
+
+        assert_eq!(
+            NodeRecord {
+                address: IP.parse().unwrap(),
+                tcp_port: TCP_PORT,
+                udp_port: UDP_PORT,
+                id: pk_to_id(&enr.public_key())
+            },
+            node_record
+        )
     }
 }
