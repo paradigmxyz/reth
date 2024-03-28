@@ -358,9 +358,7 @@ pub(crate) fn create_txn_env(
     let gas_limit = gas.unwrap_or_else(|| block_env.gas_limit.min(U256::from(u64::MAX)));
     let env = TxEnv {
         gas_limit: gas_limit.try_into().map_err(|_| RpcInvalidTransactionError::GasUintOverflow)?,
-        nonce: nonce
-            .map(|n| n.try_into().map_err(|_| RpcInvalidTransactionError::NonceTooHigh))
-            .transpose()?,
+        nonce,
         caller: from.unwrap_or_default(),
         gas_price,
         gas_priority_fee: max_priority_fee_per_gas,

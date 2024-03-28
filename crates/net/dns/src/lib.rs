@@ -372,6 +372,8 @@ pub struct DnsNodeRecordUpdate {
     pub node_record: NodeRecord,
     /// The forkid of the node, if present in the ENR
     pub fork_id: Option<ForkId>,
+    /// Original [`Enr`].
+    pub enr: Enr<SecretKey>,
 }
 
 /// Commands sent from [DnsDiscoveryHandle] to [DnsDiscoveryService]
@@ -403,7 +405,7 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
     let mut maybe_fork_id = enr.get(b"eth")?;
     let fork_id = ForkId::decode(&mut maybe_fork_id).ok();
 
-    Some(DnsNodeRecordUpdate { node_record, fork_id })
+    Some(DnsNodeRecordUpdate { node_record, fork_id, enr: enr.clone() })
 }
 
 #[cfg(test)]

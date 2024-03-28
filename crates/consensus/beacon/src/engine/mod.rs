@@ -1431,12 +1431,23 @@ where
                         if let Err((hash, error)) =
                             self.try_make_sync_target_canonical(downloaded_num_hash)
                         {
-                            tracing::error!(
-                                target: "consensus::engine",
-                                "Unexpected error while making sync target canonical: {:?}, {:?}",
+                            if !matches!(
                                 error,
-                                hash
-                            )
+                                CanonicalError::BlockchainTree(
+                                    BlockchainTreeError::BlockHashNotFoundInChain { .. }
+                                )
+                            ) {
+                                if error.is_fatal() {
+                                    error!(target: "consensus::engine", %error, "Encountered fatal error while making sync target canonical: {:?}, {:?}", error, hash);
+                                } else {
+                                    debug!(
+                                        target: "consensus::engine",
+                                        "Unexpected error while making sync target canonical: {:?}, {:?}",
+                                        error,
+                                        hash
+                                    )
+                                }
+                            }
                         }
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected {

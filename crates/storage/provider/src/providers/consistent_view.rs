@@ -1,5 +1,5 @@
-use crate::{BlockNumReader, DatabaseProviderFactory, DatabaseProviderRO, ProviderError};
-use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
+use crate::{BlockNumReader, DatabaseProviderFactory, DatabaseProviderRO, HeaderProvider};
+use reth_db::database::Database;
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{GotExpected, B256};
 use std::marker::PhantomData;
@@ -40,24 +40,24 @@ where
 
     /// Creates new consistent database view with latest tip.
     pub fn new_with_latest_tip(provider: Provider) -> ProviderResult<Self> {
-        let tip = provider
-            .database_provider_ro()?
-            .tx_ref()
-            .cursor_read::<tables::CanonicalHeaders>()?
-            .last()?;
-        Ok(Self::new(provider, tip.map(|(_, hash)| hash)))
+        let provider_ro = provider.database_provider_ro()?;
+        let last_num = provider_ro.last_block_number()?;
+        let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
+        Ok(Self::new(provider, tip))
     }
 
     /// Creates new read-only provider and performs consistency checks on the current tip.
     pub fn provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
+        // Create a new provider.
         let provider_ro = self.provider.database_provider_ro()?;
-        let last_entry = provider_ro
-            .tx_ref()
-            .cursor_read::<tables::CanonicalHeaders>()
-            .and_then(|mut cursor| cursor.last())
-            .map_err(ProviderError::Database)?;
 
-        let tip = last_entry.map(|(_, hash)| hash);
+        // Check that the latest stored header number matches the number
+        // that consistent view was initialized with.
+        // The mismatch can happen if a new block was appended while
+        // the view was being used.
+        // We compare block hashes instead of block numbers to account for reorgs.
+        let last_num = provider_ro.last_block_number()?;
+        let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
         if self.tip != tip {
             return Err(ConsistentViewError::Inconsistent {
                 tip: GotExpected { got: tip, expected: self.tip },
@@ -65,9 +65,15 @@ where
             .into())
         }
 
+        // Check that the best block number is the same as the latest stored header.
+        // This ensures that the consistent view cannot be used for initializing new providers
+        // if the node fell back to the staged sync.
         let best_block_number = provider_ro.best_block_number()?;
-        if last_entry.map(|(number, _)| number).unwrap_or_default() != best_block_number {
-            return Err(ConsistentViewError::Syncing(best_block_number).into())
+        if last_num != best_block_number {
+            return Err(ConsistentViewError::Syncing {
+                best_block: GotExpected { got: best_block_number, expected: last_num },
+            }
+            .into())
         }
 
         Ok(provider_ro)

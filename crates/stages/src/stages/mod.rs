@@ -30,8 +30,12 @@ pub use headers::*;
 pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
+
 pub use sender_recovery::*;
 pub use tx_lookup::*;
+
+mod utils;
+use utils::*;
 
 #[cfg(test)]
 mod tests {

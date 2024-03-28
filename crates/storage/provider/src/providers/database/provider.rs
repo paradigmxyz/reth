@@ -1219,7 +1219,15 @@ impl<TX: DbTx> BlockNumReader for DatabaseProvider<TX> {
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        Ok(self.tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
+        Ok(self
+            .tx
+            .cursor_read::<tables::CanonicalHeaders>()?
+            .last()?
+            .map(|(num, _)| num)
+            .max(
+                self.static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers),
+            )
+            .unwrap_or_default())
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {

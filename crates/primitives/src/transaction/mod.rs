@@ -1333,13 +1333,14 @@ impl TransactionSigned {
         let Ok(tx_type) = TxType::try_from(tx_type) else {
             return Err(RlpError::Custom("unsupported typed transaction type"))
         };
+
         let transaction = match tx_type {
             TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
             TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
             TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             #[cfg(feature = "optimism")]
             TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
-            TxType::Legacy => unreachable!("path for legacy tx has diverged before this method"),
+            TxType::Legacy => return Err(RlpError::Custom("unexpected legacy tx type")),
         };
 
         #[cfg(not(feature = "optimism"))]

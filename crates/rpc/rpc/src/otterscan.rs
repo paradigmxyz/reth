@@ -2,13 +2,14 @@ use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use revm::inspectors::NoOpInspector;
+use revm_inspectors::transfer::{TransferInspector, TransferKind};
 use revm_primitives::ExecutionResult;
 
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_types::{
-    BlockDetails, BlockTransactions, ContractCreator, InternalOperation, OtsBlockTransactions,
-    OtsTransactionReceipt, TraceEntry, Transaction, TransactionsWithReceipts,
+    BlockDetails, BlockTransactions, ContractCreator, InternalOperation, OperationType,
+    OtsBlockTransactions, OtsTransactionReceipt, TraceEntry, Transaction, TransactionsWithReceipts,
 };
 
 use crate::{eth::EthTransactions, result::internal_rpc_err};
@@ -44,8 +45,33 @@ where
     }
 
     /// Handler for `ots_getInternalOperations`
-    async fn get_internal_operations(&self, _tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn get_internal_operations(&self, tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>> {
+        let internal_operations = self
+            .eth
+            .spawn_trace_transaction_in_block_with_inspector(
+                tx_hash,
+                TransferInspector::new(false),
+                |_tx_info, inspector, _, _| Ok(inspector.into_transfers()),
+            )
+            .await?
+            .map(|transfer_operations| {
+                transfer_operations
+                    .iter()
+                    .map(|op| InternalOperation {
+                        from: op.from,
+                        to: op.to,
+                        value: op.value,
+                        r#type: match op.kind {
+                            TransferKind::Call => OperationType::OpTransfer,
+                            TransferKind::Create => OperationType::OpCreate,
+                            TransferKind::Create2 => OperationType::OpCreate2,
+                            TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
+                        },
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        Ok(internal_operations)
     }
 
     /// Handler for `ots_getTransactionError`
