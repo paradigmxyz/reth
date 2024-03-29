@@ -76,7 +76,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
         .await?;
         assert!(submission.is_valid());
 
-        // get latest valid hash from blockchaint tree
+        // get latest valid hash from blockchain tree
         let hash = submission.latest_valid_hash.unwrap();
 
         // trigger forkchoice update via engine api to commit the block to the blockchain
