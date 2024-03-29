@@ -69,11 +69,13 @@ rand.workspace = true
 paste.workspace = true
 
 # Stage benchmarks
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion = { workspace = true, features = ["async_futures"] }
 
 # io
 serde_json.workspace = true
+
+[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
 test-utils = ["reth-interfaces/test-utils", "reth-db/test-utils", "reth-provider/test-utils"]
