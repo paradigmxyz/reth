@@ -1,6 +1,6 @@
 //! Traits for the builder
 
-use crate::{components::NodeComponents, node::FullNodeTypes, BuilderContext, NodeHandle};
+use crate::{components::NodeComponents, node::FullNodeTypes, BuilderContext, NodeBuilder, NodeHandle};
 use futures::Future;
 use reth_network::NetworkHandle;
 use reth_node_api::NodeTypes;
@@ -146,16 +146,16 @@ where
 }
 
 /// Trait for launching the node.
-pub trait LaunchNode {
+pub trait LaunchNode<Node: FullNodeComponents> {
     /// Encapsulates all types and components of the node.
-    type Node: FullNodeComponents;
+    // type Node: FullNodeComponents;
 
     /// Launches the node and returns a handle to it.
     ///
     /// Returns a [NodeHandle] that can be used to interact with the node.
-    fn launch(
-        self: Self,
+    fn launch<State>(
+        builder: NodeBuilder<Node::DB, State>,
         executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
-    ) -> impl Future<Output = eyre::Result<NodeHandle<Self::Node>>>;
+    ) -> impl Future<Output = eyre::Result<NodeHandle<Node>>>;
 }
