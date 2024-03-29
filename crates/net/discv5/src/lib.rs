@@ -513,7 +513,7 @@ mod tests {
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
 
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
-        let discv5_config = Config::builder()
+        let discv5_config = Config::builder(30303)
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .build();
 

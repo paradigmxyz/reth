@@ -19,10 +19,6 @@ pub const ETH: &[u8] = b"eth";
 pub const ETH2: &[u8] = b"eth2";
 /// Optimism
 pub const OPSTACK: &[u8] = b"opstack";
-/// The default tcp port for RLPx.
-///
-/// Note: the default udp discv4 port is the same.
-pub const DEFAULT_RLPX_PORT: u16 = 30303;
 
 /// Default interval in seconds at which to run a self-lookup up query.
 ///
@@ -47,7 +43,7 @@ pub struct ConfigBuilder {
     /// RLPx TCP port to advertise. Note: so long as `reth_network` handles [`NodeRecord`]s as
     /// opposed to [`Enr`](enr::Enr)s, TCP is limited to same IP address as UDP, since
     /// [`NodeRecord`] doesn't supply an extra field for and alternative TCP address.
-    tcp_port: Option<u16>,
+    tcp_port: u16,
     /// Additional kv-pairs that should be advertised to peers by including in local node record.
     other_enr_data: Vec<(&'static str, Bytes)>,
     /// Interval in seconds at which to run a lookup up query with local node ID as target, to
@@ -75,7 +71,7 @@ impl ConfigBuilder {
             discv5_config: Some(discv5_config),
             bootstrap_nodes,
             fork: Some(fork_id),
-            tcp_port: Some(tcp_port),
+            tcp_port,
             other_enr_data,
             self_lookup_interval: Some(self_lookup_interval),
             filter_discovered_peer,
@@ -145,8 +141,8 @@ impl ConfigBuilder {
     }
 
     /// Sets the tcp port to advertise in the local [`Enr`](discv5::enr::Enr).
-    pub fn tcp_port(mut self, port: u16) -> Self {
-        self.tcp_port = Some(port);
+    fn tcp_port(mut self, port: u16) -> Self {
+        self.tcp_port = port;
         self
     }
 
@@ -197,8 +193,6 @@ impl ConfigBuilder {
 
         let fork = fork.unwrap_or((ETH, MAINNET.latest_fork_id()));
 
-        let tcp_port = tcp_port.unwrap_or(DEFAULT_RLPX_PORT);
-
         let self_lookup_interval =
             self_lookup_interval.unwrap_or(DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL);
 
@@ -237,9 +231,9 @@ pub struct Config {
 }
 
 impl Config {
-    /// Returns a new [`ConfigBuilder`].
-    pub fn builder() -> ConfigBuilder {
-        ConfigBuilder::default()
+    /// Returns a new [`ConfigBuilder`], with the RLPx TCP port set to the given port.
+    pub fn builder(rlpx_tcp_port: u16) -> ConfigBuilder {
+        ConfigBuilder::default().tcp_port(rlpx_tcp_port)
     }
 }
 
@@ -312,8 +306,9 @@ mod test {
     fn parse_boot_nodes() {
         const OP_SEPOLIA_CL_BOOTNODES: &str ="enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg,enr:-J64QFa3qMsONLGphfjEkeYyF6Jkil_jCuJmm7_a42ckZeUQGLVzrzstZNb1dgBp1GGx9bzImq5VxJLP-BaptZThGiWGAYrTytOvgmlkgnY0gmlwhGsV-zeHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDahfSECTIS_cXyZ8IyNf4leANlZnrsMEWTkEYxf4GMCmDdGNwgiQGg3VkcIIkBg";
 
-        let config =
-            Config::builder().add_cl_serialized_signed_boot_nodes(OP_SEPOLIA_CL_BOOTNODES).build();
+        let config = Config::builder(30303)
+            .add_cl_serialized_signed_boot_nodes(OP_SEPOLIA_CL_BOOTNODES)
+            .build();
 
         let socket_1 = "18.210.176.114:9222".parse::<SocketAddrV4>().unwrap();
         let socket_2 = "107.21.251.55:9222".parse::<SocketAddrV4>().unwrap();
@@ -331,7 +326,7 @@ mod test {
 
     #[test]
     fn parse_enodes() {
-        let config = Config::builder()
+        let config = Config::builder(30303)
             .add_serialized_unsigned_boot_nodes(BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET)
             .build();
 
