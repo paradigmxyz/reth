@@ -124,7 +124,7 @@ pub struct Discv5 {
     discv5: Arc<discv5::Discv5>,
     ip_mode: IpMode,
     // Notify app of discovered nodes that don't have a TCP port set in their ENR. These nodes are
-    // filtered out by default. allow_no_tcp_discovered_nodes: bool,
+    // filtered out by default.
     fork_id_key: &'static [u8],
     /// Optionally filter discovered peers before passing up to app.
     discovered_peer_filter: MustNotIncludeChains,
