@@ -340,7 +340,7 @@ impl PooledTransactionsElement {
         }
     }
 
-    /// Retruns true if the transaction is an EIP-4844 transaction.
+    /// Returns true if the transaction is an EIP-4844 transaction.
     #[inline]
     pub const fn is_eip4844(&self) -> bool {
         matches!(self, Self::BlobTransaction(_))
@@ -624,8 +624,6 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for PooledTransactionsElement {
     type Parameters = ();
-    type Strategy = proptest::strategy::BoxedStrategy<PooledTransactionsElement>;
-
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::{any, Strategy};
 
@@ -646,6 +644,8 @@ impl proptest::arbitrary::Arbitrary for PooledTransactionsElement {
             })
             .boxed()
     }
+
+    type Strategy = proptest::strategy::BoxedStrategy<PooledTransactionsElement>;
 }
 
 /// A signed pooled transaction with recovered signer.

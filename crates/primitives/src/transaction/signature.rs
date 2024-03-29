@@ -188,7 +188,6 @@ impl Signature {
 mod tests {
     use crate::{transaction::signature::SECP256K1N_HALF, Address, Signature, B256, U256};
     use alloy_primitives::{hex, hex::FromHex, Bytes};
-    use bytes::BytesMut;
     use std::str::FromStr;
 
     #[test]
@@ -218,14 +217,14 @@ mod tests {
         // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
         let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
 
-        let mut encoded = BytesMut::new();
+        let mut encoded = Vec::new();
         signature.encode_with_eip155_chain_id(&mut encoded, None);
         assert_eq!(encoded.len(), signature.payload_len_with_eip155_chain_id(None));
         let (decoded, chain_id) = Signature::decode_with_eip155_chain_id(&mut &*encoded).unwrap();
         assert_eq!(signature, decoded);
         assert_eq!(None, chain_id);
 
-        let mut encoded = BytesMut::new();
+        let mut encoded = Vec::new();
         signature.encode_with_eip155_chain_id(&mut encoded, Some(1));
         assert_eq!(encoded.len(), signature.payload_len_with_eip155_chain_id(Some(1)));
         let (decoded, chain_id) = Signature::decode_with_eip155_chain_id(&mut &*encoded).unwrap();
@@ -243,7 +242,7 @@ mod tests {
     fn test_encode_and_decode() {
         let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
 
-        let mut encoded = BytesMut::new();
+        let mut encoded = Vec::new();
         signature.encode(&mut encoded);
         assert_eq!(encoded.len(), signature.payload_len());
         let decoded = Signature::decode(&mut &*encoded).unwrap();

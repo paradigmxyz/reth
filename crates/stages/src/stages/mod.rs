@@ -30,8 +30,12 @@ pub use headers::*;
 pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
+
 pub use sender_recovery::*;
 pub use tx_lookup::*;
+
+mod utils;
+use utils::*;
 
 #[cfg(test)]
 mod tests {
@@ -170,7 +174,7 @@ mod tests {
                 ..Default::default()
             };
 
-            if let Some(PruneMode::Full) = prune_modes.account_history {
+            if prune_modes.account_history == Some(PruneMode::Full) {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {
@@ -186,7 +190,7 @@ mod tests {
                 ..Default::default()
             };
 
-            if let Some(PruneMode::Full) = prune_modes.storage_history {
+            if prune_modes.storage_history == Some(PruneMode::Full) {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {

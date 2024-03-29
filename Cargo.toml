@@ -88,10 +88,68 @@ rustdoc.all = "warn"
 rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
 
+[workspace.lints.clippy]
+# These are some of clippy's nursery (i.e., experimental) lints that we like.
+# By default, nursery lints are allowed. Some of the lints below have made good
+# suggestions which we fixed. The others didn't have any findings, so we can
+# assume they don't have that many false positives. Let's enable them to
+# prevent future problems.
+branches_sharing_code = "warn"
+clear_with_drain = "warn"
+derive_partial_eq_without_eq = "warn"
+empty_line_after_outer_attr = "warn"
+equatable_if_let = "warn"
+imprecise_flops = "warn"
+iter_on_empty_collections = "warn"
+iter_with_drain = "warn"
+large_stack_frames = "warn"
+manual_clamp = "warn"
+mutex_integer = "warn"
+needless_pass_by_ref_mut = "warn"
+nonstandard_macro_braces = "warn"
+or_fun_call = "warn"
+path_buf_push_overwrite = "warn"
+read_zero_byte_vec = "warn"
+redundant_clone = "warn"
+suboptimal_flops = "warn"
+suspicious_operation_groupings = "warn"
+trailing_empty_array = "warn"
+trait_duplication_in_bounds = "warn"
+transmute_undefined_repr = "warn"
+trivial_regex = "warn"
+tuple_array_conversions = "warn"
+uninhabited_references = "warn"
+unused_peekable = "warn"
+unused_rounding = "warn"
+useless_let_if_seq = "warn"
+
+# These are nursery lints which have findings. Allow them for now. Some are not
+# quite mature enough for use in our codebase and some we don't really want.
+# Explicitly listing should make it easier to fix in the future.
+as_ptr_cast_mut = "allow"
+cognitive_complexity = "allow"
+collection_is_never_read = "allow"
+debug_assert_with_mut_call = "allow"
+empty_line_after_doc_comments = "allow"
+fallible_impl_from = "allow"
+future_not_send = "allow"
+iter_on_single_items = "allow"
+missing_const_for_fn = "allow"
+needless_collect = "allow"
+non_send_fields_in_send_ty = "allow"
+option_if_let_else = "allow"
+redundant_pub_crate = "allow"
+significant_drop_in_scrutinee = "allow"
+significant_drop_tightening = "allow"
+string_lit_as_bytes = "allow"
+type_repetition_in_bounds = "allow"
+unnecessary_struct_initialization = "allow"
+use_self = "allow"
+
 [workspace.package]
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.4"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.76"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -186,9 +244,9 @@ reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 
 # revm
-revm = { version = "7.1.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "3.0.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "1f935e7" }
+revm = { version = "7.2.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "b3082f3" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
@@ -197,20 +255,16 @@ alloy-dyn-abi = "0.6"
 alloy-sol-types = "0.6"
 alloy-rlp = "0.3"
 alloy-trie = "0.3"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
-alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "9ac2c90" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
 
 # TODO: Remove
 ethers-core = { version = "2.0.14", default-features = false }
 ethers-providers = { version = "2.0.14", default-features = false }
-
-# js
-boa_engine = "0.17"
-boa_gc = "0.17"
 
 # misc
 aquamarine = "0.5"
@@ -224,6 +278,7 @@ tracing-appender = "0.2"
 thiserror = "1.0"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
+serde_with = "3.3.0"
 humantime-serde = "1.1"
 rand = "0.8.5"
 schnellru = "0.2"
@@ -231,13 +286,16 @@ strum = "0.26"
 rayon = "1.7"
 itertools = "0.12"
 parking_lot = "0.12"
-metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+# Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1"
 hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
 nybbles = "0.2.1"
 smallvec = "1"
 dyn-clone = "1.0.17"
+sha2 = { version = "0.10", default-features = false }
+paste = "1.0"
 
 # proc-macros
 proc-macro2 = "1.0"
@@ -262,9 +320,9 @@ discv5 = "0.4"
 igd-next = "0.14.3"
 
 # rpc
-jsonrpsee = { version = "0.20" }
-jsonrpsee-core = { version = "0.20" }
-jsonrpsee-types = { version = "0.20" }
+jsonrpsee = "0.20"
+jsonrpsee-core = "0.20"
+jsonrpsee-types = "0.20"
 
 # crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [
@@ -275,7 +333,7 @@ secp256k1 = { version = "0.27.0", default-features = false, features = [
 enr = { version = "=0.10.0", default-features = false, features = ["k256"] }
 
 # for eip-4844
-c-kzg = "0.4.2"
+c-kzg = "1.0.0"
 
 # config
 confy = "0.6"

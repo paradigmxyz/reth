@@ -550,7 +550,7 @@ impl TransactionFetcher {
                 //
                 // remove any ended sessions, so that in case of a full cache, alive peers aren't
                 // removed in favour of lru dead peers
-                let mut ended_sessions = vec!();
+                let mut ended_sessions = vec![];
                 for &peer_id in fallback_peers.iter() {
                     if is_session_active(peer_id) {
                         ended_sessions.push(peer_id);
@@ -691,10 +691,10 @@ impl TransactionFetcher {
         // try to send the request to the peer
         if let Err(err) = peer.request_tx.try_send(req) {
             // peer channel is full
-            match err {
+            return match err {
                 TrySendError::Full(_) | TrySendError::Closed(_) => {
                     self.metrics.egress_peer_channel_full.increment(1);
-                    return Some(new_announced_hashes)
+                    Some(new_announced_hashes)
                 }
             }
         } else {
@@ -944,7 +944,7 @@ impl TransactionFetcher {
                 let (verification_outcome, verified_payload) =
                     payload.verify(&requested_hashes, &peer_id);
 
-                if let VerificationOutcome::ReportPeer = verification_outcome {
+                if verification_outcome == VerificationOutcome::ReportPeer {
                     // todo: report peer for sending hashes that weren't requested
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
@@ -971,7 +971,7 @@ impl TransactionFetcher {
                 // passing the rlp encoded length down from active session along with the decoded
                 // tx.
 
-                if let FilterOutcome::ReportPeer = validation_outcome {
+                if validation_outcome == FilterOutcome::ReportPeer {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         unvalidated_payload_len=unvalidated_payload_len,
@@ -1528,7 +1528,7 @@ mod test {
             RequestTxHashes::new(request_hashes.into_iter().collect::<HashSet<_>>());
 
         // but response contains tx 1 + another tx
-        let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2.clone()]);
+        let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2]);
         let payload = UnverifiedPooledTransactions::new(response_txns);
 
         let (outcome, verified_payload) = payload.verify(&request_hashes, &PeerId::ZERO);

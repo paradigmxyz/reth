@@ -324,9 +324,9 @@ impl<'a> fmt::Display for DisplayBlocksChain<'a> {
             write!(f, "[")?;
             let mut iter = self.0.values().map(|block| block.num_hash());
             if let Some(block_num_hash) = iter.next() {
-                write!(f, "{:?}", block_num_hash)?;
+                write!(f, "{block_num_hash:?}")?;
                 for block_num_hash_iter in iter {
-                    write!(f, ", {:?}", block_num_hash_iter)?;
+                    write!(f, ", {block_num_hash_iter:?}")?;
                 }
             }
             write!(f, "]")?;
@@ -550,8 +550,8 @@ mod tests {
         block2.set_hash(block2_hash);
         block2.senders.push(Address::new([4; 20]));
 
-        let mut block_state_extended = block_state1.clone();
-        block_state_extended.extend(block_state2.clone());
+        let mut block_state_extended = block_state1;
+        block_state_extended.extend(block_state2);
 
         let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, None);
 

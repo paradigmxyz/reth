@@ -1,18 +1,22 @@
+use super::{collect_history_indices, load_history_indices};
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use reth_db::database::Database;
+use reth_config::config::EtlConfig;
+use reth_db::{
+    database::Database, models::ShardedKey, table::Decode, tables, transaction::DbTxMut,
+};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
+    Address, PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
 };
 use reth_provider::{
-    AccountExtReader, DatabaseProviderRW, HistoryWriter, PruneCheckpointReader,
-    PruneCheckpointWriter,
+    DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
 };
 use std::fmt::Debug;
+use tracing::info;
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
-/// on index sharding take a look at [`reth_db::tables::AccountsHistory`]
+/// on index sharding take a look at [`tables::AccountsHistory`]
 #[derive(Debug)]
 pub struct IndexAccountHistoryStage {
     /// Number of blocks after which the control
@@ -20,18 +24,24 @@ pub struct IndexAccountHistoryStage {
     pub commit_threshold: u64,
     /// Pruning configuration.
     pub prune_mode: Option<PruneMode>,
+    /// ETL configuration
+    pub etl_config: EtlConfig,
 }
 
 impl IndexAccountHistoryStage {
     /// Create new instance of [IndexAccountHistoryStage].
-    pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>) -> Self {
-        Self { commit_threshold, prune_mode }
+    pub fn new(
+        commit_threshold: u64,
+        prune_mode: Option<PruneMode>,
+        etl_config: EtlConfig,
+    ) -> Self {
+        Self { commit_threshold, prune_mode, etl_config }
     }
 }
 
 impl Default for IndexAccountHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000, prune_mode: None }
+        Self { commit_threshold: 100_000, prune_mode: None, etl_config: EtlConfig::default() }
     }
 }
 
@@ -81,13 +91,37 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let (range, is_final_range) = input.next_block_range_with_threshold(self.commit_threshold);
+        let mut range = input.next_block_range();
+        let first_sync = input.checkpoint().block_number == 0;
 
-        let indices = provider.changed_accounts_and_blocks_with_range(range.clone())?;
-        // Insert changeset to history index
-        provider.insert_account_history_index(indices)?;
+        // On first sync we might have history coming from genesis. We clear the table since it's
+        // faster to rebuild from scratch.
+        if first_sync {
+            provider.tx_ref().clear::<tables::AccountsHistory>()?;
+            range = 0..=*input.next_block_range().end();
+        }
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: is_final_range })
+        info!(target: "sync::stages::index_account_history::exec", ?first_sync, "Collecting indices");
+        let collector =
+            collect_history_indices::<_, tables::AccountChangeSets, tables::AccountsHistory, _>(
+                provider.tx_ref(),
+                range.clone(),
+                ShardedKey::new,
+                |(index, value)| (index, value.address),
+                &self.etl_config,
+            )?;
+
+        info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
+        load_history_indices::<_, tables::AccountsHistory, _>(
+            provider.tx_ref(),
+            collector,
+            first_sync,
+            ShardedKey::new,
+            ShardedKey::<Address>::decode,
+            |key| key.key,
+        )?;
+
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
 
     /// Unwind the stage.
@@ -117,18 +151,17 @@ mod tests {
     use reth_db::{
         cursor::DbCursorRO,
         models::{
-            sharded_key, sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey,
+            sharded_key, sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx,
             StoredBlockBodyIndices,
         },
-        tables,
-        transaction::{DbTx, DbTxMut},
+        transaction::DbTx,
         BlockNumberList,
     };
     use reth_interfaces::test_utils::{
         generators,
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
-    use reth_primitives::{address, Address, BlockNumber, B256};
+    use reth_primitives::{address, BlockNumber, B256};
     use reth_provider::providers::StaticFileWriter;
     use std::collections::BTreeMap;
 
@@ -205,7 +238,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn insert_index_to_empty() {
+    async fn insert_index_to_genesis() {
         // init
         let db = TestStageDB::default();
 
@@ -217,14 +250,14 @@ mod tests {
 
         // verify
         let table = cast(db.table::<tables::AccountsHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3])]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![0, 1, 2, 3])]));
 
         // unwind
         unwind(&db, 3, 0);
 
         // verify initial state
-        let table = db.table::<tables::AccountsHistory>().unwrap();
-        assert!(table.is_empty());
+        let table = cast(db.table::<tables::AccountsHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![0])]));
     }
 
     #[tokio::test]
@@ -405,7 +438,7 @@ mod tests {
             table,
             BTreeMap::from([
                 (shard(1), full_list.clone()),
-                (shard(2), full_list.clone()),
+                (shard(2), full_list),
                 (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1])
             ])
         );
@@ -484,7 +517,11 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S { commit_threshold: self.commit_threshold, prune_mode: self.prune_mode }
+            Self::S {
+                commit_threshold: self.commit_threshold,
+                prune_mode: self.prune_mode,
+                etl_config: EtlConfig::default(),
+            }
         }
     }
 

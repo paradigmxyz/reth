@@ -28,6 +28,9 @@ pub use error::{RethError, RethResult};
 /// P2P traits.
 pub mod p2p;
 
+/// Trie error
+pub mod trie;
+
 /// Provider error
 pub mod provider;
 

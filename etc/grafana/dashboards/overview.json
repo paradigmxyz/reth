@@ -3049,10 +3049,32 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
+          "expr": "reth_network_pending_outgoing_connections{instance=~\"$instance\"}",
+          "legendFormat": "Pending outgoing connections",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
           "expr": "reth_network_outgoing_connections{instance=~\"$instance\"}",
           "legendFormat": "Outgoing connections",
           "range": true,
-          "refId": "A"
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_network_total_pending_connections{instance=~\"$instance\"}",
+          "legendFormat": "Total pending connections",
+          "range": true,
+          "refId": "C"
         },
         {
           "datasource": {
@@ -3064,7 +3086,7 @@
           "hide": false,
           "legendFormat": "Incoming connections",
           "range": true,
-          "refId": "B"
+          "refId": "D"
         },
         {
           "datasource": {
@@ -3076,7 +3098,7 @@
           "hide": false,
           "legendFormat": "Connected peers",
           "range": true,
-          "refId": "C"
+          "refId": "E"
         }
       ],
       "title": "Connections",
@@ -3396,7 +3418,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Number of dials that resulted in a peer being added to the peerset",
+      "description": "Number of successful outgoing dial attempts.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -7959,7 +7981,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "max(max_over_time(reth_rpc_server_calls_time_seconds[$__rate_interval])) by (method) > 0",
+          "expr": "max(max_over_time(reth_rpc_server_calls_time_seconds{instance=~\"$instance\"}[$__rate_interval])) by (method) > 0",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -8171,7 +8193,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_cached_count{cache=\"evm_env\"}",
+          "expr": "reth_rpc_eth_cache_cached_count{instance=\"$instance\", cache=\"evm_env\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -8187,7 +8209,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_queued_consumers_count{cache=\"receipts\"}",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{instance=\"$instance\", cache=\"receipts\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -8204,7 +8226,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_queued_consumers_count{cache=\"evm_env\"}",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{instance=\"$instance\", cache=\"evm_env\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -8221,7 +8243,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_queued_consumers_count{cache=\"blocks\"}",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{instance=\"$instance\", cache=\"blocks\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -8238,7 +8260,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_cached_count{cache=\"blocks\"}",
+          "expr": "reth_rpc_eth_cache_cached_count{instance=\"$instance\", cache=\"blocks\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -8255,7 +8277,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_cached_count{cache=\"receipts\"}",
+          "expr": "reth_rpc_eth_cache_cached_count{instance=\"$instance\", cache=\"receipts\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,

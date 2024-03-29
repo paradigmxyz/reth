@@ -32,9 +32,10 @@ impl NetworkInfo for NoopNetwork {
             protocol_version: ProtocolVersion::V5 as u64,
             eth_protocol_info: EthProtocolInfo {
                 difficulty: Default::default(),
-                head: Default::default(),
                 network: 1,
                 genesis: Default::default(),
+                config: Default::default(),
+                head: Default::default(),
             },
         })
     }
@@ -68,6 +69,8 @@ impl PeersInfo for NoopNetwork {
 }
 
 impl Peers for NoopNetwork {
+    fn add_trusted_peer_id(&self, _peer: PeerId) {}
+
     fn add_peer_kind(&self, _peer: PeerId, _kind: PeerKind, _addr: SocketAddr) {}
 
     async fn get_peers_by_kind(&self, _kind: PeerKind) -> Result<Vec<PeerInfo>, NetworkError> {

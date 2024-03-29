@@ -324,16 +324,16 @@ where
         return Ok(EthApi::gas_price(self).await?)
     }
 
-    /// Handler for: `eth_blobBaseFee`
-    async fn blob_base_fee(&self) -> Result<U256> {
-        trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
-        return Ok(EthApi::blob_base_fee(self).await?)
-    }
-
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
         return Ok(EthApi::suggested_priority_fee(self).await?)
+    }
+
+    /// Handler for: `eth_blobBaseFee`
+    async fn blob_base_fee(&self) -> Result<U256> {
+        trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
+        return Ok(EthApi::blob_base_fee(self).await?)
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -478,7 +478,7 @@ mod tests {
             testing_pool(),
             NoopNetwork::default(),
             cache.clone(),
-            GasPriceOracle::new(provider.clone(), Default::default(), cache.clone()),
+            GasPriceOracle::new(provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
@@ -613,7 +613,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// Invalid block range (request is in in the future)
+    /// Invalid block range (request is in the future)
     async fn test_fee_history_invalid_block_range_in_future() {
         let block_count = 10;
         let newest_block = 1337;
@@ -624,7 +624,7 @@ mod tests {
 
         let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
             &eth_api,
-            (1).into(),
+            1.into(),
             (newest_block + 1000).into(),
             Some(vec![10.0]),
         )
@@ -647,8 +647,8 @@ mod tests {
 
         let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
             &eth_api,
-            (0).into(),
-            (newest_block).into(),
+            0.into(),
+            newest_block.into(),
             None,
         )
         .await
@@ -670,7 +670,7 @@ mod tests {
         let (eth_api, base_fees_per_gas, gas_used_ratios) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let fee_history = eth_api.fee_history(1, (newest_block).into(), None).await.unwrap();
+        let fee_history = eth_api.fee_history(1, newest_block.into(), None).await.unwrap();
         assert_eq!(
             &fee_history.base_fee_per_gas,
             &base_fees_per_gas[base_fees_per_gas.len() - 2..],
@@ -708,7 +708,7 @@ mod tests {
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
         let fee_history =
-            eth_api.fee_history(block_count, (newest_block).into(), None).await.unwrap();
+            eth_api.fee_history(block_count, newest_block.into(), None).await.unwrap();
 
         assert_eq!(
             &fee_history.base_fee_per_gas, &base_fees_per_gas,

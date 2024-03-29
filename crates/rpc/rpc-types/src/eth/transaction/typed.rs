@@ -3,7 +3,7 @@
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
 use alloy_primitives::{Address, Bytes, B256, U256, U64};
-use alloy_rlp::{BufMut, Decodable, Encodable, Error as RlpError};
+use alloy_rlp::{Buf, BufMut, Decodable, Encodable, Error as RlpError, EMPTY_STRING_CODE};
 use alloy_rpc_types::{AccessList, BlobTransactionSidecar};
 use serde::{Deserialize, Serialize};
 
@@ -151,13 +151,13 @@ impl Encodable for TransactionKind {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             TransactionKind::Call(to) => to.encode(out),
-            TransactionKind::Create => ([]).encode(out),
+            TransactionKind::Create => [].encode(out),
         }
     }
     fn length(&self) -> usize {
         match self {
             TransactionKind::Call(to) => to.length(),
-            TransactionKind::Create => ([]).length(),
+            TransactionKind::Create => [].length(),
         }
     }
 }
@@ -165,8 +165,8 @@ impl Encodable for TransactionKind {
 impl Decodable for TransactionKind {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if let Some(&first) = buf.first() {
-            if first == 0x80 {
-                *buf = &buf[1..];
+            if first == EMPTY_STRING_CODE {
+                buf.advance(1);
                 Ok(TransactionKind::Create)
             } else {
                 let addr = <Address as Decodable>::decode(buf)?;

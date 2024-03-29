@@ -20,52 +20,55 @@ pub enum ConsensusType {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Hardfork {
-    /// Frontier.
+    /// Frontier: <https://blog.ethereum.org/2015/03/03/ethereum-launch-process>.
     Frontier,
-    /// Homestead.
+    /// Homestead: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/homestead.md>.
     Homestead,
-    /// The DAO fork.
+    /// The DAO fork: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/dao-fork.md>.
     Dao,
-    /// Tangerine.
+    /// Tangerine: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/tangerine-whistle.md>.
     Tangerine,
-    /// Spurious Dragon.
+    /// Spurious Dragon: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/spurious-dragon.md>.
     SpuriousDragon,
-    /// Byzantium.
+    /// Byzantium: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/byzantium.md>.
     Byzantium,
-    /// Constantinople.
+    /// Constantinople: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/constantinople.md>.
     Constantinople,
-    /// Petersburg.
+    /// Petersburg: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/petersburg.md>.
     Petersburg,
-    /// Istanbul.
+    /// Istanbul: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/istanbul.md>.
     Istanbul,
-    /// Muir Glacier.
+    /// Muir Glacier: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/muir-glacier.md>.
     MuirGlacier,
-    /// Berlin.
+    /// Berlin: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/berlin.md>.
     Berlin,
-    /// London.
+    /// London: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/london.md>.
     London,
-    /// Arrow Glacier.
+    /// Arrow Glacier: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/arrow-glacier.md>.
     ArrowGlacier,
-    /// Gray Glacier.
+    /// Gray Glacier: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/gray-glacier.md>.
     GrayGlacier,
-    /// Paris.
+    /// Paris: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/paris.md>.
     Paris,
-    /// Bedrock.
+    /// Bedrock: <https://blog.oplabs.co/introducing-optimism-bedrock>.
     #[cfg(feature = "optimism")]
     Bedrock,
-    /// Regolith
+    /// Regolith: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#regolith>.
     #[cfg(feature = "optimism")]
     Regolith,
-    /// Shanghai.
+    /// Shanghai: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/shanghai.md>.
     Shanghai,
-    /// Canyon
+    /// Canyon:
+    /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#canyon>.
     #[cfg(feature = "optimism")]
     Canyon,
+    // ArbOS11,
     /// Cancun.
     Cancun,
-    /// Ecotone
+    /// Ecotone: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#ecotone>.
     #[cfg(feature = "optimism")]
     Ecotone,
+    // ArbOS20Atlas,
 }
 
 impl Hardfork {
@@ -160,6 +163,60 @@ impl Hardfork {
             Hardfork::London => Some(0),
             Hardfork::ArrowGlacier => Some(0),
             Hardfork::GrayGlacier => Some(0),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the Arbitrum Sepolia testnet.
+    pub fn arbitrum_sepolia_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(0),
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            Hardfork::Paris => Some(0),
+            Hardfork::Shanghai => Some(10653737),
+            // Hardfork::ArbOS11 => Some(10653737),
+            Hardfork::Cancun => Some(18683405),
+            // Hardfork::ArbOS20Atlas => Some(18683405),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation block for the specified hardfork on the Arbitrum One mainnet.
+    pub fn arbitrum_activation_block(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(0),
+            Hardfork::Homestead => Some(0),
+            Hardfork::Dao => Some(0),
+            Hardfork::Tangerine => Some(0),
+            Hardfork::SpuriousDragon => Some(0),
+            Hardfork::Byzantium => Some(0),
+            Hardfork::Constantinople => Some(0),
+            Hardfork::Petersburg => Some(0),
+            Hardfork::Istanbul => Some(0),
+            Hardfork::MuirGlacier => Some(0),
+            Hardfork::Berlin => Some(0),
+            Hardfork::London => Some(0),
+            Hardfork::ArrowGlacier => Some(0),
+            Hardfork::GrayGlacier => Some(0),
+            Hardfork::Paris => Some(0),
+            Hardfork::Shanghai => Some(184097479),
+            // Hardfork::ArbOS11 => Some(184097479),
+            Hardfork::Cancun => Some(190301729),
+            // Hardfork::ArbOS20Atlas => Some(190301729),
             _ => None,
         }
     }
@@ -348,6 +405,61 @@ impl Hardfork {
         }
     }
 
+    /// Retrieves the activation timestamp for the specified hardfork on the Arbitrum Sepolia
+    /// testnet.
+    pub fn arbitrum_sepolia_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(1692726996),
+            Hardfork::Homestead => Some(1692726996),
+            Hardfork::Dao => Some(1692726996),
+            Hardfork::Tangerine => Some(1692726996),
+            Hardfork::SpuriousDragon => Some(1692726996),
+            Hardfork::Byzantium => Some(1692726996),
+            Hardfork::Constantinople => Some(1692726996),
+            Hardfork::Petersburg => Some(1692726996),
+            Hardfork::Istanbul => Some(1692726996),
+            Hardfork::MuirGlacier => Some(1692726996),
+            Hardfork::Berlin => Some(1692726996),
+            Hardfork::London => Some(1692726996),
+            Hardfork::ArrowGlacier => Some(1692726996),
+            Hardfork::GrayGlacier => Some(1692726996),
+            Hardfork::Paris => Some(1692726996),
+            Hardfork::Shanghai => Some(1706634000),
+            // Hardfork::ArbOS11 => Some(1706634000),
+            Hardfork::Cancun => Some(1709229600),
+            // Hardfork::ArbOS20Atlas => Some(1709229600),
+            _ => None,
+        }
+    }
+
+    /// Retrieves the activation timestamp for the specified hardfork on the Arbitrum One mainnet.
+    pub fn arbitrum_activation_timestamp(&self) -> Option<u64> {
+        #[allow(unreachable_patterns)]
+        match self {
+            Hardfork::Frontier => Some(1622240000),
+            Hardfork::Homestead => Some(1622240000),
+            Hardfork::Dao => Some(1622240000),
+            Hardfork::Tangerine => Some(1622240000),
+            Hardfork::SpuriousDragon => Some(1622240000),
+            Hardfork::Byzantium => Some(1622240000),
+            Hardfork::Constantinople => Some(1622240000),
+            Hardfork::Petersburg => Some(1622240000),
+            Hardfork::Istanbul => Some(1622240000),
+            Hardfork::MuirGlacier => Some(1622240000),
+            Hardfork::Berlin => Some(1622240000),
+            Hardfork::London => Some(1622240000),
+            Hardfork::ArrowGlacier => Some(1622240000),
+            Hardfork::GrayGlacier => Some(1622240000),
+            Hardfork::Paris => Some(1622240000),
+            Hardfork::Shanghai => Some(1708804873),
+            // Hardfork::ArbOS11 => Some(1708804873),
+            Hardfork::Cancun => Some(1710424089),
+            // Hardfork::ArbOS20Atlas => Some(1710424089),
+            _ => None,
+        }
+    }
+
     /// Retrieves the activation timestamp for the specified hardfork on the Base Sepolia testnet.
     #[cfg(feature = "optimism")]
     pub fn base_sepolia_activation_timestamp(&self) -> Option<u64> {
@@ -439,6 +551,8 @@ impl FromStr for Hardfork {
             "canyon" => Hardfork::Canyon,
             #[cfg(feature = "optimism")]
             "ecotone" => Hardfork::Ecotone,
+            // "arbos11" => Hardfork::ArbOS11,
+            // "arbos20atlas" => Hardfork::ArbOS20Atlas,
             _ => return Err(format!("Unknown hardfork: {s}")),
         })
     }

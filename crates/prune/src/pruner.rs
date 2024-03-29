@@ -91,13 +91,14 @@ impl<DB: Database> Pruner<DB> {
         // `self.prune_max_blocks_per_run`.
         //
         // Also see docs for `self.previous_tip_block_number`.
-        let blocks_since_last_run =
-            (self.previous_tip_block_number.map_or(1, |previous_tip_block_number| {
+        let blocks_since_last_run = self
+            .previous_tip_block_number
+            .map_or(1, |previous_tip_block_number| {
                 // Saturating subtraction is needed for the case when the chain was reverted,
                 // meaning current block number might be less than the previous tip
                 // block number.
                 tip_block_number.saturating_sub(previous_tip_block_number) as usize
-            }))
+            })
             .min(self.prune_max_blocks_per_run);
         let delete_limit = self.delete_limit * blocks_since_last_run;
 
@@ -273,9 +274,9 @@ mod tests {
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let provider_factory =
-            ProviderFactory::new(db, MAINNET.clone(), create_test_static_files_dir())
-                .expect("create provide factory with static_files");
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
+        let provider_factory = ProviderFactory::new(db, MAINNET.clone(), static_dir_path)
+            .expect("create provide factory with static_files");
         let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5);
 
         // No last pruned block number was set before

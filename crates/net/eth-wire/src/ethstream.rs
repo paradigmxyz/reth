@@ -4,7 +4,6 @@ use crate::{
     types::{EthMessage, ProtocolMessage, Status},
     CanDisconnect, DisconnectReason, EthVersion,
 };
-use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::{
@@ -63,10 +62,9 @@ where
 
         // we need to encode and decode here on our own because we don't have an `EthStream` yet
         // The max length for a status with TTD is: <msg id = 1 byte> + <rlp(status) = 88 byte>
-        let mut our_status_bytes = BytesMut::with_capacity(1 + 88);
-        ProtocolMessage::from(EthMessage::Status(status)).encode(&mut our_status_bytes);
-        let our_status_bytes = our_status_bytes.freeze();
-        self.inner.send(our_status_bytes).await?;
+        self.inner
+            .send(alloy_rlp::encode(ProtocolMessage::from(EthMessage::Status(status))).into())
+            .await?;
 
         let their_msg_res = self.inner.next().await;
 
@@ -249,7 +247,7 @@ where
                 let msg = if bytes.len() > 50 {
                     format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
                 } else {
-                    format!("{:02x?}", bytes)
+                    format!("{bytes:02x?}")
                 };
                 debug!(
                     version=?this.version,

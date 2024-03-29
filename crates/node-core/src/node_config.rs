@@ -41,9 +41,7 @@ use reth_network::{
 };
 use reth_node_api::ConfigureEvm;
 use reth_primitives::{
-    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    kzg::KzgSettings,
-    stage::StageId,
+    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
     BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256, MAINNET,
 };
 use reth_provider::{
@@ -72,11 +70,7 @@ use reth_transaction_pool::{
     EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
-use std::{
-    net::{SocketAddr, SocketAddrV4},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{
     mpsc::{Receiver, UnboundedSender},
     watch,
@@ -173,9 +167,6 @@ pub struct NodeConfig {
     /// - WS_RPC_PORT: default + `instance` * 2 - 2
     pub instance: u16,
 
-    /// Overrides the KZG trusted setup by reading from the supplied file.
-    pub trusted_setup_file: Option<PathBuf>,
-
     /// All networking related arguments
     pub network: NetworkArgs,
 
@@ -236,12 +227,6 @@ impl NodeConfig {
     /// Set the instance for the node
     pub fn with_instance(mut self, instance: u16) -> Self {
         self.instance = instance;
-        self
-    }
-
-    /// Set the trusted setup file for the node
-    pub fn with_trusted_setup_file(mut self, trusted_setup_file: impl Into<PathBuf>) -> Self {
-        self.trusted_setup_file = Some(trusted_setup_file.into());
         self
     }
 
@@ -374,14 +359,7 @@ impl NodeConfig {
         info!(target: "reth::cli", "Connecting to P2P network");
         let secret_key = self.network_secret(data_dir)?;
         let default_peers_path = data_dir.known_peers_path();
-        Ok(self.load_network_config(
-            config,
-            client,
-            executor.clone(),
-            head,
-            secret_key,
-            default_peers_path.clone(),
-        ))
+        Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
 
     /// Create the [NetworkBuilder].
@@ -403,7 +381,48 @@ impl NodeConfig {
         Ok(builder)
     }
 
-    /// Build the blockchain tree
+    /// Builds the blockchain tree for the node.
+    ///
+    /// This method configures the blockchain tree, which is a critical component of the node,
+    /// responsible for managing the blockchain state, including blocks, transactions, and receipts.
+    /// It integrates with the consensus mechanism and the EVM for executing transactions.
+    ///
+    /// # Parameters
+    /// - `provider_factory`: A factory for creating various blockchain-related providers, such as
+    ///   for accessing the database or static files.
+    /// - `consensus`: The consensus configuration, which defines how the node reaches agreement on
+    ///   the blockchain state with other nodes.
+    /// - `prune_config`: Configuration for pruning old blockchain data. This helps in managing the
+    ///   storage space efficiently. It's important to validate this configuration to ensure it does
+    ///   not lead to unintended data loss.
+    /// - `sync_metrics_tx`: A transmitter for sending synchronization metrics. This is used for
+    ///   monitoring the node's synchronization process with the blockchain network.
+    /// - `tree_config`: Configuration for the blockchain tree, including any parameters that affect
+    ///   its structure or performance.
+    /// - `evm_config`: The EVM (Ethereum Virtual Machine) configuration, which affects how smart
+    ///   contracts and transactions are executed. Proper validation of this configuration is
+    ///   crucial for the correct execution of transactions.
+    ///
+    /// # Returns
+    /// A `ShareableBlockchainTree` instance, which provides access to the blockchain state and
+    /// supports operations like block insertion, state reversion, and transaction execution.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let tree = config.build_blockchain_tree(
+    ///     provider_factory,
+    ///     consensus,
+    ///     prune_config,
+    ///     sync_metrics_tx,
+    ///     BlockchainTreeConfig::default(),
+    ///     evm_config,
+    /// )?;
+    /// ```
+    ///
+    /// # Note
+    /// Ensure that all configurations passed to this method are validated beforehand to prevent
+    /// runtime errors. Specifically, `prune_config` and `evm_config` should be checked to ensure
+    /// they meet the node's operational requirements.
     pub fn build_blockchain_tree<DB, EvmConfig>(
         &self,
         provider_factory: ProviderFactory<DB>,
@@ -419,16 +438,16 @@ impl NodeConfig {
     {
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            provider_factory.clone(),
+            provider_factory,
             consensus.clone(),
             EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(
             tree_externals,
             tree_config,
-            prune_config.clone().map(|config| config.segments),
+            prune_config.map(|config| config.segments),
         )?
-        .with_sync_metrics_tx(sync_metrics_tx.clone());
+        .with_sync_metrics_tx(sync_metrics_tx);
 
         Ok(tree)
     }
@@ -564,16 +583,9 @@ impl NodeConfig {
         Ok(pipeline)
     }
 
-    /// Loads the trusted setup params from a given file path or falls back to
-    /// `MAINNET_KZG_TRUSTED_SETUP`.
+    /// Loads 'MAINNET_KZG_TRUSTED_SETUP'
     pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .map_err(LoadKzgSettingsError::KzgError)?;
-            Ok(Arc::new(trusted_setup))
-        } else {
-            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
-        }
+        Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
     }
 
     /// Installs the prometheus recorder.
@@ -699,7 +711,7 @@ impl NodeConfig {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.number)
+            return Ok(header.number);
         }
 
         Ok(self.fetch_tip_from_network(client, tip.into()).await?.number)
@@ -721,7 +733,7 @@ impl NodeConfig {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
@@ -745,16 +757,16 @@ impl NodeConfig {
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
+            .listener_addr(SocketAddr::new(
                 self.network.addr,
                 // set discovery port based on instance number
                 self.network.port + self.instance - 1,
-            )))
-            .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                self.network.addr,
+            ))
+            .discovery_addr(SocketAddr::new(
+                self.network.discovery.addr,
                 // set discovery port based on instance number
-                self.network.port + self.instance - 1,
-            )));
+                self.network.discovery.port + self.instance - 1,
+            ));
 
         cfg_builder.build(client)
     }
@@ -847,10 +859,12 @@ impl NodeConfig {
                 .set(AccountHashingStage::new(
                     stage_config.account_hashing.clean_threshold,
                     stage_config.account_hashing.commit_threshold,
+                    stage_config.etl.clone(),
                 ))
                 .set(StorageHashingStage::new(
                     stage_config.storage_hashing.clean_threshold,
                     stage_config.storage_hashing.commit_threshold,
+                    stage_config.etl.clone(),
                 ))
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
@@ -861,10 +875,12 @@ impl NodeConfig {
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
                     prune_modes.account_history,
+                    stage_config.etl.clone(),
                 ))
                 .set(IndexStorageHistoryStage::new(
                     stage_config.index_storage_history.commit_threshold,
                     prune_modes.storage_history,
+                    stage_config.etl.clone(),
                 )),
             )
             .build(provider_factory, static_file_producer);
@@ -894,7 +910,6 @@ impl Default for NodeConfig {
             chain: MAINNET.clone(),
             metrics: None,
             instance: 1,
-            trusted_setup_file: None,
             network: NetworkArgs::default(),
             rpc: RpcServerArgs::default(),
             txpool: TxPoolArgs::default(),

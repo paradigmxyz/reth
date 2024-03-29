@@ -92,9 +92,9 @@ use crate::mdbx::DatabaseArguments;
 use eyre::WrapErr;
 use std::path::Path;
 
-/// Opens up an existing database or creates a new one at the specified path. Creates tables if
-/// necessary. Read/Write mode.
-pub fn init_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
+/// Creates a new database at the specified path if it doesn't exist. Does NOT create tables. Check
+/// [`init_db`].
+pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
     use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
 
     let rpath = path.as_ref();
@@ -109,11 +109,26 @@ pub fn init_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result
             Err(err) => return Err(err.into()),
         }
     }
+
     #[cfg(feature = "mdbx")]
     {
-        let db = DatabaseEnv::open(rpath, DatabaseEnvKind::RW, args.clone())?;
+        Ok(DatabaseEnv::open(rpath, DatabaseEnvKind::RW, args)?)
+    }
+    #[cfg(not(feature = "mdbx"))]
+    {
+        unimplemented!();
+    }
+}
+
+/// Opens up an existing database or creates a new one at the specified path. Creates tables if
+/// necessary. Read/Write mode.
+pub fn init_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
+    #[cfg(feature = "mdbx")]
+    {
+        let client_version = args.client_version().clone();
+        let db = create_db(path, args)?;
         db.create_tables()?;
-        db.record_client_version(args.client_version().clone())?;
+        db.record_client_version(client_version)?;
         Ok(db)
     }
     #[cfg(not(feature = "mdbx"))]
@@ -163,6 +178,7 @@ pub mod test_utils {
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_primitives::fs;
     use std::{path::PathBuf, sync::Arc};
+    use tempfile::TempDir;
 
     /// Error during database open
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
@@ -233,12 +249,10 @@ pub mod test_utils {
     }
 
     /// Create static_files path for testing
-    pub fn create_test_static_files_dir() -> PathBuf {
-        let path = tempdir_path();
-        let emsg = format!("{}: {:?}", ERROR_STATIC_FILES_CREATION, path);
-
-        reth_primitives::fs::create_dir_all(path.clone()).expect(&emsg);
-        path
+    pub fn create_test_static_files_dir() -> (TempDir, PathBuf) {
+        let temp_dir = TempDir::with_prefix("reth-test-static-").expect(ERROR_TEMPDIR);
+        let path = temp_dir.path().to_path_buf();
+        (temp_dir, path)
     }
 
     /// Get a temporary directory path to use for the database
@@ -250,7 +264,7 @@ pub mod test_utils {
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let path = tempdir_path();
-        let emsg = format!("{}: {:?}", ERROR_DB_CREATION, path);
+        let emsg = format!("{ERROR_DB_CREATION}: {path:?}");
 
         let db = init_db(
             &path,

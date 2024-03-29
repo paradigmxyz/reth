@@ -45,15 +45,15 @@ itertools.workspace = true
 
 # testing
 rand = { workspace = true, optional = true }
-paste = { version = "1.0", optional = true }
+paste = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
-paste = "1.0"
-rand = "0.8"
+paste.workspace = true
+rand.workspace = true
 proptest.workspace = true
 criterion.workspace = true
 pprof = { workspace = true, features = ["criterion", "flamegraph"] }
@@ -66,14 +66,6 @@ default = ["serde"]
 serde = ["dep:serde"]
 test-utils = ["rand", "paste", "serde"]
 arbitrary = ["proptest", "reth-primitives/arbitrary"]
-optimism = [
-    "dep:reth-revm",
-    "reth-revm?/optimism",
-    "reth-primitives/optimism",
-    "reth-provider/test-utils",
-    "reth-provider/optimism",
-    "revm/optimism",
-]
 
 [[bench]]
 name = "truncate"

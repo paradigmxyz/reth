@@ -7,8 +7,9 @@ use crate::{
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HeaderSyncMode, HistoryWriter, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, StageCheckpointReader, StatsReader, StorageReader, TransactionVariant,
+    HeaderSyncMode, HistoricalStateProvider, HistoryWriter, LatestStateProvider,
+    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
+    StageCheckpointReader, StateProviderBox, StatsReader, StorageReader, TransactionVariant,
     TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
@@ -161,6 +162,50 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             items.push(entry?.1);
         }
         Ok(items)
+    }
+}
+
+impl<TX: DbTx + 'static> DatabaseProvider<TX> {
+    /// Storage provider for state at that given block
+    pub fn state_provider_by_block_number(
+        self,
+        mut block_number: BlockNumber,
+    ) -> ProviderResult<StateProviderBox> {
+        if block_number == self.best_block_number().unwrap_or_default() &&
+            block_number == self.last_block_number().unwrap_or_default()
+        {
+            return Ok(Box::new(LatestStateProvider::new(self.tx, self.static_file_provider)))
+        }
+
+        // +1 as the changeset that we want is the one that was applied after this block.
+        block_number += 1;
+
+        let account_history_prune_checkpoint =
+            self.get_prune_checkpoint(PruneSegment::AccountHistory)?;
+        let storage_history_prune_checkpoint =
+            self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
+
+        let mut state_provider =
+            HistoricalStateProvider::new(self.tx, block_number, self.static_file_provider);
+
+        // If we pruned account or storage history, we can't return state on every historical block.
+        // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
+        if let Some(prune_checkpoint_block_number) =
+            account_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
+        {
+            state_provider = state_provider.with_lowest_available_account_history_block_number(
+                prune_checkpoint_block_number + 1,
+            );
+        }
+        if let Some(prune_checkpoint_block_number) =
+            storage_history_prune_checkpoint.and_then(|checkpoint| checkpoint.block_number)
+        {
+            state_provider = state_provider.with_lowest_available_storage_history_block_number(
+                prune_checkpoint_block_number + 1,
+            );
+        }
+
+        Ok(Box::new(state_provider))
     }
 }
 
@@ -1174,7 +1219,15 @@ impl<TX: DbTx> BlockNumReader for DatabaseProvider<TX> {
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        Ok(self.tx.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default().0)
+        Ok(self
+            .tx
+            .cursor_read::<tables::CanonicalHeaders>()?
+            .last()?
+            .map(|(num, _)| num)
+            .max(
+                self.static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers),
+            )
+            .unwrap_or_default())
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -2089,32 +2142,40 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
-    fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
-        // account history stage
-        {
-            let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
-            self.insert_account_history_index(indices)?;
-        }
-
-        // storage history stage
-        {
-            let indices = self.changed_storages_and_blocks_with_range(range)?;
-            self.insert_storage_history_index(indices)?;
-        }
-
-        Ok(())
-    }
-
-    fn insert_storage_history_index(
+    fn unwind_account_history_indices(
         &self,
-        storage_transitions: BTreeMap<(Address, B256), Vec<u64>>,
-    ) -> ProviderResult<()> {
-        self.append_history_index::<_, tables::StoragesHistory>(
-            storage_transitions,
-            |(address, storage_key), highest_block_number| {
-                StorageShardedKey::new(address, storage_key, highest_block_number)
-            },
-        )
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<usize> {
+        let mut last_indices = self
+            .tx
+            .cursor_read::<tables::AccountChangeSets>()?
+            .walk_range(range)?
+            .map(|entry| entry.map(|(index, account)| (account.address, index)))
+            .collect::<Result<Vec<_>, _>>()?;
+        last_indices.sort_by_key(|(a, _)| *a);
+
+        // Unwind the account history index.
+        let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
+        for &(address, rem_index) in &last_indices {
+            let partial_shard = unwind_history_shards::<_, tables::AccountsHistory, _>(
+                &mut cursor,
+                ShardedKey::last(address),
+                rem_index,
+                |sharded_key| sharded_key.key == address,
+            )?;
+
+            // Check the last returned partial shard.
+            // If it's not empty, the shard needs to be reinserted.
+            if !partial_shard.is_empty() {
+                cursor.insert(
+                    ShardedKey::last(address),
+                    BlockNumberList::new_pre_sorted(partial_shard),
+                )?;
+            }
+        }
+
+        let changesets = last_indices.len();
+        Ok(changesets)
     }
 
     fn insert_account_history_index(
@@ -2167,40 +2228,32 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
         Ok(changesets)
     }
 
-    fn unwind_account_history_indices(
+    fn insert_storage_history_index(
         &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<usize> {
-        let mut last_indices = self
-            .tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range)?
-            .map(|entry| entry.map(|(index, account)| (account.address, index)))
-            .collect::<Result<Vec<_>, _>>()?;
-        last_indices.sort_by_key(|(a, _)| *a);
+        storage_transitions: BTreeMap<(Address, B256), Vec<u64>>,
+    ) -> ProviderResult<()> {
+        self.append_history_index::<_, tables::StoragesHistory>(
+            storage_transitions,
+            |(address, storage_key), highest_block_number| {
+                StorageShardedKey::new(address, storage_key, highest_block_number)
+            },
+        )
+    }
 
-        // Unwind the account history index.
-        let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
-        for &(address, rem_index) in &last_indices {
-            let partial_shard = unwind_history_shards::<_, tables::AccountsHistory, _>(
-                &mut cursor,
-                ShardedKey::last(address),
-                rem_index,
-                |sharded_key| sharded_key.key == address,
-            )?;
-
-            // Check the last returned partial shard.
-            // If it's not empty, the shard needs to be reinserted.
-            if !partial_shard.is_empty() {
-                cursor.insert(
-                    ShardedKey::last(address),
-                    BlockNumberList::new_pre_sorted(partial_shard),
-                )?;
-            }
+    fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
+        // account history stage
+        {
+            let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
+            self.insert_account_history_index(indices)?;
         }
 
-        let changesets = last_indices.len();
-        Ok(changesets)
+        // storage history stage
+        {
+            let indices = self.changed_storages_and_blocks_with_range(range)?;
+            self.insert_storage_history_index(indices)?;
+        }
+
+        Ok(())
     }
 }
 

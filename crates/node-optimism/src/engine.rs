@@ -3,7 +3,7 @@ use reth_node_api::{
     EngineObjectValidationError, EngineTypes, MessageValidationKind, PayloadOrAttributes,
     VersionSpecificValidationError,
 };
-use reth_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
+use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
 use reth_primitives::{ChainSpec, Hardfork};
 use reth_rpc_types::{
     engine::{

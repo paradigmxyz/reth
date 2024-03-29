@@ -235,18 +235,16 @@ impl Account {
                     assert_equal(
                         *value,
                         entry.value,
-                        &format!("Storage for slot {:?} does not match", slot),
+                        &format!("Storage for slot {slot:?} does not match"),
                     )?;
                 } else {
                     return Err(Error::Assertion(format!(
-                        "Slot {:?} is missing from the database. Expected {:?}",
-                        slot, value
+                        "Slot {slot:?} is missing from the database. Expected {value:?}"
                     )))
                 }
             } else {
                 return Err(Error::Assertion(format!(
-                    "Slot {:?} is missing from the database. Expected {:?}",
-                    slot, value
+                    "Slot {slot:?} is missing from the database. Expected {value:?}"
                 )))
             }
         }

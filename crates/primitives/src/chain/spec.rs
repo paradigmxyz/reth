@@ -595,9 +595,10 @@ impl ChainSpec {
 
         // If shanghai is activated, initialize the header with an empty withdrawals hash, and
         // empty withdrawals list.
-        let withdrawals_root =
-            (self.fork(Hardfork::Shanghai).active_at_timestamp(self.genesis.timestamp))
-                .then_some(EMPTY_WITHDRAWALS);
+        let withdrawals_root = self
+            .fork(Hardfork::Shanghai)
+            .active_at_timestamp(self.genesis.timestamp)
+            .then_some(EMPTY_WITHDRAWALS);
 
         // If Cancun is activated at genesis, we set:
         // * parent beacon block root to 0x0
@@ -647,7 +648,7 @@ impl ChainSpec {
         let genesis_base_fee = self.genesis.base_fee_per_gas.unwrap_or(EIP1559_INITIAL_BASE_FEE);
 
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        (self.fork(Hardfork::London).active_at_block(0)).then_some(genesis_base_fee)
+        self.fork(Hardfork::London).active_at_block(0).then_some(genesis_base_fee)
     }
 
     /// Get the [BaseFeeParams] for the chain at the given timestamp.
@@ -671,11 +672,7 @@ impl ChainSpec {
 
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> B256 {
-        if let Some(hash) = self.genesis_hash {
-            hash
-        } else {
-            self.genesis_header().hash_slow()
-        }
+        self.genesis_hash.unwrap_or_else(|| self.genesis_header().hash_slow())
     }
 
     /// Get the timestamp of the genesis block.
@@ -1451,10 +1448,10 @@ impl Display for DisplayFork {
 
         match self.activated_at {
             ForkCondition::Block(at) | ForkCondition::Timestamp(at) => {
-                write!(f, "{:32} @{}", name_with_eip, at)?;
+                write!(f, "{name_with_eip:32} @{at}")?;
             }
             ForkCondition::TTD { fork_block, total_difficulty } => {
-                writeln!(
+                write!(
                     f,
                     "{:32} @{} ({})",
                     name_with_eip,
@@ -1502,7 +1499,6 @@ impl Display for DisplayFork {
 // - GrayGlacier                      @15050000
 // Merge hard forks:
 // - Paris                            @58750000000000000000000 (network is known to be merged)
-//
 // Post-merge hard forks (timestamp based):
 // - Shanghai                         @1681338455
 /// ```
@@ -1518,23 +1514,36 @@ pub struct DisplayHardforks {
 
 impl Display for DisplayHardforks {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Pre-merge hard forks (block based):")?;
-        for fork in self.pre_merge.iter() {
-            writeln!(f, "- {fork}")?;
+        fn format(
+            header: &str,
+            forks: &[DisplayFork],
+            next_is_empty: bool,
+            f: &mut Formatter<'_>,
+        ) -> std::fmt::Result {
+            writeln!(f, "{header}:")?;
+            let mut iter = forks.iter().peekable();
+            while let Some(fork) = iter.next() {
+                write!(f, "- {fork}")?;
+                if !next_is_empty || iter.peek().is_some() {
+                    writeln!(f)?;
+                }
+            }
+            Ok(())
         }
 
+        format(
+            "Pre-merge hard forks (block based)",
+            &self.pre_merge,
+            self.with_merge.is_empty(),
+            f,
+        )?;
+
         if !self.with_merge.is_empty() {
-            writeln!(f, "Merge hard forks:")?;
-            for fork in self.with_merge.iter() {
-                writeln!(f, "- {fork}")?;
-            }
+            format("Merge hard forks", &self.with_merge, self.post_merge.is_empty(), f)?;
         }
 
         if !self.post_merge.is_empty() {
-            writeln!(f, "Post-merge hard forks (timestamp based):")?;
-            for fork in self.post_merge.iter() {
-                writeln!(f, "- {fork}")?;
-            }
+            format("Post-merge hard forks (timestamp based)", &self.post_merge, true, f)?;
         }
 
         Ok(())
@@ -1616,15 +1625,13 @@ mod tests {
             if let Some(computed_id) = spec.hardfork_fork_id(*hardfork) {
                 assert_eq!(
                     expected_id, &computed_id,
-                    "Expected fork ID {:?}, computed fork ID {:?} for hardfork {}",
-                    expected_id, computed_id, hardfork
+                    "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for hardfork {hardfork}"
                 );
-                if let Hardfork::Shanghai = hardfork {
+                if matches!(hardfork, Hardfork::Shanghai) {
                     if let Some(shangai_id) = spec.shanghai_fork_id() {
                         assert_eq!(
                             expected_id, &shangai_id,
-                            "Expected fork ID {:?}, computed fork ID {:?} for Shanghai hardfork",
-                            expected_id, computed_id
+                            "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for Shanghai hardfork"
                         );
                     } else {
                         panic!("Expected ForkCondition to return Some for Hardfork::Shanghai");
@@ -1655,11 +1662,9 @@ mod tests {
 - GrayGlacier                      @15050000
 Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
-
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-- Cancun                           @1710338135
-"
+- Cancun                           @1710338135"
         );
     }
 
@@ -1674,8 +1679,7 @@ Post-merge hard forks (timestamp based):
         assert_eq!(
             spec.display_hardforks().to_string(),
             "Pre-merge hard forks (block based):
-- Frontier                         @0
-"
+- Frontier                         @0"
         );
     }
 
@@ -1777,8 +1781,7 @@ Post-merge hard forks (timestamp based):
         let happy_path_expected = Head { number: 73, timestamp: 11313123, ..Default::default() };
         assert_eq!(
             happy_path_head, happy_path_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            happy_path_expected, happy_path_head
+            "expected satisfy() to return {happy_path_expected:#?}, but got {happy_path_head:#?} "
         );
         // multiple timestamp test case (i.e Shanghai -> Cancun)
         let multiple_timestamp_fork_case = ChainSpec::builder()
@@ -1795,8 +1798,7 @@ Post-merge hard forks (timestamp based):
             Head { number: 73, timestamp: 11313398, ..Default::default() };
         assert_eq!(
             multi_timestamp_head, mult_timestamp_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            mult_timestamp_expected, multi_timestamp_head
+            "expected satisfy() to return {mult_timestamp_expected:#?}, but got {multi_timestamp_head:#?} "
         );
         // no ForkCondition::Block test case
         let no_block_fork_case = ChainSpec::builder()
@@ -1808,8 +1810,7 @@ Post-merge hard forks (timestamp based):
         let no_block_fork_expected = Head { number: 0, timestamp: 11313123, ..Default::default() };
         assert_eq!(
             no_block_fork_head, no_block_fork_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            no_block_fork_expected, no_block_fork_head
+            "expected satisfy() to return {no_block_fork_expected:#?}, but got {no_block_fork_head:#?} ",
         );
         // spec w/ ForkCondition::TTD with block_num test case (Sepolia merge netsplit edge case)
         let fork_cond_ttd_blocknum_case = ChainSpec::builder()
@@ -1832,8 +1833,7 @@ Post-merge hard forks (timestamp based):
             Head { number: 101, timestamp: 11313123, ..Default::default() };
         assert_eq!(
             fork_cond_ttd_blocknum_head, fork_cond_ttd_blocknum_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            fork_cond_ttd_blocknum_expected, fork_cond_ttd_blocknum_head
+            "expected satisfy() to return {fork_cond_ttd_blocknum_expected:#?}, but got {fork_cond_ttd_blocknum_expected:#?} ",
         );
 
         // spec w/ only ForkCondition::Block - test the match arm for ForkCondition::Block to ensure
@@ -1849,8 +1849,7 @@ Post-merge hard forks (timestamp based):
         let fork_cond_block_only_expected = Head { number: 73, ..Default::default() };
         assert_eq!(
             fork_cond_block_only_head, fork_cond_block_only_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            fork_cond_block_only_expected, fork_cond_block_only_head
+            "expected satisfy() to return {fork_cond_block_only_expected:#?}, but got {fork_cond_block_only_head:#?} ",
         );
         // Fork::ConditionTTD test case without a new chain spec to demonstrate ChainSpec::satisfy
         // is independent of ChainSpec for this(these - including ForkCondition::Block) match arm(s)
@@ -1862,8 +1861,7 @@ Post-merge hard forks (timestamp based):
             Head { total_difficulty: U256::from(10_790_000), ..Default::default() };
         assert_eq!(
             fork_cond_ttd_no_new_spec, fork_cond_ttd_no_new_spec_expected,
-            "expected satisfy() to return {:#?}, but got {:#?} ",
-            fork_cond_ttd_no_new_spec_expected, fork_cond_ttd_no_new_spec
+            "expected satisfy() to return {fork_cond_ttd_blocknum_expected:#?}, but got {fork_cond_ttd_blocknum_expected:#?} ",
         );
     }
 
