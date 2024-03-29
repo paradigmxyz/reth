@@ -1,6 +1,6 @@
 use enr::Enr;
 use reth_rpc_types::NodeRecord;
-use secp256k1::{PublicKey, SecretKey};
+use secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
 use std::{net::IpAddr, str::FromStr};
 
 // Re-export PeerId for ease of use.
@@ -13,10 +13,6 @@ pub use reth_rpc_types::PeerId;
 ///
 /// See: <https://github.com/bitcoin-core/secp256k1/blob/master/include/secp256k1.h#L211>
 const SECP256K1_TAG_PUBKEY_UNCOMPRESSED: u8 = 4;
-
-/// How many bytes a serialized uncompressed public key should be when used as input to libsecp256k1
-/// APIs.
-const SECP256K1_PUBKEY_UNCOMPRESSED_SIZE: usize = 65;
 
 /// Converts a [secp256k1::PublicKey] to a [PeerId] by stripping the
 /// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag and storing the rest of the slice in the [PeerId].
@@ -31,7 +27,7 @@ pub fn pk2id(pk: &PublicKey) -> PeerId {
 pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
     // NOTE: B512 is used as a PeerId because 512 bits is enough to represent an uncompressed
     // public key.
-    let mut s = [0u8; SECP256K1_PUBKEY_UNCOMPRESSED_SIZE];
+    let mut s = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
     s[0] = SECP256K1_TAG_PUBKEY_UNCOMPRESSED;
     s[1..].copy_from_slice(id.as_slice());
     PublicKey::from_slice(&s)
