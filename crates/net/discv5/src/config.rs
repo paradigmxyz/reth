@@ -50,8 +50,6 @@ pub struct ConfigBuilder {
     tcp_port: Option<u16>,
     /// Additional kv-pairs that should be advertised to peers by including in local node record.
     other_enr_data: Vec<(&'static str, Bytes)>,
-    /// Allow no TCP port advertised by discovered nodes. Disallowed by default.
-    allow_no_tcp_discovered_nodes: bool,
     /// Interval in seconds at which to run a lookup up query with local node ID as target, to
     /// populate kbuckets.
     self_lookup_interval: Option<u64>,
@@ -69,7 +67,6 @@ impl ConfigBuilder {
             fork: fork_id,
             tcp_port,
             other_enr_data,
-            allow_no_tcp_discovered_nodes,
             self_lookup_interval,
             filter_discovered_peer,
         } = discv5_config;
@@ -80,7 +77,6 @@ impl ConfigBuilder {
             fork: Some(fork_id),
             tcp_port: Some(tcp_port),
             other_enr_data,
-            allow_no_tcp_discovered_nodes,
             self_lookup_interval: Some(self_lookup_interval),
             filter_discovered_peer,
         }
@@ -169,13 +165,6 @@ impl ConfigBuilder {
         self
     }
 
-    /// Allows discovered nodes without tcp port set in their ENR to be passed from
-    /// [`discv5::Discv5`] up to the app.
-    pub fn allow_no_tcp_discovered_nodes(mut self) -> Self {
-        self.allow_no_tcp_discovered_nodes = true;
-        self
-    }
-
     /// Adds filter rules to apply to discovered peer to determine whether or not it should be
     /// passed to the rlpx.
     pub fn filter(self, f: MustNotIncludeChains) -> Self {
@@ -185,7 +174,6 @@ impl ConfigBuilder {
             fork,
             tcp_port,
             other_enr_data,
-            allow_no_tcp_discovered_nodes,
             self_lookup_interval,
             ..
         } = self;
@@ -196,7 +184,6 @@ impl ConfigBuilder {
             fork,
             tcp_port,
             other_enr_data,
-            allow_no_tcp_discovered_nodes,
             self_lookup_interval,
             filter_discovered_peer: f,
         }
@@ -210,7 +197,6 @@ impl ConfigBuilder {
             fork,
             tcp_port,
             other_enr_data,
-            allow_no_tcp_discovered_nodes,
             self_lookup_interval,
             filter_discovered_peer,
         } = self;
@@ -231,7 +217,6 @@ impl ConfigBuilder {
             fork,
             tcp_port,
             other_enr_data,
-            allow_no_tcp_discovered_nodes,
             self_lookup_interval,
             filter_discovered_peer,
         }
@@ -252,8 +237,6 @@ pub struct Config {
     pub(super) tcp_port: u16,
     /// Additional kv-pairs to include in local node record.
     pub(super) other_enr_data: Vec<(&'static str, Bytes)>,
-    /// Allow no TCP port advertised by discovered nodes. Disallowed by default.
-    pub(super) allow_no_tcp_discovered_nodes: bool,
     /// Interval in seconds at which to run a lookup up query with local node ID as target, to
     /// populate kbuckets.
     pub(super) self_lookup_interval: u64,

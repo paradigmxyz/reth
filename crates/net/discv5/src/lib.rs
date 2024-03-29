@@ -174,7 +174,6 @@ impl Discv5 {
             fork,
             tcp_port,
             other_enr_data,
-            allow_no_tcp_discovered_nodes: _,
             self_lookup_interval,
             filter_discovered_peer,
         } = discv5_config;
