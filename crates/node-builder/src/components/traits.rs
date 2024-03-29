@@ -150,7 +150,9 @@ pub trait LaunchNode {
     /// Encapsulates all types and components of the node.
     type Node: FullNodeComponents;
 
-    /// Launch the node and return a handle.
+    /// Launches the node and returns a handle to it.
+    ///
+    /// Returns a [NodeHandle] that can be used to interact with the node.
     fn launch(
         self: Self,
         executor: TaskExecutor,

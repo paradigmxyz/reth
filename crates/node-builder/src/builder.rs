@@ -483,12 +483,8 @@ where
         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
         Components::Pool,
     >;
-    /// Launches the node and returns a handle to it.
-    ///
     /// This bootstraps the node internals, creates all the components with the provider
     /// [NodeComponentsBuilder] and launches the node.
-    ///
-    /// Returns a [NodeHandle] that can be used to interact with the node.
     async fn launch(
         self,
         executor: TaskExecutor,
