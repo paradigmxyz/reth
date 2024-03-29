@@ -10,16 +10,12 @@ use crate::{
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{Config, PruneConfig};
-use reth_db::{cursor::DbCursorRO, database::Database, open_db, tables, transaction::DbTx};
+use reth_db::{database::Database, open_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
-};
-use reth_network::NetworkHandle;
+use reth_interfaces::consensus::Consensus;
 use reth_node_core::{
     args::{get_secret_key, NetworkArgs},
     dirs::ChainPath,
@@ -27,11 +23,9 @@ use reth_node_core::{
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderProvider, HeaderSyncMode,
-    ProviderFactory,
+    BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
 };
 use reth_prune::PrunerBuilder;
-use reth_revm::EvmProcessorFactory;
 use reth_stages::{
     sets::DefaultStages,
     stages::{
@@ -42,7 +36,6 @@ use reth_stages::{
     Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
-use reth_tasks::TaskExecutor;
 use std::{ops::RangeInclusive, sync::Arc};
 use tokio::sync::watch;
 use tracing::info;
@@ -114,15 +107,20 @@ impl Command {
             .filter(|highest_static_file_block| highest_static_file_block >= range.start())
         {
             info!(target: "reth::cli", ?range, ?highest_static_block, "Executing a pipeline unwind.");
-            let mut pipeline = self.build_pipeline(data_dir, config, provider_factory.clone()).await?;
+            let mut pipeline =
+                self.build_pipeline(data_dir, config, provider_factory.clone()).await?;
+
+            // Move all applicable data from database to static files.
             pipeline.produce_static_files()?;
 
+            // Run the pruner so we don't potentially end up with higher height in the database vs
+            // static files.
             let mut pruner = PrunerBuilder::new(PruneConfig::default())
                 .prune_delete_limit(usize::MAX)
                 .build(provider_factory);
             pruner.run(*range.end())?;
 
-            pipeline.unwind(*range.start(), None)?;
+            pipeline.unwind((*range.start()).saturating_sub(1), None)?;
         } else {
             info!(target: "reth::cli", ?range, "Executing a database unwind.");
             let provider = provider_factory.provider_rw()?;
@@ -162,12 +160,6 @@ impl Command {
             .build(provider_factory.clone())
             .start_network()
             .await?;
-
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            PruneModes::default(),
-        );
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(BeaconConsensus::new(provider_factory.chain_spec()));
@@ -227,7 +219,14 @@ impl Command {
                 .set(IndexAccountHistoryStage::default())
                 .set(IndexStorageHistoryStage::default()),
             )
-            .build(provider_factory, static_file_producer);
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
+            );
         Ok(pipeline)
     }
 }
