@@ -609,8 +609,8 @@ where
         // get handle to peer's session, if the session is still active
         let Some(peer) = self.peers.get_mut(&peer_id) else {
             trace!(
-                peer_id=format!("{peer_id:#}"),
-                msg=?msg,
+                peer_id = format!("{peer_id:#}"),
+                ?msg,
                 "discarding announcement from inactive peer"
             );
 
@@ -636,9 +636,9 @@ where
                 .increment(count_txns_already_seen_by_peer);
 
             trace!(target: "net::tx",
-                count_txns_already_seen_by_peer=%count_txns_already_seen_by_peer,
+                %count_txns_already_seen_by_peer,
                 peer_id=format!("{peer_id:#}"),
-                client=?client,
+                ?client,
                 "Peer sent hashes that have already been marked as seen by peer"
             );
 
@@ -746,8 +746,8 @@ where
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hashes=?*hashes,
-                msg_version=%msg_version,
-                client_version=%client,
+                %msg_version,
+                %client,
                 "buffering hashes announced by busy peer"
             );
 
@@ -773,8 +773,8 @@ where
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 surplus_hashes=?*surplus_hashes,
-                msg_version=%msg_version,
-                client_version=%client,
+                %msg_version,
+                %client,
                 "some hashes in announcement from peer didn't fit in `GetPooledTransactions` request, buffering surplus hashes"
             );
 
@@ -784,8 +784,8 @@ where
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
             hashes=?*hashes_to_request,
-            msg_version=%msg_version,
-            client_version=%client,
+            %msg_version,
+            %client,
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
 
@@ -801,8 +801,8 @@ where
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 failed_to_request_hashes=?*failed_to_request_hashes,
-                conn_eth_version=%conn_eth_version,
-                client_version=%client,
+                %conn_eth_version,
+                %client,
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
