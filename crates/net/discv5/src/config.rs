@@ -307,12 +307,6 @@ impl BootNode {
     }
 }
 
-/// Key of the [`ForkId`] kv-pair in an [`Enr`](discv5::enr::Enr).
-#[derive(Debug)]
-pub struct NetworkRef;
-
-impl IdentifyForkIdKVPair for NetworkRef {}
-
 #[cfg(test)]
 mod test {
     use std::net::SocketAddrV4;
