@@ -88,14 +88,8 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds a boot node.
-    pub fn add_boot_node(mut self, node: discv5::Enr) -> Self {
-        self.bootstrap_nodes.insert(BootNode::Enr(node));
-        self
-    }
-
     /// Adds multiple boot nodes from a list of [`Enr`](discv5::Enr)s.
-    pub fn add_boot_nodes_sigp_type(
+    pub fn add_signed_boot_nodes(
         mut self,
         nodes: impl IntoIterator<Item = discv5::Enr>,
     ) -> Self {
@@ -106,7 +100,7 @@ impl ConfigBuilder {
     /// Parses a comma-separated list of serialized [`Enr`](discv5::Enr)s, signed node records, and
     /// adds any successfully deserialized records to boot nodes. Note: this type is serialized in
     /// CL format since [`discv5`] is originally a CL library.
-    pub fn add_cl_serialized_boot_nodes(mut self, enrs: &str) -> Self {
+    pub fn add_cl_serialized_signed_boot_nodes(mut self, enrs: &str) -> Self {
         let bootstrap_nodes = &mut self.bootstrap_nodes;
         for node in enrs.split(&[',']).flat_map(|record| record.trim().parse::<discv5::Enr>()) {
             bootstrap_nodes.insert(BootNode::Enr(node));
@@ -115,7 +109,7 @@ impl ConfigBuilder {
     }
 
     /// Adds a comma-separated list of enodes, serialized unsigned node records, to boot nodes.
-    pub fn add_serialized_boot_nodes(mut self, enodes: &str) -> Self {
+    pub fn add_serialized_unsigned_boot_nodes(mut self, enodes: &str) -> Self {
         let bootstrap_nodes = &mut self.bootstrap_nodes;
 
         for node in enodes.split(&[',']) {
@@ -127,8 +121,8 @@ impl ConfigBuilder {
     }
 
     /// Adds boot nodes in the form a list of [`NodeRecord`]s, parsed enodes.
-    pub fn add_deserialized_enode_boot_nodes(self, enodes: Vec<NodeRecord>) -> Self {
-        self.add_serialized_boot_nodes(&format!(
+    pub fn add_unsigned_boot_nodes(self, enodes: Vec<NodeRecord>) -> Self {
+        self.add_serialized_unsigned_boot_nodes(&format!(
             "{}",
             enodes
                 .iter()
@@ -139,12 +133,12 @@ impl ConfigBuilder {
 
     /// Add optimism mainnet boot nodes.
     pub fn add_optimism_mainnet_boot_nodes(self) -> Self {
-        self.add_serialized_boot_nodes(BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET)
+        self.add_serialized_unsigned_boot_nodes(BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET)
     }
 
     /// Add optimism sepolia boot nodes.
     pub fn add_optimism_sepolia_boot_nodes(self) -> Self {
-        self.add_serialized_boot_nodes(BOOT_NODES_OP_SEPOLIA_AND_BASE_SEPOLIA)
+        self.add_serialized_unsigned_boot_nodes(BOOT_NODES_OP_SEPOLIA_AND_BASE_SEPOLIA)
     }
 
     /// Set [`ForkId`], and key used to identify it, to set in local [`Enr`](discv5::enr::Enr).
@@ -322,7 +316,7 @@ mod test {
         const OP_SEPOLIA_CL_BOOTNODES: &str ="enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg,enr:-J64QFa3qMsONLGphfjEkeYyF6Jkil_jCuJmm7_a42ckZeUQGLVzrzstZNb1dgBp1GGx9bzImq5VxJLP-BaptZThGiWGAYrTytOvgmlkgnY0gmlwhGsV-zeHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDahfSECTIS_cXyZ8IyNf4leANlZnrsMEWTkEYxf4GMCmDdGNwgiQGg3VkcIIkBg";
 
         let config =
-            Config::builder().add_cl_serialized_boot_nodes(OP_SEPOLIA_CL_BOOTNODES).build();
+            Config::builder().add_cl_serialized_signed_boot_nodes(OP_SEPOLIA_CL_BOOTNODES).build();
 
         let socket_1 = "18.210.176.114:9222".parse::<SocketAddrV4>().unwrap();
         let socket_2 = "107.21.251.55:9222".parse::<SocketAddrV4>().unwrap();
@@ -341,7 +335,7 @@ mod test {
     #[test]
     fn parse_enodes() {
         let config = Config::builder()
-            .add_serialized_boot_nodes(BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET)
+            .add_serialized_unsigned_boot_nodes(BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET)
             .build();
 
         let bootstrap_nodes =
