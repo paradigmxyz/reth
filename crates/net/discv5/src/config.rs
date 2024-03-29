@@ -307,17 +307,6 @@ impl BootNode {
     }
 }
 
-/// Identifies a chain in an [`Enr`](discv5::enr::Enr). Used as key for the [`ForkId`] kv-pair in
-/// the [`Enr`](discv5::enr::Enr).
-pub trait IdentifyForkIdKVPair {
-    /// L1 EL
-    const ETH: &'static [u8] = b"eth";
-    /// L1 CL
-    const ETH2: &'static [u8] = b"eth2";
-    /// Optimism
-    const OPSTACK: &'static [u8] = b"opstack";
-}
-
 /// Key of the [`ForkId`] kv-pair in an [`Enr`](discv5::enr::Enr).
 #[derive(Debug)]
 pub struct NetworkRef;
