@@ -1,8 +1,10 @@
 //! Traits for the builder
 
-use crate::{components::NodeComponents, node::FullNodeTypes, BuilderContext};
+use crate::{components::NodeComponents, node::FullNodeTypes, BuilderContext, NodeHandle};
+use futures::Future;
 use reth_network::NetworkHandle;
 use reth_node_api::NodeTypes;
+use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
@@ -141,4 +143,13 @@ where
     {
         self(ctx)
     }
+}
+
+/// Trait for launching the node.
+pub trait LaunchNode {
+    /// Encapsulates all types and components of the node.
+    type Node: FullNodeComponents;
+
+    /// Launch the node and return a handle.
+    fn launch(self: Self, executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> impl Future<Output = eyre::Result<NodeHandle<Self::Node>>>;
 }
