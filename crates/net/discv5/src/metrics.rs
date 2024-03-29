@@ -6,7 +6,7 @@ use crate::config::{ETH, ETH2, OPSTACK};
 
 /// Information tracked by [`Discv5`](crate::Discv5).
 #[derive(Debug, Default, Clone)]
-pub struct Metrics {
+pub struct Discv5Metrics {
     /// Frequency of networks advertised in discovered peers' node records.
     pub discovered_peers_advertised_networks: AdvertisedChainMetrics,
     /// Tracks discovered peers.

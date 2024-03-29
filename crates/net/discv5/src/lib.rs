@@ -27,7 +27,7 @@ pub use discv5::{self, IpMode};
 pub use config::{BootNode, Config, ConfigBuilder};
 pub use enr::uncompressed_id_from_enr_pk;
 pub use filter::{FilterOutcome, MustNotIncludeChains};
-use metrics::Metrics;
+use metrics::Discv5Metrics;
 
 /// Errors from using [`discv5::Discv5`] handle.
 #[derive(thiserror::Error, Debug)]
@@ -129,7 +129,7 @@ pub struct Discv5 {
     /// Optionally filter discovered peers before passing up to app.
     discovered_peer_filter: MustNotIncludeChains,
     #[doc(hidden)]
-    pub metrics: Metrics,
+    pub metrics: Discv5Metrics,
 }
 
 impl Discv5 {
@@ -292,7 +292,7 @@ impl Discv5 {
             "added boot nodes"
         );
 
-        let metrics = Metrics::default();
+        let metrics = Discv5Metrics::default();
 
         // initiate regular lookups to populate kbuckets
         task::spawn({
