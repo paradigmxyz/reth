@@ -89,10 +89,7 @@ impl ConfigBuilder {
     }
 
     /// Adds multiple boot nodes from a list of [`Enr`](discv5::Enr)s.
-    pub fn add_signed_boot_nodes(
-        mut self,
-        nodes: impl IntoIterator<Item = discv5::Enr>,
-    ) -> Self {
+    pub fn add_signed_boot_nodes(mut self, nodes: impl IntoIterator<Item = discv5::Enr>) -> Self {
         self.bootstrap_nodes.extend(nodes.into_iter().map(BootNode::Enr));
         self
     }
@@ -108,6 +105,17 @@ impl ConfigBuilder {
         self
     }
 
+    /// Adds boot nodes in the form a list of [`NodeRecord`]s, parsed enodes.
+    pub fn add_unsigned_boot_nodes(self, enodes: Vec<NodeRecord>) -> Self {
+        self.add_serialized_unsigned_boot_nodes(&format!(
+            "{}",
+            enodes
+                .iter()
+                .map(|node| serde_json::to_string::<NodeRecord>(node).unwrap())
+                .format(",")
+        ))
+    }
+
     /// Adds a comma-separated list of enodes, serialized unsigned node records, to boot nodes.
     pub fn add_serialized_unsigned_boot_nodes(mut self, enodes: &str) -> Self {
         let bootstrap_nodes = &mut self.bootstrap_nodes;
@@ -118,17 +126,6 @@ impl ConfigBuilder {
             }
         }
         self
-    }
-
-    /// Adds boot nodes in the form a list of [`NodeRecord`]s, parsed enodes.
-    pub fn add_unsigned_boot_nodes(self, enodes: Vec<NodeRecord>) -> Self {
-        self.add_serialized_unsigned_boot_nodes(&format!(
-            "{}",
-            enodes
-                .iter()
-                .map(|node| serde_json::to_string::<NodeRecord>(node).unwrap())
-                .format(",")
-        ))
     }
 
     /// Add optimism mainnet boot nodes.
