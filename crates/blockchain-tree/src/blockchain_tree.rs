@@ -1406,7 +1406,7 @@ mod tests {
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
                 .genesis(Genesis {
-                    alloc: HashMap::from([(
+                    alloc: BTreeMap::from([(
                         signer,
                         GenesisAccount { balance: initial_signer_balance, ..Default::default() },
                     )]),

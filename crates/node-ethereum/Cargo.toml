@@ -30,3 +30,5 @@ serde.workspace = true
 
 [dev-dependencies]
 reth-db.workspace = true
+futures.workspace = true
+
