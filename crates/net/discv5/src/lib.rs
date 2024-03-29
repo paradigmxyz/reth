@@ -238,10 +238,7 @@ impl Discv5 {
         //
         // 3. start discv5
         //
-        let sk = {
-            let mut sk = *sk.as_ref();
-            discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk).unwrap()
-        };
+        let sk = discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk.secret_bytes()).unwrap();
         let mut discv5 = match discv5::Discv5::new(enr, sk, discv5_config) {
             Ok(discv5) => discv5,
             Err(err) => return Err(Error::InitFailure(err)),
