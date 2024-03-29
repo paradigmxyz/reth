@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-net-common.workspace = true
 reth-metrics.workspace = true
 
 # ethereum
