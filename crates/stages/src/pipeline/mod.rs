@@ -232,7 +232,7 @@ where
     ///
     /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
     /// lock is occupied.
-    fn produce_static_files(&mut self) -> RethResult<()> {
+    pub fn produce_static_files(&mut self) -> RethResult<()> {
         let mut static_file_producer = self.static_file_producer.lock();
 
         let provider = self.provider_factory.provider()?;
@@ -264,8 +264,10 @@ where
         let unwind_pipeline = self.stages.iter_mut().rev();
 
         let mut provider_rw = self.provider_factory.provider_rw()?;
+        dbg!("HELLO");
 
         for stage in unwind_pipeline {
+            dbg!("HELLO");
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
