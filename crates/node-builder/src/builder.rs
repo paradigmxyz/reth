@@ -4,8 +4,7 @@
 
 use crate::{
     components::{
-        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, NodeComponents,
-        NodeComponentsBuilder, PoolBuilder,
+        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, LaunchNode, NodeComponents, NodeComponentsBuilder, PoolBuilder
     },
     exex::{BoxedLaunchExEx, ExExContext},
     hooks::NodeHooks,
@@ -452,24 +451,48 @@ where
         self
     }
 
+    /// Check that the builder can be launched
+    ///
+    /// This is useful when writing tests to ensure that the builder is configured correctly.
+    pub fn check_launch(self) -> Self {
+        self
+    }
+}
+
+impl<DB, Types, Components> LaunchNode for
+    NodeBuilder<
+        DB,
+        ComponentsState<
+            Types,
+            Components,
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                Components::Pool,
+            >,
+        >,
+    >
+where
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    Types: NodeTypes,
+    Components: NodeComponentsBuilder<
+        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+    >,
+{
+    type Node = FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                Components::Pool,
+            >;
     /// Launches the node and returns a handle to it.
     ///
     /// This bootstraps the node internals, creates all the components with the provider
     /// [NodeComponentsBuilder] and launches the node.
     ///
     /// Returns a [NodeHandle] that can be used to interact with the node.
-    pub async fn launch(
+    async fn launch(
         self,
         executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
-    ) -> eyre::Result<
-        NodeHandle<
-            FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-                Components::Pool,
-            >,
-        >,
-    > {
+    ) -> eyre::Result<NodeHandle<Self::Node>> {
         // get config from file
         let reth_config = self.load_config(&data_dir)?;
 
@@ -796,13 +819,6 @@ where
         };
 
         Ok(handle)
-    }
-
-    /// Check that the builder can be launched
-    ///
-    /// This is useful when writing tests to ensure that the builder is configured correctly.
-    pub fn check_launch(self) -> Self {
-        self
     }
 }
 
