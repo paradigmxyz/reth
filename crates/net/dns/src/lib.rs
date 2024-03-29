@@ -255,7 +255,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 debug!(target: "disc::dns",%err, domain=%link.domain, ?hash, "Failed to lookup entry")
             }
             None => {
-                debug!(target: "disc::dns",domain=%link.domain, ?hash, "No dns entry")
+                trace!(target: "disc::dns",domain=%link.domain, ?hash, "No dns entry")
             }
             Some(Ok(entry)) => {
                 // cache entry
