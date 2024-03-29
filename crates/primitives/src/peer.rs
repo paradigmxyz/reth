@@ -6,13 +6,17 @@ use std::{net::IpAddr, str::FromStr};
 // Re-export PeerId for ease of use.
 pub use reth_rpc_types::PeerId;
 
+/// This tag should be set to indicate to libsecp256k1 that the following bytes denote an
+/// uncompressed pubkey.
+///
 /// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` = `0x04`
 ///
 /// See: <https://github.com/bitcoin-core/secp256k1/blob/master/include/secp256k1.h#L211>
 const SECP256K1_TAG_PUBKEY_UNCOMPRESSED: u8 = 4;
 
-/// How many bytes a serialized uncompressed public key is when coming from libsecp256k1.
-const SECP256K1_PUBKEY_UNCOMPRESSED_SIZE: u8 = 65;
+/// How many bytes a serialized uncompressed public key should be when used as input to libsecp256k1
+/// APIs.
+const SECP256K1_PUBKEY_UNCOMPRESSED_SIZE: usize = 65;
 
 /// Converts a [secp256k1::PublicKey] to a [PeerId] by stripping the
 /// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag and storing the rest of the slice in the [PeerId].
