@@ -44,6 +44,11 @@ impl HighestStaticFiles {
             StaticFileSegment::Receipts => &mut self.receipts,
         }
     }
+
+    /// Returns the maximum block of all segments.
+    pub fn max(&self) -> Option<u64> {
+        [self.headers, self.transactions, self.receipts].iter().filter_map(|&option| option).max()
+    }
 }
 
 /// Each static file has a fixed number of blocks. This gives out the range where the requested
