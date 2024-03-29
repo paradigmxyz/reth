@@ -4,7 +4,8 @@
 
 use crate::{
     components::{
-        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, LaunchNode, NodeComponents, NodeComponentsBuilder, PoolBuilder
+        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, LaunchNode,
+        NodeComponents, NodeComponentsBuilder, PoolBuilder,
     },
     exex::{BoxedLaunchExEx, ExExContext},
     hooks::NodeHooks,
@@ -459,8 +460,8 @@ where
     }
 }
 
-impl<DB, Types, Components> LaunchNode for
-    NodeBuilder<
+impl<DB, Types, Components> LaunchNode
+    for NodeBuilder<
         DB,
         ComponentsState<
             Types,
@@ -479,9 +480,9 @@ where
     >,
 {
     type Node = FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-                Components::Pool,
-            >;
+        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+        Components::Pool,
+    >;
     /// Launches the node and returns a handle to it.
     ///
     /// This bootstraps the node internals, creates all the components with the provider

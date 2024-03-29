@@ -151,5 +151,9 @@ pub trait LaunchNode {
     type Node: FullNodeComponents;
 
     /// Launch the node and return a handle.
-    fn launch(self: Self, executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> impl Future<Output = eyre::Result<NodeHandle<Self::Node>>>;
+    fn launch(
+        self: Self,
+        executor: TaskExecutor,
+        data_dir: ChainPath<DataDirPath>,
+    ) -> impl Future<Output = eyre::Result<NodeHandle<Self::Node>>>;
 }
