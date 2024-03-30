@@ -15,14 +15,6 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 
-# ethereum
-alloy-rlp.workspace = true
-enr.workspace = true
-secp256k1.workspace = true
-
 # async
 pin-project.workspace = true
 tokio = { workspace = true, features = ["full"] }
-
-# misc
-derive_more.workspace = true
