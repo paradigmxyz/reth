@@ -634,7 +634,7 @@ impl TransactionFetcher {
         if self.active_peers.len() >= self.info.max_inflight_requests {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                ?*new_announced_hashes,
+                hashes=?*new_announced_hashes,
                 %conn_eth_version,
                 max_inflight_transaction_requests=self.info.max_inflight_requests,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
@@ -645,7 +645,7 @@ impl TransactionFetcher {
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
             debug!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                new_announced_hashes=?*new_announced_hashes,
+                hashes=?*new_announced_hashes,
                 conn_eth_version=%conn_eth_version,
                 "failed to cache active peer in schnellru::LruMap, dropping request to peer"
             );
@@ -655,7 +655,7 @@ impl TransactionFetcher {
         if *inflight_count >= DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
-                ?*new_announced_hashes,
+                hashes=?*new_announced_hashes,
                 %conn_eth_version,
                 max_concurrent_tx_reqs_per_peer=DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
                 "limit for concurrent `GetPooledTransactions` requests per peer reached"
@@ -835,7 +835,7 @@ impl TransactionFetcher {
 
             trace!(target: "net::tx",
                 inflight_requests=self.inflight_requests.len(),
-                max_inflight_transaction_requests,
+                max_inflight_transaction_requests=info.max_inflight_requests,
                 hashes_pending_fetch=self.hashes_pending_fetch.len(),
                 limit,
                 "search breadth limited in search for idle fallback peer for some hash pending fetch"
