@@ -18,10 +18,10 @@ pub enum Error {
     #[error("discovery socket missing")]
     UnreachableDiscovery,
     /// Peer is unreachable over rlpx.
-    #[error("rlpx TCP socket missing")]
+    #[error("RLPx TCP socket missing")]
     UnreachableRlpx,
     /// Peer is not using same IP version as local node in rlpx.
-    #[error("rlpx TCP socket is unsupported IP version, local ip mode: {0:?}")]
+    #[error("RLPx TCP socket is unsupported IP version, local ip mode: {0:?}")]
     IpVersionMismatchRlpx(IpMode),
     /// Failed to initialize [`discv5::Discv5`].
     #[error("init failed, {0}")]

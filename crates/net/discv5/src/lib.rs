@@ -41,15 +41,16 @@ use metrics::Discv5Metrics;
 pub struct Discv5 {
     #[deref]
     #[deref_mut]
+    /// sigp/discv5 node.
     discv5: Arc<discv5::Discv5>,
+    /// [`IpMode`] of the the node.
     ip_mode: IpMode,
-    // Notify app of discovered nodes that don't have a TCP port set in their ENR. These nodes are
-    // filtered out by default.
+    /// Key used in kv-pair to ID chain.
     fork_id_key: &'static [u8],
-    /// Optionally filter discovered peers before passing up to app.
+    /// Filter applied to a discovered peers before passing it up to app.
     discovered_peer_filter: MustNotIncludeChains,
-    #[doc(hidden)]
-    pub metrics: Discv5Metrics,
+    /// Metrics for underlying [`discv5::Discv5`] node and filtered discovered peers.
+    metrics: Discv5Metrics,
 }
 
 impl Discv5 {
