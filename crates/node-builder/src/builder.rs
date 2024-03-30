@@ -4,8 +4,14 @@
 
 use crate::{
     components::{
-        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, LaunchNode, NodeComponents, NodeComponentsBuilder, PoolBuilder
-    }, exex::{BoxedLaunchExEx, ExExContext}, hooks::NodeHooks, node::{FullNode, FullNodeTypes, FullNodeTypesAdapter}, rpc::{RethRpcServerHandles, RpcContext, RpcHooks}, DefaultLauncher, Node, NodeHandle
+        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, LaunchNode,
+        NodeComponents, NodeComponentsBuilder, PoolBuilder,
+    },
+    exex::{BoxedLaunchExEx, ExExContext},
+    hooks::NodeHooks,
+    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter},
+    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
+    DefaultLauncher, Node, NodeHandle,
 };
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, Future, StreamExt};
@@ -50,7 +56,7 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-type RethFullProviderType<DB, Evm> =
+pub type RethFullProviderType<DB, Evm> =
     BlockchainProvider<DB, ShareableBlockchainTree<DB, EvmProcessorFactory<Evm>>>;
 
 type RethFullAdapter<DB, N> =
@@ -165,7 +171,10 @@ impl<DB, State> NodeBuilder<DB, State> {
     }
 
     /// Loads the reth config with the given datadir root
-    pub fn load_config(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<reth_config::Config> {
+    pub fn load_config(
+        &self,
+        data_dir: &ChainPath<DataDirPath>,
+    ) -> eyre::Result<reth_config::Config> {
         let config_path = self.config.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let mut config = confy::load_path::<reth_config::Config>(&config_path)
@@ -463,9 +472,7 @@ where
     //             Components::Pool,
     //         >,
     //     >,
-    // > {
-    //     // get config from file
-    //     let reth_config = self.load_config(&data_dir)?;
+    // > { // get config from file let reth_config = self.load_config(&data_dir)?;
 
     //     let Self {
     //         config,
@@ -502,7 +509,8 @@ where
     //         )
     //         .await?;
 
-    //     debug!(target: "reth::cli", chain=%config.chain.chain, genesis=?config.chain.genesis_hash(), "Initializing genesis");
+    //     debug!(target: "reth::cli", chain=%config.chain.chain,
+    // genesis=?config.chain.genesis_hash(), "Initializing genesis");
 
     //     let genesis_hash = init_genesis(provider_factory.clone())?;
 
@@ -540,7 +548,8 @@ where
     //     let blockchain_db =
     //         BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
 
-    //     let ctx = BuilderContext::new(head, blockchain_db, executor, data_dir, config, reth_config);
+    //     let ctx = BuilderContext::new(head, blockchain_db, executor, data_dir, config,
+    // reth_config);
 
     //     debug!(target: "reth::cli", "creating components");
     //     let NodeComponents { transaction_pool, network, payload_builder } =
@@ -599,18 +608,19 @@ where
 
     //     // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
     //     if reth_config.stages.etl.dir.is_none() {
-    //         reth_config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
-    //     }
+    //         reth_config.stages.etl.dir =
+    // Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));     }
 
     //     // Configure the pipeline
     //     let (mut pipeline, client) = if config.dev.dev {
     //         info!(target: "reth::cli", "Starting Reth in dev mode");
 
     //         for (idx, (address, alloc)) in config.chain.genesis.alloc.iter().enumerate() {
-    //             info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
-    //         }
+    //             info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx,
+    // address.to_string(), format_ether(alloc.balance));         }
 
-    //         let mining_mode = config.mining_mode(transaction_pool.pending_transactions_listener());
+    //         let mining_mode =
+    // config.mining_mode(transaction_pool.pending_transactions_listener());
 
     //         let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
     //             Arc::clone(&config.chain),
@@ -678,8 +688,8 @@ where
     //     info!(target: "reth::cli", ?prune_config, "Pruner initialized");
 
     //     // Configure the consensus engine
-    //     let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
-    //         client,
+    //     let (beacon_consensus_engine, beacon_engine_handle) =
+    // BeaconConsensusEngine::with_channel(         client,
     //         pipeline,
     //         blockchain_db.clone(),
     //         Box::new(executor.clone()),
@@ -791,34 +801,40 @@ where
 
     //     Ok(handle)
     // }
-    // 
-    // 
+    //
+    //
 
-    pub async fn launch(self, task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> eyre::Result<
+    pub async fn launch(
+        self,
+        task_executor: TaskExecutor,
+        data_dir: ChainPath<DataDirPath>,
+    ) -> eyre::Result<
         NodeHandle<
             FullNodeComponentsAdapter<
                 FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
                 Components::Pool,
             >,
         >,
-    >
-    {
+    > {
         self.launch_with::<_>(DefaultLauncher::default()).await
     }
 
-    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<
-        NodeHandle<
-            FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-                Components::Pool,
-            >,
-        >,
-    > 
-    where
-        L: LaunchNode<Node>,
-    {
-        launcher.launch(self)
-    }
+    // pub async fn launch_with<L>(
+    //     self,
+    //     launcher: L,
+    // ) -> eyre::Result<
+    //     NodeHandle<
+    //         FullNodeComponentsAdapter<
+    //             FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+    //             Components::Pool,
+    //         >,
+    //     >,
+    // >
+    // where
+    //     L: LaunchNode<FullNodeComponents>,
+    // {
+    //     launcher.launch(self)
+    // }
 
     /// Check that the builder can be launched
     ///

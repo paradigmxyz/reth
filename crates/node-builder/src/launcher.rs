@@ -1,8 +1,9 @@
 //! Launch the node
 use crate::{
     components::{
-        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, LaunchNode, NodeComponents, NodeComponentsBuilder, PoolBuilder
-    }, exex::{BoxedLaunchExEx, ExExContext}, hooks::NodeHooks, node::{FullNode, FullNodeTypes, FullNodeTypesAdapter}, rpc::{RethRpcServerHandles, RpcContext, RpcHooks}, BuilderContext, ComponentsState, Node, NodeBuilder, NodeHandle
+        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, LaunchNode,
+        NodeComponents, NodeComponentsBuilder, PoolBuilder,
+    }, exex::{BoxedLaunchExEx, ExExContext}, hooks::NodeHooks, node::{FullNode, FullNodeTypes, FullNodeTypesAdapter}, rpc::{RethRpcServerHandles, RpcContext, RpcHooks}, BuilderContext, ComponentsState, Node, NodeBuilder, NodeHandle, RethFullProviderType, TypesState
 };
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, Future, StreamExt};
@@ -49,31 +50,45 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 #[derive(Default)]
 pub struct DefaultLauncher;
 
-impl<Node: FullNodeComponents> LaunchNode<Node> for DefaultLauncher {
-    async fn launch<State>(
-        builder: NodeBuilder<Node::DB, State>,
+impl<Node, DB, Types> LaunchNode<Node, DB, Types> for DefaultLauncher {
+    async fn launch(
+        builder: NodeBuilder<DB, TypesState<Types, DB>>,
         executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
-    ) -> eyre::Result<NodeHandle<Node>> {
-
-    // /// Launches the node and returns a handle to it.
-    // ///
-    // /// This bootstraps the node internals, creates all the components with the provider
-    // /// [NodeComponentsBuilder] and launches the node.
-    // ///
-    // /// Returns a [NodeHandle] that can be used to interact with the node.
-    // pub async fn launch(
-    //     self,
-    //     executor: TaskExecutor,
-    //     data_dir: ChainPath<DataDirPath>,
-    // ) -> eyre::Result<
-    //     NodeHandle<
-    //         FullNodeComponentsAdapter<
-    //             FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-    //             Components::Pool,
-    //         >,
-    //     >,
-    // > {
+    ) -> eyre::Result<NodeHandle<
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                Components::Pool,
+                >
+    >
+    > 
+    
+where
+    Node: FullNodeComponents,
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    // Types: NodeTypes,
+    Components: NodeComponentsBuilder<
+        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+    >,
+    {
+        // /// Launches the node and returns a handle to it.
+        // ///
+        // /// This bootstraps the node internals, creates all the components with the provider
+        // /// [NodeComponentsBuilder] and launches the node.
+        // ///
+        // /// Returns a [NodeHandle] that can be used to interact with the node.
+        // pub async fn launch(
+        //     self,
+        //     executor: TaskExecutor,
+        //     data_dir: ChainPath<DataDirPath>,
+        // ) -> eyre::Result<
+        //     NodeHandle<
+        //         FullNodeComponentsAdapter<
+        //             FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+        //             Components::Pool,
+        //         >,
+        //     >,
+        // > {
         // get config from file
         let reth_config = builder.load_config(&data_dir)?;
 
