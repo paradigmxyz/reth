@@ -14,17 +14,14 @@ use crate::{
     DefaultLauncher, Node, NodeHandle,
 };
 use eyre::Context;
-use futures::{Future, StreamExt};
-
+use futures::Future;
 use reth_blockchain_tree::ShareableBlockchainTree;
-
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
-
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle};
 use reth_node_api::NodeTypes;
 use reth_node_core::{
@@ -36,9 +33,7 @@ use reth_node_core::{
 };
 use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, ChainSpec};
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
-
 use reth_revm::EvmProcessorFactory;
-
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::info;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
@@ -49,6 +44,7 @@ use std::{str::FromStr, sync::Arc};
 pub type RethFullProviderType<DB, Evm> =
     BlockchainProvider<DB, ShareableBlockchainTree<DB, EvmProcessorFactory<Evm>>>;
 
+/// The builtin type for a full node.
 pub type RethFullAdapter<DB, N> =
     FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>;
 

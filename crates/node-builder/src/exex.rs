@@ -83,7 +83,8 @@ trait LaunchExEx<Node: FullNodeTypes>: Send {
 type BoxExEx = BoxFuture<'static, eyre::Result<()>>;
 
 /// A version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
-pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
+pub trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
+    /// Launch the future.
     fn launch(self: Box<Self>, ctx: ExExContext<Node>)
         -> BoxFuture<'static, eyre::Result<BoxExEx>>;
 }

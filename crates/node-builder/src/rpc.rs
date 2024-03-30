@@ -35,19 +35,21 @@ pub struct RethRpcServerHandles {
 }
 
 /// Contains hooks that are called during the rpc setup.
-pub(crate) struct RpcHooks<Node: FullNodeComponents> {
-    pub(crate) on_rpc_started: Box<dyn OnRpcStarted<Node>>,
-    pub(crate) extend_rpc_modules: Box<dyn ExtendRpcModules<Node>>,
+pub struct RpcHooks<Node: FullNodeComponents> {
+    /// The event hook that can be run once the rpc server is started.
+    pub on_rpc_started: Box<dyn OnRpcStarted<Node>>,
+    /// The event hook that can be run once the rpc server is started.
+    pub extend_rpc_modules: Box<dyn ExtendRpcModules<Node>>,
 }
 
 impl<Node: FullNodeComponents> RpcHooks<Node> {
     /// Creates a new, empty [RpcHooks] instance for the given node type.
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self { on_rpc_started: Box::<()>::default(), extend_rpc_modules: Box::<()>::default() }
     }
 
     /// Sets the hook that is run once the rpc server is started.
-    pub(crate) fn set_on_rpc_started<F>(&mut self, hook: F) -> &mut Self
+    pub fn set_on_rpc_started<F>(&mut self, hook: F) -> &mut Self
     where
         F: OnRpcStarted<Node> + 'static,
     {
@@ -57,7 +59,7 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
 
     /// Sets the hook that is run once the rpc server is started.
     #[allow(unused)]
-    pub(crate) fn on_rpc_started<F>(mut self, hook: F) -> Self
+    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
         F: OnRpcStarted<Node> + 'static,
     {
@@ -66,7 +68,7 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
     }
 
     /// Sets the hook that is run to configure the rpc modules.
-    pub(crate) fn set_extend_rpc_modules<F>(&mut self, hook: F) -> &mut Self
+    pub fn set_extend_rpc_modules<F>(&mut self, hook: F) -> &mut Self
     where
         F: ExtendRpcModules<Node> + 'static,
     {
@@ -76,7 +78,7 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
 
     /// Sets the hook that is run to configure the rpc modules.
     #[allow(unused)]
-    pub(crate) fn extend_rpc_modules<F>(mut self, hook: F) -> Self
+    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
         F: ExtendRpcModules<Node> + 'static,
     {
@@ -194,10 +196,10 @@ impl<Node: FullNodeComponents> Clone for RpcRegistry<Node> {
 #[allow(missing_debug_implementations)]
 pub struct RpcContext<'a, Node: FullNodeComponents> {
     /// The node components.
-    pub(crate) node: Node,
+    pub node: Node,
 
     /// Gives access to the node configuration.
-    pub(crate) config: &'a NodeConfig,
+    pub config: &'a NodeConfig,
 
     /// A Helper type the holds instances of the configured modules.
     ///
@@ -247,7 +249,7 @@ impl<'a, Node: FullNodeComponents> RpcContext<'a, Node> {
 }
 
 /// Launch the rpc servers.
-pub(crate) async fn launch_rpc_servers<Node, Engine>(
+pub async fn launch_rpc_servers<Node, Engine>(
     node: Node,
     engine_api: Engine,
     config: &NodeConfig,
