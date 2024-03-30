@@ -92,7 +92,7 @@ pub trait EthTransactions: Send + Sync {
     /// Executes the future on a new blocking task.
     ///
     /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
-    /// or CPU bound operations in general use [Self::spawn_tracing_task].
+    /// or CPU bound operations in general use [Self::spawn_blocking].
     async fn spawn_blocking_future<F, R>(&self, c: F) -> EthResult<R>
     where
         F: Future<Output = EthResult<R>> + Send + 'static,
@@ -101,7 +101,7 @@ pub trait EthTransactions: Send + Sync {
     /// Executes a blocking on the tracing pol.
     ///
     /// Note: This is expected for futures that are predominantly CPU bound, for blocking IO futures
-    /// use [Self::spawn_blocking].
+    /// use [Self::spawn_blocking_future].
     async fn spawn_blocking<F, R>(&self, c: F) -> EthResult<R>
     where
         F: FnOnce() -> EthResult<R> + Send + 'static,
