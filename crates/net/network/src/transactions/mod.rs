@@ -1014,9 +1014,11 @@ where
                                 peer_id=format!("{peer_id:#}"),
                                 hash=%tx.hash(),
                                 client_version=%peer.client_version,
-                                "received an invalid transaction from peer"
+                                "received a known bad transaction from peer, reporting reputation change"
                             );
-                            self.metrics.bad_imports.increment(1);
+                            self.network
+                                .reputation_change(peer_id, ReputationChangeKind::BadTransactions);
+                            self.metrics.reported_bad_transactions.increment(1);
                         }
                     }
                 }
