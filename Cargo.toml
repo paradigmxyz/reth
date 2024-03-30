@@ -8,7 +8,8 @@ members = [
     "crates/consensus/beacon-core/",
     "crates/consensus/common/",
     "crates/ethereum-forks/",
-    "crates/etl",
+    "crates/etl/",
+    "crates/evm/",
     "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
@@ -209,6 +210,7 @@ reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
 reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
 reth-etl = { path = "crates/etl" }
+reth-evm = { path = "crates/evm" }
 reth-optimism-payload-builder = { path = "crates/payload/optimism" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }

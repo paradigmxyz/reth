@@ -1,5 +1,5 @@
 [package]
-name = "reth-node-api"
+name = "reth-evm"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,9 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-rpc-types.workspace = true
-reth-evm.workspace = true
+revm-primitives.workspace = true
+revm.workspace = true
 
-# misc
-serde.workspace = true
-thiserror.workspace = true
