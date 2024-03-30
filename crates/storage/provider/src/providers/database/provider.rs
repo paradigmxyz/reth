@@ -1414,6 +1414,92 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         }
         Ok(blocks)
     }
+
+    fn block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Vec<BlockWithSenders>> {
+        if range.is_empty() {
+            return Ok(Vec::new())
+        }
+
+        let len = range.end().saturating_sub(*range.start()) as usize;
+        let mut blocks = Vec::with_capacity(len);
+
+        let mut headers_cursor = self.tx.cursor_read::<tables::Headers>()?;
+        let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
+        let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
+        let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+        let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
+
+        for num in range {
+            if let Some((_, header)) = headers_cursor.seek_exact(num)? {
+                // If the body indices are not found, this means that the transactions either do
+                // not exist in the database yet, or they do exit but are
+                // not indexed. If they exist but are not indexed, we don't
+                // have enough information to return the block anyways, so
+                // we skip the block.
+                if let Some((_, block_body_indices)) = block_body_cursor.seek_exact(num)? {
+                    let tx_range = block_body_indices.tx_num_range();
+                    let (body, senders) = if tx_range.is_empty() {
+                        (Vec::new(), Vec::new())
+                    } else {
+                        let body = self
+                            .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
+                            .into_iter()
+                            .map(|tx| match transaction_kind {
+                                TransactionVariant::NoHash => TransactionSigned {
+                                    // Caller explicitly asked for no hash, so we don't calculate it
+                                    hash: B256::ZERO,
+                                    signature: tx.signature,
+                                    transaction: tx.transaction,
+                                },
+                                TransactionVariant::WithHash => tx.with_hash(),
+                            })
+                            .collect();
+                        // fetch senders from the senders table
+                        let senders = senders_cursor
+                            .walk_range(tx_range)?
+                            .map(|entry| entry.map(|(_, sender)| sender))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        (body, senders)
+                    };
+
+                    // If we are past shanghai, then all blocks should have a withdrawal list,
+                    // even if empty
+                    let withdrawals =
+                        if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
+                            Some(
+                                withdrawals_cursor
+                                    .seek_exact(num)?
+                                    .map(|(_, w)| w.withdrawals)
+                                    .unwrap_or_default(),
+                            )
+                        } else {
+                            None
+                        };
+                    let ommers = if self.chain_spec.final_paris_total_difficulty(num).is_some() {
+                        Vec::new()
+                    } else {
+                        ommers_cursor.seek_exact(num)?.map(|(_, o)| o.ommers).unwrap_or_default()
+                    };
+
+                    // Note: we're using unchecked here because we know the block contains valid
+                    // txs wrt to its height and can ignore the s value
+                    // check so pre EIP-2 txs are allowed
+                    let block_or_err = Block { header, body, ommers, withdrawals }
+                        .try_with_senders_unchecked(senders);
+                    // Note: if the block is not valid, we skip it
+                    if let Ok(block) = block_or_err {
+                        blocks.push(block);
+                    }
+                }
+            }
+        }
+        Ok(blocks)
+    }
 }
 
 impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {

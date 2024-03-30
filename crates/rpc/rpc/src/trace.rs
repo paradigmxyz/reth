@@ -10,7 +10,9 @@ use reth_consensus_common::calc::{base_block_reward, block_reward};
 use reth_primitives::{
     revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
 };
-use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{
+    BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory, TransactionVariant,
+};
 use reth_revm::{
     database::StateProviderDatabase,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
@@ -24,7 +26,7 @@ use reth_rpc_types::{
         parity::*,
         tracerequest::TraceCallRequest,
     },
-    BlockError, BlockOverrides, Index, TransactionRequest,
+    BlockOverrides, Index, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -256,8 +258,9 @@ where
             ))
         }
 
-        // fetch all blocks in that range
-        let blocks = self.provider().block_range(start..=end)?;
+        // fetch all blocks with related senders in that range
+        let blocks =
+            self.provider().block_with_senders_range(start..=end, TransactionVariant::NoHash)?;
 
         // find relevant blocks to trace
         let mut target_blocks = Vec::new();
@@ -265,7 +268,7 @@ where
             let mut transaction_indices = HashSet::new();
             let mut highest_matching_index = 0;
             for (tx_idx, tx) in block.body.iter().enumerate() {
-                let from = tx.recover_signer().ok_or(BlockError::InvalidSignature)?;
+                let from = block.senders[tx_idx];
                 let to = tx.to();
                 if matcher.matches(from, to) {
                     let idx = tx_idx as u64;
