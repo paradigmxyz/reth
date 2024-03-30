@@ -1571,7 +1571,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         } else {
             Ok(None)
         }
-            .map(|tx| tx.map(Into::into))
+        .map(|tx| tx.map(Into::into))
     }
 
     fn transaction_by_hash_with_meta(
@@ -1774,8 +1774,8 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
-        where
-            EvmConfig: ConfigureEvmEnv,
+    where
+        EvmConfig: ConfigureEvmEnv,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1789,8 +1789,8 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         header: &Header,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
-        where
-            EvmConfig: ConfigureEvmEnv,
+    where
+        EvmConfig: ConfigureEvmEnv,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
@@ -1846,8 +1846,8 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
-        where
-            EvmConfig: ConfigureEvmEnv,
+    where
+        EvmConfig: ConfigureEvmEnv,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1860,8 +1860,8 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         header: &Header,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
-        where
-            EvmConfig: ConfigureEvmEnv,
+    where
+        EvmConfig: ConfigureEvmEnv,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
