@@ -15,7 +15,7 @@ use alloy_rlp::{RlpDecodable};
 use clap::Parser;
 use reth_db::{init_db, tables};
 use reth_node_core::{init::init_genesis};
-use reth_primitives::{stage::StageId, ChainSpec, B256, SealedBlockWithSenders, SealedBlock, Header, fs, Genesis, b256, Bloom};
+use reth_primitives::{stage::StageId, ChainSpec, B256, SealedBlockWithSenders, SealedBlock, Header, fs, Genesis, b256};
 use reth_provider::{BlockWriter, ProviderFactory};
 use reth_stages::{
     prelude::*,
@@ -25,8 +25,6 @@ use std::{
     path::{PathBuf},
     sync::Arc,
 };
-use std::io::Read;
-use crossterm::terminal::size;
 use tracing::{debug, info};
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_revm::primitives::FixedBytes;
@@ -191,7 +189,7 @@ impl ImportOpCommand {
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
-        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Loading genesis from file");
+        info!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Loading genesis from file");
         let genesis_json: Genesis = serde_json::from_str::<Genesis>(
             fs::read_to_string("/Users/vacekj/Programming/reth/crates/primitives/res/genesis/goerli_op.json").unwrap().as_str()).unwrap();
         let chain = ChainSpec::from(genesis_json);
@@ -209,7 +207,6 @@ impl ImportOpCommand {
             ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-
 
         init_genesis(provider_factory.clone())?;
         
@@ -236,7 +233,7 @@ impl ImportOpCommand {
             parent_hash: b256!("31267a44f1422f4cab59b076548c075e79bd59e691a23fbce027f572a2a49dc9"),
             base_fee_per_gas: Some(1000000000),
             difficulty: U256::from(0),
-            extra_data: Bytes::from("424544524f434b"),
+            extra_data: Bytes::from("BEDROCK"),
             gas_limit: 25000000,
             gas_used: 0,
             logs_bloom: bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
@@ -264,8 +261,8 @@ impl ImportOpCommand {
             },
             senders: vec![]
         };
+        dbg!(block.hash());
         provider.insert_block(block, None)?;
-
         let tx = provider.into_tx();
 
         let stage_checkpoint = StageCheckpoint {
