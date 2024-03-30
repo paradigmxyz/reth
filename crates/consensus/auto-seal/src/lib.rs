@@ -51,10 +51,6 @@ mod task;
 
 pub use crate::client::AutoSealClient;
 pub use mode::{FixedBlockTimeMiner, MiningMode, ReadyTransactionMiner};
-use reth_interfaces::{
-    db::{DatabaseError, DatabaseError::Commit},
-    trie::{StateRootError, StorageRootError},
-};
 pub use task::MiningTask;
 
 /// A consensus implementation intended for local development and testing purposes.
