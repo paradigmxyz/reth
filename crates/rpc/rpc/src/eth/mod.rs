@@ -13,6 +13,9 @@ pub mod revm_utils;
 mod signer;
 pub(crate) mod utils;
 
+#[cfg(feature = "optimism")]
+pub mod optimism;
+
 pub use api::{
     fee_history::{fee_history_cache_new_blocks_task, FeeHistoryCache, FeeHistoryCacheConfig},
     EthApi, EthApiSpec, EthTransactions, TransactionSource, RPC_DEFAULT_GAS_CAP,

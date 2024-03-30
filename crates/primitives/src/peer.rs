@@ -1,9 +1,37 @@
 use enr::Enr;
 use reth_rpc_types::NodeRecord;
-use secp256k1::SecretKey;
+use secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
 use std::{net::IpAddr, str::FromStr};
+
 // Re-export PeerId for ease of use.
 pub use reth_rpc_types::PeerId;
+
+/// This tag should be set to indicate to libsecp256k1 that the following bytes denote an
+/// uncompressed pubkey.
+///
+/// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` = `0x04`
+///
+/// See: <https://github.com/bitcoin-core/secp256k1/blob/master/include/secp256k1.h#L211>
+const SECP256K1_TAG_PUBKEY_UNCOMPRESSED: u8 = 4;
+
+/// Converts a [secp256k1::PublicKey] to a [PeerId] by stripping the
+/// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag and storing the rest of the slice in the [PeerId].
+#[inline]
+pub fn pk2id(pk: &PublicKey) -> PeerId {
+    PeerId::from_slice(&pk.serialize_uncompressed()[1..])
+}
+
+/// Converts a [PeerId] to a [secp256k1::PublicKey] by prepending the [PeerId] bytes with the
+/// SECP256K1_TAG_PUBKEY_UNCOMPRESSED tag.
+#[inline]
+pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
+    // NOTE: B512 is used as a PeerId because 512 bits is enough to represent an uncompressed
+    // public key.
+    let mut s = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
+    s[0] = SECP256K1_TAG_PUBKEY_UNCOMPRESSED;
+    s[1..].copy_from_slice(id.as_slice());
+    PublicKey::from_slice(&s)
+}
 
 /// A peer that can come in ENR or [NodeRecord] form.
 #[derive(
@@ -23,9 +51,7 @@ impl AnyNode {
     pub fn peer_id(&self) -> PeerId {
         match self {
             AnyNode::NodeRecord(record) => record.id,
-            AnyNode::Enr(enr) => {
-                PeerId::from_slice(&enr.public_key().serialize_uncompressed()[1..])
-            }
+            AnyNode::Enr(enr) => pk2id(&enr.public_key()),
             AnyNode::PeerId(peer_id) => *peer_id,
         }
     }
@@ -39,7 +65,7 @@ impl AnyNode {
                     address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
                     tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
                     udp_port: enr.udp4().or_else(|| enr.udp6())?,
-                    id: PeerId::from_slice(&enr.public_key().serialize_uncompressed()[1..]),
+                    id: pk2id(&enr.public_key()),
                 }
                 .into_ipv4_mapped();
                 Some(node_record)
@@ -151,6 +177,7 @@ impl<T> WithPeerId<Option<T>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secp256k1::SECP256K1;
 
     #[test]
     fn test_node_record_parse() {
@@ -189,5 +216,12 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(node.to_string(), url);
+    }
+
+    #[test]
+    fn pk2id2pk() {
+        let prikey = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let pubkey = PublicKey::from_secret_key(SECP256K1, &prikey);
+        assert_eq!(pubkey, id2pk(pk2id(&pubkey)).unwrap());
     }
 }

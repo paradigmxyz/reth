@@ -74,7 +74,7 @@ pub use net::{
     goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
     GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,
 };
-pub use peer::{AnyNode, PeerId, WithPeerId};
+pub use peer::{id2pk, pk2id, AnyNode, PeerId, WithPeerId};
 pub use prune::{
     PruneCheckpoint, PruneMode, PruneModes, PruneProgress, PrunePurpose, PruneSegment,
     PruneSegmentError, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
