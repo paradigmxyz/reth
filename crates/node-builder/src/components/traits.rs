@@ -1,16 +1,23 @@
 //! Traits for the builder
 
 use crate::{
-    components::NodeComponents, node::FullNodeTypes, BuilderContext, NodeBuilder, NodeHandle, TypesState,
+    components::NodeComponents, node::FullNodeTypes, BuilderContext, ComponentsState,
+    FullNodeTypesAdapter, Node, NodeBuilder, NodeHandle, RethFullAdapter, RethFullProviderType,
+    TypesState,
 };
 use futures::Future;
-use reth_db::{database::Database, database_metrics::{DatabaseMetadata, DatabaseMetrics}};
+use reth_db::{
+    database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetrics},
+};
 use reth_network::NetworkHandle;
 use reth_node_api::NodeTypes;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
+
+use super::PoolBuilder;
 
 /// Encapsulates all types and components of the node.
 pub trait FullNodeComponents: FullNodeTypes + 'static {
@@ -149,18 +156,35 @@ where
 }
 
 /// Trait for launching the node.
-pub trait LaunchNode<Node, DB, Types>
+pub trait LaunchNode<N, DB, State>
 where
-    Node: FullNodeComponents,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    Types: NodeTypes,
+    N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
+    N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
+    N::NetworkBuilder: crate::components::NetworkBuilder<
+        RethFullAdapter<DB, N>,
+        <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+    >,
+    N::PayloadBuilder: crate::components::PayloadServiceBuilder<
+        RethFullAdapter<DB, N>,
+        <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+    >,
 {
     /// Launches the node and returns a handle to it.
     ///
     /// Returns a [NodeHandle] that can be used to interact with the node.
     fn launch(
-        builder: NodeBuilder<DB, TypesState<Types, DB>>,
+        builder: NodeBuilder<DB, State>,
         executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
-    ) -> impl Future<Output = eyre::Result<NodeHandle<Node>>>;
+    ) -> impl Future<
+        Output = eyre::Result<
+            NodeHandle<
+                FullNodeComponentsAdapter<
+                    RethFullAdapter<DB, N>,
+                    <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+                >,
+            >,
+        >,
+    >;
 }

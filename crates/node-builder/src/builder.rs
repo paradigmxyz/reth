@@ -59,7 +59,7 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 pub type RethFullProviderType<DB, Evm> =
     BlockchainProvider<DB, ShareableBlockchainTree<DB, EvmProcessorFactory<Evm>>>;
 
-type RethFullAdapter<DB, N> =
+pub type RethFullAdapter<DB, N> =
     FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -816,25 +816,27 @@ where
             >,
         >,
     > {
-        self.launch_with::<_>(DefaultLauncher::default()).await
+        // self.launch_with::<_>(DefaultLauncher::default()).await
+        todo!()
     }
 
-    // pub async fn launch_with<L>(
-    //     self,
-    //     launcher: L,
-    // ) -> eyre::Result<
-    //     NodeHandle<
-    //         FullNodeComponentsAdapter<
-    //             FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-    //             Components::Pool,
-    //         >,
-    //     >,
-    // >
-    // where
-    //     L: LaunchNode<FullNodeComponents>,
-    // {
-    //     launcher.launch(self)
-    // }
+    pub async fn launch_with<L>(
+        self,
+        // launcher: L,
+    ) -> eyre::Result<
+        NodeHandle<
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                Components::Pool,
+            >,
+        >,
+    >
+where
+        // L: LaunchNode<FullNodeComponents>,
+    {
+        // launcher.launch(self)
+        todo!()
+    }
 
     /// Check that the builder can be launched
     ///
