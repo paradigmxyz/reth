@@ -2,10 +2,8 @@
 //! [`discv5::enr::NodeId`] and [`PeerId`].
 
 use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey, NodeId};
-use reth_primitives::PeerId;
-use secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
-
-const SECP256K1_SERIALIZED_UNCOMPRESSED_FLAG: u8 = 4;
+use reth_primitives::{id2pk, pk2id, PeerId};
+use secp256k1::{PublicKey, SecretKey};
 
 /// Extracts a [`CombinedPublicKey::Secp256k1`] from a [`discv5::Enr`] and converts it to a
 /// [`PeerId`].
@@ -15,39 +13,23 @@ pub fn uncompressed_id_from_enr_pk(enr: &discv5::Enr) -> PeerId {
         matches!(pk, CombinedPublicKey::Secp256k1(_)),
         "discv5 using different key type than discv4"
     );
+    let pk = PublicKey::from_slice(&pk.encode()).unwrap();
 
-    pk_to_uncompressed_id(&pk)
-}
-
-/// Converts a [`CombinedPublicKey`] to a [`PeerId`] that can be used in
-pub fn pk_to_uncompressed_id(pk: &CombinedPublicKey) -> PeerId {
-    let pk_bytes = pk.encode();
-    let pk = secp256k1::PublicKey::from_slice(&pk_bytes).unwrap();
-
-    PeerId::from_slice(&pk.serialize_uncompressed()[1..])
+    pk2id(&pk)
 }
 
 /// Converts a [`PeerId`] to a [`discv5::enr::NodeId`].
-pub fn uncompressed_to_compressed_id(peer_id: PeerId) -> NodeId {
-    uncompressed_id_to_pk(peer_id).into()
-}
-
-/// Converts a [`PeerId`] to a [`PublicKey`].
-pub fn uncompressed_id_to_pk(peer_id: PeerId) -> PublicKey {
-    let mut buf = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
-    buf[0] = SECP256K1_SERIALIZED_UNCOMPRESSED_FLAG;
-    buf[1..].copy_from_slice(peer_id.as_ref());
-
-    PublicKey::from_slice(&buf).unwrap()
+pub fn v42v5_id(peer_id: PeerId) -> Result<NodeId, secp256k1::Error> {
+    Ok(id2pk(peer_id)?.into())
 }
 
 /// Converts a [`PeerId`] to a [`libp2p_identity::PeerId `].
-pub fn uncompressed_to_multiaddr_id(peer_id: PeerId) -> libp2p_identity::PeerId {
-    let pk = uncompressed_id_to_pk(peer_id).encode();
+pub fn v4_id_to_multiaddr_id(peer_id: PeerId) -> Result<libp2p_identity::PeerId, secp256k1::Error> {
+    let pk = id2pk(peer_id)?.encode();
     let pk: libp2p_identity::PublicKey =
         libp2p_identity::secp256k1::PublicKey::try_from_bytes(&pk).unwrap().into();
 
-    pk.to_peer_id()
+    Ok(pk.to_peer_id())
 }
 
 /// Wrapper around [`discv5::Enr`] ([`Enr<CombinedKey>`]).
@@ -86,9 +68,10 @@ mod tests {
         let discv5_peer_id = NodeId::from(discv5_pk.clone());
 
         // convert to discv4 id
-        let discv4_peer_id = pk_to_uncompressed_id(&discv5_pk);
+        let pk = secp256k1::PublicKey::from_slice(&discv5_pk.encode()).unwrap();
+        let discv4_peer_id = pk2id(&pk);
         // convert back to discv5 id
-        let discv5_peer_id_from_discv4_peer_id = uncompressed_to_compressed_id(discv4_peer_id);
+        let discv5_peer_id_from_discv4_peer_id = v42v5_id(discv4_peer_id).unwrap();
 
         assert_eq!(discv5_peer_id, discv5_peer_id_from_discv4_peer_id)
     }

@@ -11,7 +11,7 @@ use std::{
 use ::enr::Enr;
 use alloy_rlp::Decodable;
 use derive_more::{Constructor, Deref, DerefMut};
-use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
+use enr::{v42v5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
 use reth_primitives::{
@@ -91,10 +91,7 @@ impl Discv5 {
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /// Adds the node to the table, if it is not already present.
-    pub fn add_node_to_routing_table(
-        &self,
-        node_record: Enr<SecretKey>,
-    ) -> Result<(), impl std::error::Error> {
+    pub fn add_node_to_routing_table(&self, node_record: Enr<SecretKey>) -> Result<(), Error> {
         let EnrCombinedKeyWrapper(enr) = node_record.into();
         self.add_enr(enr).map_err(Error::AddNodeToDiscv5Failed)
     }
@@ -137,9 +134,16 @@ impl Discv5 {
     ///
     /// This will prevent any future inclusion in the table
     pub fn ban_peer_by_ip_and_node_id(&self, peer_id: PeerId, ip: IpAddr) {
-        let node_id = uncompressed_to_compressed_id(peer_id);
-        self.ban_node(&node_id, None);
-        self.ban_peer_by_ip(ip);
+        match v42v5_id(peer_id) {
+            Ok(node_id) => {
+                self.ban_node(&node_id, None);
+                self.ban_peer_by_ip(ip);
+            }
+            Err(err) => error!(target: "discv5",
+                %err,
+                "failed to ban peer"
+            ),
+        }
     }
 
     /// Adds the ip to the ban list.
@@ -538,8 +542,6 @@ pub struct DiscoveredPeer {
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
-
     use rand::thread_rng;
     use tracing::trace;
 

@@ -10,7 +10,7 @@ use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
 use reth_primitives::{Bytes, ForkId, NodeRecord, MAINNET};
 
-use crate::{enr::uncompressed_to_multiaddr_id, filter::MustNotIncludeChains};
+use crate::{enr::v4_id_to_multiaddr_id, filter::MustNotIncludeChains};
 
 /// L1 EL
 pub const ETH: &[u8] = b"eth";
@@ -103,7 +103,9 @@ impl ConfigBuilder {
     /// Adds boot nodes in the form a list of [`NodeRecord`]s, parsed enodes.
     pub fn add_unsigned_boot_nodes(mut self, enodes: Vec<NodeRecord>) -> Self {
         for node in enodes {
-            self.bootstrap_nodes.insert(BootNode::from_unsigned(node));
+            if let Ok(node) = BootNode::from_unsigned(node) {
+                self.bootstrap_nodes.insert(node);
+            }
         }
 
         self
@@ -111,11 +113,11 @@ impl ConfigBuilder {
 
     /// Adds a comma-separated list of enodes, serialized unsigned node records, to boot nodes.
     pub fn add_serialized_unsigned_boot_nodes(mut self, enodes: &[&str]) -> Self {
-        let bootstrap_nodes = &mut self.bootstrap_nodes;
-
         for node in enodes {
-            if let Ok(node_record) = node.parse() {
-                bootstrap_nodes.insert(BootNode::from_unsigned(node_record));
+            if let Ok(node) = node.parse() {
+                if let Ok(node) = BootNode::from_unsigned(node) {
+                    self.bootstrap_nodes.insert(node);
+                }
             }
         }
 
@@ -274,7 +276,7 @@ pub enum BootNode {
 impl BootNode {
     /// Parses a [`NodeRecord`] and serializes according to CL format. Note: [`discv5`] is
     /// originally a CL library hence needs this format to add the node.
-    pub fn from_unsigned(node_record: NodeRecord) -> Self {
+    pub fn from_unsigned(node_record: NodeRecord) -> Result<Self, secp256k1::Error> {
         let NodeRecord { address, udp_port, id, .. } = node_record;
         let mut multi_address = Multiaddr::empty();
         match address {
@@ -283,10 +285,10 @@ impl BootNode {
         }
 
         multi_address.push(Protocol::Udp(udp_port));
-        let id = uncompressed_to_multiaddr_id(id);
+        let id = v4_id_to_multiaddr_id(id)?;
         multi_address.push(Protocol::P2p(id));
 
-        Self::Enode(multi_address)
+        Ok(Self::Enode(multi_address))
     }
 }
 
