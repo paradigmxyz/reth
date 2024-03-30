@@ -47,6 +47,7 @@ use revm::{
     },
     Inspector,
 };
+use std::future::Future;
 
 #[cfg(feature = "optimism")]
 use crate::eth::api::optimism::OptimismTxMeta;
@@ -87,6 +88,24 @@ pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     fn call_gas_limit(&self) -> u64;
+
+    /// Executes the future on a new blocking task.
+    ///
+    /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
+    /// or CPU bound operations in general use [Self::spawn_blocking].
+    async fn spawn_blocking_future<F, R>(&self, c: F) -> EthResult<R>
+    where
+        F: Future<Output = EthResult<R>> + Send + 'static,
+        R: Send + 'static;
+
+    /// Executes a blocking on the tracing pol.
+    ///
+    /// Note: This is expected for futures that are predominantly CPU bound, for blocking IO futures
+    /// use [Self::spawn_blocking_future].
+    async fn spawn_blocking<F, R>(&self, c: F) -> EthResult<R>
+    where
+        F: FnOnce() -> EthResult<R> + Send + 'static,
+        R: Send + 'static;
 
     /// Returns the state at the given [BlockId]
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox>;
@@ -462,6 +481,22 @@ where
 {
     fn call_gas_limit(&self) -> u64 {
         self.inner.gas_cap
+    }
+
+    async fn spawn_blocking_future<F, R>(&self, c: F) -> EthResult<R>
+    where
+        F: Future<Output = EthResult<R>> + Send + 'static,
+        R: Send + 'static,
+    {
+        self.on_blocking_task(|_| c).await
+    }
+
+    async fn spawn_blocking<F, R>(&self, c: F) -> EthResult<R>
+    where
+        F: FnOnce() -> EthResult<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        self.spawn_tracing_task_with(move |_| c()).await
     }
 
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox> {
