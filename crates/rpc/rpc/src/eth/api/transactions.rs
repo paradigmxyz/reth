@@ -52,7 +52,7 @@ use std::future::Future;
 #[cfg(feature = "optimism")]
 use crate::eth::api::optimism::OptimismTxMeta;
 #[cfg(feature = "optimism")]
-use crate::eth::error::OptimismEthApiError;
+use crate::eth::optimism::OptimismEthApiError;
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
 #[cfg(feature = "optimism")]
@@ -1321,10 +1321,10 @@ where
                     &envelope_buf,
                     tx.is_deposit(),
                 )
-                .map_err(|_| EthApiError::Optimism(OptimismEthApiError::L1BlockFeeError))?;
+                .map_err(|_| OptimismEthApiError::L1BlockFeeError)?;
             let inner_l1_data_gas = l1_block_info
                 .l1_data_gas(&self.inner.provider.chain_spec(), block_timestamp, &envelope_buf)
-                .map_err(|_| EthApiError::Optimism(OptimismEthApiError::L1BlockGasError))?;
+                .map_err(|_| OptimismEthApiError::L1BlockGasError)?;
             (Some(inner_l1_fee), Some(inner_l1_data_gas))
         } else {
             (None, None)
@@ -1351,7 +1351,7 @@ where
                     target = "rpc::eth",
                     "Failed to serialize transaction for forwarding to sequencer"
                 );
-                EthApiError::Optimism(OptimismEthApiError::InvalidSequencerTransaction)
+                OptimismEthApiError::InvalidSequencerTransaction
             })?;
 
             self.inner
@@ -1361,7 +1361,7 @@ where
                 .body(body)
                 .send()
                 .await
-                .map_err(|err| EthApiError::Optimism(OptimismEthApiError::HttpError(err)))?;
+                .map_err(OptimismEthApiError::HttpError)?;
         }
         Ok(())
     }
