@@ -1,6 +1,12 @@
 //! Wrapper around [`discv5::Discv5`].
 
-use std::{collections::HashSet, fmt, net::IpAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    fmt,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 use ::enr::Enr;
 use alloy_rlp::Decodable;
@@ -381,7 +387,7 @@ impl Discv5 {
 
                 None
             }
-            discv5::Event::SessionEstablished(enr, _remote_socket) => {
+            discv5::Event::SessionEstablished(enr, remote_socket) => {
                 // covers `reth_discv4::DiscoveryUpdate` equivalents `DiscoveryUpdate::Added(_)` 
                 // and `DiscoveryUpdate::DiscoveredAtCapacity(_)
 
@@ -392,14 +398,18 @@ impl Discv5 {
 
                 self.metrics.discovered_peers.increment_established_sessions_raw(1);
 
-                self.on_discovered_peer(&enr)
+                self.on_discovered_peer(&enr, remote_socket)
             }
         }
     }
 
     /// Processes a discovered peer. Returns `true` if peer is added to
-    fn on_discovered_peer(&mut self, enr: &discv5::Enr) -> Option<DiscoveredPeer> {
-        let node_record = match self.try_into_reachable(enr) {
+    fn on_discovered_peer(
+        &mut self,
+        enr: &discv5::Enr,
+        socket: SocketAddr,
+    ) -> Option<DiscoveredPeer> {
+        let node_record = match self.try_into_reachable(enr, socket) {
             Ok(enr_bc) => enr_bc,
             Err(err) => {
                 trace!(target: "net::discovery::discv5",
@@ -437,15 +447,23 @@ impl Discv5 {
     }
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
-    /// w.r.t. local [`IpMode`].
-    fn try_into_reachable(&self, enr: &discv5::Enr) -> Result<NodeRecord, Error> {
+    /// w.r.t. local [`IpMode`]. Tries the socket from which the ENR was sent, if socket is missing
+    /// from ENR.
+    ///
+    ///  Note: [`discv5::Discv5`] won't initiate a session with any peer with a malformed node
+    /// record, that advertises a reserved IP address on a WAN network.
+    fn try_into_reachable(
+        &self,
+        enr: &discv5::Enr,
+        socket: SocketAddr,
+    ) -> Result<NodeRecord, Error> {
         // todo: track unreachable with metrics
         if enr.udp4_socket().is_none() && enr.udp6_socket().is_none() {
             return Err(Error::UnreachableDiscovery)
         }
-        let Some(udp_socket) = self.ip_mode().get_contactable_addr(enr) else {
-            return Err(Error::IpVersionMismatchDiscovery(self.ip_mode()))
-        };
+
+        let udp_socket = self.ip_mode().get_contactable_addr(enr).unwrap_or(socket);
+
         // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
         // too
         let Some(tcp_port) = (match self.ip_mode() {
