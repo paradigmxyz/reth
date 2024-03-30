@@ -56,20 +56,21 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 #[derive(Default)]
 pub struct DefaultLauncher;
 
-impl<N, DB, Types, Components> LaunchNode<N, DB, Types, Components> for DefaultLauncher
+impl<DB, Types, Components> LaunchNode<DB, Types, Components> for DefaultLauncher
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
-    N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
-    N::NetworkBuilder: crate::components::NetworkBuilder<
-        RethFullAdapter<DB, N>,
-        <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+    Types:
+        Node<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>>,
+    Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
+    Types::NetworkBuilder: crate::components::NetworkBuilder<
+        RethFullAdapter<DB, Types>,
+        <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
     >,
-    N::PayloadBuilder: crate::components::PayloadServiceBuilder<
-        RethFullAdapter<DB, N>,
-        <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+    Types::PayloadBuilder: crate::components::PayloadServiceBuilder<
+        RethFullAdapter<DB, Types>,
+        <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
     >,
-    Types: NodeTypes,
+    // Types: NodeTypes,
     Components: NodeComponentsBuilder<
         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
     >,
@@ -91,8 +92,8 @@ where
     ) -> eyre::Result<
         NodeHandle<
             FullNodeComponentsAdapter<
-                RethFullAdapter<DB, N>,
-                <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+                RethFullAdapter<DB, Types>,
+                <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
             >,
         >,
     > {

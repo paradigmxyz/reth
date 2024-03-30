@@ -156,20 +156,21 @@ where
 }
 
 /// Trait for launching the node.
-pub trait LaunchNode<N, DB, Types, Components>
+pub trait LaunchNode<DB, Types, Components>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
-    N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
-    N::NetworkBuilder: crate::components::NetworkBuilder<
-        RethFullAdapter<DB, N>,
-        <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+    Types:
+        Node<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>>,
+    Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
+    Types::NetworkBuilder: crate::components::NetworkBuilder<
+        RethFullAdapter<DB, Types>,
+        <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
     >,
-    N::PayloadBuilder: crate::components::PayloadServiceBuilder<
-        RethFullAdapter<DB, N>,
-        <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+    Types::PayloadBuilder: crate::components::PayloadServiceBuilder<
+        RethFullAdapter<DB, Types>,
+        <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
     >,
-    Types: NodeTypes,
+    // Types: NodeTypes,
     Components: NodeComponentsBuilder<
         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
     >,
@@ -195,10 +196,58 @@ where
         Output = eyre::Result<
             NodeHandle<
                 FullNodeComponentsAdapter<
-                    RethFullAdapter<DB, N>,
-                    <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+                    RethFullAdapter<DB, Types>,
+                    <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
                 >,
             >,
         >,
     >;
 }
+
+// /// Trait for launching the node.
+// pub trait LaunchNode<N, DB, Types, Components>
+// where
+//     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+//     N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
+//     N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
+//     N::NetworkBuilder: crate::components::NetworkBuilder<
+//         RethFullAdapter<DB, N>,
+//         <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+//     >,
+//     N::PayloadBuilder: crate::components::PayloadServiceBuilder<
+//         RethFullAdapter<DB, N>,
+//         <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+//     >,
+//     Types: NodeTypes,
+//     Components: NodeComponentsBuilder<
+//         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+//     >,
+// {
+//     /// Launches the node and returns a handle to it.
+//     ///
+//     /// Returns a [NodeHandle] that can be used to interact with the node.
+//     fn launch(
+//         builder: NodeBuilder<
+//             DB,
+//             ComponentsState<
+//                 Types,
+//                 Components,
+//                 FullNodeComponentsAdapter<
+//                     FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+//                     Components::Pool,
+//                 >,
+//             >,
+//         >,
+//         executor: TaskExecutor,
+//         data_dir: ChainPath<DataDirPath>,
+//     ) -> impl Future<
+//         Output = eyre::Result<
+//             NodeHandle<
+//                 FullNodeComponentsAdapter<
+//                     RethFullAdapter<DB, N>,
+//                     <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+//                 >,
+//             >,
+//         >,
+//     >;
+// }
