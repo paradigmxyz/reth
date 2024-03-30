@@ -1,9 +1,9 @@
 //! Traits for the builder
 
+use super::PoolBuilder;
 use crate::{
     components::NodeComponents, node::FullNodeTypes, BuilderContext, ComponentsState,
     FullNodeTypesAdapter, Node, NodeBuilder, NodeHandle, RethFullAdapter, RethFullProviderType,
-    TypesState,
 };
 use futures::Future;
 use reth_db::{
@@ -16,8 +16,6 @@ use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
-
-use super::PoolBuilder;
 
 /// Encapsulates all types and components of the node.
 pub trait FullNodeComponents: FullNodeTypes + 'static {
@@ -194,60 +192,7 @@ where
         data_dir: ChainPath<DataDirPath>,
     ) -> impl Future<
         Output = eyre::Result<
-            NodeHandle<
-                FullNodeComponentsAdapter<
-                    RethFullAdapter<DB, Types>,
-                    <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
-                >,
-            >,
+            NodeHandle<FullNodeComponentsAdapter<RethFullAdapter<DB, Types>, Components::Pool>>,
         >,
     >;
 }
-
-// /// Trait for launching the node.
-// pub trait LaunchNode<N, DB, Types, Components>
-// where
-//     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-//     N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
-//     N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
-//     N::NetworkBuilder: crate::components::NetworkBuilder<
-//         RethFullAdapter<DB, N>,
-//         <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-//     >,
-//     N::PayloadBuilder: crate::components::PayloadServiceBuilder<
-//         RethFullAdapter<DB, N>,
-//         <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-//     >,
-//     Types: NodeTypes,
-//     Components: NodeComponentsBuilder<
-//         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-//     >,
-// {
-//     /// Launches the node and returns a handle to it.
-//     ///
-//     /// Returns a [NodeHandle] that can be used to interact with the node.
-//     fn launch(
-//         builder: NodeBuilder<
-//             DB,
-//             ComponentsState<
-//                 Types,
-//                 Components,
-//                 FullNodeComponentsAdapter<
-//                     FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-//                     Components::Pool,
-//                 >,
-//             >,
-//         >,
-//         executor: TaskExecutor,
-//         data_dir: ChainPath<DataDirPath>,
-//     ) -> impl Future<
-//         Output = eyre::Result<
-//             NodeHandle<
-//                 FullNodeComponentsAdapter<
-//                     RethFullAdapter<DB, N>,
-//                     <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-//                 >,
-//             >,
-//         >,
-//     >;
-// }

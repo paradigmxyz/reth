@@ -90,12 +90,7 @@ where
         executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<
-        NodeHandle<
-            FullNodeComponentsAdapter<
-                RethFullAdapter<DB, Types>,
-                <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
-            >,
-        >,
+        NodeHandle<FullNodeComponentsAdapter<RethFullAdapter<DB, Types>, Components::Pool>>,
     > {
         let reth_config = builder.load_config(&data_dir)?;
 
@@ -181,14 +176,14 @@ genesis=?config.chain.genesis_hash(), "Initializing genesis");
 
         // TODO(alexey): launch ExExs and consume their events
 
-        // let BuilderContext {
-        //     provider: blockchain_db,
-        //     executor,
-        //     data_dir,
-        //     mut config,
-        //     mut reth_config,
-        //     ..
-        // } = ctx;
+        let BuilderContext {
+            provider: blockchain_db,
+            executor,
+            data_dir,
+            mut config,
+            mut reth_config,
+            ..
+        } = ctx;
 
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 

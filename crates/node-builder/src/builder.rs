@@ -1140,17 +1140,17 @@ where
 /// Captures the necessary context for building the components of the node.
 pub struct BuilderContext<Node: FullNodeTypes> {
     /// The current head of the blockchain at launch.
-    head: Head,
+    pub(crate) head: Head,
     /// The configured provider to interact with the blockchain.
-    provider: Node::Provider,
+    pub(crate) provider: Node::Provider,
     /// The executor of the node.
-    executor: TaskExecutor,
+    pub(crate) executor: TaskExecutor,
     /// The data dir of the node.
-    data_dir: ChainPath<DataDirPath>,
+    pub(crate) data_dir: ChainPath<DataDirPath>,
     /// The config of the node
-    config: NodeConfig,
+    pub(crate) config: NodeConfig,
     /// loaded config
-    reth_config: reth_config::Config,
+    pub(crate) reth_config: reth_config::Config,
 }
 
 impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
