@@ -1107,7 +1107,6 @@ impl BlockReader for StaticFileProvider {
     fn block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-        _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
         Err(ProviderError::UnsupportedProvider)
     }

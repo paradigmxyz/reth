@@ -10,9 +10,7 @@ use reth_consensus_common::calc::{base_block_reward, block_reward};
 use reth_primitives::{
     revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
 };
-use reth_provider::{
-    BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory, TransactionVariant,
-};
+use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
@@ -259,8 +257,7 @@ where
         }
 
         // fetch all blocks with related senders in that range
-        let blocks =
-            self.provider().block_with_senders_range(start..=end, TransactionVariant::NoHash)?;
+        let blocks = self.provider().block_with_senders_range(start..=end)?;
 
         // find relevant blocks to trace
         let mut target_blocks = Vec::new();

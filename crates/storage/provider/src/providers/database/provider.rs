@@ -1418,7 +1418,6 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-        transaction_kind: TransactionVariant,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
         if range.is_empty() {
             return Ok(Vec::new())
@@ -1449,15 +1448,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                         let body = self
                             .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
                             .into_iter()
-                            .map(|tx| match transaction_kind {
-                                TransactionVariant::NoHash => TransactionSigned {
-                                    // Caller explicitly asked for no hash, so we don't calculate it
-                                    hash: B256::ZERO,
-                                    signature: tx.signature,
-                                    transaction: tx.transaction,
-                                },
-                                TransactionVariant::WithHash => tx.with_hash(),
-                            })
+                            .map(Into::into)
                             .collect();
                         // fetch senders from the senders table
                         let senders = senders_cursor

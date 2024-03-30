@@ -141,7 +141,6 @@ pub trait BlockReader:
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-        transaction_kind: TransactionVariant,
     ) -> ProviderResult<Vec<BlockWithSenders>>;
 }
 

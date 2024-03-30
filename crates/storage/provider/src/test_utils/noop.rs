@@ -120,7 +120,6 @@ impl BlockReader for NoopProvider {
     fn block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-        _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
         Ok(vec![])
     }

@@ -315,9 +315,8 @@ where
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-        transaction_kind: TransactionVariant,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
-        self.database.block_with_senders_range(range, transaction_kind)
+        self.database.block_with_senders_range(range)
     }
 }
 
