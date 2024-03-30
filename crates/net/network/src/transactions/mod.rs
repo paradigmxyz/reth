@@ -1184,6 +1184,7 @@ where
                 self.report_peer_bad_transactions(peer_id);
             }
         }
+        self.metrics.bad_imports.increment(1);
         self.bad_imports.insert(err.hash);
     }
 
