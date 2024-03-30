@@ -42,7 +42,7 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             }
         }
         .into_inner();
-        let tx_range = start..=(end.min(start + input.delete_limit as u64 - 1));
+        let tx_range = start..=end.min(start + input.delete_limit as u64 - 1);
         let tx_range_end = *tx_range.end();
 
         // Retrieve transactions in the range and calculate their hashes in parallel

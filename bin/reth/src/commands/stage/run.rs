@@ -247,10 +247,10 @@ impl Command {
                     (Box::new(TransactionLookupStage::new(batch_size, etl_config, None)), None)
                 }
                 StageEnum::AccountHashing => {
-                    (Box::new(AccountHashingStage::new(1, batch_size)), None)
+                    (Box::new(AccountHashingStage::new(1, batch_size, etl_config)), None)
                 }
                 StageEnum::StorageHashing => {
-                    (Box::new(StorageHashingStage::new(1, batch_size)), None)
+                    (Box::new(StorageHashingStage::new(1, batch_size, etl_config)), None)
                 }
                 StageEnum::Merkle => (
                     Box::new(MerkleStage::default_execution()),
@@ -261,7 +261,7 @@ impl Command {
                 _ => return Ok(()),
             };
         if let Some(unwind_stage) = &unwind_stage {
-            assert!(exec_stage.type_id() == unwind_stage.type_id());
+            assert_eq!(exec_stage.type_id(), unwind_stage.type_id());
         }
 
         let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();

@@ -859,10 +859,12 @@ impl NodeConfig {
                 .set(AccountHashingStage::new(
                     stage_config.account_hashing.clean_threshold,
                     stage_config.account_hashing.commit_threshold,
+                    stage_config.etl.clone(),
                 ))
                 .set(StorageHashingStage::new(
                     stage_config.storage_hashing.clean_threshold,
                     stage_config.storage_hashing.commit_threshold,
+                    stage_config.etl.clone(),
                 ))
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
@@ -873,10 +875,12 @@ impl NodeConfig {
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
                     prune_modes.account_history,
+                    stage_config.etl.clone(),
                 ))
                 .set(IndexStorageHistoryStage::new(
                     stage_config.index_storage_history.commit_threshold,
                     prune_modes.storage_history,
+                    stage_config.etl.clone(),
                 )),
             )
             .build(provider_factory, static_file_producer);

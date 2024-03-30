@@ -158,8 +158,11 @@ pub struct RootMismatch {
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ConsistentViewError {
     /// Error thrown on attempt to initialize provider while node is still syncing.
-    #[error("node is syncing. best block: {0}")]
-    Syncing(BlockNumber),
+    #[error("node is syncing. best block: {best_block:?}")]
+    Syncing {
+        /// Best block diff.
+        best_block: GotExpected<BlockNumber>,
+    },
     /// Error thrown on inconsistent database view.
     #[error("inconsistent database state: {tip:?}")]
     Inconsistent {

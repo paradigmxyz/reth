@@ -1,4 +1,4 @@
-use crate::U8;
+use crate::{U64, U8};
 use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
@@ -103,6 +103,23 @@ impl TryFrom<u8> for TxType {
     }
 }
 
+impl TryFrom<u64> for TxType {
+    type Error = &'static str;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        let value: u8 = value.try_into().map_err(|_| "invalid tx type")?;
+        Self::try_from(value)
+    }
+}
+
+impl TryFrom<U64> for TxType {
+    type Error = &'static str;
+
+    fn try_from(value: U64) -> Result<Self, Self::Error> {
+        value.to::<u64>().try_into()
+    }
+}
+
 impl Compact for TxType {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
@@ -155,6 +172,28 @@ impl Compact for TxType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_u64_to_tx_type() {
+        // Test for Legacy transaction
+        assert_eq!(TxType::try_from(U64::from(0)).unwrap(), TxType::Legacy);
+
+        // Test for EIP2930 transaction
+        assert_eq!(TxType::try_from(U64::from(1)).unwrap(), TxType::Eip2930);
+
+        // Test for EIP1559 transaction
+        assert_eq!(TxType::try_from(U64::from(2)).unwrap(), TxType::Eip1559);
+
+        // Test for EIP4844 transaction
+        assert_eq!(TxType::try_from(U64::from(3)).unwrap(), TxType::Eip4844);
+
+        // Test for Deposit transaction
+        #[cfg(feature = "optimism")]
+        assert_eq!(TxType::try_from(U64::from(126)).unwrap(), TxType::Deposit);
+
+        // For transactions with unsupported values
+        assert!(TxType::try_from(U64::from(4)).is_err());
+    }
 
     #[test]
     fn test_txtype_to_compat() {

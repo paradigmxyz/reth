@@ -66,12 +66,12 @@ impl Stream for ConsensusLayerHealthEvents {
             if let Some(transition_config) =
                 this.canon_chain.last_exchanged_transition_configuration_timestamp()
             {
-                if transition_config.elapsed() <= NO_TRANSITION_CONFIG_EXCHANGED_PERIOD {
+                return if transition_config.elapsed() <= NO_TRANSITION_CONFIG_EXCHANGED_PERIOD {
                     // We never had an FCU, but had a transition config exchange, and it's recent.
-                    return Poll::Ready(Some(ConsensusLayerHealthEvent::NeverReceivedUpdates))
+                    Poll::Ready(Some(ConsensusLayerHealthEvent::NeverReceivedUpdates))
                 } else {
                     // We never had an FCU, but had a transition config exchange, but it's too old.
-                    return Poll::Ready(Some(ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(
+                    Poll::Ready(Some(ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(
                         transition_config.elapsed(),
                     )))
                 }

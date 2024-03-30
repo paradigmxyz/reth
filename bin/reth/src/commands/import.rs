@@ -141,7 +141,7 @@ impl ImportCommand {
         tokio::select! {
             res = pipeline.run() => res?,
             _ = tokio::signal::ctrl_c() => {},
-        };
+        }
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
