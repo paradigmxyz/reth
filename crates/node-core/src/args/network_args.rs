@@ -211,6 +211,10 @@ pub struct DiscoveryArgs {
     #[arg(long, conflicts_with = "disable_discovery")]
     pub disable_discv4_discovery: bool,
 
+    /// Enable Discv5 discovery.
+    #[arg(long, conflicts_with = "disable_discovery")]
+    pub enable_discv5_discovery: bool,
+
     /// The UDP address to use for P2P discovery/networking
     #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
     pub addr: IpAddr,
@@ -233,6 +237,10 @@ impl DiscoveryArgs {
         if self.disable_discovery || self.disable_discv4_discovery {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
+
+        if !self.disable_discovery && (self.enable_discv5_discovery || cfg!(feature = "optimism")) {
+            network_config_builder = network_config_builder.enable_discv5_discovery();
+        }
         network_config_builder
     }
 
@@ -249,7 +257,8 @@ impl Default for DiscoveryArgs {
         Self {
             disable_discovery: false,
             disable_dns_discovery: false,
-            disable_discv4_discovery: false,
+            disable_discv4_discovery: cfg!(feature = "optimism"),
+            enable_discv5_discovery: cfg!(feature = "optimism"),
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
         }
