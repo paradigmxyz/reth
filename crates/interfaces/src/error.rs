@@ -70,7 +70,7 @@ mod size_asserts {
         };
     }
 
-    static_assert_size!(RethError, 56);
+    static_assert_size!(RethError, 64);
     static_assert_size!(BlockExecutionError, 56);
     static_assert_size!(ConsensusError, 48);
     static_assert_size!(DatabaseError, 40);
