@@ -4,7 +4,7 @@
 
 use alloy_chains::Chain;
 use reth::{
-    builder::{node::NodeTypes, NodeBuilder},
+    builder::{components::ComponentsBuilder, node::NodeTypes, FullNodeTypes, Node, NodeBuilder},
     primitives::{
         address,
         revm_primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
@@ -19,7 +19,7 @@ use reth::{
 };
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthereumNode};
+use reth_node_ethereum::{node::{EthereumNetworkBuilder, EthereumPayloadBuilder, EthereumPoolBuilder}, EthEngineTypes, EthEvmConfig, EthereumNode};
 use reth_primitives::{ChainSpec, Genesis, Header, Transaction};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
@@ -111,6 +111,25 @@ impl NodeTypes for MyCustomNode {
 
     fn evm_config(&self) -> Self::Evm {
         Self::Evm::default()
+    }
+}
+
+impl<N> Node<N> for MyCustomNode
+where
+    N: FullNodeTypes<Engine = EthEngineTypes>,
+{
+    type PoolBuilder = EthereumPoolBuilder;
+    type NetworkBuilder = EthereumNetworkBuilder;
+    type PayloadBuilder = EthereumPayloadBuilder;
+
+    fn components(
+        self,
+    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder> {
+        ComponentsBuilder::default()
+            .node_types::<N>()
+            .pool(EthereumPoolBuilder::default())
+            .payload(EthereumPayloadBuilder::default())
+            .network(EthereumNetworkBuilder::default())
     }
 }
 
