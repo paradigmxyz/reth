@@ -141,7 +141,6 @@ pub enum OptimismBlockExecutionError {
     /// Thrown when a blob transaction is included in a sequencer's block.
     #[error("blob transaction included in sequencer block")]
     BlobTransactionRejected,
-
     /// Thrown when a database account could not be loaded.
     #[error("failed to load account {0}")]
     AccountLoadFailed(reth_primitives::Address),
