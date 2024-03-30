@@ -19,7 +19,10 @@ use reth::{
 };
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{node::{EthereumNetworkBuilder, EthereumPayloadBuilder, EthereumPoolBuilder}, EthEngineTypes, EthEvmConfig, EthereumNode};
+use reth_node_ethereum::{
+    node::{EthereumNetworkBuilder, EthereumPayloadBuilder, EthereumPoolBuilder},
+    EthEngineTypes, EthEvmConfig, EthereumNode,
+};
 use reth_primitives::{ChainSpec, Genesis, Header, Transaction};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;

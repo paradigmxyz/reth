@@ -2,8 +2,9 @@ use crate::{components::FullNodeComponents, node::FullNode};
 use std::fmt;
 
 /// Container for all the configurable hook functions during node launch.
-/// 
-/// Hooks are useful when called during the [LaunchNode](crate::components::LaunchNode) `launch` method.
+///
+/// Hooks are useful when called during the [LaunchNode](crate::components::LaunchNode) `launch`
+/// method.
 ///
 /// See [DefaultLauncher](crate::DefaultLauncher) for an example.
 pub struct NodeHooks<Node: FullNodeComponents> {
