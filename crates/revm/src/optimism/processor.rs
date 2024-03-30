@@ -3,6 +3,7 @@ use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
 
+use reth_interfaces::executor::OptimismBlockExecutionError::AccountLoadFailed;
 use reth_node_api::ConfigureEvm;
 use reth_primitives::{
     proofs::calculate_receipt_root_optimism, revm_primitives::ResultAndState, BlockWithSenders,
@@ -12,7 +13,6 @@ use reth_provider::{BlockExecutor, BundleStateWithReceipts};
 use revm::DatabaseCommit;
 use std::time::Instant;
 use tracing::{debug, trace};
-use reth_interfaces::executor::OptimismBlockExecutionError::AccountLoadFailed;
 
 /// Verify the calculated receipts root against the expected receipts root.
 pub fn verify_receipt_optimism<'a>(
@@ -147,9 +147,9 @@ where
                         .map(|acc| acc.account_info().unwrap_or_default())
                 })
                 .transpose()
-                .map_err(|_| BlockExecutionError::OptimismBlockExecution(
-                    AccountLoadFailed(*sender)
-                ))?;
+                .map_err(|_| {
+                    BlockExecutionError::OptimismBlockExecution(AccountLoadFailed(*sender))
+                })?;
 
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, *sender)?;
