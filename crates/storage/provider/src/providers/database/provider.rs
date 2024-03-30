@@ -1235,6 +1235,66 @@ impl<TX: DbTx> BlockNumReader for DatabaseProvider<TX> {
     }
 }
 
+impl<Tx: DbTx> DatabaseProvider<Tx> {
+    fn process_block_range<F, R>(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+        mut process_tx: F,
+    ) -> ProviderResult<Vec<R>>
+    where
+        F: FnMut(Range<TxNumber>, Header, Vec<Header>, Option<Withdrawals>) -> ProviderResult<R>,
+    {
+        if range.is_empty() {
+            return Ok(Vec::new())
+        }
+
+        let len = range.end().saturating_sub(*range.start()) as usize;
+        let mut blocks = Vec::with_capacity(len);
+
+        let mut headers_cursor = self.tx.cursor_read::<tables::Headers>()?;
+        let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
+        let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
+        let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
+
+        for num in range {
+            if let Some((_, header)) = headers_cursor.seek_exact(num)? {
+                // If the body indices are not found, this means that the transactions either do
+                // not exist in the database yet, or they do exit but are
+                // not indexed. If they exist but are not indexed, we don't
+                // have enough information to return the block anyways, so
+                // we skip the block.
+                if let Some((_, block_body_indices)) = block_body_cursor.seek_exact(num)? {
+                    let tx_range = block_body_indices.tx_num_range();
+
+                    // If we are past shanghai, then all blocks should have a withdrawal list,
+                    // even if empty
+                    let withdrawals =
+                        if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
+                            Some(
+                                withdrawals_cursor
+                                    .seek_exact(num)?
+                                    .map(|(_, w)| w.withdrawals)
+                                    .unwrap_or_default(),
+                            )
+                        } else {
+                            None
+                        };
+                    let ommers = if self.chain_spec.final_paris_total_difficulty(num).is_some() {
+                        Vec::new()
+                    } else {
+                        ommers_cursor.seek_exact(num)?.map(|(_, o)| o.ommers).unwrap_or_default()
+                    };
+
+                    if let Ok(b) = process_tx(tx_range, header, ommers, withdrawals) {
+                        blocks.push(b);
+                    }
+                }
+            }
+        }
+        Ok(blocks)
+    }
+}
+
 impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         if source.is_database() {
@@ -1358,138 +1418,51 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        if range.is_empty() {
-            return Ok(Vec::new())
-        }
-
-        let len = range.end().saturating_sub(*range.start()) as usize;
-        let mut blocks = Vec::with_capacity(len);
-
-        let mut headers_cursor = self.tx.cursor_read::<tables::Headers>()?;
-        let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
-        let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
-        let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
-
-        for num in range {
-            if let Some((_, header)) = headers_cursor.seek_exact(num)? {
-                // If the body indices are not found, this means that the transactions either do
-                // not exist in the database yet, or they do exit but are
-                // not indexed. If they exist but are not indexed, we don't
-                // have enough information to return the block anyways, so
-                // we skip the block.
-                if let Some((_, block_body_indices)) = block_body_cursor.seek_exact(num)? {
-                    let tx_range = block_body_indices.tx_num_range();
-                    let body = if tx_range.is_empty() {
-                        Vec::new()
-                    } else {
-                        self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
-                            .into_iter()
-                            .map(Into::into)
-                            .collect()
-                    };
-
-                    // If we are past shanghai, then all blocks should have a withdrawal list,
-                    // even if empty
-                    let withdrawals =
-                        if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
-                            Some(
-                                withdrawals_cursor
-                                    .seek_exact(num)?
-                                    .map(|(_, w)| w.withdrawals)
-                                    .unwrap_or_default(),
-                            )
-                        } else {
-                            None
-                        };
-                    let ommers = if self.chain_spec.final_paris_total_difficulty(num).is_some() {
-                        Vec::new()
-                    } else {
-                        ommers_cursor.seek_exact(num)?.map(|(_, o)| o.ommers).unwrap_or_default()
-                    };
-
-                    blocks.push(Block { header, body, ommers, withdrawals });
-                }
-            }
-        }
-        Ok(blocks)
+        self.process_block_range(range, |tx_range, header, ommers, withdrawals| {
+            let body = if tx_range.is_empty() {
+                Vec::new()
+            } else {
+                self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect()
+            };
+            Ok(Block { header, body, ommers, withdrawals })
+        })
     }
 
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
-        if range.is_empty() {
-            return Ok(Vec::new())
-        }
-
-        let len = range.end().saturating_sub(*range.start()) as usize;
-        let mut blocks = Vec::with_capacity(len);
-
-        let mut headers_cursor = self.tx.cursor_read::<tables::Headers>()?;
-        let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
-        let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
-        let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
         let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
 
-        for num in range {
-            if let Some((_, header)) = headers_cursor.seek_exact(num)? {
-                // If the body indices are not found, this means that the transactions either do
-                // not exist in the database yet, or they do exit but are
-                // not indexed. If they exist but are not indexed, we don't
-                // have enough information to return the block anyways, so
-                // we skip the block.
-                if let Some((_, block_body_indices)) = block_body_cursor.seek_exact(num)? {
-                    let tx_range = block_body_indices.tx_num_range();
-                    let (body, senders) = if tx_range.is_empty() {
-                        (Vec::new(), Vec::new())
-                    } else {
-                        let body = self
-                            .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
-                            .into_iter()
-                            .map(Into::into)
-                            .collect();
-                        // fetch senders from the senders table
-                        let senders = senders_cursor
-                            .walk_range(tx_range)?
-                            .map(|entry| entry.map(|(_, sender)| sender))
-                            .collect::<Result<Vec<_>, _>>()?;
-                        (body, senders)
-                    };
+        self.process_block_range(range, |tx_range, header, ommers, withdrawals| {
+            let (body, senders) = if tx_range.is_empty() {
+                (Vec::new(), Vec::new())
+            } else {
+                let body = self
+                    .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect();
+                // fetch senders from the senders table
+                let senders = senders_cursor
+                    .walk_range(tx_range)?
+                    .map(|entry| entry.map(|(_, sender)| sender))
+                    .collect::<Result<Vec<_>, _>>()?;
+                (body, senders)
+            };
 
-                    // If we are past shanghai, then all blocks should have a withdrawal list,
-                    // even if empty
-                    let withdrawals =
-                        if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
-                            Some(
-                                withdrawals_cursor
-                                    .seek_exact(num)?
-                                    .map(|(_, w)| w.withdrawals)
-                                    .unwrap_or_default(),
-                            )
-                        } else {
-                            None
-                        };
-                    let ommers = if self.chain_spec.final_paris_total_difficulty(num).is_some() {
-                        Vec::new()
-                    } else {
-                        ommers_cursor.seek_exact(num)?.map(|(_, o)| o.ommers).unwrap_or_default()
-                    };
-
-                    // Note: we're using unchecked here because we know the block contains valid
-                    // txs wrt to its height and can ignore the s value
-                    // check so pre EIP-2 txs are allowed
-                    let block_or_err = Block { header, body, ommers, withdrawals }
-                        .try_with_senders_unchecked(senders);
-                    // Note: if the block is not valid, we skip it
-                    if let Ok(block) = block_or_err {
-                        blocks.push(block);
-                    }
-                }
+            let block_or_err =
+                Block { header, body, ommers, withdrawals }.try_with_senders_unchecked(senders);
+            match block_or_err {
+                Ok(b) => Ok(b),
+                Err(_) => Err(ProviderError::SenderRecoveryError),
             }
-        }
-        Ok(blocks)
+        })
     }
 }
 
@@ -1598,7 +1571,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
         } else {
             Ok(None)
         }
-        .map(|tx| tx.map(Into::into))
+            .map(|tx| tx.map(Into::into))
     }
 
     fn transaction_by_hash_with_meta(
@@ -1801,8 +1774,8 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv,
+        where
+            EvmConfig: ConfigureEvmEnv,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1816,8 +1789,8 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         header: &Header,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv,
+        where
+            EvmConfig: ConfigureEvmEnv,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
@@ -1873,8 +1846,8 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         at: BlockHashOrNumber,
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv,
+        where
+            EvmConfig: ConfigureEvmEnv,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1887,8 +1860,8 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         header: &Header,
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv,
+        where
+            EvmConfig: ConfigureEvmEnv,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
