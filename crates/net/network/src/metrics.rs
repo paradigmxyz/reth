@@ -200,7 +200,12 @@ pub struct TransactionFetcherMetrics {
     pub(crate) egress_peer_channel_full: Counter,
     /// Total number of hashes pending fetch.
     pub(crate) hashes_pending_fetch: Gauge,
-
+    /// Total number of fetched transactions.
+    pub(crate) fetched_transactions: Counter,
+    /// Total number of transactions that were received in
+    /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) responses, that weren't
+    /// requested.
+    pub(crate) unsolicited_transactions: Counter,
     /* ================ SEARCH DURATION ================ */
     /// Time spent searching for an idle peer in call to
     /// [`TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash`](crate::transactions::TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash).
