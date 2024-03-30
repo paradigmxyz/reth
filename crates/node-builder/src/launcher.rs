@@ -1,18 +1,17 @@
-//! Launch the node
+//! Default launch implementation for a standard Ethereum node.
+
+#![allow(clippy::type_complexity, missing_debug_implementations)]
 use crate::{
     components::{
-        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, LaunchNode,
-        NodeComponents, NodeComponentsBuilder, PoolBuilder,
+        FullNodeComponentsAdapter, LaunchNode, NodeComponents, NodeComponentsBuilder, PoolBuilder,
     },
-    exex::{BoxedLaunchExEx, ExExContext},
     hooks::NodeHooks,
-    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter},
-    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
+    node::{FullNode, FullNodeTypesAdapter},
     BuilderContext, ComponentsState, Node, NodeBuilder, NodeHandle, RethFullAdapter,
-    RethFullProviderType, TypesState,
+    RethFullProviderType,
 };
 use eyre::Context;
-use futures::{future::Either, stream, stream_select, Future, StreamExt};
+use futures::{future::Either, stream, stream_select, StreamExt};
 use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
@@ -23,33 +22,28 @@ use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
-    test_utils::{create_test_rw_db, TempDatabase},
-    DatabaseEnv,
 };
 use reth_interfaces::p2p::either::EitherDownloader;
-use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
+use reth_network::NetworkEvents;
 use reth_node_api::NodeTypes;
 use reth_node_core::{
-    cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
-    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+    cli::config::RethRpcConfig,
+    dirs::{ChainPath, DataDirPath},
     engine_api_store::EngineApiStore,
     events::cl::ConsensusLayerHealthEvents,
     exit::NodeExitFuture,
     init::init_genesis,
-    node_config::NodeConfig,
-    primitives::{kzg::KzgSettings, Head},
-    utils::write_peers_to_file,
 };
-use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, format_ether, ChainSpec};
-use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
+use reth_primitives::format_ether;
+use reth_provider::{providers::BlockchainProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
-use reth_revm::EvmProcessorFactory;
+
 use reth_rpc_engine_api::EngineApi;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info};
-use reth_transaction_pool::{PoolConfig, TransactionPool};
-use std::{cmp::max, str::FromStr, sync::Arc, thread::available_parallelism};
+use reth_transaction_pool::TransactionPool;
+use std::{cmp::max, sync::Arc, thread::available_parallelism};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
 /// Type to launch a standard Ethereum node.
@@ -70,12 +64,12 @@ where
         RethFullAdapter<DB, Types>,
         <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
     >,
-    // Types: NodeTypes,
     Components: NodeComponentsBuilder<
         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
     >,
 {
     async fn launch(
+        self,
         builder: NodeBuilder<
             DB,
             ComponentsState<

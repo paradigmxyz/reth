@@ -168,7 +168,6 @@ where
         RethFullAdapter<DB, Types>,
         <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
     >,
-    // Types: NodeTypes,
     Components: NodeComponentsBuilder<
         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
     >,
@@ -177,6 +176,7 @@ where
     ///
     /// Returns a [NodeHandle] that can be used to interact with the node.
     fn launch(
+        self,
         builder: NodeBuilder<
             DB,
             ComponentsState<
