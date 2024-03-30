@@ -347,6 +347,20 @@ where
         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
     >,
 {
+    /// Return components state
+    pub fn component_state(
+        self,
+    ) -> ComponentsState<
+        Types,
+        Components,
+        FullNodeComponentsAdapter<
+            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+            Components::Pool,
+        >,
+    > {
+        // todo!()
+        self.state
+    }
     /// Apply a function to the components builder.
     pub fn map_components(self, f: impl FnOnce(Components) -> Components) -> Self {
         Self {

@@ -156,7 +156,7 @@ where
 }
 
 /// Trait for launching the node.
-pub trait LaunchNode<N, DB, State>
+pub trait LaunchNode<N, DB, Types, Components>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
@@ -169,12 +169,26 @@ where
         RethFullAdapter<DB, N>,
         <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
     >,
+    Types: NodeTypes,
+    Components: NodeComponentsBuilder<
+        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+    >,
 {
     /// Launches the node and returns a handle to it.
     ///
     /// Returns a [NodeHandle] that can be used to interact with the node.
     fn launch(
-        builder: NodeBuilder<DB, State>,
+        builder: NodeBuilder<
+            DB,
+            ComponentsState<
+                Types,
+                Components,
+                FullNodeComponentsAdapter<
+                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                    Components::Pool,
+                >,
+            >,
+        >,
         executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
     ) -> impl Future<
