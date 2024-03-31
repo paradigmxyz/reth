@@ -2,8 +2,8 @@
 
 use super::PoolBuilder;
 use crate::{
-    components::NodeComponents, node::FullNodeTypes, BuilderContext, FullNodeTypesAdapter, Node,
-    NodeHandle, RethFullAdapter, RethFullNodeBuilder, RethFullProviderType,
+    components::NodeComponents, node::FullNodeTypes, BuilderContext, Node, NodeHandle,
+    RethFullAdapter, RethFullNodeBuilder,
 };
 use futures::Future;
 use reth_db::{
@@ -167,9 +167,7 @@ where
         RethFullAdapter<DB, Types>,
         <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
     >,
-    Components: NodeComponentsBuilder<
-        RethFullAdapter<DB, Types>
-    >,
+    Components: NodeComponentsBuilder<RethFullAdapter<DB, Types>>,
 {
     /// Launches the node and returns a handle to it.
     ///

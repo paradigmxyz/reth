@@ -56,9 +56,7 @@ pub type RethFullNodeBuilder<DB, Types, Components> = NodeBuilder<
         Components,
         FullNodeComponentsAdapter<
             RethFullAdapter<DB, Types>,
-            <Components as NodeComponentsBuilder<
-                RethFullAdapter<DB, Types>
-            >>::Pool,
+            <Components as NodeComponentsBuilder<RethFullAdapter<DB, Types>>>::Pool,
         >,
     >,
 >;
@@ -319,8 +317,7 @@ where
     }
 }
 
-impl<DB, Types, Components>
-    RethFullNodeBuilder<DB, Types, Components>
+impl<DB, Types, Components> RethFullNodeBuilder<DB, Types, Components>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     Types: NodeTypes,

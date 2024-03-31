@@ -6,9 +6,9 @@ use crate::{
         FullNodeComponentsAdapter, LaunchNode, NodeComponents, NodeComponentsBuilder, PoolBuilder,
     },
     hooks::NodeHooks,
-    node::{FullNode, FullNodeTypesAdapter},
+    node::FullNode,
     BuilderContext, ComponentsState, Node, NodeBuilder, NodeHandle, RethFullAdapter,
-    RethFullNodeBuilder, RethFullProviderType,
+    RethFullNodeBuilder,
 };
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};
@@ -25,7 +25,6 @@ use reth_db::{
 };
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
-use reth_node_api::NodeTypes;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
@@ -63,9 +62,7 @@ where
         RethFullAdapter<DB, Types>,
         <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
     >,
-    Components: NodeComponentsBuilder<
-        RethFullAdapter<DB, Types>
-    >,
+    Components: NodeComponentsBuilder<RethFullAdapter<DB, Types>>,
 {
     async fn launch(
         self,
