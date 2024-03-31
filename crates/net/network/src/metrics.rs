@@ -118,7 +118,9 @@ pub struct TransactionsManagerMetrics {
     /* ================ POOL IMPORTS ================ */
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
-    /// Total number of bad imports.
+    /// Total number of bad imports, imports that fail because the transaction is badly formed
+    /// (i.e. have no chance of passing validation, unlike imports that fail due to e.g. nonce
+    /// gaps).
     pub(crate) bad_imports: Counter,
     /// Number of inflight requests at which the
     /// [`TransactionPool`](reth_transaction_pool::TransactionPool) is considered to be at
