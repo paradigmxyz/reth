@@ -2,7 +2,7 @@
 
 use std::{fmt, net::IpAddr, sync::Arc, time::Duration};
 
-use ::enr::Enr;
+use ::enr::{Enr, NodeId};
 use alloy_rlp::Decodable;
 use derive_more::{Constructor, Deref, DerefMut};
 use enr::{uncompressed_to_compressed_id, EnrCombinedKeyWrapper};
@@ -312,22 +312,14 @@ impl<T> Discv5<T> {
             let local_node_id = discv5.local_enr().node_id();
             let self_lookup_interval = Duration::from_secs(self_lookup_interval);
 
-            /*let filter = filter_discovered_peer.clone();
-            let predicate = Box::new(move |enr: &discv5::Enr| -> bool {
-                match filter.filter(enr) {
-                    FilterOutcome::Ok | FilterOutcome::OkReturnForkId(_) => true,
-                    FilterOutcome::Ignore { reason } => {
-                        trace!(target: "net::discv5",
-                            ?enr,
-                            reason,
-                            "filtered out peer from lookup query"
-                        );
+            // eth1 discv5 nodes are sparse relative to eth2 nodes. eth1 nodes currently rely on
+            // eth2 nodes to stay connected, hence why predicated query barely makes progress if
+            // filtering out eth2 nodes.
+            // todo: upstream fix to prioritize based on predicate rather than drop.
 
-                        false
-                    }
-                }
-            });*/
             // todo: graceful shutdown
+
+            let mut distance = 0;
 
             async move {
                 loop {
@@ -335,7 +327,13 @@ impl<T> Discv5<T> {
                         self_lookup_interval=format!("{:#?}", self_lookup_interval),
                         "starting periodic lookup query"
                     );
-                    match discv5.find_node(local_node_id).await {
+                    let target = get_lookup_target(distance, local_node_id);
+                    if distance == 256 {
+                        distance = 0;
+                    } else {
+                        distance += 1;
+                    }
+                    match discv5.find_node(target).await {
                         Err(err) => trace!(target: "net::discv5",
                             self_lookup_interval=format!("{:#?}", self_lookup_interval),
                             %err,
@@ -444,6 +442,26 @@ impl<T> UpdateMetrics for Discv5<T> {
     {
         f(&mut self.metrics)
     }
+}
+
+fn get_lookup_target(distance: usize, local_node_id: NodeId) -> NodeId {
+    let mut target = local_node_id.raw();
+    //make sure target has a 'distance'-long suffix that differs from local node id
+    if distance != 0 {
+        let suffix_bit_offset = 256_usize.saturating_sub(distance);
+        let suffix_byte_offset = suffix_bit_offset / 8;
+        // todo: flip the precise bit
+        // let rel_suffix_bit_offset = suffix_bit_offset % 8;
+        target[suffix_byte_offset] = !target[suffix_byte_offset];
+
+        if suffix_byte_offset != 31 {
+            for i in suffix_byte_offset + 1..31 {
+                target[i] = rand::random::<u8>();
+            }
+        }
+    }
+
+    target.into()
 }
 
 #[cfg(test)]

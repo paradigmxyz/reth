@@ -35,6 +35,7 @@ parking_lot.workspace = true
 
 # io
 serde_json.workspace = true
+rand.workspace = true
 
 # misc
 derive_more.workspace = true
