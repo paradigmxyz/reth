@@ -10,7 +10,7 @@ use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
 use reth_primitives::{Bytes, ForkId, NodeRecord, MAINNET};
 
-use crate::{enr::v4_id_to_multiaddr_id, filter::MustNotIncludeChains};
+use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeChains};
 
 /// L1 EL
 pub const ETH: &[u8] = b"eth";
@@ -285,7 +285,7 @@ impl BootNode {
         }
 
         multi_address.push(Protocol::Udp(udp_port));
-        let id = v4_id_to_multiaddr_id(id)?;
+        let id = discv4_id_to_multiaddr_id(id)?;
         multi_address.push(Protocol::P2p(id));
 
         Ok(Self::Enode(multi_address))

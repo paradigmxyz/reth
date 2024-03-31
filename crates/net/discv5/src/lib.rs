@@ -11,7 +11,7 @@ use std::{
 use ::enr::Enr;
 use alloy_rlp::Decodable;
 use derive_more::{Deref, DerefMut};
-use enr::{v42v5_id, EnrCombinedKeyWrapper};
+use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
 use reth_primitives::{
@@ -31,7 +31,7 @@ pub mod metrics;
 pub use discv5::{self, IpMode};
 
 pub use config::{BootNode, Config, ConfigBuilder};
-pub use enr::uncompressed_id_from_enr_pk;
+pub use enr::enr_to_discv4_id;
 pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeChains};
 use metrics::Discv5Metrics;
@@ -102,7 +102,7 @@ impl Discv5 {
     ///
     /// This will prevent any future inclusion in the table
     pub fn ban_peer_by_ip_and_node_id(&self, peer_id: PeerId, ip: IpAddr) {
-        match v42v5_id(peer_id) {
+        match discv4_id_to_discv5_id(peer_id) {
             Ok(node_id) => {
                 self.ban_node(&node_id, None);
                 self.ban_peer_by_ip(ip);
@@ -445,7 +445,7 @@ impl Discv5 {
             return Err(Error::IpVersionMismatchRlpx(self.ip_mode()))
         };
 
-        let id = uncompressed_id_from_enr_pk(enr);
+        let id = enr_to_discv4_id(enr);
 
         Ok(NodeRecord { address: udp_socket.ip(), tcp_port, udp_port: udp_socket.port(), id })
     }

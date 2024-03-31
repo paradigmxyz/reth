@@ -6,8 +6,8 @@ use reth_primitives::{id2pk, pk2id, PeerId};
 use secp256k1::{PublicKey, SecretKey};
 
 /// Extracts a [`CombinedPublicKey::Secp256k1`] from a [`discv5::Enr`] and converts it to a
-/// [`PeerId`].
-pub fn uncompressed_id_from_enr_pk(enr: &discv5::Enr) -> PeerId {
+/// [`PeerId`]. Note: conversion from discv5 ID to discv4 ID is not possible.
+pub fn enr_to_discv4_id(enr: &discv5::Enr) -> PeerId {
     let pk = enr.public_key();
     debug_assert!(
         matches!(pk, CombinedPublicKey::Secp256k1(_)),
@@ -19,12 +19,14 @@ pub fn uncompressed_id_from_enr_pk(enr: &discv5::Enr) -> PeerId {
 }
 
 /// Converts a [`PeerId`] to a [`discv5::enr::NodeId`].
-pub fn v42v5_id(peer_id: PeerId) -> Result<NodeId, secp256k1::Error> {
+pub fn discv4_id_to_discv5_id(peer_id: PeerId) -> Result<NodeId, secp256k1::Error> {
     Ok(id2pk(peer_id)?.into())
 }
 
 /// Converts a [`PeerId`] to a [`libp2p_identity::PeerId `].
-pub fn v4_id_to_multiaddr_id(peer_id: PeerId) -> Result<libp2p_identity::PeerId, secp256k1::Error> {
+pub fn discv4_id_to_multiaddr_id(
+    peer_id: PeerId,
+) -> Result<libp2p_identity::PeerId, secp256k1::Error> {
     let pk = id2pk(peer_id)?.encode();
     let pk: libp2p_identity::PublicKey =
         libp2p_identity::secp256k1::PublicKey::try_from_bytes(&pk).unwrap().into();
@@ -71,7 +73,7 @@ mod tests {
         let pk = secp256k1::PublicKey::from_slice(&discv5_pk.encode()).unwrap();
         let discv4_peer_id = pk2id(&pk);
         // convert back to discv5 id
-        let discv5_peer_id_from_discv4_peer_id = v42v5_id(discv4_peer_id).unwrap();
+        let discv5_peer_id_from_discv4_peer_id = discv4_id_to_discv5_id(discv4_peer_id).unwrap();
 
         assert_eq!(discv5_peer_id, discv5_peer_id_from_discv4_peer_id)
     }
