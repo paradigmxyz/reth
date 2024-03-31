@@ -5,11 +5,10 @@ use crate::{
     components::{
         FullNodeComponentsAdapter, LaunchNode, NodeComponents, NodeComponentsBuilder, PoolBuilder,
     },
-    RethFullNodeBuilder,
     hooks::NodeHooks,
     node::{FullNode, FullNodeTypesAdapter},
     BuilderContext, ComponentsState, Node, NodeBuilder, NodeHandle, RethFullAdapter,
-    RethFullProviderType,
+    RethFullNodeBuilder, RethFullProviderType,
 };
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};

@@ -49,19 +49,23 @@ pub type RethFullAdapter<DB, N> =
     FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>;
 
 /// The builtin [NodeBuilder] type for launching a node.
-pub type RethFullNodeBuilder<DB, Types, Components> =
-    NodeBuilder<
-        DB,
-        ComponentsState<
-            Types,
-            Components,
-            FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>,
-                <Components as NodeComponentsBuilder<
-        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>>>::Pool,
-            >,
+pub type RethFullNodeBuilder<DB, Types, Components> = NodeBuilder<
+    DB,
+    ComponentsState<
+        Types,
+        Components,
+        FullNodeComponentsAdapter<
+            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>,
+            <Components as NodeComponentsBuilder<
+                FullNodeTypesAdapter<
+                    Types,
+                    DB,
+                    RethFullProviderType<DB, <Types as NodeTypes>::Evm>,
+                >,
+            >>::Pool,
         >,
-    >;
+    >,
+>;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
@@ -299,17 +303,7 @@ where
     pub fn with_components<Components>(
         self,
         components_builder: Components,
-    ) -> NodeBuilder<
-        DB,
-        ComponentsState<
-            Types,
-            Components,
-            FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-                Components::Pool,
-            >,
-        >,
-    >
+    ) -> RethFullNodeBuilder<DB, Types, Components>
     where
         Components: NodeComponentsBuilder<
             FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
@@ -330,17 +324,7 @@ where
 }
 
 impl<DB, Types, Components>
-    NodeBuilder<
-        DB,
-        ComponentsState<
-            Types,
-            Components,
-            FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-                Components::Pool,
-            >,
-        >,
-    >
+    RethFullNodeBuilder<DB, Types, Components>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     Types: NodeTypes,
@@ -359,7 +343,6 @@ where
             Components::Pool,
         >,
     > {
-        // todo!()
         self.state
     }
     /// Apply a function to the components builder.
