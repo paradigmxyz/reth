@@ -5,6 +5,7 @@ use crate::{
     components::{
         FullNodeComponentsAdapter, LaunchNode, NodeComponents, NodeComponentsBuilder, PoolBuilder,
     },
+    RethFullNodeBuilder,
     hooks::NodeHooks,
     node::{FullNode, FullNodeTypesAdapter},
     BuilderContext, ComponentsState, Node, NodeBuilder, NodeHandle, RethFullAdapter,
@@ -70,17 +71,7 @@ where
 {
     async fn launch(
         self,
-        builder: NodeBuilder<
-            DB,
-            ComponentsState<
-                Types,
-                Components,
-                FullNodeComponentsAdapter<
-                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-                    Components::Pool,
-                >,
-            >,
-        >,
+        builder: RethFullNodeBuilder<DB, Types, Components>,
         executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<

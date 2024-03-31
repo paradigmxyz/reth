@@ -2,8 +2,7 @@
 
 use super::PoolBuilder;
 use crate::{
-    components::NodeComponents, node::FullNodeTypes, BuilderContext, ComponentsState,
-    FullNodeTypesAdapter, Node, NodeBuilder, NodeHandle, RethFullAdapter, RethFullProviderType,
+    components::NodeComponents, node::FullNodeTypes, BuilderContext, FullNodeTypesAdapter, Node, NodeHandle, RethFullAdapter, RethFullNodeBuilder, RethFullProviderType
 };
 use futures::Future;
 use reth_db::{
@@ -177,17 +176,7 @@ where
     /// Returns a [NodeHandle] that can be used to interact with the node.
     fn launch(
         self,
-        builder: NodeBuilder<
-            DB,
-            ComponentsState<
-                Types,
-                Components,
-                FullNodeComponentsAdapter<
-                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-                    Components::Pool,
-                >,
-            >,
-        >,
+        builder: RethFullNodeBuilder<DB, Types, Components>,
         executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
     ) -> impl Future<

@@ -57,11 +57,11 @@ pub type RethFullNodeBuilder<DB, Types, Components> =
             Components,
             FullNodeComponentsAdapter<
                 FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>,
-                <Components as NodeComponentsBuilder<Types>>::Pool,
+                <Components as NodeComponentsBuilder<
+        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>>>::Pool,
             >,
         >,
     >;
-
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
