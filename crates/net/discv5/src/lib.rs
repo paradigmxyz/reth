@@ -156,7 +156,7 @@ impl Discv5 {
             let mut builder = discv5::enr::Enr::builder();
 
             use discv5::ListenConfig::*;
-            let ip_mode = match discv5_config.listen_config {
+            let (ip_mode, socket) = match discv5_config.listen_config {
                 Ipv4 { ip, port } => {
                     if ip != Ipv4Addr::UNSPECIFIED {
                         builder.ip4(ip);
@@ -164,7 +164,7 @@ impl Discv5 {
                     builder.udp4(port);
                     builder.tcp4(tcp_port);
 
-                    IpMode::Ip4
+                    (IpMode::Ip4, (ip, port).into())
                 }
                 Ipv6 { ip, port } => {
                     if ip != Ipv6Addr::UNSPECIFIED {
@@ -173,7 +173,7 @@ impl Discv5 {
                     builder.udp6(port);
                     builder.tcp6(tcp_port);
 
-                    IpMode::Ip6
+                    (IpMode::Ip6, (ip, port).into())
                 }
                 DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
                     if ipv4 != Ipv4Addr::UNSPECIFIED {
@@ -187,7 +187,7 @@ impl Discv5 {
                     }
                     builder.udp6(ipv6_port);
 
-                    IpMode::DualStack
+                    (IpMode::DualStack, (ipv6, ipv6_port).into())
                 }
             };
 
@@ -211,7 +211,6 @@ impl Discv5 {
             );
 
             // backwards compatible enr
-            let socket = ip_mode.get_contactable_addr(&enr).unwrap();
             let bc_enr = NodeRecord::from_secret_key(socket, sk);
 
             (enr, bc_enr, ip_mode, chain)
