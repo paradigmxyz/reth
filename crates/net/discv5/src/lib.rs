@@ -10,7 +10,7 @@ use std::{
 
 use ::enr::Enr;
 use alloy_rlp::Decodable;
-use derive_more::{Constructor, Deref, DerefMut};
+use derive_more::{Deref, DerefMut};
 use enr::{v42v5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
@@ -37,7 +37,7 @@ pub use filter::{FilterOutcome, MustNotIncludeChains};
 use metrics::Discv5Metrics;
 
 /// Transparent wrapper around [`discv5::Discv5`].
-#[derive(Deref, DerefMut, Clone, Constructor)]
+#[derive(Deref, DerefMut, Clone)]
 pub struct Discv5 {
     #[deref]
     #[deref_mut]
@@ -146,10 +146,10 @@ impl Discv5 {
             tcp_port,
             other_enr_data,
             self_lookup_interval,
-            filter_discovered_peer,
+            discovered_peer_filter,
         } = discv5_config;
 
-        let (enr, bc_enr, ip_mode, chain) = {
+        let (enr, bc_enr, ip_mode, fork_id_key) = {
             let mut builder = discv5::enr::Enr::builder();
 
             use discv5::ListenConfig::*;
@@ -234,7 +234,7 @@ impl Discv5 {
         Self::spawn_populate_kbuckets_bg(self_lookup_interval, metrics.clone(), discv5.clone());
 
         Ok((
-            Discv5::new(discv5, ip_mode, chain, filter_discovered_peer, metrics),
+            Discv5 { discv5, ip_mode, fork_id_key, discovered_peer_filter, metrics },
             discv5_updates,
             bc_enr,
         ))

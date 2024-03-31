@@ -50,7 +50,7 @@ pub struct ConfigBuilder {
     self_lookup_interval: Option<u64>,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
-    filter_discovered_peer: MustNotIncludeChains,
+    discovered_peer_filter: MustNotIncludeChains,
 }
 
 impl ConfigBuilder {
@@ -63,7 +63,7 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_data,
             self_lookup_interval,
-            filter_discovered_peer,
+            discovered_peer_filter,
         } = discv5_config;
 
         Self {
@@ -73,7 +73,7 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_data,
             self_lookup_interval: Some(self_lookup_interval),
-            filter_discovered_peer,
+            discovered_peer_filter,
         }
     }
 
@@ -172,7 +172,7 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_data,
             self_lookup_interval,
-            filter_discovered_peer: f,
+            discovered_peer_filter: f,
         }
     }
 
@@ -185,7 +185,7 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_data,
             self_lookup_interval,
-            filter_discovered_peer,
+            discovered_peer_filter,
         } = self;
 
         let discv5_config = discv5_config
@@ -203,7 +203,7 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_data,
             self_lookup_interval,
-            filter_discovered_peer,
+            discovered_peer_filter,
         }
     }
 }
@@ -227,7 +227,7 @@ pub struct Config {
     pub(super) self_lookup_interval: u64,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
-    pub(super) filter_discovered_peer: MustNotIncludeChains,
+    pub(super) discovered_peer_filter: MustNotIncludeChains,
 }
 
 impl Config {
