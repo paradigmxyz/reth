@@ -42,6 +42,12 @@ pub struct RpcHooks<Node: FullNodeComponents> {
     pub extend_rpc_modules: Box<dyn ExtendRpcModules<Node>>,
 }
 
+impl<N: FullNodeComponents> Default for RpcHooks<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<Node: FullNodeComponents> RpcHooks<Node> {
     /// Creates a new, empty [RpcHooks] instance for the given node type.
     pub fn new() -> Self {

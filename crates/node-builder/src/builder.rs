@@ -487,7 +487,7 @@ where
             <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
         >,
     {
-        self.launch_with(DefaultLauncher::default(), task_executor, data_dir).await
+        self.launch_with(DefaultLauncher, task_executor, data_dir).await
     }
 
     /// Launch the node with the passed launcher, which implements [LaunchNode].
