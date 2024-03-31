@@ -275,11 +275,10 @@ impl Discv5 {
         _ = join_all(enr_requests);
 
         debug!(target: "net::discv5",
-            connected_boot_nodes=format!("[{:#}]", discv5.with_kbuckets(|kbuckets| kbuckets
+            nodes=format!("[{:#}]", discv5.with_kbuckets(|kbuckets| kbuckets
                 .write()
                 .iter()
-                .filter(|entry| entry.status.is_connected())
-                .map(|connected_peer| connected_peer.node.key.preimage()).copied().collect::<Vec<_>>()
+                .map(|peer| format!("enr: {:?}, status: {:?}", peer.node.value, peer.status)).collect::<Vec<_>>()
             ).into_iter().format(", ")),
             "added boot nodes"
         );
