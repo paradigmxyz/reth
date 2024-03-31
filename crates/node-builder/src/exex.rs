@@ -69,7 +69,7 @@ pub struct ExExContext<Node: FullNodeTypes> {
 }
 
 /// A trait for launching an ExEx.
-trait LaunchExEx<Node: FullNodeTypes>: Send {
+pub trait LaunchExEx<Node: FullNodeTypes>: Send {
     /// Launches the ExEx.
     ///
     /// The ExEx should be able to run independently and emit events on the channels provided in
@@ -80,7 +80,8 @@ trait LaunchExEx<Node: FullNodeTypes>: Send {
     ) -> impl Future<Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>> + Send;
 }
 
-type BoxExEx = BoxFuture<'static, eyre::Result<()>>;
+/// A 'static [BoxFuture] that resolves to `Result<()>`;
+pub type BoxExEx = BoxFuture<'static, eyre::Result<()>>;
 
 /// A version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
 pub trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
