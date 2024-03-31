@@ -296,7 +296,7 @@ impl Discv5 {
             let local_node_id = discv5.local_enr().node_id();
             let lookup_interval = Duration::from_secs(lookup_interval);
             let mut metrics = metrics.discovered_peers;
-            let mut distance = 0usize;
+            let mut log2_distance = 0usize;
             // todo: graceful shutdown
 
             async move {
@@ -312,13 +312,13 @@ impl Discv5 {
                     );
                     // make sure node is connected to each subtree in the network by target
                     // selection (ref kademlia)
-                    let target = get_lookup_target(distance, local_node_id);
-                    if distance < MAX_LOG2_DISTANCE {
+                    let target = get_lookup_target(log2_distance, local_node_id);
+                    if log2_distance < MAX_LOG2_DISTANCE {
                         // try to populate bucket one step further away
-                        distance += 1
+                        log2_distance += 1
                     } else {
                         // start over with self lookup
-                        distance = 0
+                        log2_distance = 0
                     }
                     match discv5.find_node(target).await {
                         Err(err) => trace!(target: "net::discv5",
@@ -514,13 +514,13 @@ pub struct DiscoveredPeer {
 
 /// Gets the next lookup target, based on which distance is currently being targeted.
 pub fn get_lookup_target(
-    distance: usize,
+    log2_distance: usize,
     local_node_id: discv5::enr::NodeId,
 ) -> discv5::enr::NodeId {
     let mut target = local_node_id.raw();
     //make sure target has a 'distance'-long suffix that differs from local node id
-    if distance != 0 {
-        let suffix_bit_offset = MAX_LOG2_DISTANCE.saturating_sub(distance);
+    if log2_distance != 0 {
+        let suffix_bit_offset = MAX_LOG2_DISTANCE.saturating_sub(log2_distance);
         let suffix_byte_offset = suffix_bit_offset / 8;
         // todo: flip the precise bit
         // let rel_suffix_bit_offset = suffix_bit_offset % 8;
