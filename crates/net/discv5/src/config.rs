@@ -10,7 +10,7 @@ use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
 use reth_primitives::{Bytes, ForkId, NodeRecord, MAINNET};
 
-use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeChains};
+use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys};
 
 /// L1 EL
 pub const ETH: &[u8] = b"eth";
@@ -50,7 +50,7 @@ pub struct ConfigBuilder {
     self_lookup_interval: Option<u64>,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
-    discovered_peer_filter: MustNotIncludeChains,
+    discovered_peer_filter: Option<MustNotIncludeKeys>,
 }
 
 impl ConfigBuilder {
@@ -73,7 +73,7 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_data,
             self_lookup_interval: Some(self_lookup_interval),
-            discovered_peer_filter,
+            discovered_peer_filter: Some(discovered_peer_filter),
         }
     }
 
@@ -152,28 +152,14 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds filter rules to apply to discovered peer to determine whether or not it should be
-    /// passed to the rlpx.
-    pub fn filter(self, f: MustNotIncludeChains) -> Self {
-        let Self {
-            discv5_config,
-            bootstrap_nodes,
-            fork,
-            tcp_port,
-            other_enr_data,
-            self_lookup_interval,
-            ..
-        } = self;
-
-        ConfigBuilder {
-            discv5_config,
-            bootstrap_nodes,
-            fork,
-            tcp_port,
-            other_enr_data,
-            self_lookup_interval,
-            discovered_peer_filter: f,
-        }
+    /// Adds chains to disallow when filtering a discovered peer, to determine whether or not it
+    /// should be passed to rlpx. The discovered node record is scanned for any kv-pairs where the
+    /// key matches the disallowed chains. If not explicitly set, b"eth2" key will be disallowed.
+    pub fn must_not_include_chains(mut self, not_chains: &[&'static [u8]]) -> Self {
+        let mut filter = self.discovered_peer_filter.unwrap_or_default();
+        filter.add_disallowed_chains(not_chains);
+        self.discovered_peer_filter = Some(filter);
+        self
     }
 
     /// Returns a new [`Config`].
@@ -195,6 +181,9 @@ impl ConfigBuilder {
 
         let self_lookup_interval =
             self_lookup_interval.unwrap_or(DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL);
+
+        let discovered_peer_filter =
+            discovered_peer_filter.unwrap_or(MustNotIncludeKeys::new(&[ETH2]));
 
         Config {
             discv5_config,
@@ -227,7 +216,7 @@ pub struct Config {
     pub(super) self_lookup_interval: u64,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
-    pub(super) discovered_peer_filter: MustNotIncludeChains,
+    pub(super) discovered_peer_filter: MustNotIncludeKeys,
 }
 
 impl Config {

@@ -27,51 +27,45 @@ impl FilterOutcome {
 
 /// Filter requiring that peers advertise that they belong to some fork of a certain chain.
 #[derive(Debug, Constructor, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MustIncludeChain {
-    /// Chain which node record must advertise.
-    chain: &'static [u8],
+pub struct MustIncludeKey {
+    /// Kv-pair key which node record must advertise.
+    key: &'static [u8],
 }
 
-impl MustIncludeChain {
-    /// Returns [`FilterOutcome::Ok`] if [`Enr`](discv5::Enr) passes filtering rules.
+impl MustIncludeKey {
+    /// Returns [`FilterOutcome::Ok`] if [`Enr`](discv5::Enr) contains the configured kv-pair key.
     pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
-        if enr.get_raw_rlp(self.chain).is_none() {
+        if enr.get_raw_rlp(self.key).is_none() {
             return FilterOutcome::Ignore { reason: self.ignore_reason() }
         }
         FilterOutcome::Ok
     }
 
     fn ignore_reason(&self) -> String {
-        format!("{} fork required", String::from_utf8_lossy(self.chain))
-    }
-}
-
-impl Default for MustIncludeChain {
-    fn default() -> Self {
-        Self { chain: ETH }
+        format!("{} fork required", String::from_utf8_lossy(self.key))
     }
 }
 
 /// Filter requiring that peers not advertise that they belong to some chains.
-#[derive(Debug, Clone)]
-pub struct MustNotIncludeChains {
-    chains: DashSet<MustIncludeChain>,
+#[derive(Debug, Clone, Default)]
+pub struct MustNotIncludeKeys {
+    chains: DashSet<MustIncludeKey>,
 }
 
-impl MustNotIncludeChains {
+impl MustNotIncludeKeys {
     /// Returns a new instance that disallows node records with a kv-pair that has any of the given
     /// chains as key.
     pub fn new(disallow_chains: &[&'static [u8]]) -> Self {
         let chains = DashSet::with_capacity(disallow_chains.len());
         for chain in disallow_chains {
-            _ = chains.insert(MustIncludeChain::new(chain));
+            _ = chains.insert(MustIncludeKey::new(chain));
         }
 
-        MustNotIncludeChains { chains }
+        MustNotIncludeKeys { chains }
     }
 }
 
-impl MustNotIncludeChains {
+impl MustNotIncludeKeys {
     /// Returns `true` if [`Enr`](discv5::Enr) passes filtering rules.
     pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
         for chain in self.chains.iter() {
@@ -86,14 +80,15 @@ impl MustNotIncludeChains {
     fn ignore_reason(&self) -> String {
         format!(
             "{} forks not allowed",
-            self.chains.iter().map(|chain| String::from_utf8_lossy(chain.chain)).format(",")
+            self.chains.iter().map(|chain| String::from_utf8_lossy(chain.key)).format(",")
         )
     }
-}
 
-impl Default for MustNotIncludeChains {
-    fn default() -> Self {
-        Self::new(&[ETH2])
+    /// Adds a key that must not be present for any kv-pair in a node record.
+    pub fn add_disallowed_chains(&mut self, keys: &[&'static [u8]]) {
+        for key in keys {
+            self.chains.insert(MustIncludeKey::new(*key));
+        }
     }
 }
 
@@ -108,7 +103,7 @@ mod tests {
     fn must_not_include_chain_filter() {
         // rig test
 
-        let filter = MustNotIncludeChains::new(&[b"eth", b"eth2"]);
+        let filter = MustNotIncludeKeys::new(&[ETH, ETH2]);
 
         // enr_1 advertises a fork from one of the chains configured in filter
         let sk = CombinedKey::generate_secp256k1();

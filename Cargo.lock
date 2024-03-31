@@ -6053,7 +6053,6 @@ dependencies = [
  "multiaddr",
  "parking_lot 0.12.1",
  "pin-project",
- "rand 0.8.5",
  "reth-metrics",
  "reth-primitives",
  "reth-tracing",
