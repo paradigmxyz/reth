@@ -3,7 +3,7 @@
 use std::{
     collections::HashSet,
     fmt,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
@@ -157,22 +157,34 @@ impl Discv5 {
 
             use discv5::ListenConfig::*;
             let ip_mode = match discv5_config.listen_config {
-                Ipv4 { port, .. } => {
+                Ipv4 { ip, port } => {
+                    if ip != Ipv4Addr::UNSPECIFIED {
+                        builder.ip4(ip);
+                    }
                     builder.udp4(port);
                     builder.tcp4(tcp_port);
 
                     IpMode::Ip4
                 }
-                Ipv6 { port, .. } => {
+                Ipv6 { ip, port } => {
+                    if ip != Ipv6Addr::UNSPECIFIED {
+                        builder.ip6(ip);
+                    }
                     builder.udp6(port);
                     builder.tcp6(tcp_port);
 
                     IpMode::Ip6
                 }
-                DualStack { ipv4_port, ipv6_port, .. } => {
+                DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
+                    if ipv4 != Ipv4Addr::UNSPECIFIED {
+                        builder.ip4(ipv4);
+                    }
                     builder.udp4(ipv4_port);
                     builder.tcp4(tcp_port);
 
+                    if ipv6 != Ipv6Addr::UNSPECIFIED {
+                        builder.ip6(ipv6);
+                    }
                     builder.udp6(ipv6_port);
 
                     IpMode::DualStack
