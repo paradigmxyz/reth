@@ -33,7 +33,7 @@ pub use discv5::{self, IpMode};
 pub use config::{BootNode, Config, ConfigBuilder};
 pub use enr::enr_to_discv4_id;
 pub use error::Error;
-pub use filter::{FilterOutcome, MustNotIncludeChains};
+pub use filter::{FilterOutcome, MustNotIncludeKeys};
 use metrics::Discv5Metrics;
 
 /// Transparent wrapper around [`discv5::Discv5`].
@@ -48,7 +48,7 @@ pub struct Discv5 {
     /// Key used in kv-pair to ID chain.
     fork_id_key: &'static [u8],
     /// Filter applied to a discovered peers before passing it up to app.
-    discovered_peer_filter: MustNotIncludeChains,
+    discovered_peer_filter: MustNotIncludeKeys,
     /// Metrics for underlying [`discv5::Discv5`] node and filtered discovered peers.
     metrics: Discv5Metrics,
 }
@@ -234,7 +234,7 @@ impl Discv5 {
         Self::spawn_populate_kbuckets_bg(self_lookup_interval, metrics.clone(), discv5.clone());
 
         Ok((
-            Discv5 { discv5, ip_mode, fork_id_key, discovered_peer_filter, metrics },
+            Self { discv5, ip_mode, fork_id_key, discovered_peer_filter, metrics },
             discv5_updates,
             bc_enr,
         ))
@@ -428,11 +428,6 @@ impl Discv5 {
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Result<NodeRecord, Error> {
-        // todo: track unreachable with metrics
-        if enr.udp4_socket().is_none() && enr.udp6_socket().is_none() {
-            return Err(Error::UnreachableDiscovery)
-        }
-
         let udp_socket = self.ip_mode().get_contactable_addr(enr).unwrap_or(socket);
 
         // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
@@ -509,10 +504,30 @@ pub struct DiscoveredPeer {
 
 #[cfg(test)]
 mod tests {
+    use ::enr::CombinedKey;
+    use discv5::ListenConfig;
     use secp256k1::rand::thread_rng;
     use tracing::trace;
 
     use super::*;
+
+    fn discv5_noop() -> Discv5 {
+        let sk = CombinedKey::generate_secp256k1();
+        Discv5 {
+            discv5: Arc::new(
+                discv5::Discv5::new(
+                    Enr::empty(&sk).unwrap(),
+                    sk,
+                    discv5::ConfigBuilder::new(ListenConfig::default()).build(),
+                )
+                .unwrap(),
+            ),
+            ip_mode: IpMode::Ip4,
+            fork_id_key: b"noop",
+            discovered_peer_filter: MustNotIncludeKeys::default(),
+            metrics: Discv5Metrics::default(),
+        }
+    }
 
     async fn start_discovery_node(
         udp_port_discv5: u16,
@@ -582,5 +597,31 @@ mod tests {
             event_2_v5,
             discv5::Event::NodeInserted { node_id, replaced } if node_id == node_1_enr.node_id() && replaced.is_none()
         );
+    }
+
+    #[test]
+    fn discovered_enr_disc_socket_missing() {
+        reth_tracing::init_test_tracing();
+
+        // rig test
+        const REMOTE_RLPX_PORT: u16 = 30303;
+        let remote_socket = "104.28.44.25:9000".parse().unwrap();
+        let remote_key = CombinedKey::generate_secp256k1();
+        let remote_enr = Enr::builder().tcp4(REMOTE_RLPX_PORT).build(&remote_key).unwrap();
+
+        let mut discv5 = discv5_noop();
+
+        // test
+        let filtered_peer = discv5.on_discovered_peer(&remote_enr, remote_socket);
+
+        assert_eq!(
+            NodeRecord {
+                address: remote_socket.ip(),
+                udp_port: remote_socket.port(),
+                tcp_port: REMOTE_RLPX_PORT,
+                id: enr_to_discv4_id(&remote_enr),
+            },
+            filtered_peer.unwrap().node_record
+        )
     }
 }
