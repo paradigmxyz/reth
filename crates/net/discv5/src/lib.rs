@@ -154,26 +154,22 @@ impl Discv5 {
 
             use discv5::ListenConfig::*;
             let ip_mode = match discv5_config.listen_config {
-                Ipv4 { ip, port } => {
-                    builder.ip4(ip);
+                Ipv4 { port, .. } => {
                     builder.udp4(port);
                     builder.tcp4(tcp_port);
 
                     IpMode::Ip4
                 }
-                Ipv6 { ip, port } => {
-                    builder.ip6(ip);
+                Ipv6 { port, .. } => {
                     builder.udp6(port);
                     builder.tcp6(tcp_port);
 
                     IpMode::Ip6
                 }
-                DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
-                    builder.ip4(ipv4);
+                DualStack { ipv4_port, ipv6_port, .. } => {
                     builder.udp4(ipv4_port);
                     builder.tcp4(tcp_port);
 
-                    builder.ip6(ipv6);
                     builder.udp6(ipv6_port);
 
                     IpMode::DualStack
