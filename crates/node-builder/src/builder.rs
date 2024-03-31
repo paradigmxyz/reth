@@ -325,19 +325,6 @@ where
         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
     >,
 {
-    /// Return components state
-    pub fn component_state(
-        self,
-    ) -> ComponentsState<
-        Types,
-        Components,
-        FullNodeComponentsAdapter<
-            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-            Components::Pool,
-        >,
-    > {
-        self.state
-    }
     /// Apply a function to the components builder.
     pub fn map_components(self, f: impl FnOnce(Components) -> Components) -> Self {
         Self {
@@ -815,17 +802,17 @@ where
 /// Captures the necessary context for building the components of the node.
 pub struct BuilderContext<Node: FullNodeTypes> {
     /// The current head of the blockchain at launch.
-    pub(crate) head: Head,
+    pub head: Head,
     /// The configured provider to interact with the blockchain.
-    pub(crate) provider: Node::Provider,
+    pub provider: Node::Provider,
     /// The executor of the node.
-    pub(crate) executor: TaskExecutor,
+    pub executor: TaskExecutor,
     /// The data dir of the node.
-    pub(crate) data_dir: ChainPath<DataDirPath>,
+    pub data_dir: ChainPath<DataDirPath>,
     /// The config of the node
-    pub(crate) config: NodeConfig,
+    pub config: NodeConfig,
     /// loaded config
-    pub(crate) reth_config: reth_config::Config,
+    pub reth_config: reth_config::Config,
 }
 
 impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
