@@ -510,7 +510,7 @@ pub struct DiscoveredPeer {
 
 #[cfg(test)]
 mod tests {
-    use rand::thread_rng;
+    use secp256k1::rand::thread_rng;
     use tracing::trace;
 
     use super::*;
