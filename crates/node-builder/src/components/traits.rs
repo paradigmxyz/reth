@@ -157,8 +157,7 @@ where
 pub trait LaunchNode<DB, Types, Components>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    Types:
-        Node<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>>,
+    Types: Node<RethFullAdapter<DB, Types>>,
     Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
     Types::NetworkBuilder: crate::components::NetworkBuilder<
         RethFullAdapter<DB, Types>,
@@ -169,7 +168,7 @@ where
         <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
     >,
     Components: NodeComponentsBuilder<
-        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+        RethFullAdapter<DB, Types>
     >,
 {
     /// Launches the node and returns a handle to it.

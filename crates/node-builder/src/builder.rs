@@ -55,13 +55,9 @@ pub type RethFullNodeBuilder<DB, Types, Components> = NodeBuilder<
         Types,
         Components,
         FullNodeComponentsAdapter<
-            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>,
+            RethFullAdapter<DB, Types>,
             <Components as NodeComponentsBuilder<
-                FullNodeTypesAdapter<
-                    Types,
-                    DB,
-                    RethFullProviderType<DB, <Types as NodeTypes>::Evm>,
-                >,
+                RethFullAdapter<DB, Types>
             >>::Pool,
         >,
     >,
