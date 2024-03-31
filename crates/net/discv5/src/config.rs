@@ -183,7 +183,7 @@ impl ConfigBuilder {
             self_lookup_interval.unwrap_or(DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL);
 
         let discovered_peer_filter =
-            discovered_peer_filter.unwrap_or(MustNotIncludeKeys::new(&[ETH2]));
+            discovered_peer_filter.unwrap_or_else(|| MustNotIncludeKeys::new(&[ETH2]));
 
         Config {
             discv5_config,

@@ -4,8 +4,6 @@ use dashmap::DashSet;
 use derive_more::Constructor;
 use itertools::Itertools;
 
-use crate::config::{ETH, ETH2};
-
 /// Outcome of applying filtering rules on node record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterOutcome {
@@ -87,7 +85,7 @@ impl MustNotIncludeKeys {
     /// Adds a key that must not be present for any kv-pair in a node record.
     pub fn add_disallowed_chains(&mut self, keys: &[&'static [u8]]) {
         for key in keys {
-            self.chains.insert(MustIncludeKey::new(*key));
+            self.chains.insert(MustIncludeKey::new(key));
         }
     }
 }
@@ -96,6 +94,8 @@ impl MustNotIncludeKeys {
 mod tests {
     use alloy_rlp::Bytes;
     use discv5::enr::{CombinedKey, Enr};
+
+    use crate::config::{ETH, ETH2};
 
     use super::*;
 
