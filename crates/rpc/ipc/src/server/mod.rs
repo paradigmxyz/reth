@@ -331,7 +331,7 @@ async fn spawn_connection<S, T>(
                     // shutdown
                     break
                 }
-            };
+            }
         }
     });
 

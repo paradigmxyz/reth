@@ -37,7 +37,9 @@ pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyErro
     match exists {
         Ok(true) => {
             let contents = fs::read_to_string(secret_key_path)?;
-            Ok((contents.as_str().parse::<SecretKey>())
+            Ok(contents
+                .as_str()
+                .parse::<SecretKey>()
                 .map_err(SecretKeyError::SecretKeyDecodeError)?)
         }
         Ok(false) => {

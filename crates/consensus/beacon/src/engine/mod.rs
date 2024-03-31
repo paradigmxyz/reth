@@ -1128,13 +1128,13 @@ where
                             if let Err((_hash, error)) =
                                 self.try_make_sync_target_canonical(block_num_hash)
                             {
-                                if error.is_fatal() {
+                                return if error.is_fatal() {
                                     error!(target: "consensus::engine", %error, "Encountered fatal error");
-                                    return Err(BeaconOnNewPayloadError::Internal(Box::new(error)))
+                                    Err(BeaconOnNewPayloadError::Internal(Box::new(error)))
                                 } else {
                                     // If we could not make the sync target block canonical, we
                                     // should return the error as an invalid payload status.
-                                    return Ok(PayloadStatus::new(
+                                    Ok(PayloadStatus::new(
                                         PayloadStatusEnum::Invalid {
                                             validation_error: error.to_string(),
                                         },
@@ -1431,12 +1431,23 @@ where
                         if let Err((hash, error)) =
                             self.try_make_sync_target_canonical(downloaded_num_hash)
                         {
-                            tracing::error!(
-                                target: "consensus::engine",
-                                "Unexpected error while making sync target canonical: {:?}, {:?}",
+                            if !matches!(
                                 error,
-                                hash
-                            )
+                                CanonicalError::BlockchainTree(
+                                    BlockchainTreeError::BlockHashNotFoundInChain { .. }
+                                )
+                            ) {
+                                if error.is_fatal() {
+                                    error!(target: "consensus::engine", %error, "Encountered fatal error while making sync target canonical: {:?}, {:?}", error, hash);
+                                } else {
+                                    debug!(
+                                        target: "consensus::engine",
+                                        "Unexpected error while making sync target canonical: {:?}, {:?}",
+                                        error,
+                                        hash
+                                    )
+                                }
+                            }
                         }
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected {
@@ -2006,7 +2017,7 @@ mod tests {
         let mut rx = spawn_consensus_engine(consensus_engine);
 
         // consensus engine is idle
-        std::thread::sleep(Duration::from_millis(100));
+        tokio::time::sleep(Duration::from_millis(100)).await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because no FCUs were received

@@ -158,14 +158,6 @@ where
     /// If the `count` is 1, this will use the `download_full_block` method instead, because it
     /// downloads headers and bodies for the block concurrently.
     pub(crate) fn download_block_range(&mut self, hash: B256, count: u64) {
-        // notify listeners that we're downloading a block
-        self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
-            ConsensusEngineLiveSyncProgress::DownloadingBlocks {
-                remaining_blocks: count,
-                target: hash,
-            },
-        ));
-
         if count == 1 {
             self.download_full_block(hash);
         } else {
@@ -176,6 +168,13 @@ where
                 "start downloading full block range."
             );
 
+            // notify listeners that we're downloading a block range
+            self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
+                ConsensusEngineLiveSyncProgress::DownloadingBlocks {
+                    remaining_blocks: count,
+                    target: hash,
+                },
+            ));
             let request = self.full_block_client.get_full_block_range(hash, count);
             self.inflight_block_range_requests.push(request);
         }
