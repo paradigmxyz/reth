@@ -34,6 +34,7 @@ parking_lot.workspace = true
 
 # io
 serde_json.workspace = true
+rand.workspace = true
 
 # misc
 derive_more.workspace = true
@@ -47,3 +48,4 @@ dashmap = "5.5.3"
 reth-tracing.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 secp256k1 = { workspace = true, features = ["rand-std"] }
+uint = { version = "0.9", default-features = false }

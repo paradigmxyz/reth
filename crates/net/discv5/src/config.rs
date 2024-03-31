@@ -22,7 +22,7 @@ pub const OPSTACK: &[u8] = b"opstack";
 /// Default interval in seconds at which to run a self-lookup up query.
 ///
 /// Default is 60 seconds.
-const DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL: u64 = 60;
+const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 60;
 
 /// Optimism mainnet and base mainnet boot nodes.
 const BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET: &[&str] = &["enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305", "enode://dd751a9ef8912be1bfa7a5e34e2c3785cc5253110bd929f385e07ba7ac19929fb0e0c5d93f77827291f4da02b2232240fbc47ea7ce04c46e333e452f8656b667@34.65.107.0:30305", "enode://c5d289b56a77b6a2342ca29956dfd07aadf45364dde8ab20d1dc4efd4d1bc6b4655d902501daea308f4d8950737a4e93a4dfedd17b49cd5760ffd127837ca965@34.65.202.239:30305", "enode://87a32fd13bd596b2ffca97020e31aef4ddcc1bbd4b95bb633d16c1329f654f34049ed240a36b449fda5e5225d70fe40bc667f53c304b71f8e68fc9d448690b51@3.231.138.188:30301", "enode://ca21ea8f176adb2e229ce2d700830c844af0ea941a1d8152a9513b966fe525e809c3a6c73a2c18a12b74ed6ec4380edf91662778fe0b79f6a591236e49e176f9@184.72.129.189:30301", "enode://acf4507a211ba7c1e52cdf4eef62cdc3c32e7c9c47998954f7ba024026f9a6b2150cd3f0b734d9c78e507ab70d59ba61dfe5c45e1078c7ad0775fb251d7735a2@3.220.145.177:30301", "enode://8a5a5006159bf079d06a04e5eceab2a1ce6e0f721875b2a9c96905336219dbe14203d38f70f3754686a6324f786c2f9852d8c0dd3adac2d080f4db35efc678c5@3.231.11.52:30301", "enode://cdadbe835308ad3557f9a1de8db411da1a260a98f8421d62da90e71da66e55e98aaa8e90aa7ce01b408a54e4bd2253d701218081ded3dbe5efbbc7b41d7cef79@54.198.153.150:30301"];
@@ -45,9 +45,8 @@ pub struct ConfigBuilder {
     tcp_port: u16,
     /// Additional kv-pairs that should be advertised to peers by including in local node record.
     other_enr_data: Vec<(&'static str, Bytes)>,
-    /// Interval in seconds at which to run a lookup up query with local node ID as target, to
-    /// populate kbuckets.
-    self_lookup_interval: Option<u64>,
+    /// Interval in seconds at which to run a lookup up query to populate kbuckets.
+    lookup_interval: Option<u64>,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
     discovered_peer_filter: Option<MustNotIncludeKeys>,
@@ -62,7 +61,7 @@ impl ConfigBuilder {
             fork: fork_id,
             tcp_port,
             other_enr_data,
-            self_lookup_interval,
+            lookup_interval,
             discovered_peer_filter,
         } = discv5_config;
 
@@ -72,7 +71,7 @@ impl ConfigBuilder {
             fork: Some(fork_id),
             tcp_port,
             other_enr_data,
-            self_lookup_interval: Some(self_lookup_interval),
+            lookup_interval: Some(lookup_interval),
             discovered_peer_filter: Some(discovered_peer_filter),
         }
     }
@@ -170,7 +169,7 @@ impl ConfigBuilder {
             fork,
             tcp_port,
             other_enr_data,
-            self_lookup_interval,
+            lookup_interval,
             discovered_peer_filter,
         } = self;
 
@@ -179,8 +178,7 @@ impl ConfigBuilder {
 
         let fork = fork.unwrap_or((ETH, MAINNET.latest_fork_id()));
 
-        let self_lookup_interval =
-            self_lookup_interval.unwrap_or(DEFAULT_SECONDS_SELF_LOOKUP_INTERVAL);
+        let lookup_interval = lookup_interval.unwrap_or(DEFAULT_SECONDS_LOOKUP_INTERVAL);
 
         let discovered_peer_filter =
             discovered_peer_filter.unwrap_or_else(|| MustNotIncludeKeys::new(&[ETH2]));
@@ -191,7 +189,7 @@ impl ConfigBuilder {
             fork,
             tcp_port,
             other_enr_data,
-            self_lookup_interval,
+            lookup_interval,
             discovered_peer_filter,
         }
     }
@@ -211,9 +209,8 @@ pub struct Config {
     pub(super) tcp_port: u16,
     /// Additional kv-pairs to include in local node record.
     pub(super) other_enr_data: Vec<(&'static str, Bytes)>,
-    /// Interval in seconds at which to run a lookup up query with local node ID as target, to
-    /// populate kbuckets.
-    pub(super) self_lookup_interval: u64,
+    /// Interval in seconds at which to run a lookup up query with to populate kbuckets.
+    pub(super) lookup_interval: u64,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
     pub(super) discovered_peer_filter: MustNotIncludeKeys,

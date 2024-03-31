@@ -36,6 +36,9 @@ pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
 use metrics::Discv5Metrics;
 
+/// The max log2 distance, is equivalent to the index of the last bit in a discv5 node id.
+const MAX_LOG2_DISTANCE: usize = 255;
+
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Deref, DerefMut, Clone)]
 pub struct Discv5 {
@@ -145,7 +148,7 @@ impl Discv5 {
             fork,
             tcp_port,
             other_enr_data,
-            self_lookup_interval,
+            lookup_interval,
             discovered_peer_filter,
         } = discv5_config;
 
@@ -227,7 +230,7 @@ impl Discv5 {
         //
         // 5. bg kbuckets maintenance
         //
-        Self::spawn_populate_kbuckets_bg(self_lookup_interval, metrics.clone(), discv5.clone());
+        Self::spawn_populate_kbuckets_bg(lookup_interval, metrics.clone(), discv5.clone());
 
         Ok((
             Self { discv5, ip_mode, fork_id_key, discovered_peer_filter, metrics },
@@ -284,15 +287,16 @@ impl Discv5 {
 
     /// Backgrounds regular look up queries, in order to keep kbuckets populated.
     fn spawn_populate_kbuckets_bg(
-        self_lookup_interval: u64,
+        lookup_interval: u64,
         metrics: Discv5Metrics,
         discv5: Arc<discv5::Discv5>,
     ) {
         // initiate regular lookups to populate kbuckets
         task::spawn({
             let local_node_id = discv5.local_enr().node_id();
-            let self_lookup_interval = Duration::from_secs(self_lookup_interval);
+            let lookup_interval = Duration::from_secs(lookup_interval);
             let mut metrics = metrics.discovered_peers;
+            let mut distance = 0usize;
             // todo: graceful shutdown
 
             async move {
@@ -303,17 +307,27 @@ impl Discv5 {
                     );
 
                     trace!(target: "net::discv5",
-                        self_lookup_interval=format!("{:#?}", self_lookup_interval),
+                        lookup_interval=format!("{:#?}", lookup_interval),
                         "starting periodic lookup query"
                     );
-                    match discv5.find_node(local_node_id).await {
+                    // make sure node is connected to each subtree in the network by target
+                    // selection (ref kademlia)
+                    let target = get_lookup_target(distance, local_node_id);
+                    if distance < MAX_LOG2_DISTANCE {
+                        // try to populate bucket one step further away
+                        distance += 1
+                    } else {
+                        // start over with self lookup
+                        distance = 0
+                    }
+                    match discv5.find_node(target).await {
                         Err(err) => trace!(target: "net::discv5",
-                            self_lookup_interval=format!("{:#?}", self_lookup_interval),
+                            lookup_interval=format!("{:#?}", lookup_interval),
                             %err,
                             "periodic lookup query failed"
                         ),
                         Ok(peers) => trace!(target: "net::discv5",
-                            self_lookup_interval=format!("{:#?}", self_lookup_interval),
+                            lookup_interval=format!("{:#?}", lookup_interval),
                             peers_count=peers.len(),
                             peers=format!("[{:#}]", peers.iter()
                                 .map(|enr| enr.node_id()
@@ -329,7 +343,7 @@ impl Discv5 {
                         connected_peers=discv5.connected_peers(),
                         "connected peers in routing table"
                     );
-                    tokio::time::sleep(self_lookup_interval).await;
+                    tokio::time::sleep(lookup_interval).await;
                 }
             }
         });
@@ -498,10 +512,35 @@ pub struct DiscoveredPeer {
     pub fork_id: Option<ForkId>,
 }
 
+/// Gets the next lookup target, based on which distance is currently being targeted.
+pub fn get_lookup_target(
+    distance: usize,
+    local_node_id: discv5::enr::NodeId,
+) -> discv5::enr::NodeId {
+    let mut target = local_node_id.raw();
+    //make sure target has a 'distance'-long suffix that differs from local node id
+    if distance != 0 {
+        let suffix_bit_offset = MAX_LOG2_DISTANCE.saturating_sub(distance);
+        let suffix_byte_offset = suffix_bit_offset / 8;
+        // todo: flip the precise bit
+        // let rel_suffix_bit_offset = suffix_bit_offset % 8;
+        target[suffix_byte_offset] = !target[suffix_byte_offset];
+
+        if suffix_byte_offset != 31 {
+            for i in suffix_byte_offset + 1..31 {
+                target[i] = rand::random::<u8>();
+            }
+        }
+    }
+
+    target.into()
+}
+
 #[cfg(test)]
 mod tests {
-    use ::enr::CombinedKey;
+    use ::enr::{CombinedKey, EnrKey};
     use discv5::ListenConfig;
+    use rand::Rng;
     use secp256k1::rand::thread_rng;
     use tracing::trace;
 
@@ -619,5 +658,120 @@ mod tests {
             },
             filtered_peer.unwrap().node_record
         )
+    }
+
+    // Copied from sigp/discv5
+    #[allow(unreachable_pub)]
+    #[allow(unused)]
+    mod sigp {
+        use enr::{
+            k256::sha2::digest::generic_array::{typenum::U32, GenericArray},
+            NodeId,
+        };
+        use uint::construct_uint;
+
+        construct_uint! {
+            /// 256-bit unsigned integer.
+            pub(super) struct U256(4);
+        }
+
+        /// A `Key` is a cryptographic hash, identifying both the nodes participating in
+        /// the Kademlia DHT, as well as records stored in the DHT.
+        ///
+        /// The set of all `Key`s defines the Kademlia keyspace.
+        ///
+        /// `Key`s have an XOR metric as defined in the Kademlia paper, i.e. the bitwise XOR of
+        /// the hash digests, interpreted as an integer. See [`Key::distance`].
+        ///
+        /// A `Key` preserves the preimage of type `T` of the hash function. See [`Key::preimage`].
+        #[derive(Clone, Debug)]
+        pub struct Key<T> {
+            preimage: T,
+            hash: GenericArray<u8, U32>,
+        }
+
+        impl<T> PartialEq for Key<T> {
+            fn eq(&self, other: &Key<T>) -> bool {
+                self.hash == other.hash
+            }
+        }
+
+        impl<T> Eq for Key<T> {}
+
+        impl<TPeerId> AsRef<Key<TPeerId>> for Key<TPeerId> {
+            fn as_ref(&self) -> &Key<TPeerId> {
+                self
+            }
+        }
+
+        impl<T> Key<T> {
+            /// Construct a new `Key` by providing the raw 32 byte hash.
+            pub fn new_raw(preimage: T, hash: GenericArray<u8, U32>) -> Key<T> {
+                Key { preimage, hash }
+            }
+
+            /// Borrows the preimage of the key.
+            pub fn preimage(&self) -> &T {
+                &self.preimage
+            }
+
+            /// Converts the key into its preimage.
+            pub fn into_preimage(self) -> T {
+                self.preimage
+            }
+
+            /// Computes the distance of the keys according to the XOR metric.
+            pub fn distance<U>(&self, other: &Key<U>) -> Distance {
+                let a = U256::from(self.hash.as_slice());
+                let b = U256::from(other.hash.as_slice());
+                Distance(a ^ b)
+            }
+
+            // Used in the FINDNODE query outside of the k-bucket implementation.
+            /// Computes the integer log-2 distance between two keys, assuming a 256-bit
+            /// key. The output returns None if the key's are identical. The range is 1-256.
+            pub fn log2_distance<U>(&self, other: &Key<U>) -> Option<u64> {
+                let xor_dist = self.distance(other);
+                let log_dist = u64::from(256 - xor_dist.0.leading_zeros());
+                if log_dist == 0 {
+                    None
+                } else {
+                    Some(log_dist)
+                }
+            }
+        }
+
+        impl From<NodeId> for Key<NodeId> {
+            fn from(node_id: NodeId) -> Self {
+                Key { preimage: node_id, hash: *GenericArray::from_slice(&node_id.raw()) }
+            }
+        }
+
+        /// A distance between two `Key`s.
+        #[derive(Copy, Clone, PartialEq, Eq, Default, PartialOrd, Ord, Debug)]
+        pub struct Distance(pub(super) U256);
+    }
+
+    #[test]
+    fn select_lookup_target() {
+        // distance ceiled to the next byte
+        const fn expected_log2_distance(log2_distance: usize) -> u64 {
+            let log2_distance = log2_distance / 8;
+            ((log2_distance + 1) * 8) as u64
+        }
+
+        let log2_distance = rand::thread_rng().gen_range(0..=MAX_LOG2_DISTANCE);
+
+        let sk = CombinedKey::generate_secp256k1();
+        let local_node_id = discv5::enr::NodeId::from(sk.public());
+        let target = get_lookup_target(log2_distance, local_node_id);
+
+        let local_node_id = sigp::Key::from(local_node_id);
+        let target = sigp::Key::from(target);
+
+        assert_eq!(
+            expected_log2_distance(log2_distance),
+            local_node_id.log2_distance(&target).unwrap()
+        );
     }
 }
