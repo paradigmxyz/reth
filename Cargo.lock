@@ -4299,10 +4299,12 @@ version = "0.0.0"
 dependencies = [
  "eyre",
  "futures-util",
+ "rand 0.8.5",
  "reth",
  "reth-node-core",
  "reth-node-ethereum",
  "reth-primitives",
+ "secp256k1 0.27.0",
  "serde_json",
  "tokio",
 ]
