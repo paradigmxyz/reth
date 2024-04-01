@@ -26,12 +26,12 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
+use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::{
     p2p::headers::downloader::SyncTarget,
     provider::{ProviderResult, RootMismatch},
     RethResult,
 };
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     keccak256,
     revm::{config::revm_spec, env::fill_block_env},

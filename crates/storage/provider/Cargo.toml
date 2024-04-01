@@ -19,7 +19,7 @@ reth-db.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
-reth-node-api.workspace = true
+reth-evm.workspace = true
 
 revm.workspace = true
 
