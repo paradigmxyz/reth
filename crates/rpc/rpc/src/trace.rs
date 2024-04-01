@@ -24,7 +24,7 @@ use reth_rpc_types::{
         parity::*,
         tracerequest::TraceCallRequest,
     },
-    BlockOverrides, Index, TransactionRequest,
+    BlockError, BlockOverrides, Index, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -256,8 +256,8 @@ where
             ))
         }
 
-        // fetch all blocks with related senders in that range
-        let blocks = self.provider().block_with_senders_range(start..=end)?;
+        // fetch all blocks in that range
+        let blocks = self.provider().block_range(start..=end)?;
 
         // find relevant blocks to trace
         let mut target_blocks = Vec::new();
@@ -265,7 +265,7 @@ where
             let mut transaction_indices = HashSet::new();
             let mut highest_matching_index = 0;
             for (tx_idx, tx) in block.body.iter().enumerate() {
-                let from = block.senders[tx_idx];
+                let from = tx.recover_signer().ok_or(BlockError::InvalidSignature)?;
                 let to = tx.to();
                 if matcher.matches(from, to) {
                     let idx = tx_idx as u64;
