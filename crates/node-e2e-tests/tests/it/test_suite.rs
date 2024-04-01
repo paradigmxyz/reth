@@ -4,7 +4,7 @@ use reth_primitives::{
     B256, U256,
 };
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 /// Helper struct to customize the chain spec during e2e tests
 pub struct TestSuite {
@@ -26,7 +26,7 @@ impl TestSuite {
     /// Creates a custom chain spec and allocates the initial balance to the given account
     fn chain_spec(account: &Account) -> Arc<ChainSpec> {
         let sk = B256::from_slice(&account.secret_key.secret_bytes());
-        let mut alloc = HashMap::new();
+        let mut alloc = BTreeMap::new();
         let genesis_acc = GenesisAccount {
             balance: U256::from(1_000_000_000_000_000_000_000_000u128),
             code: None,
