@@ -375,11 +375,10 @@ impl TransactionFetcher {
         let mut max_retried_and_evicted_hashes = vec![];
 
         for hash in hashes.into_iter() {
-            debug_assert!(
-                self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_some(),
-                "`%hash` in `@buffered_hashes` that's not in `@hashes_fetch_inflight_and_pending_fetch`, `@buffered_hashes` should be a subset of keys in `@hashes_fetch_inflight_and_pending_fetch`, broken invariant `@buffered_hashes` and `@hashes_fetch_inflight_and_pending_fetch`,
-`%hash`: {hash}"
-            );
+            // hash could have been evicted from bounded lru map
+            if self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_none() {
+                continue
+            }
 
             let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
                 self.hashes_fetch_inflight_and_pending_fetch.get(&hash)
