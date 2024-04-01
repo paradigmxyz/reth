@@ -6,11 +6,16 @@ use crate::{
 };
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
+use reth_ipc::server::IpcServer;
+pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+
 use jsonrpsee::{
     http_client::HeaderMap,
     server::{RpcModule, ServerHandle},
     Methods,
 };
+
+use crate::constants::DEFAULT_IPC_ENDPOINT;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_provider::{
@@ -149,6 +154,8 @@ pub struct AuthServerConfig {
     pub(crate) secret: JwtSecret,
     /// Configs for JSON-RPC Http.
     pub(crate) server_config: ServerBuilder,
+    ipc_server_config: Option<IpcServerBuilder>,
+    ipc_endpoint: Option<Endpoint>,
 }
 
 // === impl AuthServerConfig ===
@@ -191,6 +198,8 @@ pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
     server_config: Option<ServerBuilder>,
+    ipc_server_config: Option<IpcServerBuilder>,
+    ipc_endpoint: Option<Endpoint>,
 }
 
 // === impl AuthServerConfigBuilder ===
@@ -198,7 +207,13 @@ pub struct AuthServerConfigBuilder {
 impl AuthServerConfigBuilder {
     /// Create a new `AuthServerConfigBuilder` with the given `secret`.
     pub fn new(secret: JwtSecret) -> Self {
-        Self { socket_addr: None, secret, server_config: None }
+        Self {
+            socket_addr: None,
+            secret,
+            server_config: None,
+            ipc_server_config: None,
+            ipc_endpoint: None,
+        }
     }
 
     /// Set the socket address for the server.
@@ -228,6 +243,16 @@ impl AuthServerConfigBuilder {
         self
     }
 
+    /// Set the ipc endpoint for the server.
+    pub fn ipc_endpoint(mut self, ipc_endpoint: Endpoint) -> Self {
+        self.ipc_endpoint = Some(ipc_endpoint);
+        self
+    }
+    pub fn with_ipc_config(mut self, config: IpcServerBuilder) -> Self {
+        self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
+        self
+    }
+
     /// Build the `AuthServerConfig`.
     pub fn build(self) -> AuthServerConfig {
         AuthServerConfig {
@@ -251,6 +276,16 @@ impl AuthServerConfigBuilder {
                     .max_request_body_size(128 * 1024 * 1024)
                     .set_id_provider(EthSubscriptionIdProvider::default())
             }),
+            ipc_server_config: self.ipc_server_config.unwrap_or_else(|| {
+                IpcServerBuilder::new()
+                    .max_response_body_size(750 * 1024 * 1024)
+                    .max_connections(500)
+                    .max_request_body_size(128 * 1024 * 1024)
+                    .set_id_provider(EthSubscriptionIdProvider::default())
+            }),
+            ipc_endpoint: self
+                .ipc_endpoint
+                .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string())),
         }
     }
 }
