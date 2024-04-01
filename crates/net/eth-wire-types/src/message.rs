@@ -26,10 +26,10 @@ pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 /// Error when sending/receiving a message
 #[derive(thiserror::Error, Debug)]
 pub enum MessageError {
-    #[error("message id {1:?} is invalid for version {0:?}")]
     /// Flags an unrecognized message ID for a given protocol version.
-    InvalidMessageError(EthVersion, EthMessageID),
-    /// This variant is for encapsulating alloy_rlp::Error
+    #[error("message id {1:?} is invalid for version {0:?}")]
+    Invalid(EthVersion, EthMessageID),
+    /// Thrown when rlp decoding a message message failed.
     #[error("RLP error: {0}")]
     RlpError(#[from] alloy_rlp::Error),
 }
@@ -93,20 +93,14 @@ impl ProtocolMessage {
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(MessageError::InvalidMessageError(
-                        version,
-                        EthMessageID::GetNodeData,
-                    ))
+                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
                 }
                 let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
                 EthMessage::GetNodeData(request_pair)
             }
             EthMessageID::NodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(MessageError::InvalidMessageError(
-                        version,
-                        EthMessageID::GetNodeData,
-                    ))
+                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
                 }
                 let request_pair = RequestPair::<NodeData>::decode(buf)?;
                 EthMessage::NodeData(request_pair)
@@ -499,7 +493,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use super::MessageError;
     use crate::{
         message::RequestPair, EthMessage, EthMessageID, GetNodeData, NodeData, ProtocolMessage,
@@ -522,14 +515,14 @@ mod tests {
             message: get_node_data,
         });
         let msg = ProtocolMessage::decode_message(crate::EthVersion::Eth67, &mut &buf[..]);
-        assert!(matches!(msg, Err(MessageError::InvalidMessageError(..))));
+        assert!(matches!(msg, Err(MessageError::Invalid(..))));
 
         let node_data =
             EthMessage::NodeData(RequestPair { request_id: 1337, message: NodeData(vec![]) });
         let buf =
             encode(ProtocolMessage { message_type: EthMessageID::NodeData, message: node_data });
         let msg = ProtocolMessage::decode_message(crate::EthVersion::Eth67, &mut &buf[..]);
-        assert!(matches!(msg, Err(MessageError::InvalidMessageError(..))));
+        assert!(matches!(msg, Err(MessageError::Invalid(..))));
     }
 
     #[test]

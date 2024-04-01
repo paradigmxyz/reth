@@ -1,4 +1,4 @@
-//! types for the eth wire protocol.
+//! Types for the eth wire protocol: <https://github.com/ethereum/devp2p/blob/master/caps/eth.md>
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

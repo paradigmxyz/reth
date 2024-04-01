@@ -110,7 +110,7 @@ where
             Err(err) => {
                 debug!("decode error in eth handshake: msg={their_msg:x}");
                 self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
-                return Err(EthStreamError::EthInvalidMessageError(err))
+                return Err(EthStreamError::InvalidMessage(err))
             }
         };
 
@@ -277,7 +277,7 @@ where
                     %msg,
                     "failed to decode protocol message"
                 );
-                return Poll::Ready(Some(Err(EthStreamError::EthInvalidMessageError(err))))
+                return Poll::Ready(Some(Err(EthStreamError::InvalidMessage(err))))
             }
         };
 
