@@ -60,19 +60,19 @@ where
     async fn call(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> Result<Bytes> {
         self.eth
-            .call(request, block_number, state_overrides, block_overrides)
+            .call(request, block_id, state_overrides, block_overrides)
             .instrument(engine_span!())
             .await
     }
 
     /// Handler for: `eth_getCode`
-    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
-        self.eth.get_code(address, block_number).instrument(engine_span!()).await
+    async fn get_code(&self, address: Address, block_id: Option<BlockId>) -> Result<Bytes> {
+        self.eth.get_code(address, block_id).instrument(engine_span!()).await
     }
 
     /// Handler for: `eth_getBlockByHash`

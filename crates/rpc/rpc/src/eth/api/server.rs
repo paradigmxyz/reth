@@ -212,9 +212,9 @@ where
     }
 
     /// Handler for: `eth_getBalance`
-    async fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256> {
-        trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getBalance");
-        Ok(self.on_blocking_task(|this| async move { this.balance(address, block_number) }).await?)
+    async fn balance(&self, address: Address, block_id: Option<BlockId>) -> Result<U256> {
+        trace!(target: "rpc::eth", ?address, ?block_id, "Serving eth_getBalance");
+        Ok(self.on_blocking_task(|this| async move { this.balance(address, block_id) }).await?)
     }
 
     /// Handler for: `eth_getStorageAt`
@@ -222,34 +222,26 @@ where
         &self,
         address: Address,
         index: JsonStorageKey,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
     ) -> Result<B256> {
-        trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
+        trace!(target: "rpc::eth", ?address, ?block_id, "Serving eth_getStorageAt");
         Ok(self
-            .on_blocking_task(|this| async move { this.storage_at(address, index, block_number) })
+            .on_blocking_task(|this| async move { this.storage_at(address, index, block_id) })
             .await?)
     }
 
     /// Handler for: `eth_getTransactionCount`
-    async fn transaction_count(
-        &self,
-        address: Address,
-        block_number: Option<BlockId>,
-    ) -> Result<U256> {
-        trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getTransactionCount");
+    async fn transaction_count(&self, address: Address, block_id: Option<BlockId>) -> Result<U256> {
+        trace!(target: "rpc::eth", ?address, ?block_id, "Serving eth_getTransactionCount");
         Ok(self
-            .on_blocking_task(
-                |this| async move { this.get_transaction_count(address, block_number) },
-            )
+            .on_blocking_task(|this| async move { this.get_transaction_count(address, block_id) })
             .await?)
     }
 
     /// Handler for: `eth_getCode`
-    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
-        trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getCode");
-        Ok(self
-            .on_blocking_task(|this| async move { this.get_code(address, block_number) })
-            .await?)
+    async fn get_code(&self, address: Address, block_id: Option<BlockId>) -> Result<Bytes> {
+        trace!(target: "rpc::eth", ?address, ?block_id, "Serving eth_getCode");
+        Ok(self.on_blocking_task(|this| async move { this.get_code(address, block_id) }).await?)
     }
 
     /// Handler for: `eth_getHeaderByNumber`
@@ -268,13 +260,13 @@ where
     async fn call(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> Result<Bytes> {
-        trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, ?block_overrides, "Serving eth_call");
+        trace!(target: "rpc::eth", ?request, ?block_id, ?state_overrides, ?block_overrides, "Serving eth_call");
         Ok(self
-            .call(request, block_number, EvmOverrides::new(state_overrides, block_overrides))
+            .call(request, block_id, EvmOverrides::new(state_overrides, block_overrides))
             .await?)
     }
 
@@ -305,14 +297,14 @@ where
     async fn estimate_gas(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> Result<U256> {
-        trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
+        trace!(target: "rpc::eth", ?request, ?block_id, "Serving eth_estimateGas");
         Ok(self
             .estimate_gas_at(
                 request,
-                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
+                block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
                 state_override,
             )
             .await?)

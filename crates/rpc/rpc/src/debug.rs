@@ -752,12 +752,11 @@ where
     async fn debug_trace_call(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_call(self, request, block_number, opts.unwrap_or_default())
-            .await?)
+        Ok(DebugApi::debug_trace_call(self, request, block_id, opts.unwrap_or_default()).await?)
     }
 
     async fn debug_trace_call_many(
