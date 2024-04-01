@@ -9,6 +9,7 @@ use std::{
 };
 
 use ::enr::Enr;
+use discv5::ListenConfig;
 use alloy_rlp::Decodable;
 use derive_more::{Deref, DerefMut};
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
@@ -155,9 +156,8 @@ impl Discv5 {
         let (enr, bc_enr, ip_mode, fork_id_key) = {
             let mut builder = discv5::enr::Enr::builder();
 
-            use discv5::ListenConfig::*;
             let (ip_mode, socket) = match discv5_config.listen_config {
-                Ipv4 { ip, port } => {
+                ListenConfig::Ipv4 { ip, port } => {
                     if ip != Ipv4Addr::UNSPECIFIED {
                         builder.ip4(ip);
                     }
@@ -166,7 +166,7 @@ impl Discv5 {
 
                     (IpMode::Ip4, (ip, port).into())
                 }
-                Ipv6 { ip, port } => {
+                ListenConfig::Ipv6 { ip, port } => {
                     if ip != Ipv6Addr::UNSPECIFIED {
                         builder.ip6(ip);
                     }
@@ -175,7 +175,7 @@ impl Discv5 {
 
                     (IpMode::Ip6, (ip, port).into())
                 }
-                DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
+                ListenConfig::DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
                     if ipv4 != Ipv4Addr::UNSPECIFIED {
                         builder.ip4(ipv4);
                     }
@@ -550,7 +550,6 @@ pub fn get_lookup_target(
 #[cfg(test)]
 mod tests {
     use ::enr::{CombinedKey, EnrKey};
-    use discv5::ListenConfig;
     use rand::Rng;
     use secp256k1::rand::thread_rng;
     use tracing::trace;
@@ -582,7 +581,7 @@ mod tests {
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
 
-        let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
+        let discv5_listen_config = ListenConfig::from(discv5_addr);
         let discv5_config = Config::builder(30303)
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .build();
