@@ -375,11 +375,10 @@ impl TransactionFetcher {
         let mut max_retried_and_evicted_hashes = vec![];
 
         for hash in hashes.into_iter() {
-            debug_assert!(
-                self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_some(),
-                "`%hash` in `@buffered_hashes` that's not in `@hashes_fetch_inflight_and_pending_fetch`, `@buffered_hashes` should be a subset of keys in `@hashes_fetch_inflight_and_pending_fetch`, broken invariant `@buffered_hashes` and `@hashes_fetch_inflight_and_pending_fetch`,
-`%hash`: {hash}"
-            );
+            // hash could have been evicted from bounded lru map
+            if self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_none() {
+                continue
+            }
 
             let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
                 self.hashes_fetch_inflight_and_pending_fetch.get(&hash)
@@ -665,20 +664,18 @@ impl TransactionFetcher {
 
         *inflight_count += 1;
 
-        debug_assert!(
-            || -> bool {
-                for hash in new_announced_hashes.iter() {
-                    if self.hashes_pending_fetch.contains(hash) {
-                        return false
-                    }
-                }
-                true
-            }(),
-            "`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@buffered_hashes` and `@inflight_requests`,
+        #[cfg(debug_assertions)]
+        {
+            for hash in new_announced_hashes.iter() {
+                if self.hashes_pending_fetch.contains(hash) {
+                    panic!("`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and
+`@inflight_requests`,
 `@hashes_fetch_inflight_and_pending_fetch` for `%new_announced_hashes`: {:?}",
-            new_announced_hashes.iter().map(|hash|
-                (*hash, self.hashes_fetch_inflight_and_pending_fetch.get(hash).cloned())
-            ).collect::<Vec<(TxHash, Option<TxFetchMetadata>)>>());
+                        new_announced_hashes.iter().map(|hash|
+                            (*hash, self.hashes_fetch_inflight_and_pending_fetch.get(hash).cloned())).collect::<Vec<(TxHash, Option<TxFetchMetadata>)>>())
+                }
+            }
+        }
 
         let (response, rx) = oneshot::channel();
         let req: PeerRequest = PeerRequest::GetPooledTransactions {
