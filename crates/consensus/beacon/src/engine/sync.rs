@@ -214,7 +214,13 @@ where
     }
 
     /// Sets a new target to sync the pipeline to.
+    ///
+    /// But ensures the target is not the zero hash.
     pub(crate) fn set_pipeline_sync_target(&mut self, target: B256) {
+        if target.is_zero() {
+            // precaution to never sync to the zero hash
+            return
+        }
         self.pending_pipeline_target = Some(target);
     }
 
