@@ -674,6 +674,7 @@ mod tests {
     // Copied from sigp/discv5
     #[allow(unreachable_pub)]
     #[allow(unused)]
+    #[allow(clippy::assign_op_pattern)]
     mod sigp {
         use enr::{
             k256::sha2::digest::generic_array::{typenum::U32, GenericArray},
