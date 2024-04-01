@@ -87,7 +87,7 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
 /// Note: Since blob transactions can be re-injected without their sidecar (after reorg), the
 /// validator can omit the sidecar if it is still in the blob store and return a
 /// [ValidTransaction::Valid] instead.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ValidTransaction<T> {
     /// A valid transaction without a sidecar.
     Valid(T),
@@ -367,6 +367,21 @@ impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
             .finish()
     }
 }
+
+impl<T> PartialEq for ValidPoolTransaction<T>
+where
+    T: PartialEq + PoolTransaction,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.transaction == other.transaction &&
+            self.transaction_id == other.transaction_id &&
+            self.propagate == other.propagate &&
+            self.timestamp == other.timestamp &&
+            self.origin == other.origin
+    }
+}
+
+impl<T> Eq for ValidPoolTransaction<T> where T: Eq + PoolTransaction {}
 
 /// Validation Errors that can occur during transaction validation.
 #[derive(thiserror::Error, Debug)]
