@@ -8,8 +8,8 @@ use crate::{
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
+use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
