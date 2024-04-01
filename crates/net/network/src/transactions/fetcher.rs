@@ -664,20 +664,18 @@ impl TransactionFetcher {
 
         *inflight_count += 1;
 
-        debug_assert!(
-            || -> bool {
-                for hash in new_announced_hashes.iter() {
-                    if self.hashes_pending_fetch.contains(hash) {
-                        return false
-                    }
-                }
-                true
-            }(),
-            "`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@buffered_hashes` and `@inflight_requests`,
+        #[cfg(debug_assertions)]
+        {
+            for hash in new_announced_hashes.iter() {
+                if self.hashes_pending_fetch.contains(hash) {
+                    panic!("`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and
+`@inflight_requests`,
 `@hashes_fetch_inflight_and_pending_fetch` for `%new_announced_hashes`: {:?}",
-            new_announced_hashes.iter().map(|hash|
-                (*hash, self.hashes_fetch_inflight_and_pending_fetch.get(hash).cloned())
-            ).collect::<Vec<(TxHash, Option<TxFetchMetadata>)>>());
+                        new_announced_hashes.iter().map(|hash|
+                            (*hash, self.hashes_fetch_inflight_and_pending_fetch.get(hash).cloned())).collect::<Vec<(TxHash, Option<TxFetchMetadata>)>>())
+                }
+            }
+        }
 
         let (response, rx) = oneshot::channel();
         let req: PeerRequest = PeerRequest::GetPooledTransactions {
