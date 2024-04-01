@@ -21,23 +21,21 @@
 //! [`StreamClone`] buffers egress bytes for [`MuxDemuxer`] that are read and sent to the network
 //! when [`MuxDemuxStream`] is polled.
 
-use std::{
-    collections::HashMap,
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
-
-use derive_more::{Deref, DerefMut};
-use futures::{Sink, SinkExt, StreamExt};
-use reth_primitives::bytes::{Bytes, BytesMut};
-use tokio::sync::mpsc;
-use tokio_stream::Stream;
-
 use crate::{
     capability::{Capability, SharedCapabilities, SharedCapability},
     errors::MuxDemuxError,
     CanDisconnect, DisconnectP2P, DisconnectReason,
 };
+use derive_more::{Deref, DerefMut};
+use futures::{Sink, SinkExt, StreamExt};
+use reth_primitives::bytes::{Bytes, BytesMut};
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
+use tokio::sync::mpsc;
+use tokio_stream::Stream;
 
 use MuxDemuxError::*;
 
@@ -351,21 +349,6 @@ impl CanDisconnect<Bytes> for StreamClone {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, pin::Pin};
-
-    use futures::{Future, SinkExt, StreamExt};
-    use reth_ecies::util::pk2id;
-    use reth_primitives::{
-        bytes::{BufMut, Bytes, BytesMut},
-        ForkFilter, Hardfork, MAINNET,
-    };
-    use secp256k1::{SecretKey, SECP256K1};
-    use tokio::{
-        net::{TcpListener, TcpStream},
-        task::JoinHandle,
-    };
-    use tokio_util::codec::{Decoder, Framed, LengthDelimitedCodec};
-
     use crate::{
         capability::{Capability, SharedCapabilities},
         muxdemux::MuxDemuxStream,
@@ -373,6 +356,18 @@ mod tests {
         EthVersion, HelloMessageWithProtocols, Status, StatusBuilder, StreamClone,
         UnauthedEthStream, UnauthedP2PStream,
     };
+    use futures::{Future, SinkExt, StreamExt};
+    use reth_primitives::{
+        bytes::{BufMut, Bytes, BytesMut},
+        pk2id, ForkFilter, Hardfork, MAINNET,
+    };
+    use secp256k1::{SecretKey, SECP256K1};
+    use std::{net::SocketAddr, pin::Pin};
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        task::JoinHandle,
+    };
+    use tokio_util::codec::{Decoder, Framed, LengthDelimitedCodec};
 
     const ETH_68_CAP: Capability = Capability::eth(EthVersion::Eth68);
     const ETH_68_PROTOCOL: Protocol = Protocol::new(ETH_68_CAP, 13);

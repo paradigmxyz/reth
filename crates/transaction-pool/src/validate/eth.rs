@@ -445,10 +445,14 @@ pub struct EthTransactionValidatorBuilder {
 
 impl EthTransactionValidatorBuilder {
     /// Creates a new builder for the given [ChainSpec]
+    ///
+    /// By default this assumes the network is on the `Cancun` hardfork and the following
+    /// transactions are allowed:
+    ///  - Legacy
+    ///  - EIP-2718
+    ///  - EIP-1559
+    ///  - EIP-4844
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        // If cancun is enabled at genesis, enable it
-        let cancun = chain_spec.is_cancun_active_at_timestamp(chain_spec.genesis_timestamp());
-
         Self {
             chain_spec,
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
@@ -466,8 +470,8 @@ impl EthTransactionValidatorBuilder {
             // shanghai is activated by default
             shanghai: true,
 
-            // TODO: can hard enable by default once mainnet transitioned
-            cancun,
+            // cancun is activated by default
+            cancun: true,
         }
     }
 
@@ -502,24 +506,35 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
-    /// Disables the eip2718 support.
+    /// Disables the support for EIP-2718 transactions.
     pub const fn no_eip2718(self) -> Self {
         self.set_eip2718(false)
     }
 
-    /// Set eip2718 support.
+    /// Set the support for EIP-2718 transactions.
     pub const fn set_eip2718(mut self, eip2718: bool) -> Self {
         self.eip2718 = eip2718;
         self
     }
 
-    /// Disables the eip1559 support.
+    /// Disables the support for EIP-1559 transactions.
     pub const fn no_eip1559(self) -> Self {
         self.set_eip1559(false)
     }
 
-    /// Set the eip1559 support.
+    /// Set the support for EIP-1559 transactions.
     pub const fn set_eip1559(mut self, eip1559: bool) -> Self {
+        self.eip1559 = eip1559;
+        self
+    }
+
+    /// Disables the support for EIP-4844 transactions.
+    pub const fn no_eip4844(self) -> Self {
+        self.set_eip1559(false)
+    }
+
+    /// Set the support for EIP-4844 transactions.
+    pub const fn set_eip4844(mut self, eip1559: bool) -> Self {
         self.eip1559 = eip1559;
         self
     }
