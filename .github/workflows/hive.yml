@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   prepare:
+    if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
     runs-on:
       group: Reth
