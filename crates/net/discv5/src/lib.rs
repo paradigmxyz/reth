@@ -97,7 +97,7 @@ impl Discv5 {
         key: Vec<u8>,
         value: impl alloy_rlp::Encodable,
     ) {
-        let mut buf = BytesMut::new();
+        let mut buf = Vec::new();
         value.encode(&mut buf);
         self.set_eip868_in_local_enr(key, buf.freeze())
     }
