@@ -68,16 +68,11 @@ where
     pub async fn call(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
         overrides: EvmOverrides,
     ) -> EthResult<Bytes> {
-        let (res, _env) = self
-            .transact_call_at(
-                request,
-                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                overrides,
-            )
-            .await?;
+        let block_id = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let (res, _env) = self.transact_call_at(request, block_id, overrides).await?;
 
         ensure_success(res.result)
     }
@@ -376,10 +371,10 @@ where
     pub(crate) async fn create_access_list_at(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
     ) -> EthResult<AccessListWithGasUsed> {
         self.on_blocking_task(|this| async move {
-            this.create_access_list_with(request, block_number).await
+            this.create_access_list_with(request, block_id).await
         })
         .await
     }

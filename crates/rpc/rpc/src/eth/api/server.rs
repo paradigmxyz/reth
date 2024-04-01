@@ -293,10 +293,10 @@ where
     async fn create_access_list(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
-        trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        let access_list_with_gas_used = self.create_access_list_at(request, block_number).await?;
+        trace!(target: "rpc::eth", ?request, ?block_id, "Serving eth_createAccessList");
+        let access_list_with_gas_used = self.create_access_list_at(request, block_id).await?;
 
         Ok(access_list_with_gas_used)
     }
@@ -416,10 +416,10 @@ where
         &self,
         address: Address,
         keys: Vec<JsonStorageKey>,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
-        trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
-        let res = EthApi::get_proof(self, address, keys, block_number).await;
+        trace!(target: "rpc::eth", ?address, ?keys, ?block_id, "Serving eth_getProof");
+        let res = EthApi::get_proof(self, address, keys, block_id).await;
 
         Ok(res.map_err(|e| match e {
             EthApiError::InvalidBlockRange => {

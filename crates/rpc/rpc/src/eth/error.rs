@@ -9,7 +9,7 @@ use jsonrpsee::{
 use reth_interfaces::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes, U256};
 use reth_revm::tracing::{js::JsInspectorError, MuxError};
-use reth_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
+use reth_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError, BlockId};
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
     PoolTransactionError,
@@ -44,6 +44,9 @@ pub enum EthApiError {
     /// When an unknown block number is encountered
     #[error("unknown block number")]
     UnknownBlockNumber,
+    /// When an unknown block is encountered
+    #[error("unknown block id")]
+    UnknownBlockId(BlockId),
     /// Thrown when querying for `finalized` or `safe` block before the merge transition is
     /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
     #[error("unknown block")]
@@ -155,6 +158,22 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::EvmCustom(_) => internal_rpc_err(error.to_string()),
             EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
+            }
+            EthApiError::UnknownBlockId(id) => {
+                let arg = match id {
+                    BlockId::Hash(h) => {
+                        if h.require_canonical == Some(true) {
+                            format!("canonical hash {}", h.block_hash)
+                        } else {
+                            format!("hash {}", h.block_hash)
+                        }
+                    }
+                    BlockId::Number(n) => format!("number {}", n),
+                };
+                rpc_error_with_code(
+                    EthRpcErrorCode::ResourceNotFound.code(),
+                    format!("{}: {}", error, arg),
+                )
             }
             EthApiError::UnknownSafeOrFinalizedBlock => {
                 rpc_error_with_code(EthRpcErrorCode::UnknownBlock.code(), error.to_string())

@@ -22,7 +22,8 @@ use reth_primitives::{
     U256, U64,
 };
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
@@ -231,7 +232,11 @@ where
     ///
     /// Note: if not [BlockNumberOrTag::Pending] then this will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
     pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox> {
-        Ok(self.provider().state_by_block_id(at)?)
+        self.provider().state_by_block_id(at).map_err(|e| match e {
+            ProviderError::HeaderNotFound(_) => EthApiError::UnknownBlockId(at),
+            ProviderError::BlockHashNotFound(_) => EthApiError::UnknownBlockId(at),
+            _ => e.into(),
+        })
     }
 
     /// Returns the state at the given [BlockId] enum or the latest.
