@@ -1456,12 +1456,9 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                 (body, senders)
             };
 
-            let block_or_err =
-                Block { header, body, ommers, withdrawals }.try_with_senders_unchecked(senders);
-            match block_or_err {
-                Ok(b) => Ok(b),
-                Err(_) => Err(ProviderError::SenderRecoveryError),
-            }
+            Block { header, body, ommers, withdrawals }
+                .try_with_senders_unchecked(senders)
+                .map_err(|_| ProviderError::SenderRecoveryError)
         })
     }
 }
