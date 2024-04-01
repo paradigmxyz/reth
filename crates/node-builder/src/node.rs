@@ -9,7 +9,10 @@ pub use reth_node_api::NodeTypes;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
-    rpc::builder::{auth::AuthServerHandle, RpcServerHandle},
+    rpc::{
+        api::EngineApiClient,
+        builder::{auth::AuthServerHandle, RpcServerHandle},
+    },
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::ChainSpec;
@@ -123,6 +126,20 @@ impl<Node: FullNodeComponents> FullNode<Node> {
     /// Returns the [AuthServerHandle] to the started authenticated engine API server.
     pub fn auth_server_handle(&self) -> &AuthServerHandle {
         &self.rpc_server_handles.auth
+    }
+
+    /// Returns the [EngineApiClient] interface for the authenticated engine API.
+    ///
+    /// This will send authenticated http requests to the node's auth server.
+    pub fn engine_http_client(&self) -> impl EngineApiClient<Node::Engine> {
+        self.auth_server_handle().http_client()
+    }
+
+    /// Returns the [EngineApiClient] interface for the authenticated engine API.
+    ///
+    /// This will send authenticated ws requests to the node's auth server.
+    pub async fn engine_ws_client(&self) -> impl EngineApiClient<Node::Engine> {
+        self.auth_server_handle().ws_client().await
     }
 }
 
