@@ -12,7 +12,7 @@ use reth::{
     tasks::TaskManager,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+use reth_node_ethereum::EthereumNode;
 use reth_primitives::{Address, BlockNumberOrTag, B256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -46,8 +46,10 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let payload_id = node.payload_builder.new_payload(eth_attr.clone()).await?;
 
     // resolve best payload via engine api
-    let client = node.auth_server_handle().http_client();
-    EngineApiClient::<EthEngineTypes>::get_payload_v3(&client, payload_id).await?;
+    let client = node.engine_http_client();
+
+    // ensure we can get the payload over the engine api
+    let _payload = client.get_payload_v3(payload_id).await?;
 
     let mut payload_event_stream = payload_events.into_stream();
 
@@ -67,29 +69,25 @@ async fn can_run_eth_node() -> eyre::Result<()> {
         let payload_v3 = envelope_v3.execution_payload;
 
         // submit payload to engine api
-        let submission = EngineApiClient::<EthEngineTypes>::new_payload_v3(
-            &client,
-            payload_v3,
-            vec![],
-            eth_attr.parent_beacon_block_root.unwrap(),
-        )
-        .await?;
+        let submission = client
+            .new_payload_v3(payload_v3, vec![], eth_attr.parent_beacon_block_root.unwrap())
+            .await?;
         assert!(submission.is_valid());
 
         // get latest valid hash from blockchain tree
         let hash = submission.latest_valid_hash.unwrap();
 
         // trigger forkchoice update via engine api to commit the block to the blockchain
-        let fcu = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v2(
-            &client,
-            ForkchoiceState {
-                head_block_hash: hash,
-                safe_block_hash: hash,
-                finalized_block_hash: hash,
-            },
-            None,
-        )
-        .await?;
+        let fcu = client
+            .fork_choice_updated_v2(
+                ForkchoiceState {
+                    head_block_hash: hash,
+                    safe_block_hash: hash,
+                    finalized_block_hash: hash,
+                },
+                None,
+            )
+            .await?;
         assert!(fcu.is_valid());
 
         // get head block from notifications stream and verify the tx has been pushed to the pool
