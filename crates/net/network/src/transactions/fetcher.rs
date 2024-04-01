@@ -944,6 +944,10 @@ impl TransactionFetcher {
                 let (verification_outcome, verified_payload) =
                     payload.verify(&requested_hashes, &peer_id);
 
+                let unsolicited = unverified_len - verified_payload.len();
+                if unsolicited > 0 {
+                    self.metrics.unsolicited_transactions.increment(unsolicited as u64);
+                }
                 if verification_outcome == VerificationOutcome::ReportPeer {
                     // todo: report peer for sending hashes that weren't requested
                     trace!(target: "net::tx",
@@ -997,6 +1001,7 @@ impl TransactionFetcher {
                     true
                 });
                 fetched.shrink_to_fit();
+                self.metrics.fetched_transactions.increment(fetched.len() as u64);
 
                 if fetched.len() < requested_hashes_len {
                     trace!(target: "net::tx",
