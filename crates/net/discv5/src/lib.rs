@@ -538,8 +538,8 @@ pub fn get_lookup_target(
         target[suffix_byte_offset] = !target[suffix_byte_offset];
 
         if suffix_byte_offset != 31 {
-            for i in suffix_byte_offset + 1..31 {
-                target[i] = rand::random::<u8>();
+            for b in target.iter_mut().take(31).skip(suffix_byte_offset + 1) {
+                *b = rand::random::<u8>();
             }
         }
     }
