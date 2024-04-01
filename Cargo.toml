@@ -19,6 +19,7 @@ members = [
     "crates/net/downloaders/",
     "crates/net/ecies/",
     "crates/net/eth-wire/",
+    "crates/net/eth-wire-types",
     "crates/net/nat/",
     "crates/net/network/",
     "crates/net/network-api/",
@@ -207,6 +208,7 @@ reth-node-api = { path = "crates/node-api" }
 reth-downloaders = { path = "crates/net/downloaders" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
+reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
 reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
 reth-etl = { path = "crates/etl" }
