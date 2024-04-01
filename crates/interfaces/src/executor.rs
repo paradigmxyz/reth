@@ -115,7 +115,7 @@ pub enum BlockExecutionError {
     /// Note: this is not feature gated for convenience.
     #[error("execution unavailable for tests")]
     UnavailableForTest,
-    /// Error when fetch latest block state.
+    /// Error when fetching latest block state.
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
 
