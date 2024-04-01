@@ -2090,6 +2090,7 @@ mod tests {
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
                 head_block_hash: rng.gen(),
+                finalized_block_hash: rng.gen(),
                 ..Default::default()
             })
             .await;
