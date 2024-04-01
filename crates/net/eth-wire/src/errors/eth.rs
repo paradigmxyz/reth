@@ -2,8 +2,9 @@
 
 use crate::{
     errors::{MuxDemuxError, P2PStreamError},
+    message::MessageError,
     version::ParseVersionError,
-    DisconnectReason, EthMessageID, EthVersion,
+    DisconnectReason,
 };
 use alloy_chains::Chain;
 use reth_primitives::{GotExpected, GotExpectedBoxed, ValidationError, B256};
@@ -24,9 +25,9 @@ pub enum EthStreamError {
     #[error(transparent)]
     /// Failed Ethereum handshake.
     EthHandshakeError(#[from] EthHandshakeError),
-    #[error("message id {1:?} is invalid for version {0:?}")]
-    /// Flags an unrecognized message ID for a given protocol version.
-    EthInvalidMessageError(EthVersion, EthMessageID),
+    /// Thrown when decoding a message message failed.
+    #[error(transparent)]
+    InvalidMessage(#[from] MessageError),
     #[error("message size ({0}) exceeds max length (10MB)")]
     /// Received a message whose size exceeds the standard limit.
     MessageTooBig(usize),
@@ -40,8 +41,8 @@ pub enum EthStreamError {
         /// The number of transaction sizes.
         sizes_len: usize,
     },
-    /// Error when data is not recieved from peer for a prolonged period.
-    #[error("never recieved data from remote peer")]
+    /// Error when data is not received from peer for a prolonged period.
+    #[error("never received data from remote peer")]
     StreamTimeout,
 }
 
@@ -70,12 +71,6 @@ impl EthStreamError {
 
 impl From<io::Error> for EthStreamError {
     fn from(err: io::Error) -> Self {
-        P2PStreamError::from(err).into()
-    }
-}
-
-impl From<alloy_rlp::Error> for EthStreamError {
-    fn from(err: alloy_rlp::Error) -> Self {
         P2PStreamError::from(err).into()
     }
 }

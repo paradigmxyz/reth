@@ -5826,6 +5826,7 @@ dependencies = [
  "reth-codecs",
  "reth-discv4",
  "reth-ecies",
+ "reth-eth-wire-types",
  "reth-metrics",
  "reth-net-common",
  "reth-primitives",
@@ -5839,6 +5840,30 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "reth-eth-wire-types"
+version = "0.2.0-beta.4"
+dependencies = [
+ "alloy-chains",
+ "alloy-rlp",
+ "arbitrary",
+ "async-stream",
+ "bytes",
+ "derive_more",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.5",
+ "reth-codecs",
+ "reth-net-common",
+ "reth-primitives",
+ "reth-tracing",
+ "secp256k1 0.27.0",
+ "serde",
+ "test-fuzz",
+ "thiserror",
+ "tokio-util",
 ]
 
 [[package]]
@@ -5898,7 +5923,7 @@ dependencies = [
  "futures",
  "parking_lot 0.12.1",
  "rand 0.8.5",
- "reth-eth-wire",
+ "reth-eth-wire-types",
  "reth-network-api",
  "reth-primitives",
  "reth-rpc-types",
