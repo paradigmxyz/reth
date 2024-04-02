@@ -445,6 +445,8 @@ pub trait EthTransactions: Send + Sync {
     /// transactions, in other words, it will stop executing transactions after the
     /// `highest_index`th transaction.
     ///
+    /// Note: This expect tx index to be 0-indexed, so the first transaction is at index 0.
+    ///
     /// This accepts a `inspector_setup` closure that returns the inspector to be used for tracing
     /// the transactions.
     async fn trace_block_until_with_inspector<Setup, Insp, F, R>(
@@ -1109,8 +1111,10 @@ where
             let base_fee = block_env.basefee.saturating_to::<u64>();
 
             // prepare transactions, we do everything upfront to reduce time spent with open state
-            let max_transactions =
-                highest_index.map_or(block.body.len(), |highest| highest as usize);
+            let max_transactions = highest_index.map_or(block.body.len(), |highest| {
+                // we need + 1 because the index is 0-based
+                highest as usize + 1
+            });
             let mut results = Vec::with_capacity(max_transactions);
 
             let mut transactions = block
