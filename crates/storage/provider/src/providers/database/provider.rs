@@ -1365,7 +1365,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         let len = range.end().saturating_sub(*range.start()) as usize;
         let mut blocks = Vec::with_capacity(len);
 
-        let headers = self.headers_range(range.clone())?;
+        let headers = self.headers_range(range)?;
         let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
         let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
