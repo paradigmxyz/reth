@@ -270,8 +270,7 @@ impl Command {
 
         let mut unwind = UnwindInput {
             checkpoint: checkpoint.with_block_number(self.to),
-            // don't unwind the genesis block
-            unwind_to: self.from.max(1),
+            unwind_to: self.from,
             bad_block: None,
         };
 
