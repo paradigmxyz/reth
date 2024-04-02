@@ -97,7 +97,7 @@ impl Command {
             eyre::bail!("Cannot unwind genesis block")
         }
 
-        // Only execute a pipeline unwind if the start of the range touches the existing static
+        // Only execute a pipeline unwind if the start of the range overlaps the existing static
         // files. If that's the case, then copy all available data from MDBX to static files, and
         // only then, proceed with the unwind.
         if let Some(highest_static_block) = provider_factory
