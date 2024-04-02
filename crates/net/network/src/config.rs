@@ -117,10 +117,8 @@ impl<C> NetworkConfig<C> {
     /// Sets the config to use for the discovery v5 protocol, with help of the
     /// [`reth_discv5::ConfigBuilder`].
     /// ```
-    /// use reth_discv4::secp256k1::SecretKey;
-    /// use reth_discv5::Config;
     /// use reth_network::NetworkConfigBuilder;
-    /// use secp256k1::rand::thread_rng;
+    /// use secp256k1::{rand::thread_rng, SecretKey};
     ///
     /// let sk = SecretKey::new(&mut thread_rng());
     /// let network_config = NetworkConfigBuilder::new(sk).build(());
@@ -138,8 +136,8 @@ impl<C> NetworkConfig<C> {
         let fork_id = self.status.forkid;
         let boot_nodes = self.boot_nodes.clone();
 
-        let mut builder = reth_discv5::Config::builder(rlpx_port)
-            .add_unsigned_boot_nodes(boot_nodes.into_iter()); // todo: store discv5 peers in separate file
+        let mut builder =
+            reth_discv5::Config::builder(rlpx_port).add_unsigned_boot_nodes(boot_nodes.into_iter()); // todo: store discv5 peers in separate file
 
         if chain.is_optimism() {
             builder = builder.fork(OPSTACK, fork_id)
