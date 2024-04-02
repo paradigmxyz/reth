@@ -409,7 +409,7 @@ impl StorageInner {
         // calculate the state root
         let state_root = client
             .latest()
-            .map_err(|_| BlockExecutionError::ProviderError)?
+            .map_err(BlockExecutionError::LatestBlock)?
             .state_root(bundle_state.state())
             .unwrap();
         header.state_root = state_root;
@@ -439,7 +439,9 @@ impl StorageInner {
 
         // now execute the block
         let db = State::builder()
-            .with_database_boxed(Box::new(StateProviderDatabase::new(client.latest().unwrap())))
+            .with_database_boxed(Box::new(StateProviderDatabase::new(
+                client.latest().map_err(BlockExecutionError::LatestBlock)?,
+            )))
             .with_bundle_update()
             .build();
         let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db, evm_config);

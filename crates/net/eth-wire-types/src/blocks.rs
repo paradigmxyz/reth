@@ -128,9 +128,7 @@ impl From<Vec<BlockBody>> for BlockBodies {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::{
-        message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-    };
+    use crate::{message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders};
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
         hex, BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction, TransactionKind,
