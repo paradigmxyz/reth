@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Ethereum network discovery V5"
+description = "Ethereum peer discovery V5"
 
 [lints]
 workspace = true
