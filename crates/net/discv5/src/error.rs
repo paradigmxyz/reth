@@ -8,6 +8,9 @@ pub enum Error {
     /// Failure adding node to [`discv5::Discv5`].
     #[error("failed adding node to discv5, {0}")]
     AddNodeToDiscv5Failed(&'static str),
+    /// Node record has incompatible key type.
+    #[error("incompatible key type (not secp256k1)")]
+    IncompatibleKeyType,
     /// Missing key used to identify rlpx network.
     #[error("fork missing on enr, 'eth' key missing")]
     ForkMissing,

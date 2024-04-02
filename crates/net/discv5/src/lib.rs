@@ -453,6 +453,8 @@ impl Discv5 {
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Result<NodeRecord, Error> {
+        let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
+
         let udp_socket = self.ip_mode().get_contactable_addr(enr).unwrap_or(socket);
 
         // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
@@ -463,8 +465,6 @@ impl Discv5 {
         }) else {
             return Err(Error::IpVersionMismatchRlpx(self.ip_mode()))
         };
-
-        let id = enr_to_discv4_id(enr);
 
         Ok(NodeRecord { address: udp_socket.ip(), tcp_port, udp_port: udp_socket.port(), id })
     }
@@ -668,7 +668,7 @@ mod tests {
                 address: remote_socket.ip(),
                 udp_port: remote_socket.port(),
                 tcp_port: REMOTE_RLPX_PORT,
-                id: enr_to_discv4_id(&remote_enr),
+                id: enr_to_discv4_id(&remote_enr).unwrap(),
             },
             filtered_peer.unwrap().node_record
         )

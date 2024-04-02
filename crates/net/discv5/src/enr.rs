@@ -7,15 +7,15 @@ use secp256k1::{PublicKey, SecretKey};
 
 /// Extracts a [`CombinedPublicKey::Secp256k1`] from a [`discv5::Enr`] and converts it to a
 /// [`PeerId`]. Note: conversion from discv5 ID to discv4 ID is not possible.
-pub fn enr_to_discv4_id(enr: &discv5::Enr) -> PeerId {
+pub fn enr_to_discv4_id(enr: &discv5::Enr) -> Option<PeerId> {
     let pk = enr.public_key();
-    debug_assert!(
-        matches!(pk, CombinedPublicKey::Secp256k1(_)),
-        "discv5 using different key type than discv4"
-    );
+    if !matches!(pk, CombinedPublicKey::Secp256k1(_)) {
+        return None
+    }
+
     let pk = PublicKey::from_slice(&pk.encode()).unwrap();
 
-    pk2id(&pk)
+    Some(pk2id(&pk))
 }
 
 /// Converts a [`PeerId`] to a [`discv5::enr::NodeId`].
