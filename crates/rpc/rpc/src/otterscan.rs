@@ -7,7 +7,7 @@ use revm_primitives::ExecutionResult;
 
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
-use reth_rpc_types::{
+use reth_rpc_types::trace::otterscan::{
     BlockDetails, BlockTransactions, ContractCreator, InternalOperation, OperationType,
     OtsBlockTransactions, OtsTransactionReceipt, TraceEntry, Transaction, TransactionsWithReceipts,
 };
