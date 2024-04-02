@@ -167,8 +167,7 @@ impl<DB> NodeState<DB> {
                         .and_then(|entities| entities.fmt_percentage());
                     let stage_eta = current_stage.eta.fmt_for_stage(stage_id);
 
-                    let message =
-                        if done { "Stage finished executing" } else { "Stage committed progress" };
+                    let message = if done { "Finished stage" } else { "Committed stage progress" };
 
                     match (stage_progress, stage_eta) {
                         (Some(stage_progress), Some(stage_eta)) => {
