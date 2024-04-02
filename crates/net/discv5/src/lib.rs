@@ -674,7 +674,7 @@ mod tests {
         )
     }
 
-    // Copied from sigp/discv5
+    // Copied from sigp/discv5 with slight modification (U256 type)
     // <https://github.com/sigp/discv5/blob/master/src/kbucket/key.rs#L89-L101>
     #[allow(unreachable_pub)]
     #[allow(unused)]
@@ -684,12 +684,7 @@ mod tests {
             k256::sha2::digest::generic_array::{typenum::U32, GenericArray},
             NodeId,
         };
-        use uint::construct_uint;
-
-        construct_uint! {
-            /// 256-bit unsigned integer.
-            pub(super) struct U256(4);
-        }
+        use reth_primitives::U256;
 
         /// A `Key` is a cryptographic hash, identifying both the nodes participating in
         /// the Kademlia DHT, as well as records stored in the DHT.
@@ -738,8 +733,8 @@ mod tests {
 
             /// Computes the distance of the keys according to the XOR metric.
             pub fn distance<U>(&self, other: &Key<U>) -> Distance {
-                let a = U256::from(self.hash.as_slice());
-                let b = U256::from(other.hash.as_slice());
+                let a = U256::from_be_slice(self.hash.as_slice());
+                let b = U256::from_be_slice(other.hash.as_slice());
                 Distance(a ^ b)
             }
 
@@ -748,7 +743,7 @@ mod tests {
             /// key. The output returns None if the key's are identical. The range is 1-256.
             pub fn log2_distance<U>(&self, other: &Key<U>) -> Option<u64> {
                 let xor_dist = self.distance(other);
-                let log_dist = u64::from(256 - xor_dist.0.leading_zeros());
+                let log_dist = (256 - xor_dist.0.leading_zeros() as u64);
                 if log_dist == 0 {
                     None
                 } else {
