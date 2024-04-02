@@ -4,8 +4,7 @@ use crate::{
     components::{
         NetworkBuilder, NodeComponents, NodeComponentsBuilder, PayloadServiceBuilder, PoolBuilder,
     },
-    node::FullNodeTypes,
-    BuilderContext,
+    BuilderContext, FullNodeTypes,
 };
 use std::marker::PhantomData;
 

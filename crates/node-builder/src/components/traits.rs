@@ -2,8 +2,8 @@
 
 use super::PoolBuilder;
 use crate::{
-    components::NodeComponents, node::FullNodeTypes, BuilderContext, Node, NodeHandle,
-    RethFullAdapter, RethFullBuilderState,
+    components::NodeComponents, BuilderContext, Node, NodeHandle, RethFullAdapter,
+    RethFullBuilderState,
 };
 use futures::Future;
 use reth_db::{
@@ -11,7 +11,7 @@ use reth_db::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_network::NetworkHandle;
-use reth_node_api::NodeTypes;
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,

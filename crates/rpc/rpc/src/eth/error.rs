@@ -20,6 +20,12 @@ use std::time::Duration;
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
 
+/// A tait for custom rpc errors used by [EthApiError::Other].
+pub trait ToRpcError: std::error::Error + Send + Sync + 'static {
+    /// Converts the error to a JSON-RPC error object.
+    fn to_rpc_error(&self) -> ErrorObject<'static>;
+}
+
 /// Errors that can occur when interacting with the `eth_` namespace
 #[derive(Debug, thiserror::Error)]
 pub enum EthApiError {
@@ -106,10 +112,6 @@ pub enum EthApiError {
     #[error(transparent)]
     /// Call Input error when both `data` and `input` fields are set and not equal.
     TransactionInputError(#[from] TransactionInputError),
-    /// Optimism related error
-    #[error(transparent)]
-    #[cfg(feature = "optimism")]
-    Optimism(#[from] OptimismEthApiError),
     /// Evm generic purpose error.
     #[error("Revm error: {0}")]
     EvmCustom(String),
@@ -119,27 +121,16 @@ pub enum EthApiError {
     /// Error thrown when tracing with a muxTracer fails
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
+    /// Any other error
+    #[error("0")]
+    Other(Box<dyn ToRpcError>),
 }
 
-/// Eth Optimism Api Error
-#[cfg(feature = "optimism")]
-#[derive(Debug, thiserror::Error)]
-pub enum OptimismEthApiError {
-    /// Wrapper around a [hyper::Error].
-    #[error(transparent)]
-    HyperError(#[from] hyper::Error),
-    /// Wrapper around an [reqwest::Error].
-    #[error(transparent)]
-    HttpError(#[from] reqwest::Error),
-    /// Thrown when serializing transaction to forward to sequencer
-    #[error("invalid sequencer transaction")]
-    InvalidSequencerTransaction,
-    /// Thrown when calculating L1 gas fee
-    #[error("failed to calculate l1 gas fee")]
-    L1BlockFeeError,
-    /// Thrown when calculating L1 gas used
-    #[error("failed to calculate l1 gas used")]
-    L1BlockGasError,
+impl EthApiError {
+    /// crates a new [EthApiError::Other] variant.
+    pub fn other<E: ToRpcError>(err: E) -> Self {
+        EthApiError::Other(Box::new(err))
+    }
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -178,14 +169,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             err @ EthApiError::InternalBlockingTaskError => internal_rpc_err(err.to_string()),
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
-            #[cfg(feature = "optimism")]
-            EthApiError::Optimism(err) => match err {
-                OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
-                OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
-                OptimismEthApiError::InvalidSequencerTransaction |
-                OptimismEthApiError::L1BlockFeeError |
-                OptimismEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
-            },
+            EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
         }
     }

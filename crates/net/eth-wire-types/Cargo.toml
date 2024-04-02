@@ -1,12 +1,13 @@
 [package]
-name = "reth-eth-wire"
-description = "Implements the eth/64 and eth/65 P2P protocols"
+name = "reth-eth-wire-types"
+description = "types for eth-wire"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
+exclude.workspace = true
 
 [lints]
 workspace = true
@@ -15,27 +16,13 @@ workspace = true
 # reth
 reth-codecs.workspace = true
 reth-primitives.workspace = true
-reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
 alloy-chains = { workspace = true, features = ["serde", "rlp", "arbitrary"] }
-reth-discv4.workspace = true
-reth-eth-wire-types.workspace = true
-
-# metrics
-reth-metrics.workspace = true
-metrics.workspace = true
 
 bytes.workspace = true
 derive_more.workspace = true
 thiserror.workspace = true
 serde = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["full"] }
-tokio-util = { workspace = true, features = ["io", "codec"] }
-futures.workspace = true
-tokio-stream.workspace = true
-pin-project.workspace = true
-tracing.workspace = true
-snap = "1.0.5"
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -62,8 +49,3 @@ default = ["serde"]
 serde = ["dep:serde"]
 arbitrary = ["reth-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 optimism = ["reth-primitives/optimism"]
-
-[[test]]
-name = "fuzz_roundtrip"
-path = "tests/fuzz_roundtrip.rs"
-required-features = ["arbitrary", "serde"]

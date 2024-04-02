@@ -157,7 +157,7 @@ impl Command {
             .await?;
         }
 
-        let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
+        let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
 
         let etl_config = EtlConfig::new(
             Some(

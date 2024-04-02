@@ -9,7 +9,7 @@ use crate::{
     },
     exex::{BoxedLaunchExEx, ExExContext},
     hooks::NodeHooks,
-    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter},
+    node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     DefaultLauncher, Node, NodeHandle,
 };
@@ -23,7 +23,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle};
-use reth_node_api::NodeTypes;
+use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},

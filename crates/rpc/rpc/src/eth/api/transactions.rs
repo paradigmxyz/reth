@@ -47,11 +47,12 @@ use revm::{
     },
     Inspector,
 };
+use std::future::Future;
 
 #[cfg(feature = "optimism")]
 use crate::eth::api::optimism::OptimismTxMeta;
 #[cfg(feature = "optimism")]
-use crate::eth::error::OptimismEthApiError;
+use crate::eth::optimism::OptimismEthApiError;
 #[cfg(feature = "optimism")]
 use reth_revm::optimism::RethL1BlockInfo;
 #[cfg(feature = "optimism")]
@@ -87,6 +88,24 @@ pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     fn call_gas_limit(&self) -> u64;
+
+    /// Executes the future on a new blocking task.
+    ///
+    /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
+    /// or CPU bound operations in general use [Self::spawn_blocking].
+    async fn spawn_blocking_future<F, R>(&self, c: F) -> EthResult<R>
+    where
+        F: Future<Output = EthResult<R>> + Send + 'static,
+        R: Send + 'static;
+
+    /// Executes a blocking on the tracing pol.
+    ///
+    /// Note: This is expected for futures that are predominantly CPU bound, for blocking IO futures
+    /// use [Self::spawn_blocking_future].
+    async fn spawn_blocking<F, R>(&self, c: F) -> EthResult<R>
+    where
+        F: FnOnce() -> EthResult<R> + Send + 'static,
+        R: Send + 'static;
 
     /// Returns the state at the given [BlockId]
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox>;
@@ -426,6 +445,8 @@ pub trait EthTransactions: Send + Sync {
     /// transactions, in other words, it will stop executing transactions after the
     /// `highest_index`th transaction.
     ///
+    /// Note: This expect tx index to be 0-indexed, so the first transaction is at index 0.
+    ///
     /// This accepts a `inspector_setup` closure that returns the inspector to be used for tracing
     /// the transactions.
     async fn trace_block_until_with_inspector<Setup, Insp, F, R>(
@@ -462,6 +483,22 @@ where
 {
     fn call_gas_limit(&self) -> u64 {
         self.inner.gas_cap
+    }
+
+    async fn spawn_blocking_future<F, R>(&self, c: F) -> EthResult<R>
+    where
+        F: Future<Output = EthResult<R>> + Send + 'static,
+        R: Send + 'static,
+    {
+        self.on_blocking_task(|_| c).await
+    }
+
+    async fn spawn_blocking<F, R>(&self, c: F) -> EthResult<R>
+    where
+        F: FnOnce() -> EthResult<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        self.spawn_tracing_task_with(move |_| c()).await
     }
 
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox> {
@@ -1074,8 +1111,10 @@ where
             let base_fee = block_env.basefee.saturating_to::<u64>();
 
             // prepare transactions, we do everything upfront to reduce time spent with open state
-            let max_transactions =
-                highest_index.map_or(block.body.len(), |highest| highest as usize);
+            let max_transactions = highest_index.map_or(block.body.len(), |highest| {
+                // we need + 1 because the index is 0-based
+                highest as usize + 1
+            });
             let mut results = Vec::with_capacity(max_transactions);
 
             let mut transactions = block
@@ -1286,10 +1325,10 @@ where
                     &envelope_buf,
                     tx.is_deposit(),
                 )
-                .map_err(|_| EthApiError::Optimism(OptimismEthApiError::L1BlockFeeError))?;
+                .map_err(|_| OptimismEthApiError::L1BlockFeeError)?;
             let inner_l1_data_gas = l1_block_info
                 .l1_data_gas(&self.inner.provider.chain_spec(), block_timestamp, &envelope_buf)
-                .map_err(|_| EthApiError::Optimism(OptimismEthApiError::L1BlockGasError))?;
+                .map_err(|_| OptimismEthApiError::L1BlockGasError)?;
             (Some(inner_l1_fee), Some(inner_l1_data_gas))
         } else {
             (None, None)
@@ -1316,7 +1355,7 @@ where
                     target = "rpc::eth",
                     "Failed to serialize transaction for forwarding to sequencer"
                 );
-                EthApiError::Optimism(OptimismEthApiError::InvalidSequencerTransaction)
+                OptimismEthApiError::InvalidSequencerTransaction
             })?;
 
             self.inner
@@ -1326,7 +1365,7 @@ where
                 .body(body)
                 .send()
                 .await
-                .map_err(|err| EthApiError::Optimism(OptimismEthApiError::HttpError(err)))?;
+                .map_err(OptimismEthApiError::HttpError)?;
         }
         Ok(())
     }
