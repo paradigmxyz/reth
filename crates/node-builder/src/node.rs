@@ -1,7 +1,7 @@
 use crate::{
     components::{ComponentsBuilder, FullNodeComponents},
-    provider::FullProvider,
     rpc::{RethRpcServerHandles, RpcRegistry},
+    FullProvider,
 };
 use reth_db::database::Database;
 use reth_network::NetworkHandle;

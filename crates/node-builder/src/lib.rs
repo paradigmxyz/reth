@@ -24,7 +24,6 @@ pub use builder::*;
 mod handle;
 pub use handle::NodeHandle;
 
-pub mod provider;
 pub mod rpc;
 
 /// Support for installing the ExExs (execution extensions) in a node.
