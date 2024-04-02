@@ -375,7 +375,7 @@ mod tests {
 
         let path = MaybePlatformPath::<DataDirPath>::from_str("my/path/to/datadir").unwrap();
         let path = path.unwrap_or_chain_default(Chain::mainnet(), DatadirArgs::default());
-        assert!(path.as_ref().ends_with("my/path/to/datadir"), "{:?}", path);
+        assert!(path.as_ref().ends_with("my/path/to/datadir"), "{path:?}");
     }
 
     #[test]
