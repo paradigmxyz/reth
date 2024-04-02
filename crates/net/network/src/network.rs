@@ -3,6 +3,7 @@ use crate::{
     peers::PeersHandle, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
     transactions::TransactionsHandle, FetchClient,
 };
+use enr::Enr;
 use parking_lot::Mutex;
 use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
@@ -12,7 +13,8 @@ use reth_network_api::{
     NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
     ReputationChangeKind,
 };
-use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, B256};
+use reth_network_types::PeerId;
+use reth_primitives::{Head, NodeRecord, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
 use secp256k1::SecretKey;
 use std::{
@@ -50,7 +52,6 @@ impl NetworkHandle {
         bandwidth_meter: BandwidthMeter,
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
-        #[cfg(feature = "optimism")] sequencer_endpoint: Option<String>,
         discv4: Option<Discv4>,
     ) -> Self {
         let inner = NetworkInner {
@@ -66,8 +67,6 @@ impl NetworkHandle {
             initial_sync_done: Arc::new(AtomicBool::new(false)),
             chain_id,
             tx_gossip_disabled,
-            #[cfg(feature = "optimism")]
-            sequencer_endpoint,
             discv4,
         };
         Self { inner: Arc::new(inner) }
@@ -240,6 +239,20 @@ impl PeersInfo for NetworkHandle {
             NodeRecord::new(socket_addr, id)
         }
     }
+
+    fn local_enr(&self) -> Enr<SecretKey> {
+        let local_node_record = self.local_node_record();
+        let mut builder = Enr::builder();
+        builder.ip(local_node_record.address);
+        if local_node_record.address.is_ipv4() {
+            builder.udp4(local_node_record.udp_port);
+            builder.tcp4(local_node_record.tcp_port);
+        } else {
+            builder.udp6(local_node_record.udp_port);
+            builder.tcp6(local_node_record.tcp_port);
+        }
+        builder.build(&self.inner.secret_key).expect("valid enr")
+    }
 }
 
 impl Peers for NetworkHandle {
@@ -329,11 +342,6 @@ impl NetworkInfo for NetworkHandle {
     fn is_initially_syncing(&self) -> bool {
         SyncStateProvider::is_initially_syncing(self)
     }
-
-    #[cfg(feature = "optimism")]
-    fn sequencer_endpoint(&self) -> Option<&str> {
-        self.inner.sequencer_endpoint.as_deref()
-    }
 }
 
 impl SyncStateProvider for NetworkHandle {
@@ -391,9 +399,6 @@ struct NetworkInner {
     chain_id: Arc<AtomicU64>,
     /// Whether to disable transaction gossip
     tx_gossip_disabled: bool,
-    /// The sequencer HTTP Endpoint
-    #[cfg(feature = "optimism")]
-    sequencer_endpoint: Option<String>,
     /// The instance of the discv4 service
     discv4: Option<Discv4>,
 }

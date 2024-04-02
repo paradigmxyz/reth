@@ -33,7 +33,7 @@ use tower::{Layer, Service};
 ///     let middleware = tower::ServiceBuilder::default().layer(layer);
 ///
 ///     let _server = ServerBuilder::default()
-///         .set_middleware(middleware)
+///         .set_http_middleware(middleware)
 ///         .build(addr.parse::<SocketAddr>().unwrap())
 ///         .await
 ///         .unwrap();
@@ -44,11 +44,7 @@ pub struct AuthLayer<V> {
     validator: V,
 }
 
-impl<V> AuthLayer<V>
-where
-    V: AuthValidator,
-    V::ResponseBody: Body,
-{
+impl<V> AuthLayer<V> {
     /// Creates an instance of [`AuthLayer`].
     /// `validator` is a generic trait able to validate requests (see [`AuthValidator`]).
     pub fn new(validator: V) -> Self {
@@ -159,7 +155,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use http::{header, Method, Request, StatusCode};
     use hyper::{body, Body};
     use jsonrpsee::{
@@ -276,7 +271,7 @@ mod tests {
         // Create a layered server
         let server = ServerBuilder::default()
             .set_id_provider(RandomStringIdProvider::new(16))
-            .set_middleware(middleware)
+            .set_http_middleware(middleware)
             .build(addr.parse::<SocketAddr>().unwrap())
             .await
             .unwrap();

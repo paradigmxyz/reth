@@ -1,4 +1,3 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use reth_config::config::EtlConfig;
 use reth_db::{
@@ -16,6 +15,7 @@ use reth_primitives::{
     Account, B256,
 };
 use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
@@ -46,6 +46,12 @@ impl AccountHashingStage {
     /// Create new instance of [AccountHashingStage].
     pub fn new(clean_threshold: u64, commit_threshold: u64, etl_config: EtlConfig) -> Self {
         Self { clean_threshold, commit_threshold, etl_config }
+    }
+
+    /// Set the ETL configuration to use.
+    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
+        self.etl_config = etl_config;
+        self
     }
 }
 
@@ -200,7 +206,17 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             let mut hashed_account_cursor =
                 tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
 
-            for item in collector.iter()? {
+            let total_hashes = collector.len();
+            let interval = (total_hashes / 10).max(1);
+            for (index, item) in collector.iter()?.enumerate() {
+                if index > 0 && index % interval == 0 {
+                    info!(
+                        target: "sync::stages::hashing_account",
+                        progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                        "Inserting hashes"
+                    );
+                }
+
                 let (key, value) = item?;
                 hashed_account_cursor
                     .append(RawKey::<B256>::from_vec(key), RawValue::<Account>::from_vec(value))?;
@@ -262,7 +278,7 @@ fn collect(
             collector.insert(key, v)?;
         }
     }
-    debug!(target: "sync::stages::hashing_account", "Hashed {} entries", collector.len());
+    info!(target: "sync::stages::hashing_account", "Hashed {} entries", collector.len());
     channels.clear();
     Ok(())
 }

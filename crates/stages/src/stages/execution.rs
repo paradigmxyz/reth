@@ -1,30 +1,32 @@
-use crate::{
-    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, BlockErrorKind, ExecInput, ExecOutput,
-    MetricEvent, MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
-};
+use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use num_traits::Zero;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::Database,
-    models::BlockNumberAddress,
-    static_file::HeaderMask,
-    tables,
-    transaction::{DbTx, DbTxMut},
+    cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
+use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
+use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, PruneModes, StaticFileSegment, U256,
+    BlockNumber, Header, PruneModes, StaticFileSegment,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
+    BlockReader, BundleStateWithReceipts, Chain, DatabaseProviderRW, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
+    TransactionVariant,
+};
+use reth_revm::database::StateProviderDatabase;
+use reth_stages_api::{
+    BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
+    UnwindInput, UnwindOutput,
 };
 use std::{
     cmp::Ordering,
     ops::RangeInclusive,
+    sync::Arc,
+    task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
 use tracing::*;
@@ -60,10 +62,10 @@ use tracing::*;
 /// to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
-pub struct ExecutionStage<EF: ExecutorFactory> {
+pub struct ExecutionStage<E> {
     metrics_tx: Option<MetricEventsSender>,
-    /// The stage's internal executor
-    executor_factory: EF,
+    /// The stage's internal block executor
+    executor_provider: E,
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -73,34 +75,39 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     external_clean_threshold: u64,
     /// Pruning configuration.
     prune_modes: PruneModes,
+    /// Handle to communicate with ExEx manager.
+    exex_manager_handle: ExExManagerHandle,
 }
 
-impl<EF: ExecutorFactory> ExecutionStage<EF> {
+impl<E> ExecutionStage<E> {
     /// Create new execution stage with specified config.
     pub fn new(
-        executor_factory: EF,
+        executor_provider: E,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         prune_modes: PruneModes,
+        exex_manager_handle: ExExManagerHandle,
     ) -> Self {
         Self {
             metrics_tx: None,
             external_clean_threshold,
-            executor_factory,
+            executor_provider,
             thresholds,
             prune_modes,
+            exex_manager_handle,
         }
     }
 
-    /// Create an execution stage with the provided  executor factory.
+    /// Create an execution stage with the provided executor.
     ///
     /// The commit threshold will be set to 10_000.
-    pub fn new_with_factory(executor_factory: EF) -> Self {
+    pub fn new_with_executor(executor_provider: E) -> Self {
         Self::new(
-            executor_factory,
+            executor_provider,
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
+            ExExManagerHandle::empty(),
         )
     }
 
@@ -108,129 +115,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
         self.metrics_tx = Some(metrics_tx);
         self
-    }
-
-    /// Execute the stage.
-    pub fn execute_inner<DB: Database>(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
-        if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
-        }
-
-        let start_block = input.next_block();
-        let max_block = input.target();
-        let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
-        let static_file_provider = provider.static_file_provider();
-
-        // We only use static files for Receipts, if there is no receipt pruning of any kind.
-        let static_file_producer = if self.prune_modes.receipts.is_none() &&
-            self.prune_modes.receipts_log_filter.is_empty()
-        {
-            Some(prepare_static_file_producer(provider, start_block)?)
-        } else {
-            None
-        };
-
-        // Build executor
-        let mut executor = self.executor_factory.with_state(LatestStateProviderRef::new(
-            provider.tx_ref(),
-            provider.static_file_provider().clone(),
-        ));
-        executor.set_prune_modes(prune_modes);
-        executor.set_tip(max_block);
-
-        // Progress tracking
-        let mut stage_progress = start_block;
-        let mut stage_checkpoint =
-            execution_checkpoint(static_file_provider, start_block, max_block, input.checkpoint())?;
-
-        let mut fetch_block_duration = Duration::default();
-        let mut execution_duration = Duration::default();
-        debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
-
-        // Execute block range
-        let mut cumulative_gas = 0;
-        let batch_start = Instant::now();
-
-        for block_number in start_block..=max_block {
-            // Fetch the block
-            let fetch_block_start = Instant::now();
-
-            let td = provider
-                .header_td_by_number(block_number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-
-            // we need the block's transactions but we don't need the transaction hashes
-            let block = provider
-                .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
-                .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
-
-            fetch_block_duration += fetch_block_start.elapsed();
-
-            cumulative_gas += block.gas_used;
-
-            // Configure the executor to use the current state.
-            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
-
-            // Execute the block
-            let execute_start = Instant::now();
-            executor.execute_and_verify_receipt(&block, td).map_err(|error| StageError::Block {
-                block: Box::new(block.header.clone().seal_slow()),
-                error: BlockErrorKind::Execution(error),
-            })?;
-            execution_duration += execute_start.elapsed();
-
-            // Gas metrics
-            if let Some(metrics_tx) = &mut self.metrics_tx {
-                let _ =
-                    metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
-            }
-
-            stage_progress = block_number;
-
-            stage_checkpoint.progress.processed += block.gas_used;
-
-            // Check if we should commit now
-            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
-            if self.thresholds.is_end_of_batch(
-                block_number - start_block,
-                bundle_size_hint,
-                cumulative_gas,
-                batch_start.elapsed(),
-            ) {
-                break
-            }
-        }
-        let time = Instant::now();
-        let state = executor.take_output_state();
-        let write_preparation_duration = time.elapsed();
-
-        let time = Instant::now();
-        // write output
-        state.write_to_storage(
-            provider.tx_ref(),
-            static_file_producer,
-            OriginalValuesKnown::Yes,
-        )?;
-        let db_write_duration = time.elapsed();
-        debug!(
-            target: "sync::stages::execution",
-            block_fetch = ?fetch_block_duration,
-            execution = ?execution_duration,
-            write_preparation = ?write_preparation_duration,
-            write = ?db_write_duration,
-            "Execution time"
-        );
-
-        let done = stage_progress == max_block;
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(stage_progress)
-                .with_execution_stage_checkpoint(stage_checkpoint),
-            done,
-        })
     }
 
     /// Adjusts the prune modes related to changesets.
@@ -260,6 +144,163 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             prune_modes.storage_history = None;
         }
         Ok(prune_modes)
+    }
+}
+
+impl<E> ExecutionStage<E>
+where
+    E: BlockExecutorProvider,
+{
+    /// Execute the stage.
+    pub fn execute_inner<DB: Database>(
+        &mut self,
+        provider: &DatabaseProviderRW<DB>,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
+        if input.target_reached() {
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+
+        let start_block = input.next_block();
+        let max_block = input.target();
+        let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
+        let static_file_provider = provider.static_file_provider();
+
+        // We only use static files for Receipts, if there is no receipt pruning of any kind.
+        let static_file_producer = if self.prune_modes.receipts.is_none() &&
+            self.prune_modes.receipts_log_filter.is_empty()
+        {
+            let mut producer = prepare_static_file_producer(provider, start_block)?;
+            // Since there might be a database <-> static file inconsistency (read
+            // `prepare_static_file_producer` for context), we commit the change straight away.
+            producer.commit()?;
+            Some(producer)
+        } else {
+            None
+        };
+
+        let db = StateProviderDatabase(LatestStateProviderRef::new(
+            provider.tx_ref(),
+            provider.static_file_provider().clone(),
+        ));
+        let mut executor = self.executor_provider.batch_executor(db, prune_modes);
+        executor.set_tip(max_block);
+
+        // Progress tracking
+        let mut stage_progress = start_block;
+        let mut stage_checkpoint =
+            execution_checkpoint(static_file_provider, start_block, max_block, input.checkpoint())?;
+
+        let mut fetch_block_duration = Duration::default();
+        let mut execution_duration = Duration::default();
+        debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
+
+        // Execute block range
+        let mut cumulative_gas = 0;
+        let batch_start = Instant::now();
+
+        let mut blocks = Vec::new();
+        for block_number in start_block..=max_block {
+            // Fetch the block
+            let fetch_block_start = Instant::now();
+
+            let td = provider
+                .header_td_by_number(block_number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+            // we need the block's transactions but we don't need the transaction hashes
+            let block = provider
+                .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+            fetch_block_duration += fetch_block_start.elapsed();
+
+            cumulative_gas += block.gas_used;
+
+            // Configure the executor to use the current state.
+            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
+
+            // Execute the block
+            let execute_start = Instant::now();
+
+            executor.execute_one((&block, td).into()).map_err(|error| StageError::Block {
+                block: Box::new(block.header.clone().seal_slow()),
+                error: BlockErrorKind::Execution(error),
+            })?;
+            execution_duration += execute_start.elapsed();
+
+            // Gas metrics
+            if let Some(metrics_tx) = &mut self.metrics_tx {
+                let _ =
+                    metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
+            }
+
+            stage_progress = block_number;
+            stage_checkpoint.progress.processed += block.gas_used;
+
+            // If we have ExEx's we need to save the block in memory for later
+            if self.exex_manager_handle.has_exexs() {
+                blocks.push(block);
+            }
+
+            // Check if we should commit now
+            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
+            if self.thresholds.is_end_of_batch(
+                block_number - start_block,
+                bundle_size_hint,
+                cumulative_gas,
+                batch_start.elapsed(),
+            ) {
+                break
+            }
+        }
+        let time = Instant::now();
+        let BatchBlockExecutionOutput { bundle, receipts, first_block } = executor.finalize();
+        let state = BundleStateWithReceipts::new(bundle, receipts, first_block);
+        let write_preparation_duration = time.elapsed();
+
+        // Check if we should send a [`ExExNotification`] to execution extensions.
+        //
+        // Note: Since we only write to `blocks` if there are any ExEx's we don't need to perform
+        // the `has_exexs` check here as well
+        if !blocks.is_empty() {
+            let chain = Arc::new(Chain::new(
+                blocks.into_iter().map(|block| {
+                    let hash = block.header.hash_slow();
+                    block.seal(hash)
+                }),
+                state.clone(),
+                None,
+            ));
+
+            // NOTE: We can ignore the error here, since an error means that the channel is closed,
+            // which means the manager has died, which then in turn means the node is shutting down.
+            let _ = self.exex_manager_handle.send(ExExNotification::ChainCommitted { new: chain });
+        }
+
+        let time = Instant::now();
+        // write output
+        state.write_to_storage(
+            provider.tx_ref(),
+            static_file_producer,
+            OriginalValuesKnown::Yes,
+        )?;
+        let db_write_duration = time.elapsed();
+        debug!(
+            target: "sync::stages::execution",
+            block_fetch = ?fetch_block_duration,
+            execution = ?execution_duration,
+            write_preparation = ?write_preparation_duration,
+            write = ?db_write_duration,
+            "Execution time"
+        );
+
+        let done = stage_progress == max_block;
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(stage_progress)
+                .with_execution_stage_checkpoint(stage_checkpoint),
+            done,
+        })
     }
 }
 
@@ -353,10 +394,24 @@ fn calculate_gas_used_from_headers(
     Ok(gas_total)
 }
 
-impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
+impl<E, DB> Stage<DB> for ExecutionStage<E>
+where
+    DB: Database,
+    E: BlockExecutorProvider,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::Execution
+    }
+
+    fn poll_execute_ready(
+        &mut self,
+        cx: &mut Context<'_>,
+        _: ExecInput,
+    ) -> Poll<Result<(), StageError>> {
+        ready!(self.exex_manager_handle.poll_ready(cx));
+
+        Poll::Ready(Ok(()))
     }
 
     /// Execute the stage
@@ -374,73 +429,31 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let tx = provider.tx_ref();
-        // Acquire changeset cursors
-        let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
-        let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
-
         let (range, unwind_to, _) =
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
-
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
             })
         }
 
-        // get all batches for account change
-        // Check if walk and walk_dup would do the same thing
-        let account_changeset_batch =
-            account_changeset.walk_range(range.clone())?.collect::<Result<Vec<_>, _>>()?;
+        // Unwind account and storage changesets, as well as receipts.
+        //
+        // This also updates `PlainStorageState` and `PlainAccountState`.
+        let bundle_state_with_receipts = provider.unwind_or_peek_state::<true>(range.clone())?;
 
-        // revert all changes to PlainState
-        for (_, changeset) in account_changeset_batch.into_iter().rev() {
-            if let Some(account_info) = changeset.info {
-                tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
-            } else {
-                tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
-            }
+        // Construct a `ExExNotification` if we have ExEx's installed.
+        if self.exex_manager_handle.has_exexs() {
+            // Get the blocks for the unwound range. This is needed for `ExExNotification`.
+            let blocks = provider.get_take_block_range::<false>(range.clone())?;
+            let chain = Chain::new(blocks, bundle_state_with_receipts, None);
+
+            // NOTE: We can ignore the error here, since an error means that the channel is closed,
+            // which means the manager has died, which then in turn means the node is shutting down.
+            let _ = self
+                .exex_manager_handle
+                .send(ExExNotification::ChainReverted { old: Arc::new(chain) });
         }
-
-        // get all batches for storage change
-        let storage_changeset_batch = storage_changeset
-            .walk_range(BlockNumberAddress::range(range.clone()))?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // revert all changes to PlainStorage
-        let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-
-        for (key, storage) in storage_changeset_batch.into_iter().rev() {
-            let address = key.address();
-            if let Some(v) = plain_storage_cursor.seek_by_key_subkey(address, storage.key)? {
-                if v.key == storage.key {
-                    plain_storage_cursor.delete_current()?;
-                }
-            }
-            if storage.value != U256::ZERO {
-                plain_storage_cursor.upsert(address, storage)?;
-            }
-        }
-
-        // Discard unwinded changesets
-        provider.unwind_table_by_num::<tables::AccountChangeSets>(unwind_to)?;
-
-        let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
-        while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
-            if key.block_number() < *range.start() {
-                break
-            }
-            // delete all changesets
-            rev_storage_changeset_walker.delete_current()?;
-        }
-
-        // Look up the start index for the transaction range
-        let first_tx_num = provider
-            .block_body_indices(*range.start())?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(*range.start()))?
-            .first_tx_num();
-
-        let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
 
         // Unwind all receipts for transactions in the block range
         if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
@@ -450,34 +463,24 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             // if the expected highest receipt in the files is higher than the database.
             // Which is essentially what happens here when we unwind this stage.
             let _static_file_producer = prepare_static_file_producer(provider, *range.start())?;
-
-            // Update the checkpoint.
-            if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
-                for block_number in range {
-                    stage_checkpoint.progress.processed -= provider
-                        .block_by_number(block_number)?
-                        .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?
-                        .gas_used;
-                }
-            }
         } else {
-            // We use database for Receipts, if there is any kind of receipt pruning/filtering,
-            // since it is not supported by static files.
-            let mut cursor = tx.cursor_write::<tables::Receipts>()?;
-            let mut reverse_walker = cursor.walk_back(None)?;
-
-            while let Some(Ok((tx_number, receipt))) = reverse_walker.next() {
-                if tx_number < first_tx_num {
-                    break
-                }
-                reverse_walker.delete_current()?;
-
-                if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
-                    stage_checkpoint.progress.processed -= receipt.cumulative_gas_used;
-                }
-            }
+            // If there is any kind of receipt pruning/filtering we use the database, since static
+            // files do not support filters.
+            //
+            // If we hit this case, the receipts have already been unwound by the call to
+            // `unwind_or_peek_state`.
         }
 
+        // Update the checkpoint.
+        let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
+        if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
+            for block_number in range {
+                stage_checkpoint.progress.processed -= provider
+                    .block_by_number(block_number)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
+                    .gas_used;
+            }
+        }
         let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {
             StageCheckpoint::new(unwind_to).with_execution_stage_checkpoint(stage_checkpoint)
         } else {
@@ -620,25 +623,26 @@ mod tests {
     use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use reth_db::models::AccountBeforeTx;
+    use reth_db::{models::AccountBeforeTx, transaction::DbTxMut};
+    use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_interfaces::executor::BlockValidationError;
-    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
         Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,
-        B256,
+        B256, U256,
     };
-    use reth_provider::{test_utils::create_test_provider_factory, AccountReader, ReceiptProvider};
-    use reth_revm::EvmProcessorFactory;
-    use std::{collections::BTreeMap, sync::Arc};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,
+        StaticFileProviderFactory,
+    };
+    use std::collections::BTreeMap;
 
-    fn stage() -> ExecutionStage<EvmProcessorFactory<EthEvmConfig>> {
-        let executor_factory = EvmProcessorFactory::new(
-            Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()),
-            EthEvmConfig::default(),
-        );
+    fn stage() -> ExecutionStage<EthExecutorProvider> {
+        let executor_provider = EthExecutorProvider::ethereum(Arc::new(
+            ChainSpecBuilder::mainnet().berlin_activated().build(),
+        ));
         ExecutionStage::new(
-            executor_factory,
+            executor_provider,
             ExecutionStageThresholds {
                 max_blocks: Some(100),
                 max_changes: None,
@@ -647,6 +651,7 @@ mod tests {
             },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
+            ExExManagerHandle::empty(),
         )
     }
 
@@ -872,7 +877,7 @@ mod tests {
                 mode.receipts_log_filter = random_filter.clone();
             }
 
-            let mut execution_stage: ExecutionStage<EvmProcessorFactory<EthEvmConfig>> = stage();
+            let mut execution_stage = stage();
             execution_stage.prune_modes = mode.clone().unwrap_or_default();
 
             let output = execution_stage.execute(&provider, input).unwrap();

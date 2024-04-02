@@ -65,15 +65,43 @@ Networking:
       --disable-discv4-discovery
           Disable Discv4 discovery
 
+      --enable-discv5-discovery
+          Enable Discv5 discovery
+
       --discovery.addr <DISCOVERY_ADDR>
-          The UDP address to use for P2P discovery/networking
+          The UDP address to use for devp2p peer discovery version 4
           
           [default: 0.0.0.0]
 
       --discovery.port <DISCOVERY_PORT>
-          The UDP port to use for P2P discovery/networking
+          The UDP port to use for devp2p peer discovery version 4
           
           [default: 30303]
+
+      --discovery.v5.addr <DISCOVERY_V5_ADDR>
+          The UDP address to use for devp2p peer discovery version 5
+          
+          [default: 0.0.0.0]
+
+      --discovery.v5.port <DISCOVERY_V5_PORT>
+          The UDP port to use for devp2p peer discovery version 5
+          
+          [default: 9000]
+
+      --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
+          The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
+          
+          [default: 60]
+
+      --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_bootstrap_lookup_interval>
+          The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
+          
+          [default: 5]
+
+      --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_bootstrap_lookup_countdown>
+          The number of times to carry out boost lookup queries at bootstrap
+          
+          [default: 100]
 
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs of trusted peers for P2P connections.
@@ -95,7 +123,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/<VERSION>-<SHA>/<ARCH>-gnu]
+          [default: reth/<VERSION>-<SHA>/<ARCH>]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -182,7 +210,7 @@ RPC:
           [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
 
       --ipcdisable
-          Disable the IPC-RPC  server
+          Disable the IPC-RPC server
 
       --ipcpath <IPCPATH>
           Filename for IPC socket/pipe within the datadir
@@ -206,48 +234,56 @@ RPC:
           
           If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
 
+      --auth-ipc
+          Enable auth engine API over IPC
+
+      --auth-ipc.path <AUTH_IPC_PATH>
+          Filename for auth IPC socket/pipe within the datadir
+          
+          [default: <CACHE_DIR>_engine_api.ipc]
+
       --rpc.jwtsecret <HEX>
           Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and `--ws.api`.
           
           This is __not__ used for the authenticated engine-API RPC server, see `--authrpc.jwtsecret`.
 
-      --rpc-max-request-size <RPC_MAX_REQUEST_SIZE>
+      --rpc.max-request-size <RPC_MAX_REQUEST_SIZE>
           Set the maximum RPC request payload size for both HTTP and WS in megabytes
           
           [default: 15]
 
-      --rpc-max-response-size <RPC_MAX_RESPONSE_SIZE>
+      --rpc.max-response-size <RPC_MAX_RESPONSE_SIZE>
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
           
           [default: 160]
-          [aliases: --rpc.returndata.limit]
+          [aliases: rpc.returndata.limit]
 
-      --rpc-max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
+      --rpc.max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
           Set the maximum concurrent subscriptions per connection
           
           [default: 1024]
 
-      --rpc-max-connections <COUNT>
+      --rpc.max-connections <COUNT>
           Maximum number of RPC server connections
           
           [default: 500]
 
-      --rpc-max-tracing-requests <COUNT>
+      --rpc.max-tracing-requests <COUNT>
           Maximum number of concurrent tracing requests
           
-          [default: 14]
+          [default: 8]
 
-      --rpc-max-blocks-per-filter <COUNT>
+      --rpc.max-blocks-per-filter <COUNT>
           Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
           
           [default: 100000]
 
-      --rpc-max-logs-per-response <COUNT>
+      --rpc.max-logs-per-response <COUNT>
           Maximum number of logs that can be returned in a single response. (0 = no limit)
           
           [default: 20000]
 
-      --rpc-gas-cap <GAS_CAP>
+      --rpc.gascap <GAS_CAP>
           Maximum gas limit for `eth_call` and call tracing RPC methods
           
           [default: 50000000]
@@ -295,37 +331,37 @@ Gas Price Oracle:
           [default: 60]
 
 TxPool:
-      --txpool.pending_max_count <PENDING_MAX_COUNT>
+      --txpool.pending-max-count <PENDING_MAX_COUNT>
           Max number of transaction in the pending sub-pool
           
           [default: 10000]
 
-      --txpool.pending_max_size <PENDING_MAX_SIZE>
+      --txpool.pending-max-size <PENDING_MAX_SIZE>
           Max size of the pending sub-pool in megabytes
           
           [default: 20]
 
-      --txpool.basefee_max_count <BASEFEE_MAX_COUNT>
+      --txpool.basefee-max-count <BASEFEE_MAX_COUNT>
           Max number of transaction in the basefee sub-pool
           
           [default: 10000]
 
-      --txpool.basefee_max_size <BASEFEE_MAX_SIZE>
+      --txpool.basefee-max-size <BASEFEE_MAX_SIZE>
           Max size of the basefee sub-pool in megabytes
           
           [default: 20]
 
-      --txpool.queued_max_count <QUEUED_MAX_COUNT>
+      --txpool.queued-max-count <QUEUED_MAX_COUNT>
           Max number of transaction in the queued sub-pool
           
           [default: 10000]
 
-      --txpool.queued_max_size <QUEUED_MAX_SIZE>
+      --txpool.queued-max-size <QUEUED_MAX_SIZE>
           Max size of the queued sub-pool in megabytes
           
           [default: 20]
 
-      --txpool.max_account_slots <MAX_ACCOUNT_SLOTS>
+      --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
           
           [default: 16]
@@ -340,12 +376,12 @@ TxPool:
           
           [default: 100]
 
-      --txpool.max_tx_input_bytes <MAX_TX_INPUT_BYTES>
+      --txpool.max-tx-input-bytes <MAX_TX_INPUT_BYTES>
           Max size in bytes of a single transaction allowed to enter the pool
           
           [default: 131072]
 
-      --txpool.max_cached_entries <MAX_CACHED_ENTRIES>
+      --txpool.max-cached-entries <MAX_CACHED_ENTRIES>
           The maximum number of blobs to keep in the in memory blob cache
           
           [default: 100]
@@ -402,17 +438,11 @@ Debug:
       --debug.max-block <MAX_BLOCK>
           Runs the sync only up to the specified block
 
-      --debug.print-inspector
-          Print opcode level traces directly to console during execution
+      --debug.skip-fcu <SKIP_FCU>
+          If provided, the engine will skip `n` consecutive FCUs
 
-      --debug.hook-block <HOOK_BLOCK>
-          Hook on a specific block during execution
-
-      --debug.hook-transaction <HOOK_TRANSACTION>
-          Hook on a specific transaction during execution
-
-      --debug.hook-all
-          Hook on every transaction in a block
+      --debug.skip-new-payload <SKIP_NEW_PAYLOAD>
+          If provided, the engine will skip `n` consecutive new payloads
 
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location

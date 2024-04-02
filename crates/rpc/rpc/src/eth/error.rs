@@ -2,29 +2,22 @@
 
 use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
 use alloy_sol_types::decode_revert_reason;
-use jsonrpsee::{
-    core::Error as RpcError,
-    types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
-};
+use jsonrpsee::types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject};
 use reth_interfaces::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes, U256};
-use reth_revm::tracing::{js::JsInspectorError, MuxError};
-use reth_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
+use reth_rpc_types::{
+    error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
+};
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
     PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
+use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
 use std::time::Duration;
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
-
-/// A tait for custom rpc errors used by [EthApiError::Other].
-pub trait ToRpcError: std::error::Error + Send + Sync + 'static {
-    /// Converts the error to a JSON-RPC error object.
-    fn to_rpc_error(&self) -> ErrorObject<'static>;
-}
 
 /// Errors that can occur when interacting with the `eth_` namespace
 #[derive(Debug, thiserror::Error)]
@@ -46,7 +39,12 @@ pub enum EthApiError {
     UnknownBlockNumber,
     /// Thrown when querying for `finalized` or `safe` block before the merge transition is
     /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
-    #[error("unknown block")]
+    ///
+    /// op-node uses case sensitive string comparison to parse this error:
+    /// <https://github.com/ethereum-optimism/optimism/blob/0913776869f6cb2c1218497463d7377cf4de16de/op-service/sources/l2_client.go#L105>
+    ///
+    /// TODO(#8045): Temporary, until a version of <https://github.com/ethereum-optimism/optimism/pull/10071> is pushed through that doesn't require this to figure out the EL sync status.
+    #[error("Unknown block")]
     UnknownSafeOrFinalizedBlock,
     /// Thrown when an unknown block or transaction index is encountered
     #[error("unknown block or tx index")]
@@ -122,7 +120,7 @@ pub enum EthApiError {
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
     /// Any other error
-    #[error("0")]
+    #[error("{0}")]
     Other(Box<dyn ToRpcError>),
 }
 
@@ -175,11 +173,6 @@ impl From<EthApiError> for ErrorObject<'static> {
     }
 }
 
-impl From<EthApiError> for RpcError {
-    fn from(error: EthApiError) -> Self {
-        RpcError::Call(error.into())
-    }
-}
 impl From<JsInspectorError> for EthApiError {
     fn from(error: JsInspectorError) -> Self {
         match error {

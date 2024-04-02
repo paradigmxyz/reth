@@ -51,12 +51,12 @@ impl InitCommand {
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
 
-        let provider_factory = ProviderFactory::new(db, self.chain, data_dir.static_files_path())?;
+        let provider_factory = ProviderFactory::new(db, self.chain, data_dir.static_files())?;
 
         info!(target: "reth::cli", "Writing genesis block");
 

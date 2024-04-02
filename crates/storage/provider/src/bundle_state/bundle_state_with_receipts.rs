@@ -1,9 +1,10 @@
-use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts};
+use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts, StateWriter};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_evm::execute::BatchBlockExecutionOutput;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     logs_bloom,
@@ -32,6 +33,22 @@ pub struct BundleStateWithReceipts {
     receipts: Receipts,
     /// First block of bundle state.
     first_block: BlockNumber,
+}
+
+// TODO(mattsse): unify the types, currently there's a cyclic dependency between
+impl From<BatchBlockExecutionOutput> for BundleStateWithReceipts {
+    fn from(value: BatchBlockExecutionOutput) -> Self {
+        let BatchBlockExecutionOutput { bundle, receipts, first_block } = value;
+        Self { bundle, receipts, first_block }
+    }
+}
+
+// TODO(mattsse): unify the types, currently there's a cyclic dependency between
+impl From<BundleStateWithReceipts> for BatchBlockExecutionOutput {
+    fn from(value: BundleStateWithReceipts) -> Self {
+        let BundleStateWithReceipts { bundle, receipts, first_block } = value;
+        Self { bundle, receipts, first_block }
+    }
 }
 
 /// Type used to initialize revms bundle state.
@@ -218,11 +235,13 @@ impl BundleStateWithReceipts {
         self.first_block
     }
 
-    /// Revert to given block number.
+    /// Revert the state to the given block number.
     ///
-    /// If number is in future, or in the past return false
+    /// Returns false if the block number is not in the bundle state.
     ///
-    /// NOTE: Provided block number will stay inside the bundle state.
+    /// # Note
+    ///
+    /// The provided block number will stay inside the bundle state.
     pub fn revert_to(&mut self, block_number: BlockNumber) -> bool {
         let Some(index) = self.block_number_to_index(block_number) else { return false };
 
@@ -290,14 +309,10 @@ impl BundleStateWithReceipts {
         // swap bundles
         std::mem::swap(&mut self.bundle, &mut other)
     }
+}
 
-    /// Write the [BundleStateWithReceipts] to database and receipts to either database or static
-    /// files if `static_file_producer` is `Some`. It should be none if there is any kind of
-    /// pruning/filtering over the receipts.
-    ///
-    /// `omit_changed_check` should be set to true of bundle has some of it data
-    /// detached, This would make some original values not known.
-    pub fn write_to_storage<TX>(
+impl StateWriter for BundleStateWithReceipts {
+    fn write_to_storage<TX>(
         self,
         tx: &TX,
         mut static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
@@ -314,7 +329,12 @@ impl BundleStateWithReceipts {
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
-        for (idx, receipts) in self.receipts.into_iter().enumerate() {
+        // ATTENTION: Any potential future refactor or change to how this loop works should keep in
+        // mind that the static file producer must always call `increment_block` even if the block
+        // has no receipts. Keeping track of the exact block range of the segment is needed for
+        // consistency, querying and file range segmentation.
+        let blocks = self.receipts.into_iter().enumerate();
+        for (idx, receipts) in blocks {
             let block_number = self.first_block + idx as u64;
             let first_tx_index = bodies_cursor
                 .seek_exact(block_number)?

@@ -1,4 +1,3 @@
-version: '3.9'
 name: 'reth'
 
 services:
@@ -16,6 +15,8 @@ services:
       - holesky_data:/root/.local/share/reth/holesky
       - logs:/root/logs
       - ./jwttoken:/root/jwt:ro
+    # https://paradigmxyz.github.io/reth/run/troubleshooting.html#concurrent-database-access-error-using-containersdocker
+    pid: host
     # For Sepolia, replace `--chain mainnet` with `--chain sepolia`
     # For Holesky, replace `--chain mainnet` with `--chain holesky`
     command: >

@@ -1,5 +1,4 @@
 //! Utils for `stages`.
-use crate::StageError;
 use reth_config::config::EtlConfig;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -10,6 +9,7 @@ use reth_db::{
 };
 use reth_etl::Collector;
 use reth_primitives::BlockNumber;
+use reth_stages_api::StageError;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
 
@@ -64,7 +64,7 @@ where
 
     // observability
     let total_changesets = tx.entries::<CS>()?;
-    let interval = (total_changesets / 100).max(1);
+    let interval = (total_changesets / 1000).max(1);
 
     let mut flush_counter = 0;
     let mut current_block_number = u64::MAX;
@@ -72,8 +72,8 @@ where
         let (block_number, key) = partial_key_factory(entry?);
         cache.entry(key).or_default().push(block_number);
 
-        if idx > 0 && idx % interval == 0 && total_changesets > 100 {
-            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
+        if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
         }
 
         // Make sure we only flush the cache every DEFAULT_CACHE_THRESHOLD blocks.

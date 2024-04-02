@@ -6,7 +6,8 @@ use crate::{
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
-use reth_primitives::{hex, pk2id, ForkHash, ForkId, NodeRecord, B256};
+use reth_network_types::pk2id;
+use reth_primitives::{hex, ForkHash, ForkId, NodeRecord, B256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},
@@ -113,7 +114,7 @@ impl MockDiscovery {
     }
 
     /// Encodes the packet, sends it and returns the hash.
-    fn send_packet(&mut self, msg: Message, to: SocketAddr) -> B256 {
+    fn send_packet(&self, msg: Message, to: SocketAddr) -> B256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         let _ = self.egress.try_send((payload, to));
         hash

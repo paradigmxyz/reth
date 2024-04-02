@@ -1,10 +1,15 @@
 use crate::result::ToRpcResult;
+use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
-use reth_primitives::{AnyNode, ChainSpec, NodeRecord};
+use reth_network_types::AnyNode;
+use reth_primitives::{ChainSpec, NodeRecord};
 use reth_rpc_api::AdminApiServer;
-use reth_rpc_types::{NodeInfo, PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo};
+use reth_rpc_types::{
+    admin::{EthProtocolInfo, NodeInfo, Ports, ProtocolInfo},
+    PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo,
+};
 use std::sync::Arc;
 
 /// `admin` API implementation.
@@ -87,11 +92,31 @@ where
 
     /// Handler for `admin_nodeInfo`
     async fn node_info(&self) -> RpcResult<NodeInfo> {
-        let enr = self.network.local_node_record();
+        let enode = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
         let config = self.chain_spec.genesis().config.clone();
 
-        Ok(NodeInfo::new(enr, status, config))
+        let node_info = NodeInfo {
+            id: B256::from_slice(&enode.id.as_slice()[..32]),
+            name: status.client_version,
+            enode: enode.to_string(),
+            enr: self.network.local_enr().to_string(),
+            ip: enode.address,
+            ports: Ports { discovery: enode.udp_port, listener: enode.tcp_port },
+            listen_addr: enode.tcp_addr(),
+            protocols: ProtocolInfo {
+                eth: Some(EthProtocolInfo {
+                    network: status.eth_protocol_info.network,
+                    difficulty: status.eth_protocol_info.difficulty,
+                    genesis: status.eth_protocol_info.genesis,
+                    config,
+                    head: status.eth_protocol_info.head,
+                }),
+                snap: None,
+            },
+        };
+
+        Ok(node_info)
     }
 
     /// Handler for `admin_peerEvents`

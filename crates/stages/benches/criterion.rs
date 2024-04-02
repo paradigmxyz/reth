@@ -1,8 +1,5 @@
 #![allow(missing_docs)]
-use criterion::{
-    async_executor::FuturesExecutor, criterion_group, criterion_main, measurement::WallTime,
-    BenchmarkGroup, Criterion,
-};
+use criterion::{criterion_main, measurement::WallTime, BenchmarkGroup, Criterion};
 #[cfg(not(target_os = "windows"))]
 use pprof::criterion::{Output, PProfProfiler};
 use reth_config::config::EtlConfig;
@@ -12,32 +9,40 @@ use reth_primitives::{stage::StageCheckpoint, BlockNumber};
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TransactionLookupStage},
     test_utils::TestStageDB,
-    ExecInput, Stage, StageExt, UnwindInput,
 };
+use reth_stages_api::{ExecInput, Stage, StageExt, UnwindInput};
 use std::{ops::RangeInclusive, sync::Arc};
+use tokio::runtime::Runtime;
 
 mod setup;
 use setup::StageRange;
 
-#[cfg(not(target_os = "windows"))]
-criterion_group! {
-    name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
-    targets = transaction_lookup, account_hashing, senders, merkle
-}
+// Expanded form of `criterion_group!`
+//
+// This is currently needed to only instantiate the tokio runtime once.
+fn benches() {
+    #[cfg(not(target_os = "windows"))]
+    let mut criterion = Criterion::default()
+        .with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)))
+        .configure_from_args();
 
-#[cfg(target_os = "windows")]
-criterion_group! {
-    name = benches;
-    config = Criterion::default();
-    targets = transaction_lookup, account_hashing, senders, merkle
+    let runtime = Runtime::new().unwrap();
+    let _guard = runtime.enter();
+
+    #[cfg(target_os = "windows")]
+    let mut criterion = Criterion::default().configure_from_args();
+
+    transaction_lookup(&mut criterion, &runtime);
+    account_hashing(&mut criterion, &runtime);
+    senders(&mut criterion, &runtime);
+    merkle(&mut criterion, &runtime);
 }
 
 criterion_main!(benches);
 
 const DEFAULT_NUM_BLOCKS: u64 = 10_000;
 
-fn account_hashing(c: &mut Criterion) {
+fn account_hashing(c: &mut Criterion, runtime: &Runtime) {
     let mut group = c.benchmark_group("Stages");
 
     // don't need to run each stage for that many times
@@ -46,25 +51,39 @@ fn account_hashing(c: &mut Criterion) {
     let num_blocks = 10_000;
     let (db, stage, range) = setup::prepare_account_hashing(num_blocks);
 
-    measure_stage(&mut group, &db, setup::stage_unwind, stage, range, "AccountHashing".to_string());
+    measure_stage(
+        runtime,
+        &mut group,
+        &db,
+        setup::stage_unwind,
+        stage,
+        range,
+        "AccountHashing".to_string(),
+    );
 }
 
-fn senders(c: &mut Criterion) {
+fn senders(c: &mut Criterion, runtime: &Runtime) {
     let mut group = c.benchmark_group("Stages");
+
     // don't need to run each stage for that many times
     group.sample_size(10);
 
     let db = setup::txs_testdata(DEFAULT_NUM_BLOCKS);
 
-    for batch in [1000usize, 10_000, 100_000, 250_000] {
-        let stage = SenderRecoveryStage { commit_threshold: DEFAULT_NUM_BLOCKS };
-        let label = format!("SendersRecovery-batch-{batch}");
+    let stage = SenderRecoveryStage { commit_threshold: DEFAULT_NUM_BLOCKS };
 
-        measure_stage(&mut group, &db, setup::stage_unwind, stage, 0..=DEFAULT_NUM_BLOCKS, label);
-    }
+    measure_stage(
+        runtime,
+        &mut group,
+        &db,
+        setup::stage_unwind,
+        stage,
+        0..=DEFAULT_NUM_BLOCKS,
+        "SendersRecovery".to_string(),
+    );
 }
 
-fn transaction_lookup(c: &mut Criterion) {
+fn transaction_lookup(c: &mut Criterion, runtime: &Runtime) {
     let mut group = c.benchmark_group("Stages");
     // don't need to run each stage for that many times
     group.sample_size(10);
@@ -73,6 +92,7 @@ fn transaction_lookup(c: &mut Criterion) {
     let db = setup::txs_testdata(DEFAULT_NUM_BLOCKS);
 
     measure_stage(
+        runtime,
         &mut group,
         &db,
         setup::stage_unwind,
@@ -82,7 +102,7 @@ fn transaction_lookup(c: &mut Criterion) {
     );
 }
 
-fn merkle(c: &mut Criterion) {
+fn merkle(c: &mut Criterion, runtime: &Runtime) {
     let mut group = c.benchmark_group("Stages");
     // don't need to run each stage for that many times
     group.sample_size(10);
@@ -91,6 +111,7 @@ fn merkle(c: &mut Criterion) {
 
     let stage = MerkleStage::Both { clean_threshold: u64::MAX };
     measure_stage(
+        runtime,
         &mut group,
         &db,
         setup::unwind_hashes,
@@ -101,6 +122,7 @@ fn merkle(c: &mut Criterion) {
 
     let stage = MerkleStage::Both { clean_threshold: 0 };
     measure_stage(
+        runtime,
         &mut group,
         &db,
         setup::unwind_hashes,
@@ -111,6 +133,7 @@ fn merkle(c: &mut Criterion) {
 }
 
 fn measure_stage<F, S>(
+    runtime: &Runtime,
     group: &mut BenchmarkGroup<'_, WallTime>,
     db: &TestStageDB,
     setup: F,
@@ -135,7 +158,7 @@ fn measure_stage<F, S>(
     let (input, _) = stage_range;
 
     group.bench_function(label, move |b| {
-        b.to_async(FuturesExecutor).iter_with_setup(
+        b.to_async(runtime).iter_with_setup(
             || {
                 // criterion setup does not support async, so we have to use our own runtime
                 setup(stage.clone(), db, stage_range)

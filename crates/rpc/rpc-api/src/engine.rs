@@ -4,7 +4,7 @@
 //! the consensus client.
 
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_node_api::EngineTypes;
+use reth_engine_primitives::EngineTypes;
 use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_types::{
     engine::{
@@ -131,7 +131,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// layer p2p specification, meaning the input should be treated as untrusted or potentially
     /// adversarial.
     ///
-    /// Implementors should take care when acting on the input to this method, specifically
+    /// Implementers should take care when acting on the input to this method, specifically
     /// ensuring that the range is limited properly, and that the range boundaries are computed
     /// correctly and without panics.
     #[method(name = "getPayloadBodiesByRangeV1")]

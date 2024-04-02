@@ -78,6 +78,13 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
         last_finalized_block: BlockNumber,
     ) -> RethResult<()>;
 
+    /// Update all block hashes. iterate over present and new list of canonical hashes and compare
+    /// them. Remove all mismatches, disconnect them, removes all chains and clears all buffered
+    /// blocks before the tip.
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>>;
+
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree by attempting to connect the buffered blocks to canonical hashes.
     ///
@@ -96,10 +103,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// # Returns
     ///
     /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, CanonicalError>;
-
-    /// Unwind tables and put it inside state
-    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()>;
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError>;
 }
 
 /// Represents the kind of validation that should be performed when inserting a block.
@@ -290,15 +294,6 @@ pub trait BlockchainTreeViewer: Send + Sync {
 
     /// Canonical block number and hashes best known by the tree.
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
-
-    /// Given the parent hash of a block, this tries to find the last ancestor that is part of the
-    /// canonical chain.
-    ///
-    /// In other words, this will walk up the (side) chain starting with the given hash and return
-    /// the first block that's canonical.
-    ///
-    /// Note: this could be the given `parent_hash` if it's already canonical.
-    fn find_canonical_ancestor(&self, parent_hash: BlockHash) -> Option<BlockHash>;
 
     /// Return whether or not the block is known and in the canonical chain.
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError>;

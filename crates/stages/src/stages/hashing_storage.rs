@@ -1,4 +1,3 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use reth_config::config::EtlConfig;
 use reth_db::{
@@ -18,6 +17,7 @@ use reth_primitives::{
     BufMut, StorageEntry, B256,
 };
 use reth_provider::{DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::{
     fmt::Debug,
     sync::mpsc::{self, Receiver},
@@ -47,6 +47,12 @@ impl StorageHashingStage {
     /// Create new instance of [StorageHashingStage].
     pub fn new(clean_threshold: u64, commit_threshold: u64, etl_config: EtlConfig) -> Self {
         Self { clean_threshold, commit_threshold, etl_config }
+    }
+
+    /// Set the ETL configuration to use.
+    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
+        self.etl_config = etl_config;
+        self
     }
 }
 
@@ -116,8 +122,18 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
             collect(&mut channels, &mut collector)?;
 
+            let total_hashes = collector.len();
+            let interval = (total_hashes / 10).max(1);
             let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
-            for item in collector.iter()? {
+            for (index, item) in collector.iter()?.enumerate() {
+                if index > 0 && index % interval == 0 {
+                    info!(
+                        target: "sync::stages::hashing_storage",
+                        progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                        "Inserting hashes"
+                    );
+                }
+
                 let (addr_key, value) = item?;
                 cursor.append_dup(
                     B256::from_slice(&addr_key[..32]),
@@ -182,7 +198,7 @@ fn collect(
             collector.insert(key, v)?;
         }
     }
-    debug!(target: "sync::stages::hashing_storage", "Hashed {} entries", collector.len());
+    info!(target: "sync::stages::hashing_storage", "Hashed {} entries", collector.len());
     channels.clear();
     Ok(())
 }

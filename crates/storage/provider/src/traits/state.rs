@@ -1,11 +1,16 @@
 use super::AccountReader;
-use crate::{BlockHashReader, BlockIdReader, BundleStateWithReceipts, StateRootProvider};
+use crate::{
+    providers::StaticFileProviderRWRefMut, BlockHashReader, BlockIdReader, BundleStateWithReceipts,
+    StateRootProvider,
+};
 use auto_impl::auto_impl;
+use reth_db::transaction::{DbTx, DbTxMut};
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     trie::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
     Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
 };
+use revm::db::OriginalValuesKnown;
 
 /// Type alias of boxed [StateProvider].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -97,6 +102,7 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
 /// This affects tracing, or replaying blocks, which will need to be executed on top of the state of
 /// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
 /// to be used, since block `n` was executed on its parent block's state.
+#[auto_impl(&, Arc, Box)]
 pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Storage provider for latest block.
     fn latest(&self) -> ProviderResult<StateProviderBox>;
@@ -224,4 +230,18 @@ pub trait BundleStateDataProvider: Send + Sync {
     ///
     /// Needed to create state provider.
     fn canonical_fork(&self) -> BlockNumHash;
+}
+
+/// A helper trait for [BundleStateWithReceipts] to write state and receipts to storage.
+pub trait StateWriter {
+    /// Write the data and receipts to the database or static files if `static_file_producer` is
+    /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
+    fn write_to_storage<TX>(
+        self,
+        tx: &TX,
+        static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
+        is_value_known: OriginalValuesKnown,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut + DbTx;
 }

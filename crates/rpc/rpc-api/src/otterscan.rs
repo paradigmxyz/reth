@@ -1,8 +1,11 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, TxHash, B256};
 use reth_rpc_types::{
-    BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
-    Transaction, TransactionsWithReceipts,
+    trace::otterscan::{
+        BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
+        TransactionsWithReceipts,
+    },
+    Transaction,
 };
 
 /// Otterscan rpc interface.

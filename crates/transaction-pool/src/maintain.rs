@@ -13,8 +13,8 @@ use futures_util::{
 };
 use reth_primitives::{
     fs::FsPathError, Address, BlockHash, BlockNumber, BlockNumberOrTag,
-    FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, TransactionSigned,
+    FromRecoveredPooledTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
+    TransactionSigned, TryFromRecoveredTransaction,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
@@ -109,7 +109,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number,
             pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params(latest.timestamp + 12))
+                .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp + 12))
                 .unwrap_or_default(),
             pending_blob_fee: latest.next_block_blob_fee(),
         };
@@ -265,7 +265,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // fees for the next block: `new_tip+1`
                 let pending_block_base_fee = new_tip
-                    .next_block_base_fee(chain_spec.base_fee_params(new_tip.timestamp + 12))
+                    .next_block_base_fee(
+                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp + 12),
+                    )
                     .unwrap_or_default();
                 let pending_block_blob_fee = new_tip.next_block_blob_fee();
 
@@ -333,9 +335,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     <P as TransactionPool>::Transaction::from_recovered_pooled_transaction,
                                 )
                         } else {
-                            Some(<P as TransactionPool>::Transaction::from_recovered_transaction(
+                            <P as TransactionPool>::Transaction::try_from_recovered_transaction(
                                 tx,
-                            ))
+                            ).ok()
                         }
                     })
                     .collect::<Vec<_>>();
@@ -370,7 +372,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // fees for the next block: `tip+1`
                 let pending_block_base_fee = tip
-                    .next_block_base_fee(chain_spec.base_fee_params(tip.timestamp + 12))
+                    .next_block_base_fee(
+                        chain_spec.base_fee_params_at_timestamp(tip.timestamp + 12),
+                    )
                     .unwrap_or_default();
                 let pending_block_blob_fee = tip.next_block_blob_fee();
 
@@ -584,8 +588,13 @@ where
 
     let pool_transactions = txs_signed
         .into_iter()
-        .filter_map(|tx| tx.try_ecrecovered().map(<P::Transaction>::from_recovered_transaction))
+        .filter_map(|tx| tx.try_ecrecovered())
+        .filter_map(|tx| {
+            // Filter out errors
+            <P as TransactionPool>::Transaction::try_from_recovered_transaction(tx).ok()
+        })
         .collect::<Vec<_>>();
+
     let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
 
     info!(target: "txpool", txs_file =?file_path, num_txs=%outcome.len(), "Successfully reinserted local transactions from file");

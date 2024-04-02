@@ -22,7 +22,19 @@ use std::collections::{BTreeMap, HashSet};
 /// Caution: this is only intended for testing purposes, or for wiring components together.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct NoopBlockchainTree {}
+pub struct NoopBlockchainTree {
+    /// Broadcast channel for canon state changes notifications.
+    pub canon_state_notification_sender: Option<CanonStateNotificationSender>,
+}
+
+impl NoopBlockchainTree {
+    /// Create a new NoopBlockchainTree with a canon state notification sender.
+    pub fn with_canon_state_notifications(
+        canon_state_notification_sender: CanonStateNotificationSender,
+    ) -> Self {
+        Self { canon_state_notification_sender: Some(canon_state_notification_sender) }
+    }
+}
 
 impl BlockchainTreeEngine for NoopBlockchainTree {
     fn buffer_block(&self, _block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
@@ -53,12 +65,14 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
         Ok(())
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
-        Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
+        Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash }.into())
     }
 
-    fn unwind(&self, _unwind_to: BlockNumber) -> RethResult<()> {
-        Ok(())
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+        Ok(BTreeMap::new())
     }
 }
 
@@ -89,10 +103,6 @@ impl BlockchainTreeViewer for NoopBlockchainTree {
 
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
         Default::default()
-    }
-
-    fn find_canonical_ancestor(&self, _parent_hash: BlockHash) -> Option<BlockHash> {
-        None
     }
 
     fn is_canonical(&self, _block_hash: BlockHash) -> Result<bool, ProviderError> {
@@ -135,6 +145,9 @@ impl BlockchainTreePendingStateProvider for NoopBlockchainTree {
 
 impl CanonStateSubscriptions for NoopBlockchainTree {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
-        CanonStateNotificationSender::new(1).subscribe()
+        self.canon_state_notification_sender
+            .as_ref()
+            .map(|sender| sender.subscribe())
+            .unwrap_or_else(|| CanonStateNotificationSender::new(1).subscribe())
     }
 }

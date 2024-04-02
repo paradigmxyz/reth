@@ -20,6 +20,7 @@ use std::{
     sync::Arc,
 };
 
+mod checksum;
 mod clear;
 mod diff;
 mod get;
@@ -69,6 +70,8 @@ pub enum Subcommands {
     Stats(stats::Command),
     /// Lists the contents of a table
     List(list::Command),
+    /// Calculates the content checksum of a table
+    Checksum(checksum::Command),
     /// Create a diff between two database tables or two entire databases.
     Diff(diff::Command),
     /// Gets the content of a table for the given key
@@ -105,9 +108,9 @@ impl Command {
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         let db_args = self.db.database_args();
-        let static_files_path = data_dir.static_files_path();
+        let static_files_path = data_dir.static_files();
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.
@@ -117,6 +120,11 @@ impl Command {
                 });
             }
             Subcommands::List(command) => {
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::Checksum(command) => {
                 db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
                     command.execute(&tool)?;
                 });
@@ -151,7 +159,7 @@ impl Command {
                 let provider_factory =
                     ProviderFactory::new(db, self.chain.clone(), static_files_path.clone())?;
 
-                let mut tool = DbTool::new(provider_factory, self.chain.clone())?;
+                let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {

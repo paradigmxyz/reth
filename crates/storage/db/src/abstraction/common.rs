@@ -23,7 +23,7 @@ mod sealed {
     use crate::{database::Database, mock::DatabaseMock, DatabaseEnv};
     use std::sync::Arc;
 
-    /// Sealed trait to limit the implementors of the Database trait.
+    /// Sealed trait to limit the implementers of the Database trait.
     pub trait Sealed: Sized {}
 
     impl<DB: Database> Sealed for &DB {}

@@ -1,4 +1,4 @@
-use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_consensus::ConsensusError;
 use reth_db::{
     cursor::DbCursorRW,
     database::Database,
@@ -7,7 +7,6 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawValue,
 };
-use reth_interfaces::consensus;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,
@@ -15,6 +14,9 @@ use reth_primitives::{
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
     StatsReader,
+};
+use reth_stages_api::{
+    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
@@ -207,7 +209,7 @@ fn recover_range<DB: Database>(
                             Err(StageError::Block {
                                 block: Box::new(sealed_header),
                                 error: BlockErrorKind::Validation(
-                                    consensus::ConsensusError::TransactionSignerRecoveryError,
+                                    ConsensusError::TransactionSignerRecoveryError,
                                 ),
                             })
                         }
@@ -290,7 +292,10 @@ mod tests {
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
         TransactionSigned, B256,
     };
-    use reth_provider::{providers::StaticFileWriter, PruneCheckpointWriter, TransactionsProvider};
+    use reth_provider::{
+        providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
+        TransactionsProvider,
+    };
 
     use super::*;
     use crate::test_utils::{

@@ -18,6 +18,7 @@ reth-primitives.workspace = true
 reth-net-common.workspace = true
 reth-network-api.workspace = true
 reth-discv4.workspace = true
+reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
 reth-eth-wire.workspace = true
 reth-ecies.workspace = true
@@ -26,10 +27,13 @@ reth-transaction-pool.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
 reth-tokio-util.workspace = true
+reth-consensus.workspace = true
+reth-network-types.workspace = true
 
 # ethereum
-enr = { workspace = true, features = ["rust-secp256k1"], optional = true }
+enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 alloy-rlp.workspace = true
+discv5.workspace = true
 
 # async/futures
 futures.workspace = true
@@ -49,7 +53,7 @@ reth-metrics = { workspace = true, features = ["common"] }
 metrics.workspace = true
 
 # misc
-auto_impl = "1"
+auto_impl.workspace = true
 aquamarine.workspace = true
 tracing.workspace = true
 fnv = "1.0"
@@ -78,11 +82,9 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
+# alloy deps for testing against nodes
 alloy-node-bindings.workspace = true
-ethers-core = { workspace = true, default-features = false }
-ethers-providers = { workspace = true, default-features = false, features = ["ws"] }
-
-enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
+alloy-provider.workspace = true
 
 # misc
 serial_test.workspace = true
@@ -94,19 +96,9 @@ criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 
 [features]
 default = ["serde"]
-serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr?/serde", "dep:serde_json"]
-test-utils = [
-    "reth-provider/test-utils",
-    "dep:enr",
-    "dep:tempfile",
-    "reth-transaction-pool/test-utils",
-]
+serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr/serde", "dep:serde_json"]
+test-utils = ["reth-provider/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils"]
 geth-tests = []
-optimism = [
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-network-api/optimism",
-]
 
 [[bench]]
 name = "bench"

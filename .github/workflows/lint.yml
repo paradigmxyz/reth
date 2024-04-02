@@ -27,8 +27,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run:
-          cargo clippy --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }} asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+      - run: cargo clippy --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }} asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
         env:
           RUSTFLAGS: -D warnings
 
@@ -95,9 +94,7 @@ jobs:
         env:
           # Keep in sync with ./book.yml:jobs.build
           # This should only add `-D warnings`
-          RUSTDOCFLAGS:
-            --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page
-            -Zunstable-options -D warnings
+          RUSTDOCFLAGS: --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options -D warnings
 
   fmt:
     name: fmt
@@ -109,6 +106,12 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all --check
+
+  codespell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: codespell-project/actions-codespell@v2
 
   grafana:
     runs-on: ubuntu-latest
@@ -124,7 +127,7 @@ jobs:
     name: lint success
     runs-on: ubuntu-latest
     if: always()
-    needs: [clippy-binaries, clippy, crate-checks, docs, fmt, grafana]
+    needs: [clippy-binaries, clippy, crate-checks, docs, fmt, codespell, grafana]
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

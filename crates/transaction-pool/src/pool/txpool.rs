@@ -18,7 +18,6 @@ use crate::{
     PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
-use fnv::FnvHashMap;
 use itertools::Itertools;
 use reth_primitives::{
     constants::{
@@ -26,6 +25,7 @@ use reth_primitives::{
     },
     Address, TxHash, B256,
 };
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -44,7 +44,7 @@ use tracing::trace;
 /// include_mmd!("docs/mermaid/txpool.mmd")
 pub struct TxPool<T: TransactionOrdering> {
     /// Contains the currently known information about the senders.
-    sender_info: FnvHashMap<SenderId, SenderInfo>,
+    sender_info: FxHashMap<SenderId, SenderInfo>,
     /// pending subpool
     ///
     /// Holds transactions that are ready to be executed on the current state.
@@ -428,7 +428,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Update sub-pools size metrics.
-    pub(crate) fn update_size_metrics(&mut self) {
+    pub(crate) fn update_size_metrics(&self) {
         let stats = self.size();
         self.metrics.pending_pool_transactions.set(stats.pending as f64);
         self.metrics.pending_pool_size_bytes.set(stats.pending_size as f64);
@@ -903,7 +903,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Tracks the number of transactions by sender that are currently in the pool.
-    tx_counter: FnvHashMap<SenderId, usize>,
+    tx_counter: FxHashMap<SenderId, usize>,
     /// The current block number the pool keeps track of.
     last_seen_block_number: u64,
     /// The current block hash the pool keeps track of.
@@ -990,7 +990,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Updates the size metrics
-    pub(crate) fn update_size_metrics(&mut self) {
+    pub(crate) fn update_size_metrics(&self) {
         self.metrics.all_transactions_by_hash.set(self.by_hash.len() as f64);
         self.metrics.all_transactions_by_id.set(self.txs.len() as f64);
     }
@@ -1766,8 +1766,8 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     pub(crate) transaction: Arc<ValidPoolTransaction<T>>,
     /// The `SubPool` that currently contains this transaction.
     pub(crate) subpool: SubPool,
-    /// Keeps track of the current state of the transaction and therefor in which subpool it should
-    /// reside
+    /// Keeps track of the current state of the transaction and therefore in which subpool it
+    /// should reside
     pub(crate) state: TxState,
     /// The total cost all transactions before this transaction.
     ///

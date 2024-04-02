@@ -1,8 +1,6 @@
-use std::net::SocketAddr;
-
-use crate::RethRpcModule;
-use jsonrpsee::core::Error as JsonRpseeError;
-use std::{io, io::ErrorKind};
+use crate::{cors::CorsDomainError, RethRpcModule};
+use reth_ipc::server::IpcServerStartError;
+use std::{io, io::ErrorKind, net::SocketAddr};
 
 /// Rpc server kind.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -40,12 +38,17 @@ impl std::fmt::Display for ServerKind {
     }
 }
 
-/// Rpc Errors.
+/// Rpc Server related errors
 #[derive(Debug, thiserror::Error)]
 pub enum RpcError {
-    /// Wrapper for `jsonrpsee::core::Error`.
-    #[error(transparent)]
-    RpcError(#[from] JsonRpseeError),
+    /// Thrown during server start.
+    #[error("Failed to start {kind} server: {error}")]
+    ServerError {
+        /// Server kind.
+        kind: ServerKind,
+        /// IO error.
+        error: io::Error,
+    },
     /// Address already in use.
     #[error("address {kind} is already in use (os error 98). Choose a different port using {}", kind.flags())]
     AddressAlreadyInUse {
@@ -54,31 +57,27 @@ pub enum RpcError {
         /// IO error.
         error: io::Error,
     },
+    /// Cors parsing error.
+    #[error(transparent)]
+    Cors(#[from] CorsDomainError),
     /// Http and WS server configured on the same port but with conflicting settings.
     #[error(transparent)]
     WsHttpSamePortError(#[from] WsHttpSamePortError),
+    /// Thrown when IPC server fails to start.
+    #[error(transparent)]
+    IpcServerError(#[from] IpcServerStartError),
     /// Custom error.
     #[error("{0}")]
     Custom(String),
 }
 
 impl RpcError {
-    /// Converts a `jsonrpsee::core::Error` to a more descriptive `RpcError`.
-    pub fn from_jsonrpsee_error(err: JsonRpseeError, kind: ServerKind) -> RpcError {
-        match err {
-            JsonRpseeError::Transport(err) => {
-                if let Some(io_error) = err.downcast_ref::<io::Error>() {
-                    if io_error.kind() == ErrorKind::AddrInUse {
-                        return RpcError::AddressAlreadyInUse {
-                            kind,
-                            error: io::Error::from(io_error.kind()),
-                        }
-                    }
-                }
-                RpcError::RpcError(JsonRpseeError::Transport(err))
-            }
-            _ => err.into(),
+    /// Converts an [io::Error] to a more descriptive `RpcError`.
+    pub fn server_error(io_error: io::Error, kind: ServerKind) -> RpcError {
+        if io_error.kind() == ErrorKind::AddrInUse {
+            return RpcError::AddressAlreadyInUse { kind, error: io_error }
         }
+        RpcError::ServerError { kind, error: io_error }
     }
 }
 

@@ -1,7 +1,7 @@
 //! Helpers for testing debug trace calls.
 
 use futures::{Stream, StreamExt};
-use jsonrpsee::core::Error as RpcError;
+use jsonrpsee::core::client::Error as RpcError;
 use reth_primitives::{BlockId, TxHash, B256};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 use reth_rpc_types::{
@@ -37,14 +37,14 @@ pub trait DebugApiExt {
         &self,
         hash: B256,
         opts: GethDebugTracingOptions,
-    ) -> impl Future<Output = Result<serde_json::Value, jsonrpsee::core::Error>> + Send;
+    ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send;
 
     /// Trace all transactions in a block individually with the given tracing opts.
     fn debug_trace_transactions_in_block<B>(
         &self,
         block: B,
         opts: GethDebugTracingOptions,
-    ) -> impl Future<Output = Result<DebugTraceTransactionsStream<'_>, jsonrpsee::core::Error>> + Send
+    ) -> impl Future<Output = Result<DebugTraceTransactionsStream<'_>, RpcError>> + Send
     where
         B: Into<BlockId> + Send;
 
@@ -64,7 +64,7 @@ pub trait DebugApiExt {
         &self,
         request: TransactionRequest,
         opts: GethDebugTracingOptions,
-    ) -> impl Future<Output = Result<serde_json::Value, jsonrpsee::core::Error>> + Send;
+    ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send;
 
     ///  method for debug_traceCall using raw JSON strings for the request and options.
     fn debug_trace_call_raw_json(
@@ -84,7 +84,7 @@ where
         &self,
         hash: B256,
         opts: GethDebugTracingOptions,
-    ) -> Result<serde_json::Value, jsonrpsee::core::Error> {
+    ) -> Result<serde_json::Value, RpcError> {
         let mut params = jsonrpsee::core::params::ArrayParams::new();
         params.insert(hash).unwrap();
         params.insert(opts).unwrap();
@@ -95,7 +95,7 @@ where
         &self,
         block: B,
         opts: GethDebugTracingOptions,
-    ) -> Result<DebugTraceTransactionsStream<'_>, jsonrpsee::core::Error>
+    ) -> Result<DebugTraceTransactionsStream<'_>, RpcError>
     where
         B: Into<BlockId> + Send,
     {
@@ -150,7 +150,7 @@ where
         &self,
         request: TransactionRequest,
         opts: GethDebugTracingOptions,
-    ) -> Result<serde_json::Value, jsonrpsee::core::Error> {
+    ) -> Result<serde_json::Value, RpcError> {
         let mut params = jsonrpsee::core::params::ArrayParams::new();
         params.insert(request).unwrap();
         params.insert(opts).unwrap();

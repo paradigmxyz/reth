@@ -69,6 +69,13 @@ pub enum Hardfork {
     #[cfg(feature = "optimism")]
     Ecotone,
     // ArbOS20Atlas,
+
+    // Upcoming
+    /// Prague: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/prague.md>
+    Prague,
+    /// Fjord: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#fjord>
+    #[cfg(feature = "optimism")]
+    Fjord,
 }
 
 impl Hardfork {
@@ -551,6 +558,7 @@ impl FromStr for Hardfork {
             "canyon" => Hardfork::Canyon,
             #[cfg(feature = "optimism")]
             "ecotone" => Hardfork::Ecotone,
+            "prague" => Hardfork::Prague,
             // "arbos11" => Hardfork::ArbOS11,
             // "arbos20atlas" => Hardfork::ArbOS20Atlas,
             _ => return Err(format!("Unknown hardfork: {s}")),
@@ -588,6 +596,7 @@ mod tests {
             "PARIS",
             "ShAnGhAI",
             "CaNcUn",
+            "PrAguE",
         ];
         let expected_hardforks = [
             Hardfork::Frontier,
@@ -607,6 +616,7 @@ mod tests {
             Hardfork::Paris,
             Hardfork::Shanghai,
             Hardfork::Cancun,
+            Hardfork::Prague,
         ];
 
         let hardforks: Vec<Hardfork> =

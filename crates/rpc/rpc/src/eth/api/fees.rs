@@ -7,9 +7,9 @@ use crate::{
     },
     EthApi,
 };
+use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::ConfigureEvmEnv;
-use reth_primitives::{basefee::calculate_next_block_base_fee, BlockNumberOrTag, U256};
+use reth_primitives::{BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::FeeHistory;
 use reth_transaction_pool::TransactionPool;
@@ -21,7 +21,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     /// Returns a suggestion for a gas price for legacy transactions.
     ///
@@ -107,13 +107,13 @@ where
         let start_block = end_block_plus - block_count;
 
         // Collect base fees, gas usage ratios and (optionally) reward percentile data
-        let mut base_fee_per_gas: Vec<U256> = Vec::new();
+        let mut base_fee_per_gas: Vec<u128> = Vec::new();
         let mut gas_used_ratio: Vec<f64> = Vec::new();
 
-        let mut base_fee_per_blob_gas: Vec<U256> = Vec::new();
+        let mut base_fee_per_blob_gas: Vec<u128> = Vec::new();
         let mut blob_gas_used_ratio: Vec<f64> = Vec::new();
 
-        let mut rewards: Vec<Vec<U256>> = Vec::new();
+        let mut rewards: Vec<Vec<u128>> = Vec::new();
 
         // Check if the requested range is within the cache bounds
         let fee_entries = self.fee_history_cache().get_history(start_block, end_block).await;
@@ -124,10 +124,9 @@ where
             }
 
             for entry in &fee_entries {
-                base_fee_per_gas.push(U256::from(entry.base_fee_per_gas));
+                base_fee_per_gas.push(entry.base_fee_per_gas as u128);
                 gas_used_ratio.push(entry.gas_used_ratio);
-                base_fee_per_blob_gas
-                    .push(U256::from(entry.base_fee_per_blob_gas.unwrap_or_default()));
+                base_fee_per_blob_gas.push(entry.base_fee_per_blob_gas.unwrap_or_default());
                 blob_gas_used_ratio.push(entry.blob_gas_used_ratio);
 
                 if let Some(percentiles) = &reward_percentiles {
@@ -143,10 +142,9 @@ where
             // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the next
             // block
             base_fee_per_gas
-                .push(U256::from(last_entry.next_block_base_fee(&self.provider().chain_spec())));
+                .push(last_entry.next_block_base_fee(&self.provider().chain_spec()) as u128);
 
-            base_fee_per_blob_gas
-                .push(U256::from(last_entry.next_block_blob_fee().unwrap_or_default()));
+            base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
         } else {
             // read the requested header range
             let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
@@ -155,9 +153,9 @@ where
             }
 
             for header in &headers {
-                base_fee_per_gas.push(U256::from(header.base_fee_per_gas.unwrap_or_default()));
+                base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default() as u128);
                 gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
-                base_fee_per_blob_gas.push(U256::from(header.blob_fee().unwrap_or_default()));
+                base_fee_per_blob_gas.push(header.blob_fee().unwrap_or_default());
                 blob_gas_used_ratio.push(
                     header.blob_gas_used.unwrap_or_default() as f64 /
                         reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
@@ -189,17 +187,17 @@ where
             //
             // The unwrap is safe since we checked earlier that we got at least 1 header.
             let last_header = headers.last().expect("is present");
-            base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
-                last_header.gas_used,
-                last_header.gas_limit,
-                last_header.base_fee_per_gas.unwrap_or_default(),
-                self.provider().chain_spec().base_fee_params(last_header.timestamp),
-            )));
+            base_fee_per_gas.push(
+                self.provider().chain_spec().base_fee_params_at_timestamp(last_header.timestamp).next_block_base_fee(
+                    last_header.gas_used as u128,
+                    last_header.gas_limit as u128,
+                    last_header.base_fee_per_gas.unwrap_or_default() as u128,
+                ));
 
             // Same goes for the `base_fee_per_blob_gas`:
             // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
             base_fee_per_blob_gas
-                .push(U256::from(last_header.next_block_blob_fee().unwrap_or_default()));
+                .push(last_header.next_block_blob_fee().unwrap_or_default());
         };
 
         Ok(FeeHistory {
@@ -207,14 +205,14 @@ where
             gas_used_ratio,
             base_fee_per_blob_gas,
             blob_gas_used_ratio,
-            oldest_block: U256::from(start_block),
+            oldest_block: start_block,
             reward: reward_percentiles.map(|_| rewards),
         })
     }
 
     /// Approximates reward at a given percentile for a specific block
     /// Based on the configured resolution
-    fn approximate_percentile(&self, entry: &FeeHistoryEntry, requested_percentile: f64) -> U256 {
+    fn approximate_percentile(&self, entry: &FeeHistoryEntry, requested_percentile: f64) -> u128 {
         let resolution = self.fee_history_cache().resolution();
         let rounded_percentile =
             (requested_percentile * resolution as f64).round() / resolution as f64;
@@ -223,6 +221,6 @@ where
         // Calculate the index in the precomputed rewards array
         let index = (clamped_percentile / (1.0 / resolution as f64)).round() as usize;
         // Fetch the reward from the FeeHistoryEntry
-        entry.rewards.get(index).cloned().unwrap_or(U256::ZERO)
+        entry.rewards.get(index).cloned().unwrap_or_default()
     }
 }

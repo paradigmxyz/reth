@@ -4,14 +4,12 @@ use crate::{
     eth::error::{EthApiError, EthResult, RpcInvalidTransactionError},
     EthApi,
 };
-use reth_node_api::ConfigureEvmEnv;
-use reth_primitives::{
-    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, B256, U256,
-};
+use reth_evm::ConfigureEvm;
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
-use reth_rpc_types::EIP1186AccountProofResponse;
+use reth_rpc_types::{serde_helpers::JsonStorageKey, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -21,7 +19,7 @@ where
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: Send + Sync + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
         Ok(self
@@ -84,7 +82,7 @@ where
         block_id: Option<BlockId>,
     ) -> EthResult<EIP1186AccountProofResponse> {
         let chain_info = self.provider().chain_info()?;
-        let block_id = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let block_id = block_id.unwrap_or_default();
 
         // if we are trying to create a proof for the latest block, but have a BlockId as input
         // that is not BlockNumberOrTag::Latest, then we need to figure out whether or not the
@@ -121,7 +119,7 @@ mod tests {
     use crate::eth::{
         cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig,
     };
-    use reth_node_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_tasks::pool::BlockingTaskPool;
@@ -145,6 +143,7 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
+            None,
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -169,6 +168,7 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
+            None,
         );
 
         let storage_key: U256 = storage_key.into();

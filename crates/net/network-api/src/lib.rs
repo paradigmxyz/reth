@@ -14,13 +14,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_eth_wire::{DisconnectReason, EthVersion, Status};
-use reth_primitives::{NodeRecord, PeerId};
-use reth_rpc_types::NetworkStatus;
+use reth_network_types::PeerId;
+use reth_primitives::NodeRecord;
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
 use reth_eth_wire::capability::Capabilities;
+use reth_rpc_types::NetworkStatus;
 
 /// Network Error
 pub mod error;
@@ -46,10 +47,6 @@ pub trait NetworkInfo: Send + Sync {
 
     /// Returns `true` when the node is undergoing the very first Pipeline sync.
     fn is_initially_syncing(&self) -> bool;
-
-    /// Returns the sequencer HTTP endpoint, if set.
-    #[cfg(feature = "optimism")]
-    fn sequencer_endpoint(&self) -> Option<&str>;
 }
 
 /// Provides general purpose information about Peers in the network.
@@ -61,6 +58,9 @@ pub trait PeersInfo: Send + Sync {
 
     /// Returns the Ethereum Node Record of the node.
     fn local_node_record(&self) -> NodeRecord;
+
+    /// Returns the local ENR of the node.
+    fn local_enr(&self) -> enr::Enr<enr::secp256k1::SecretKey>;
 }
 
 /// Provides an API for managing the peers of the network.

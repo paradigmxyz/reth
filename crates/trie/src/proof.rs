@@ -165,11 +165,10 @@ where
 mod tests {
     use super::*;
     use crate::StateRoot;
-    use alloy_chains::Chain;
     use once_cell::sync::Lazy;
     use reth_db::database::Database;
     use reth_interfaces::RethResult;
-    use reth_primitives::{Account, Bytes, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
+    use reth_primitives::{Account, Bytes, Chain, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
     use std::{str::FromStr, sync::Arc};
 
@@ -208,9 +207,8 @@ mod tests {
         let genesis = chain_spec.genesis();
         let alloc_accounts = genesis
             .alloc
-            .clone()
-            .into_iter()
-            .map(|(addr, account)| (addr, Some(Account::from_genesis_account(account))));
+            .iter()
+            .map(|(addr, account)| (*addr, Some(Account::from_genesis_account(account))));
         provider.insert_account_for_hashing(alloc_accounts).unwrap();
 
         let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {

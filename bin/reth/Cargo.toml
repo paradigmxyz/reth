@@ -17,16 +17,17 @@ workspace = true
 reth-config.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
 reth-db = { workspace = true, features = ["mdbx"] }
+reth-exex.workspace = true
 reth-provider = { workspace = true }
+reth-evm.workspace = true
 reth-revm.workspace = true
 reth-stages.workspace = true
 reth-interfaces = { workspace = true, features = ["clap"] }
 reth-transaction-pool.workspace = true
 reth-beacon-consensus.workspace = true
-reth-auto-seal-consensus.workspace = true
+reth-cli-runner.workspace = true
 reth-consensus-common.workspace = true
 reth-blockchain-tree.workspace = true
-reth-rpc-engine-api.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc.workspace = true
 reth-rpc-types.workspace = true
@@ -42,25 +43,27 @@ reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
-reth-prune.workspace = true
-reth-static-file = { workspace = true, features = ["clap"] }
+reth-static-file = { workspace = true }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
-reth-node-optimism = { workspace = true, optional = true, features = ["optimism"] }
+reth-node-optimism = { workspace = true, optional = true, features = [
+    "optimism",
+] }
 reth-node-core.workspace = true
 reth-node-builder.workspace = true
+reth-node-events.workspace = true
+reth-consensus.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
-alloy-chains.workspace = true
 
 # tracing
 tracing.workspace = true
 
 # io
-fdlimit = "0.3.0"
+fdlimit.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 confy.workspace = true
@@ -76,23 +79,34 @@ rand.workspace = true
 # tui
 comfy-table = "7.0"
 crossterm = "0.27.0"
-ratatui = "0.25.0"
+ratatui = { version = "0.26", default-features = false, features = [
+    "crossterm",
+] }
 human_bytes = "0.4.1"
 
 # async
-tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
+tokio = { workspace = true, features = [
+    "sync",
+    "macros",
+    "time",
+    "rt-multi-thread",
+] }
 futures.workspace = true
 
 # misc
 aquamarine.workspace = true
 eyre.workspace = true
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 tempfile.workspace = true
 backon = "0.4"
 similar-asserts.workspace = true
 itertools.workspace = true
 rayon.workspace = true
 boyer-moore-magiclen = "0.2.16"
+ahash = "0.8"
+
+# p2p
+discv5.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
@@ -118,15 +132,10 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 
 optimism = [
     "reth-primitives/optimism",
-    "reth-revm/optimism",
     "reth-interfaces/optimism",
     "reth-rpc/optimism",
-    "reth-rpc-engine-api/optimism",
     "reth-provider/optimism",
     "reth-beacon-consensus/optimism",
-    "reth-auto-seal-consensus/optimism",
-    "reth-network/optimism",
-    "reth-network-api/optimism",
     "reth-blockchain-tree/optimism",
     "dep:reth-node-optimism",
     "reth-node-core/optimism",

@@ -1,6 +1,6 @@
 use crate::eth::{
     error::{EthApiError, EthResult},
-    revm_utils::{inspect, inspect_and_return_db, prepare_call_env, EvmOverrides},
+    revm_utils::{prepare_call_env, EvmOverrides},
     utils::recover_raw_transaction,
     EthTransactions,
 };
@@ -11,10 +11,7 @@ use reth_primitives::{
     revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
 };
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
-use reth_revm::{
-    database::StateProviderDatabase,
-    tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
-};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     state::StateOverride,
@@ -31,7 +28,10 @@ use revm::{
     db::{CacheDB, DatabaseCommit},
     primitives::EnvWithHandlerCfg,
 };
-use revm_inspectors::opcode::OpcodeGasInspector;
+use revm_inspectors::{
+    opcode::OpcodeGasInspector,
+    tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
+};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -62,6 +62,11 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
     ) -> std::result::Result<OwnedSemaphorePermit, AcquireError> {
         self.inner.blocking_task_guard.clone().acquire_owned().await
     }
+
+    /// Access the underlying `Eth` API.
+    pub fn eth_api(&self) -> &Eth {
+        &self.inner.eth_api
+    }
 }
 
 // === impl TraceApi ===
@@ -73,15 +78,15 @@ where
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(&self, trace_request: TraceCallRequest) -> EthResult<TraceResults> {
-        let at = trace_request.block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let at = trace_request.block_id.unwrap_or_default();
         let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
         let mut inspector = TracingInspector::new(config);
-        self.inner
-            .eth_api
+        let this = self.clone();
+        self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, env| {
-                let (res, _, db) = inspect_and_return_db(db, env, &mut inspector)?;
+                let (res, _) = this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     &res,
                     &trace_request.trace_types,
@@ -101,11 +106,7 @@ where
     ) -> EthResult<TraceResults> {
         let tx = recover_raw_transaction(tx)?;
 
-        let (cfg, block, at) = self
-            .inner
-            .eth_api
-            .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
-            .await?;
+        let (cfg, block, at) = self.inner.eth_api.evm_env_at(block_id.unwrap_or_default()).await?;
         let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
         let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx);
 
@@ -136,9 +137,9 @@ where
         let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
 
         let gas_limit = self.inner.eth_api.call_gas_limit();
+        let this = self.clone();
         // execute all transactions on top of each other and record the traces
-        self.inner
-            .eth_api
+        self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
                 let mut results = Vec::with_capacity(calls.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
@@ -156,7 +157,7 @@ where
                     )?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
-                    let (res, _) = inspect(&mut db, env, &mut inspector)?;
+                    let (res, _) = this.eth_api().inspect(&mut db, env, &mut inspector)?;
 
                     let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                         &res,

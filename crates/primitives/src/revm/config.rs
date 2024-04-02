@@ -142,7 +142,7 @@ mod tests {
         {
             #[inline(always)]
             fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
-                let cs = ChainSpecBuilder::mainnet().chain(alloy_chains::Chain::from_id(10));
+                let cs = ChainSpecBuilder::mainnet().chain(crate::Chain::from_id(10));
                 f(cs).build()
             }
 

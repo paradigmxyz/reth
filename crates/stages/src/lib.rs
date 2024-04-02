@@ -15,19 +15,22 @@
 //! # use std::sync::Arc;
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
-//! # use reth_interfaces::consensus::Consensus;
-//! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
-//! # use reth_revm::EvmProcessorFactory;
-//! # use reth_primitives::{PeerId, MAINNET, B256, PruneModes};
+//! # use reth_interfaces::test_utils::{TestBodiesClient, TestHeadersClient};
+//! # use reth_evm_ethereum::execute::EthExecutorProvider;
+//! # use reth_primitives::{MAINNET, B256, PruneModes};
+//! # use reth_network_types::PeerId;
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;
-//! # use reth_node_ethereum::EthEvmConfig;
+//! # use reth_evm_ethereum::EthEvmConfig;
 //! # use reth_provider::ProviderFactory;
+//! # use reth_provider::StaticFileProviderFactory;
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::EtlConfig;
+//! # use reth_consensus::Consensus;
+//! # use reth_consensus::test_utils::TestConsensus;
 //! #
 //! # let chain_spec = MAINNET.clone();
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
@@ -42,7 +45,7 @@
 //! #    provider_factory.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
-//! # let executor_factory = EvmProcessorFactory::new(chain_spec.clone(), EthEvmConfig::default());
+//! # let executor_provider = EthExecutorProvider::mainnet();
 //! # let static_file_producer = StaticFileProducer::new(
 //! #    provider_factory.clone(),
 //! #    provider_factory.static_file_provider(),
@@ -52,17 +55,15 @@
 //! # let pipeline =
 //! Pipeline::builder()
 //!     .with_tip_sender(tip_tx)
-//!     .add_stages(
-//!         DefaultStages::new(
-//!             provider_factory.clone(),
-//!             HeaderSyncMode::Tip(tip_rx),
-//!             consensus,
-//!             headers_downloader,
-//!             bodies_downloader,
-//!             executor_factory,
-//!             EtlConfig::default(),
-//!         )
-//!     )
+//!     .add_stages(DefaultStages::new(
+//!         provider_factory.clone(),
+//!         HeaderSyncMode::Tip(tip_rx),
+//!         consensus,
+//!         headers_downloader,
+//!         bodies_downloader,
+//!         executor_provider,
+//!         EtlConfig::default(),
+//!     ))
 //!     .build(provider_factory, static_file_producer);
 //! ```
 //!
@@ -76,12 +77,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-
-mod error;
-mod metrics;
-mod pipeline;
-mod stage;
-mod util;
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 #[allow(missing_docs)]
 #[cfg(any(test, feature = "test-utils"))]
@@ -95,7 +91,5 @@ pub mod stages;
 
 pub mod sets;
 
-pub use crate::metrics::*;
-pub use error::*;
-pub use pipeline::*;
-pub use stage::*;
+// re-export the stages API
+pub use reth_stages_api::*;

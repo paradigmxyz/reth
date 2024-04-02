@@ -1,7 +1,8 @@
 #[cfg(feature = "zstd-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
-use crate::{logs_bloom, Bloom, Bytes, Log, PruneSegmentError, TxType, B256};
-use alloy_rlp::{length_of_length, Decodable, Encodable};
+use crate::{logs_bloom, Bloom, Bytes, PruneSegmentError, TxType, B256};
+use alloy_primitives::Log;
+use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::strategy::Strategy;
@@ -17,7 +18,8 @@ use std::{
 #[cfg_attr(feature = "zstd-codec", main_codec(no_arbitrary, zstd))]
 #[cfg_attr(not(feature = "zstd-codec"), main_codec(no_arbitrary))]
 #[add_arbitrary_tests]
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[rlp(trailing)]
 pub struct Receipt {
     /// Receipt type.
     pub tx_type: TxType,
@@ -118,13 +120,15 @@ impl Receipts {
 
     /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
     pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, PruneSegmentError> {
-        let Some(block_r) = self.last() else { return Ok(vec![]) };
+        let Some(block_r) = self.last() else {
+            return Ok(vec![]);
+        };
         let mut out = Vec::with_capacity(block_r.len());
         for (id, tx_r) in block_r.iter().enumerate() {
             if let Some(receipt) = tx_r.as_ref() {
                 out.push((id as u64, receipt.cumulative_gas_used));
             } else {
-                return Err(PruneSegmentError::ReceiptsPruned)
+                return Err(PruneSegmentError::ReceiptsPruned);
             }
         }
         Ok(out)
@@ -308,7 +312,7 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::Error::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -353,7 +357,7 @@ impl ReceiptWithBloom {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         *buf = *b;
         Ok(this)
@@ -506,7 +510,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return
+            return;
         }
 
         let mut payload = Vec::new();
@@ -578,14 +582,14 @@ mod tests {
             receipt: Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
-                logs: vec![Log {
-                    address: address!("0000000000000000000000000000000000000011"),
-                    topics: vec![
+                logs: vec![Log::new_unchecked(
+                    address!("0000000000000000000000000000000000000011"),
+                    vec![
                         b256!("000000000000000000000000000000000000000000000000000000000000dead"),
                         b256!("000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
-                    data: bytes!("0100ff"),
-                }],
+                    bytes!("0100ff"),
+                )],
                 success: false,
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
@@ -612,14 +616,14 @@ mod tests {
             receipt: Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
-                logs: vec![Log {
-                    address: address!("0000000000000000000000000000000000000011"),
-                    topics: vec![
+                logs: vec![Log::new_unchecked(
+                    address!("0000000000000000000000000000000000000011"),
+                    vec![
                         b256!("000000000000000000000000000000000000000000000000000000000000dead"),
                         b256!("000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
-                    data: bytes!("0100ff"),
-                }],
+                    bytes!("0100ff"),
+                )],
                 success: false,
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
@@ -692,20 +696,16 @@ mod tests {
             success: true,
             tx_type: TxType::Legacy,
             logs: vec![
-                Log {
-                    address: address!("4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
-                    topics: vec![b256!(
-                        "c69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9"
-                    )],
-                    data: Bytes::from(vec![1; 0xffffff]),
-                },
-                Log {
-                    address: address!("faca325c86bf9c2d5b413cd7b90b209be92229c2"),
-                    topics: vec![b256!(
-                        "8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2"
-                    )],
-                    data: Bytes::from(vec![1; 0xffffff]),
-                },
+                Log::new_unchecked(
+                    address!("4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
+                    vec![b256!("c69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9")],
+                    Bytes::from(vec![1; 0xffffff]),
+                ),
+                Log::new_unchecked(
+                    address!("faca325c86bf9c2d5b413cd7b90b209be92229c2"),
+                    vec![b256!("8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2")],
+                    Bytes::from(vec![1; 0xffffff]),
+                ),
             ],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,

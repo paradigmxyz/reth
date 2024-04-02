@@ -12,40 +12,29 @@
 //! ```no_run
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
-//! # use reth_revm::EvmProcessorFactory;
 //! # use reth_primitives::{PruneModes, MAINNET};
-//! # use reth_node_ethereum::EthEvmConfig;
+//! # use reth_evm_ethereum::EthEvmConfig;
+//! # use reth_provider::StaticFileProviderFactory;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;
+//! # use reth_config::config::EtlConfig;
+//! # use reth_evm::execute::BlockExecutorProvider;
 //!
-//! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone(), EthEvmConfig::default());
-//! # let provider_factory = create_test_provider_factory();
-//! # let static_file_producer =  StaticFileProducer::new(
+//! # fn create(exec: impl BlockExecutorProvider) {
+//!
+//! let provider_factory = create_test_provider_factory();
+//! let static_file_producer = StaticFileProducer::new(
 //!     provider_factory.clone(),
 //!     provider_factory.static_file_provider(),
 //!     PruneModes::default(),
 //! );
 //! // Build a pipeline with all offline stages.
-//! # let pipeline = Pipeline::builder()
-//!     .add_stages(OfflineStages::new(executor_factory))
+//! let pipeline = Pipeline::builder()
+//!     .add_stages(OfflineStages::new(exec, EtlConfig::default()))
 //!     .build(provider_factory, static_file_producer);
-//! ```
 //!
-//! ```ignore
-//! # use reth_stages::Pipeline;
-//! # use reth_stages::{StageSet, sets::OfflineStages};
-//! # use reth_revm::EvmProcessorFactory;
-//! # use reth_node_ethereum::EthEvmConfig;
-//! # use reth_primitives::MAINNET;
-//! // Build a pipeline with all offline stages and a custom stage at the end.
-//! # let executor_factory = EvmProcessorFactory::new(MAINNET.clone(), EthEvmConfig::default());
-//! Pipeline::builder()
-//!     .add_stages(
-//!         OfflineStages::new(executor_factory).builder().add_stage(MyCustomStage)
-//!     )
-//!     .build();
+//! # }
 //! ```
-
 use crate::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
@@ -55,12 +44,13 @@ use crate::{
     StageSet, StageSetBuilder,
 };
 use reth_config::config::EtlConfig;
+use reth_consensus::Consensus;
 use reth_db::database::Database;
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
+use reth_evm::execute::BlockExecutorProvider;
+use reth_interfaces::p2p::{
+    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader,
 };
-use reth_provider::{ExecutorFactory, HeaderSyncGapProvider, HeaderSyncMode};
+use reth_provider::{HeaderSyncGapProvider, HeaderSyncMode};
 use std::sync::Arc;
 
 /// A set containing all stages to run a fully syncing instance of reth.
@@ -90,9 +80,11 @@ pub struct DefaultStages<Provider, H, B, EF> {
     online: OnlineStages<Provider, H, B>,
     /// Executor factory needs for execution stage
     executor_factory: EF,
+    /// ETL configuration
+    etl_config: EtlConfig,
 }
 
-impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
+impl<Provider, H, B, E> DefaultStages<Provider, H, B, E> {
     /// Create a new set of default stages with default values.
     pub fn new(
         provider: Provider,
@@ -100,11 +92,11 @@ impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
         consensus: Arc<dyn Consensus>,
         header_downloader: H,
         body_downloader: B,
-        executor_factory: EF,
+        executor_factory: E,
         etl_config: EtlConfig,
     ) -> Self
     where
-        EF: ExecutorFactory,
+        E: BlockExecutorProvider,
     {
         Self {
             online: OnlineStages::new(
@@ -113,39 +105,41 @@ impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
                 consensus,
                 header_downloader,
                 body_downloader,
-                etl_config,
+                etl_config.clone(),
             ),
             executor_factory,
+            etl_config,
         }
     }
 }
 
-impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF>
+impl<Provider, H, B, E> DefaultStages<Provider, H, B, E>
 where
-    EF: ExecutorFactory,
+    E: BlockExecutorProvider,
 {
     /// Appends the default offline stages and default finish stage to the given builder.
     pub fn add_offline_stages<DB: Database>(
         default_offline: StageSetBuilder<DB>,
-        executor_factory: EF,
+        executor_factory: E,
+        etl_config: EtlConfig,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_set(default_offline)
-            .add_set(OfflineStages::new(executor_factory))
+            .add_set(OfflineStages::new(executor_factory, etl_config))
             .add_stage(FinishStage)
     }
 }
 
-impl<Provider, H, B, EF, DB> StageSet<DB> for DefaultStages<Provider, H, B, EF>
+impl<Provider, H, B, E, DB> StageSet<DB> for DefaultStages<Provider, H, B, E>
 where
     Provider: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
-    EF: ExecutorFactory,
+    E: BlockExecutorProvider,
     DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
-        Self::add_offline_stages(self.online.builder(), self.executor_factory)
+        Self::add_offline_stages(self.online.builder(), self.executor_factory, self.etl_config)
     }
 }
 
@@ -247,61 +241,74 @@ where
 /// - [`HistoryIndexingStages`]
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct OfflineStages<EF: ExecutorFactory> {
+pub struct OfflineStages<EF> {
     /// Executor factory needs for execution stage
     pub executor_factory: EF,
+    /// ETL configuration
+    etl_config: EtlConfig,
 }
 
-impl<EF: ExecutorFactory> OfflineStages<EF> {
+impl<EF> OfflineStages<EF> {
     /// Create a new set of offline stages with default values.
-    pub fn new(executor_factory: EF) -> Self {
-        Self { executor_factory }
+    pub fn new(executor_factory: EF, etl_config: EtlConfig) -> Self {
+        Self { executor_factory, etl_config }
     }
 }
 
-impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for OfflineStages<EF> {
+impl<E, DB> StageSet<DB> for OfflineStages<E>
+where
+    E: BlockExecutorProvider,
+    DB: Database,
+{
     fn builder(self) -> StageSetBuilder<DB> {
         ExecutionStages::new(self.executor_factory)
             .builder()
-            .add_set(HashingStages)
-            .add_set(HistoryIndexingStages)
+            .add_set(HashingStages { etl_config: self.etl_config.clone() })
+            .add_set(HistoryIndexingStages { etl_config: self.etl_config })
     }
 }
 
 /// A set containing all stages that are required to execute pre-existing block data.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct ExecutionStages<EF: ExecutorFactory> {
+pub struct ExecutionStages<E> {
     /// Executor factory that will create executors.
-    executor_factory: EF,
+    executor_factory: E,
 }
 
-impl<EF: ExecutorFactory + 'static> ExecutionStages<EF> {
+impl<E> ExecutionStages<E> {
     /// Create a new set of execution stages with default values.
-    pub fn new(executor_factory: EF) -> Self {
+    pub fn new(executor_factory: E) -> Self {
         Self { executor_factory }
     }
 }
 
-impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for ExecutionStages<EF> {
+impl<E, DB> StageSet<DB> for ExecutionStages<E>
+where
+    DB: Database,
+    E: BlockExecutorProvider,
+{
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(SenderRecoveryStage::default())
-            .add_stage(ExecutionStage::new_with_factory(self.executor_factory))
+            .add_stage(ExecutionStage::new_with_executor(self.executor_factory))
     }
 }
 
 /// A set containing all stages that hash account state.
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct HashingStages;
+pub struct HashingStages {
+    /// ETL configuration
+    etl_config: EtlConfig,
+}
 
 impl<DB: Database> StageSet<DB> for HashingStages {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(MerkleStage::default_unwind())
-            .add_stage(AccountHashingStage::default())
-            .add_stage(StorageHashingStage::default())
+            .add_stage(AccountHashingStage::default().with_etl_config(self.etl_config.clone()))
+            .add_stage(StorageHashingStage::default().with_etl_config(self.etl_config))
             .add_stage(MerkleStage::default_execution())
     }
 }
@@ -309,13 +316,16 @@ impl<DB: Database> StageSet<DB> for HashingStages {
 /// A set containing all stages that do additional indexing for historical state.
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct HistoryIndexingStages;
+pub struct HistoryIndexingStages {
+    /// ETL configuration
+    etl_config: EtlConfig,
+}
 
 impl<DB: Database> StageSet<DB> for HistoryIndexingStages {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(TransactionLookupStage::default())
-            .add_stage(IndexStorageHistoryStage::default())
-            .add_stage(IndexAccountHistoryStage::default())
+            .add_stage(TransactionLookupStage::default().with_etl_config(self.etl_config.clone()))
+            .add_stage(IndexStorageHistoryStage::default().with_etl_config(self.etl_config.clone()))
+            .add_stage(IndexAccountHistoryStage::default().with_etl_config(self.etl_config))
     }
 }

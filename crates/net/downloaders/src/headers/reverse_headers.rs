@@ -6,21 +6,19 @@ use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
 use reth_config::config::HeadersConfig;
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{
-        error::{DownloadError, DownloadResult, PeerRequestResult},
-        headers::{
-            client::{HeadersClient, HeadersRequest},
-            downloader::{validate_header_download, HeaderDownloader, SyncTarget},
-            error::{HeadersDownloaderError, HeadersDownloaderResult},
-        },
-        priority::Priority,
+use reth_consensus::Consensus;
+use reth_interfaces::p2p::{
+    error::{DownloadError, DownloadResult, PeerRequestResult},
+    headers::{
+        client::{HeadersClient, HeadersRequest},
+        downloader::{validate_header_download, HeaderDownloader, SyncTarget},
+        error::{HeadersDownloaderError, HeadersDownloaderResult},
     },
+    priority::Priority,
 };
+use reth_network_types::PeerId;
 use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, PeerId, SealedHeader,
-    B256,
+    BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, SealedHeader, B256,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
@@ -284,6 +282,7 @@ where
                     peer_id: Some(peer_id),
                     error: DownloadError::HeaderValidation {
                         hash: head.hash(),
+                        number: head.number,
                         error: Box::new(error),
                     },
                 }
@@ -537,7 +536,7 @@ where
     /// Handles the error of a bad response
     ///
     /// This will re-submit the request.
-    fn on_headers_error(&mut self, err: Box<HeadersResponseError>) {
+    fn on_headers_error(&self, err: Box<HeadersResponseError>) {
         let HeadersResponseError { request, peer_id, error } = *err;
 
         self.penalize_peer(peer_id, &error);
@@ -582,7 +581,7 @@ where
     }
 
     /// Starts a request future
-    fn submit_request(&mut self, request: HeadersRequest, priority: Priority) {
+    fn submit_request(&self, request: HeadersRequest, priority: Priority) {
         trace!(target: "downloaders::headers", ?request, "Submitting headers request");
         self.in_progress_queue.push(self.request_fut(request, priority));
         self.metrics.in_flight_requests.increment(1.);
@@ -1224,7 +1223,8 @@ mod tests {
 
     use crate::headers::test_utils::child_header;
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
+    use reth_consensus::test_utils::TestConsensus;
+    use reth_interfaces::test_utils::TestHeadersClient;
 
     /// Tests that `replace_number` works the same way as Option::replace
     #[test]

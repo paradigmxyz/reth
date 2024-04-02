@@ -13,53 +13,47 @@ workspace = true
 
 [dependencies]
 # reth
+reth-exex.workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
 reth-codecs.workspace = true
 reth-provider.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
-reth-tokio-util.workspace = true
 reth-etl.workspace = true
-reth-static-file.workspace = true
 reth-config.workspace = true
+reth-stages-api = { workspace = true, features = ["test-utils"] }
+reth-consensus.workspace = true
+reth-evm.workspace = true
+reth-revm.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
-tokio-stream.workspace = true
 futures-util.workspace = true
 
 # observability
 tracing.workspace = true
 
-# io
-tempfile.workspace = true
-
-# metrics
-reth-metrics.workspace = true
-metrics.workspace = true
-
 # misc
 thiserror.workspace = true
-aquamarine.workspace = true
 itertools.workspace = true
 rayon.workspace = true
 num-traits = "0.2.15"
-auto_impl = "1"
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
+reth-evm-ethereum.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
-reth-eth-wire.workspace = true # TODO(onbjerg): We only need this for [BlockBody]
-reth-node-ethereum.workspace = true
-reth-node-optimism.workspace = true
-reth-blockchain-tree.workspace = true
 reth-revm.workspace = true
+reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-network-types.workspace = true
 
 alloy-rlp.workspace = true
 itertools.workspace = true
@@ -67,18 +61,29 @@ tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 assert_matches.workspace = true
 rand.workspace = true
 paste.workspace = true
+tempfile.workspace = true
 
 # Stage benchmarks
-criterion = { workspace = true, features = ["async_futures"] }
+criterion = { workspace = true, features = ["async_tokio"] }
 
 # io
 serde_json.workspace = true
 
 [target.'cfg(not(target_os = "windows"))'.dev-dependencies]
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
 
 [features]
-test-utils = ["reth-interfaces/test-utils", "reth-db/test-utils", "reth-provider/test-utils"]
+test-utils = [
+    "reth-interfaces/test-utils",
+    "reth-db/test-utils",
+    "reth-provider/test-utils",
+    "reth-stages-api/test-utils",
+    "dep:tempfile",
+]
 
 [[bench]]
 name = "criterion"
