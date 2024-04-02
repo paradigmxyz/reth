@@ -675,6 +675,7 @@ mod tests {
     }
 
     // Copied from sigp/discv5
+    // <https://github.com/sigp/discv5/blob/master/src/kbucket/key.rs#L89-L101>
     #[allow(unreachable_pub)]
     #[allow(unused)]
     #[allow(clippy::assign_op_pattern)]
