@@ -60,7 +60,7 @@ impl From<EnrCombinedKeyWrapper> for Enr<SecretKey> {
 mod tests {
     use alloy_rlp::Encodable;
     use discv5::enr::{CombinedKey, EnrKey};
-    use reth_primitives::{pk2id, Hardfork, NodeRecord, MAINNET};
+    use reth_primitives::{Hardfork, NodeRecord, MAINNET};
 
     use super::*;
 
