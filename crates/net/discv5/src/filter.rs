@@ -24,7 +24,7 @@ impl FilterOutcome {
     }
 }
 
-/// Filter requiring that peers advertise that they belong to some fork of a certain chain.
+/// Filter requiring that peers advertise that they belong to some fork of a certain key.
 #[derive(Debug, Constructor, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MustIncludeKey {
     /// Kv-pair key which node record must advertise.
@@ -45,30 +45,30 @@ impl MustIncludeKey {
     }
 }
 
-/// Filter requiring that peers not advertise that they belong to some chains.
+/// Filter requiring that peers not advertise kv-pairs using certain keys, e.g. b"eth2".
 #[derive(Debug, Clone, Default)]
 pub struct MustNotIncludeKeys {
-    chains: HashSet<MustIncludeKey>,
+    keys: HashSet<MustIncludeKey>,
 }
 
 impl MustNotIncludeKeys {
     /// Returns a new instance that disallows node records with a kv-pair that has any of the given
-    /// chains as key.
-    pub fn new(disallow_chains: &[&'static [u8]]) -> Self {
-        let mut chains = HashSet::with_capacity(disallow_chains.len());
-        for chain in disallow_chains {
-            _ = chains.insert(MustIncludeKey::new(chain));
+    /// keys.
+    pub fn new(disallow_keys: &[&'static [u8]]) -> Self {
+        let mut keys = HashSet::with_capacity(disallow_keys.len());
+        for key in disallow_keys {
+            _ = keys.insert(MustIncludeKey::new(key));
         }
 
-        MustNotIncludeKeys { chains }
+        MustNotIncludeKeys { keys }
     }
 }
 
 impl MustNotIncludeKeys {
     /// Returns `true` if [`Enr`](discv5::Enr) passes filtering rules.
     pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
-        for chain in self.chains.iter() {
-            if matches!(chain.filter(enr), FilterOutcome::Ok) {
+        for key in self.keys.iter() {
+            if matches!(key.filter(enr), FilterOutcome::Ok) {
                 return FilterOutcome::Ignore { reason: self.ignore_reason() }
             }
         }
@@ -79,14 +79,14 @@ impl MustNotIncludeKeys {
     fn ignore_reason(&self) -> String {
         format!(
             "{} forks not allowed",
-            self.chains.iter().map(|chain| String::from_utf8_lossy(chain.key)).format(",")
+            self.keys.iter().map(|key| String::from_utf8_lossy(key.key)).format(",")
         )
     }
 
     /// Adds a key that must not be present for any kv-pair in a node record.
-    pub fn add_disallowed_chains(&mut self, keys: &[&'static [u8]]) {
+    pub fn add_disallowed_keys(&mut self, keys: &[&'static [u8]]) {
         for key in keys {
-            self.chains.insert(MustIncludeKey::new(key));
+            self.keys.insert(MustIncludeKey::new(key));
         }
     }
 }
@@ -101,17 +101,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn must_not_include_chain_filter() {
+    fn must_not_include_key_filter() {
         // rig test
 
         let filter = MustNotIncludeKeys::new(&[ETH, ETH2]);
 
-        // enr_1 advertises a fork from one of the chains configured in filter
+        // enr_1 advertises a fork from one of the keys configured in filter
         let sk = CombinedKey::generate_secp256k1();
         let enr_1 =
             Enr::builder().add_value_rlp(ETH as &[u8], Bytes::from("cancun")).build(&sk).unwrap();
 
-        // enr_2 advertises a fork from one the other chain configured in filter
+        // enr_2 advertises a fork from one the other key configured in filter
         let sk = CombinedKey::generate_secp256k1();
         let enr_2 = Enr::builder().add_value_rlp(ETH2, Bytes::from("deneb")).build(&sk).unwrap();
 

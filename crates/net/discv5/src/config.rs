@@ -151,12 +151,12 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds chains to disallow when filtering a discovered peer, to determine whether or not it
+    /// Adds keys to disallow when filtering a discovered peer, to determine whether or not it
     /// should be passed to rlpx. The discovered node record is scanned for any kv-pairs where the
-    /// key matches the disallowed chains. If not explicitly set, b"eth2" key will be disallowed.
-    pub fn must_not_include_chains(mut self, not_chains: &[&'static [u8]]) -> Self {
+    /// key matches the disallowed keys. If not explicitly set, b"eth2" key will be disallowed.
+    pub fn must_not_include_keys(mut self, not_keys: &[&'static [u8]]) -> Self {
         let mut filter = self.discovered_peer_filter.unwrap_or_default();
-        filter.add_disallowed_chains(not_chains);
+        filter.add_disallowed_keys(not_keys);
         self.discovered_peer_filter = Some(filter);
         self
     }
