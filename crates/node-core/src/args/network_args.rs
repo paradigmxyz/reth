@@ -3,7 +3,10 @@
 use crate::version::P2P_CLIENT_VERSION;
 use clap::Args;
 use reth_config::Config;
-use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
+use reth_discv4::{
+    DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT, DEFAULT_DISCOVERY_V5_ADDR,
+    DEFAULT_DISCOVERY_V5_PORT,
+};
 use reth_net_nat::NatResolver;
 use reth_network::{
     transactions::{
@@ -215,13 +218,23 @@ pub struct DiscoveryArgs {
     #[arg(long, conflicts_with = "disable_discovery")]
     pub enable_discv5_discovery: bool,
 
-    /// The UDP address to use for P2P discovery/networking
+    /// The UDP address to use for devp2p peer discovery version 4.
     #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
     pub addr: IpAddr,
 
-    /// The UDP port to use for P2P discovery/networking
+    /// The UDP port to use for devp2p peer discovery version 4.
     #[arg(id = "discovery.port", long = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
+
+    /// The UDP address to use for devp2p peer discovery version 5.
+    #[arg(id = "discovery.v5.addr", long = "discovery.v5.addr", value_name = "DISCOVERY_V5_ADDR",
+    default_value_t = DEFAULT_DISCOVERY_V5_ADDR)]
+    pub discv5_addr: IpAddr,
+
+    /// The UDP port to use for devp2p peer discovery version 5.
+    #[arg(id = "discovery.v5.port", long = "discovery.v5.port", value_name = "DISCOVERY_V5_PORT",
+    default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
+    pub discv5_port: u16,
 }
 
 impl DiscoveryArgs {
@@ -241,6 +254,7 @@ impl DiscoveryArgs {
         if !self.disable_discovery && (self.enable_discv5_discovery || cfg!(feature = "optimism")) {
             network_config_builder = network_config_builder.enable_discv5_discovery();
         }
+
         network_config_builder
     }
 
@@ -257,10 +271,12 @@ impl Default for DiscoveryArgs {
         Self {
             disable_discovery: false,
             disable_dns_discovery: false,
-            disable_discv4_discovery: cfg!(feature = "optimism"),
+            disable_discv4_discovery: false,
             enable_discv5_discovery: cfg!(feature = "optimism"),
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
+            discv5_addr: DEFAULT_DISCOVERY_V5_ADDR,
+            discv5_port: DEFAULT_DISCOVERY_V5_PORT,
         }
     }
 }

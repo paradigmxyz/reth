@@ -8,15 +8,13 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
-use discv5::ListenConfig;
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
-use reth_discv5::{IdentifyForkIdKVPair, MustNotIncludeChains, NetworkRef};
+use reth_discv5::config::OPSTACK;
 use reth_dns_discovery::DnsDiscoveryConfig;
-use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
-    mainnet_nodes, sepolia_nodes, Chain, ChainSpec, ForkFilter, Head, NamedChain, NodeRecord,
-    PeerId, MAINNET,
+    mainnet_nodes, pk2id, sepolia_nodes, Chain, ChainSpec, ForkFilter, Head, NamedChain,
+    NodeRecord, PeerId, MAINNET,
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -128,14 +126,34 @@ impl<C> NetworkConfig<C> {
     /// let network_config = NetworkConfigBuilder::new(sk).build(());
     /// let fork_id = network_config.status.forkid;
     /// let network_config = network_config
-    ///     .set_discovery_v5_with_config_builder(|builder| builder.fork(b"eth", fork_id).build());
+    ///     .discovery_v5_with_config_builder(|builder| builder.fork(b"eth", fork_id).build());
     /// ```
 
-    pub fn set_discovery_v5_with_config_builder(
+    pub fn discovery_v5_with_config_builder(
         self,
         f: impl FnOnce(reth_discv5::ConfigBuilder) -> reth_discv5::Config,
     ) -> Self {
-        self.set_discovery_v5(f(reth_discv5::Config::builder()))
+        let rlpx_port = self.listener_addr.port();
+        let chain = self.chain_spec.chain;
+        let fork_id = self.status.forkid;
+        let boot_nodes = self.boot_nodes.clone();
+
+        let mut builder = reth_discv5::Config::builder(rlpx_port)
+            .add_unsigned_boot_nodes(boot_nodes.clone().into_iter()); // todo: store discv5 peers in separate file
+
+        if chain.is_optimism() {
+            builder = builder.fork(OPSTACK, fork_id)
+        }
+
+        if chain == Chain::optimism_mainnet() || chain == Chain::base_mainnet() {
+            builder = builder.add_optimism_mainnet_boot_nodes()
+        } else if chain == Chain::from_named(NamedChain::OptimismSepolia) ||
+            chain == Chain::from_named(NamedChain::BaseSepolia)
+        {
+            builder = builder.add_optimism_sepolia_boot_nodes()
+        }
+
+        self.set_discovery_v5(f(builder))
     }
 
     /// Sets the config to use for the discovery v5 protocol.
@@ -494,7 +512,7 @@ impl NetworkConfigBuilder {
             secret_key,
             mut dns_discovery_config,
             discovery_v4_builder,
-            enable_discovery_v5,
+            enable_discovery_v5: _,
             boot_nodes,
             discovery_addr,
             listener_addr,
@@ -513,7 +531,7 @@ impl NetworkConfigBuilder {
             transactions_manager_config,
         } = self;
 
-        let listener_addr = listener_addr.unwrap_or("0.0.0.0:44444".parse().unwrap());
+        let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
 
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
@@ -544,41 +562,13 @@ impl NetworkConfigBuilder {
             }
         }
 
-        let discovery_v5_config = enable_discovery_v5.then_some({
-            let mut builder = reth_discv5::Config::builder()
-                .tcp_port(listener_addr.port())
-                .discv5_config(
-                    discv5::ConfigBuilder::new(ListenConfig::from(
-                        "0.0.0.0:33339".parse::<SocketAddr>().unwrap(),
-                    ))
-                    .build(),
-                )
-                //.add_enode_boot_nodes(boot_nodes)
-                .filter(MustNotIncludeChains::new(&[NetworkRef::ETH2]));
-            if cfg!(feature = "optimism") {
-                if chain_spec.chain == Chain::optimism_mainnet() ||
-                    chain_spec.chain == Chain::base_mainnet()
-                {
-                    builder = builder.add_optimism_mainnet_boot_nodes()
-                } else if chain_spec.chain == Chain::from_named(NamedChain::OptimismSepolia) ||
-                    chain_spec.chain == Chain::from_named(NamedChain::BaseSepolia)
-                {
-                    builder = builder.add_optimism_sepolia_boot_nodes()
-                }
-                builder.fork(NetworkRef::OPSTACK, status.forkid)
-            } else {
-                builder.fork(NetworkRef::ETH, status.forkid)
-            }
-            .build()
-        });
-
         NetworkConfig {
             client,
             secret_key,
             boot_nodes,
             dns_discovery_config,
-            discovery_v4_config: None,
-            discovery_v5_config,
+            discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
+            discovery_v5_config: None,
             discovery_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
             listener_addr,
             peers_config: peers_config.unwrap_or_default(),
