@@ -21,7 +21,8 @@ pub trait NodeTypes: Send + Sync + 'static {
     fn evm_config(&self) -> Self::Evm;
 }
 
-/// A helper type that is downstream of the node types and adds stateful components to the node.
+/// A helper type that is downstream of the [NodeTypes] trait and adds stateful components to the
+/// node.
 pub trait FullNodeTypes: NodeTypes + 'static {
     /// Underlying database type.
     type DB: Database + Clone + 'static;

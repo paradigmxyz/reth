@@ -3,7 +3,6 @@ use crate::{
     rpc::{RethRpcServerHandles, RpcRegistry},
 };
 use reth_network::NetworkHandle;
-pub use reth_node_api::NodeTypes;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
@@ -17,6 +16,9 @@ use reth_primitives::ChainSpec;
 use reth_provider::ChainSpecProvider;
 use reth_tasks::TaskExecutor;
 use std::sync::Arc;
+
+// re-export the node api types
+pub use reth_node_api::{FullNodeTypes, NodeTypes};
 
 /// A [Node] is a [NodeTypes] that comes with preconfigured components.
 ///
