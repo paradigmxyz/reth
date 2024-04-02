@@ -325,7 +325,7 @@ address.to_string(), format_ether(alloc.balance));
                 Some(network.clone()),
                 Some(head.number),
                 events,
-                database.clone(),
+                database,
             ),
         );
 
