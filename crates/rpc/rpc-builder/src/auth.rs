@@ -6,7 +6,6 @@ use crate::{
 };
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
-use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
 use jsonrpsee::{
@@ -15,7 +14,7 @@ use jsonrpsee::{
     Methods,
 };
 
-use crate::constants::DEFAULT_IPC_ENDPOINT;
+use crate::constants::ENGINE_API_IPC_ENDPOINT;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_provider::{
@@ -34,6 +33,7 @@ use reth_rpc_api::servers::*;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
 use std::{
+    fmt,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -138,15 +138,16 @@ where
         .build(socket_addr)
         .await
         .map_err(|err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)))?;
-
     let local_addr = server.local_addr()?;
+    let handle = server.start(module.clone());
 
-    let handle = server.start(module);
-    Ok(AuthServerHandle { handle, local_addr, secret })
+    let ipc_endpoint = Endpoint::new(ENGINE_API_IPC_ENDPOINT.to_string());
+    let ipc_handle = IpcServerBuilder::default().build(ipc_endpoint.path())?.start(module).await?;
+
+    Ok(AuthServerHandle { handle, local_addr, secret, _ipc_handle: ipc_handle })
 }
 
 /// Server configuration for the auth server.
-#[derive(Debug)]
 pub struct AuthServerConfig {
     /// Where the server should listen.
     pub(crate) socket_addr: SocketAddr,
@@ -154,8 +155,22 @@ pub struct AuthServerConfig {
     pub(crate) secret: JwtSecret,
     /// Configs for JSON-RPC Http.
     pub(crate) server_config: ServerBuilder,
-    ipc_server_config: Option<IpcServerBuilder>,
-    ipc_endpoint: Option<Endpoint>,
+    /// Configs for IPC server
+    pub(crate) ipc_server_config: IpcServerBuilder,
+    /// IPC endpoint
+    pub(crate) ipc_endpoint: Endpoint,
+}
+
+impl fmt::Debug for AuthServerConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthServerConfig")
+            .field("socket_addr", &self.socket_addr)
+            .field("secret", &self.secret)
+            .field("server_config", &self.server_config)
+            .field("ipc_server_config", &self.ipc_server_config)
+            .field("ipc_endpoint", &self.ipc_endpoint.path())
+            .finish()
+    }
 }
 
 // === impl AuthServerConfig ===
@@ -173,7 +188,7 @@ impl AuthServerConfig {
 
     /// Convenience function to start a server in one step.
     pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
-        let Self { socket_addr, secret, server_config } = self;
+        let Self { socket_addr, secret, server_config, ipc_server_config, ipc_endpoint } = self;
 
         // Create auth middleware.
         let middleware = tower::ServiceBuilder::new()
@@ -186,20 +201,32 @@ impl AuthServerConfig {
             })?;
 
         let local_addr = server.local_addr()?;
+        let handle = server.start(module.inner.clone());
+        let ipc_handle = ipc_server_config.build(ipc_endpoint.path())?.start(module.inner).await?;
 
-        let handle = server.start(module.inner);
-        Ok(AuthServerHandle { handle, local_addr, secret })
+        Ok(AuthServerHandle { handle, local_addr, secret, _ipc_handle: ipc_handle })
     }
 }
 
 /// Builder type for configuring an `AuthServerConfig`.
-#[derive(Debug)]
 pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
     server_config: Option<ServerBuilder>,
     ipc_server_config: Option<IpcServerBuilder>,
     ipc_endpoint: Option<Endpoint>,
+}
+
+impl fmt::Debug for AuthServerConfigBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthServerConfig")
+            .field("socket_addr", &self.socket_addr)
+            .field("secret", &self.secret)
+            .field("server_config", &self.server_config)
+            .field("ipc_server_config", &self.ipc_server_config)
+            .field("ipc_endpoint", &self.ipc_endpoint.as_ref().map(|endpoint| endpoint.path()))
+            .finish()
+    }
 }
 
 // === impl AuthServerConfigBuilder ===
@@ -248,6 +275,10 @@ impl AuthServerConfigBuilder {
         self.ipc_endpoint = Some(ipc_endpoint);
         self
     }
+
+    /// Configures the IPC server
+    ///
+    /// Note: this always configures an [EthSubscriptionIdProvider]
     pub fn with_ipc_config(mut self, config: IpcServerBuilder) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
@@ -277,7 +308,7 @@ impl AuthServerConfigBuilder {
                     .set_id_provider(EthSubscriptionIdProvider::default())
             }),
             ipc_server_config: self.ipc_server_config.unwrap_or_else(|| {
-                IpcServerBuilder::new()
+                IpcServerBuilder::default()
                     .max_response_body_size(750 * 1024 * 1024)
                     .max_connections(500)
                     .max_request_body_size(128 * 1024 * 1024)
@@ -285,7 +316,7 @@ impl AuthServerConfigBuilder {
             }),
             ipc_endpoint: self
                 .ipc_endpoint
-                .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string())),
+                .unwrap_or_else(|| Endpoint::new(ENGINE_API_IPC_ENDPOINT.to_string())),
         }
     }
 }
@@ -344,6 +375,7 @@ pub struct AuthServerHandle {
     local_addr: SocketAddr,
     handle: ServerHandle,
     secret: JwtSecret,
+    _ipc_handle: ServerHandle,
 }
 
 // === impl AuthServerHandle ===
