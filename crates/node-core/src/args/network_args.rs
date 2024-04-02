@@ -283,8 +283,6 @@ impl Default for DiscoveryArgs {
 
 #[cfg(test)]
 mod tests {
-    use std::default;
-
     use super::*;
     use clap::Parser;
     /// A helper type to parse Args more easily
