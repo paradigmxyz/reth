@@ -1,6 +1,6 @@
 //! Network component for the node builder.
 
-use crate::{node::FullNodeTypes, BuilderContext};
+use crate::{BuilderContext, FullNodeTypes};
 use reth_network::NetworkHandle;
 use reth_transaction_pool::TransactionPool;
 use std::future::Future;

@@ -6124,6 +6124,7 @@ dependencies = [
 name = "reth-node-api"
 version = "0.2.0-beta.4"
 dependencies = [
+ "reth-db",
  "reth-evm",
  "reth-primitives",
  "reth-provider",
