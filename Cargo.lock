@@ -6059,7 +6059,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "uint",
 ]
 
 [[package]]
