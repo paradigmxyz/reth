@@ -7,8 +7,7 @@ use crate::{
     },
     hooks::NodeHooks,
     node::FullNode,
-    BuilderContext, ComponentsState, Node, NodeBuilder, NodeHandle, RethFullAdapter,
-    RethFullNodeBuilder,
+    BuilderContext, ComponentsState, Node, NodeHandle, RethFullAdapter, RethFullBuilderState,
 };
 use eyre::Context;
 use futures::{future::Either, stream, stream_select, StreamExt};
@@ -32,6 +31,7 @@ use reth_node_core::{
     events::cl::ConsensusLayerHealthEvents,
     exit::NodeExitFuture,
     init::init_genesis,
+    node_config::NodeConfig,
 };
 use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory};
@@ -66,19 +66,17 @@ where
 {
     async fn launch(
         self,
-        builder: RethFullNodeBuilder<DB, Types, Components>,
+        config: NodeConfig,
+        state: RethFullBuilderState<DB, Types, Components>,
+        database: DB,
         executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
+        reth_config: reth_config::Config,
     ) -> eyre::Result<
         NodeHandle<FullNodeComponentsAdapter<RethFullAdapter<DB, Types>, Components::Pool>>,
     > {
-        let reth_config = builder.load_config(&data_dir)?;
-
-        let NodeBuilder {
-            config,
-            state: ComponentsState { types, components_builder, hooks, rpc, exexs: _ },
-            database,
-        } = builder;
+        // deconstruct state from builder
+        let ComponentsState { types, components_builder, hooks, rpc, exexs: _ } = state;
 
         // Raise the fd limit of the process.
         // Does not do anything on windows.

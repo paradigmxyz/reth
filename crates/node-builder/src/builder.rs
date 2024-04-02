@@ -48,18 +48,19 @@ pub type RethFullProviderType<DB, Evm> =
 pub type RethFullAdapter<DB, N> =
     FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>;
 
-/// The builtin [NodeBuilder] type for launching a node.
-pub type RethFullNodeBuilder<DB, Types, Components> = NodeBuilder<
-    DB,
-    ComponentsState<
-        Types,
-        Components,
-        FullNodeComponentsAdapter<
-            RethFullAdapter<DB, Types>,
-            <Components as NodeComponentsBuilder<RethFullAdapter<DB, Types>>>::Pool,
-        >,
+/// The builtin [ComponentsState] type for launching a node.
+pub type RethFullBuilderState<DB, Types, Components> = ComponentsState<
+    Types,
+    Components,
+    FullNodeComponentsAdapter<
+        RethFullAdapter<DB, Types>,
+        <Components as NodeComponentsBuilder<RethFullAdapter<DB, Types>>>::Pool,
     >,
 >;
+
+/// The builtin [NodeBuilder] type for launching a node.
+pub type RethFullNodeBuilder<DB, Types, Components> =
+    NodeBuilder<DB, RethFullBuilderState<DB, Types, Components>>;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
@@ -156,11 +157,11 @@ pub type RethFullNodeBuilder<DB, Types, Components> = NodeBuilder<
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
 pub struct NodeBuilder<DB, State> {
     /// All settings for how the node should be configured.
-    pub config: NodeConfig,
+    config: NodeConfig,
     /// State of the node builder process.
-    pub state: State,
+    state: State,
     /// The configured database for the node.
-    pub database: DB,
+    database: DB,
 }
 
 impl<DB, State> NodeBuilder<DB, State> {
@@ -497,7 +498,12 @@ where
             <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
         >,
     {
-        launcher.launch(self, task_executor, data_dir).await
+        // load reth config
+        let reth_config = self.load_config(&data_dir)?;
+
+        // deconstruct self to launch node
+        let Self { config, state, database } = self;
+        launcher.launch(config, state, database, task_executor, data_dir, reth_config).await
     }
 
     /// Check that the builder can be launched
@@ -789,6 +795,44 @@ where
         let Self { builder, task_executor, data_dir } = self;
 
         builder.launch(task_executor, data_dir).await
+    }
+
+    /// Launch the node with the passed launcher, which implements [LaunchNode].
+    pub async fn launch_with<L>(
+        self,
+        launcher: L,
+    ) -> eyre::Result<
+        NodeHandle<
+            FullNodeComponentsAdapter<
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                Components::Pool,
+            >,
+        >,
+    >
+    where
+        L: LaunchNode<DB, Types, Components>,
+        Types: Node<
+            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>,
+        >,
+        Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
+        Types::NetworkBuilder: crate::components::NetworkBuilder<
+            RethFullAdapter<DB, Types>,
+            <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
+        >,
+        Types::PayloadBuilder: crate::components::PayloadServiceBuilder<
+            RethFullAdapter<DB, Types>,
+            <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
+        >,
+    {
+        // deconstruct self for launch node params
+        let Self { builder, task_executor, data_dir } = self;
+
+        // load reth config
+        let reth_config = builder.load_config(&data_dir)?;
+
+        // deconstruct node builder to launch node
+        let NodeBuilder { config, state, database } = builder;
+        launcher.launch(config, state, database, task_executor, data_dir, reth_config).await
     }
 
     /// Check that the builder can be launched

@@ -3,7 +3,7 @@
 use super::PoolBuilder;
 use crate::{
     components::NodeComponents, node::FullNodeTypes, BuilderContext, Node, NodeHandle,
-    RethFullAdapter, RethFullNodeBuilder,
+    RethFullAdapter, RethFullBuilderState,
 };
 use futures::Future;
 use reth_db::{
@@ -12,7 +12,10 @@ use reth_db::{
 };
 use reth_network::NetworkHandle;
 use reth_node_api::NodeTypes;
-use reth_node_core::dirs::{ChainPath, DataDirPath};
+use reth_node_core::{
+    dirs::{ChainPath, DataDirPath},
+    node_config::NodeConfig,
+};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
@@ -174,9 +177,12 @@ where
     /// Returns a [NodeHandle] that can be used to interact with the node.
     fn launch(
         self,
-        builder: RethFullNodeBuilder<DB, Types, Components>,
+        config: NodeConfig,
+        state: RethFullBuilderState<DB, Types, Components>,
+        database: DB,
         executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
+        reth_config: reth_config::Config,
     ) -> impl Future<
         Output = eyre::Result<
             NodeHandle<FullNodeComponentsAdapter<RethFullAdapter<DB, Types>, Components::Pool>>,
