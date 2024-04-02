@@ -349,21 +349,31 @@ where
     async fn logs_for_filter(&self, filter: Filter) -> Result<Vec<Log>, FilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
+                // all matching logs in the block
+                let block_number = self
+                    .provider
+                    .block_number_for_id(block_hash.into())?
+                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
+                // we also need to ensure that the receipts are available and return an error if
+                // not, in case the block hash been reorged
+                let receipts = self
+                    .eth_cache
+                    .get_receipts(block_hash)
+                    .await?
+                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
                 let mut all_logs = Vec::new();
-                // all matching logs in the block, if it exists
-                if let Some(block_number) = self.provider.block_number_for_id(block_hash.into())? {
-                    if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
-                        let filter = FilteredParams::new(Some(filter));
-                        logs_utils::append_matching_block_logs(
-                            &mut all_logs,
-                            &self.provider,
-                            &filter,
-                            (block_hash, block_number).into(),
-                            &receipts,
-                            false,
-                        )?;
-                    }
-                }
+                let filter = FilteredParams::new(Some(filter));
+                logs_utils::append_matching_block_logs(
+                    &mut all_logs,
+                    &self.provider,
+                    &filter,
+                    (block_hash, block_number).into(),
+                    &receipts,
+                    false,
+                )?;
+
                 Ok(all_logs)
             }
             FilterBlockOption::Range { from_block, to_block } => {

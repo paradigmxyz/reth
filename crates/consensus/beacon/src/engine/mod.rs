@@ -622,7 +622,7 @@ where
     }
 
     /// Returns the finalized hash to sync to if the distance from the local tip to the block is
-    /// greater than the configured threshold and we're not synced to the finalized block yet block
+    /// greater than the configured threshold and we're not synced to the finalized block yet
     /// yet (if we've seen that block already).
     ///
     /// If this is invoked after a new block has been downloaded, the downloaded block could be the
@@ -671,9 +671,12 @@ where
                         warn!(target: "consensus::engine", %err, "Failed to get finalized block header");
                     }
                     Ok(None) => {
-                        // we don't have the block yet and the distance exceeds the allowed
-                        // threshold
-                        return Some(state.finalized_block_hash)
+                        // ensure the finalized block is known (not the zero hash)
+                        if !state.finalized_block_hash.is_zero() {
+                            // we don't have the block yet and the distance exceeds the allowed
+                            // threshold
+                            return Some(state.finalized_block_hash)
+                        }
                     }
                     Ok(Some(_)) => {
                         // we're fully synced to the finalized block
@@ -1431,12 +1434,23 @@ where
                         if let Err((hash, error)) =
                             self.try_make_sync_target_canonical(downloaded_num_hash)
                         {
-                            tracing::error!(
-                                target: "consensus::engine",
-                                "Unexpected error while making sync target canonical: {:?}, {:?}",
+                            if !matches!(
                                 error,
-                                hash
-                            )
+                                CanonicalError::BlockchainTree(
+                                    BlockchainTreeError::BlockHashNotFoundInChain { .. }
+                                )
+                            ) {
+                                if error.is_fatal() {
+                                    error!(target: "consensus::engine", %error, "Encountered fatal error while making sync target canonical: {:?}, {:?}", error, hash);
+                                } else {
+                                    debug!(
+                                        target: "consensus::engine",
+                                        "Unexpected error while making sync target canonical: {:?}, {:?}",
+                                        error,
+                                        hash
+                                    )
+                                }
+                            }
                         }
                     }
                     InsertPayloadOk::Inserted(BlockStatus::Disconnected {
@@ -1697,6 +1711,7 @@ where
                     )
                     .is_none()
                 {
+                    // get the block number of the finalized block, if we have it
                     let newest_finalized = self
                         .forkchoice_state_tracker
                         .sync_target_state()
@@ -2075,6 +2090,7 @@ mod tests {
         let _ = env
             .send_forkchoice_updated(ForkchoiceState {
                 head_block_hash: rng.gen(),
+                finalized_block_hash: rng.gen(),
                 ..Default::default()
             })
             .await;

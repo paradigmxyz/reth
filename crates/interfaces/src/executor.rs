@@ -88,9 +88,6 @@ pub enum BlockExecutionError {
     /// Pruning error, transparently wrapping `PruneSegmentError`
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
-    /// Error representing a provider error
-    #[error("provider error")]
-    ProviderError,
     /// Transaction error on revert with inner details
     #[error("transaction error on revert: {inner}")]
     CanonicalRevert {
@@ -118,6 +115,9 @@ pub enum BlockExecutionError {
     /// Note: this is not feature gated for convenience.
     #[error("execution unavailable for tests")]
     UnavailableForTest,
+    /// Error when fetching latest block state.
+    #[error(transparent)]
+    LatestBlock(#[from] ProviderError),
 
     /// Optimism Block Executor Errors
     #[cfg(feature = "optimism")]
@@ -141,6 +141,9 @@ pub enum OptimismBlockExecutionError {
     /// Thrown when a blob transaction is included in a sequencer's block.
     #[error("blob transaction included in sequencer block")]
     BlobTransactionRejected,
+    /// Thrown when a database account could not be loaded.
+    #[error("failed to load account {0}")]
+    AccountLoadFailed(reth_primitives::Address),
 }
 
 impl BlockExecutionError {

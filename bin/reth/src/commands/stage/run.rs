@@ -157,7 +157,7 @@ impl Command {
             .await?;
         }
 
-        let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
+        let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
 
         let etl_config = EtlConfig::new(
             Some(
@@ -247,10 +247,10 @@ impl Command {
                     (Box::new(TransactionLookupStage::new(batch_size, etl_config, None)), None)
                 }
                 StageEnum::AccountHashing => {
-                    (Box::new(AccountHashingStage::new(1, batch_size)), None)
+                    (Box::new(AccountHashingStage::new(1, batch_size, etl_config)), None)
                 }
                 StageEnum::StorageHashing => {
-                    (Box::new(StorageHashingStage::new(1, batch_size)), None)
+                    (Box::new(StorageHashingStage::new(1, batch_size, etl_config)), None)
                 }
                 StageEnum::Merkle => (
                     Box::new(MerkleStage::default_execution()),

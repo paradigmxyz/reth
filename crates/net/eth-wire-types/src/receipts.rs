@@ -34,10 +34,7 @@ pub struct Receipts(
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        types::{message::RequestPair, GetReceipts},
-        Receipts,
-    };
+    use crate::{message::RequestPair, GetReceipts, Receipts};
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{hex, Log, Receipt, ReceiptWithBloom, TxType};
 

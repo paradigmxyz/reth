@@ -22,7 +22,7 @@ use crate::{
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
-use reth_primitives::{ForkId, NodeRecord, PeerId};
+use reth_primitives::{pk2id, ForkId, NodeRecord};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
@@ -255,7 +255,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 debug!(target: "disc::dns",%err, domain=%link.domain, ?hash, "Failed to lookup entry")
             }
             None => {
-                debug!(target: "disc::dns",domain=%link.domain, ?hash, "No dns entry")
+                trace!(target: "disc::dns",domain=%link.domain, ?hash, "No dns entry")
             }
             Some(Ok(entry)) => {
                 // cache entry
@@ -372,6 +372,8 @@ pub struct DnsNodeRecordUpdate {
     pub node_record: NodeRecord,
     /// The forkid of the node, if present in the ENR
     pub fork_id: Option<ForkId>,
+    /// Original [`Enr`].
+    pub enr: Enr<SecretKey>,
 }
 
 /// Commands sent from [DnsDiscoveryHandle] to [DnsDiscoveryService]
@@ -396,14 +398,14 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
         address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
         tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
         udp_port: enr.udp4().or_else(|| enr.udp6())?,
-        id: PeerId::from_slice(&enr.public_key().serialize_uncompressed()[1..]),
+        id: pk2id(&enr.public_key()),
     }
     .into_ipv4_mapped();
 
     let mut maybe_fork_id = enr.get(b"eth")?;
     let fork_id = ForkId::decode(&mut maybe_fork_id).ok();
 
-    Some(DnsNodeRecordUpdate { node_record, fork_id })
+    Some(DnsNodeRecordUpdate { node_record, fork_id, enr: enr.clone() })
 }
 
 #[cfg(test)]

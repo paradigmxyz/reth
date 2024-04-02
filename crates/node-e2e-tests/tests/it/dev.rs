@@ -17,7 +17,7 @@ async fn can_run_dev_node() -> eyre::Result<()> {
     // create node config
     let node_config = NodeConfig::test()
         .dev()
-        .with_rpc(RpcServerArgs::default().with_http())
+        .with_rpc(RpcServerArgs::default().with_http().with_unused_ports())
         .with_chain(custom_chain());
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)

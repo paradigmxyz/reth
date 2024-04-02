@@ -52,8 +52,7 @@ use reth_rpc_types::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
         PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
-    withdrawal::Withdrawal,
-    ExecutionPayloadV1,
+    ExecutionPayloadV1, Withdrawal,
 };
 use reth_tracing::{RethTracer, Tracer};
 use serde::{Deserialize, Serialize};

@@ -10,6 +10,7 @@ use reth_db::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
+use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::{
     blockchain_tree::{
         error::{CanonicalError, InsertBlockError},
@@ -20,7 +21,6 @@ use reth_interfaces::{
     provider::ProviderResult,
     RethResult,
 };
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,

@@ -319,7 +319,7 @@ mod tests {
         let chain_spec = Arc::new(ChainSpec {
             chain: Chain::from_id(1),
             genesis: Genesis {
-                alloc: HashMap::from([
+                alloc: BTreeMap::from([
                     (
                         address_with_balance,
                         GenesisAccount { balance: U256::from(1), ..Default::default() },
@@ -327,7 +327,7 @@ mod tests {
                     (
                         address_with_storage,
                         GenesisAccount {
-                            storage: Some(HashMap::from([(storage_key, B256::random())])),
+                            storage: Some(BTreeMap::from([(storage_key, B256::random())])),
                             ..Default::default()
                         },
                     ),

@@ -11,7 +11,8 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
+use crate::{EthVersion, SharedTransactions};
+
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use reth_primitives::bytes::{Buf, BufMut};
 #[cfg(feature = "serde")]
@@ -21,6 +22,17 @@ use std::{fmt::Debug, sync::Arc};
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
 pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
+
+/// Error when sending/receiving a message
+#[derive(thiserror::Error, Debug)]
+pub enum MessageError {
+    /// Flags an unrecognized message ID for a given protocol version.
+    #[error("message id {1:?} is invalid for version {0:?}")]
+    Invalid(EthVersion, EthMessageID),
+    /// Thrown when rlp decoding a message message failed.
+    #[error("RLP error: {0}")]
+    RlpError(#[from] alloy_rlp::Error),
+}
 
 /// An `eth` protocol message, containing a message ID and payload.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,7 +46,7 @@ pub struct ProtocolMessage {
 
 impl ProtocolMessage {
     /// Create a new ProtocolMessage from a message type and message rlp bytes.
-    pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, EthStreamError> {
+    pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
 
         let message = match message_type {
@@ -81,20 +93,14 @@ impl ProtocolMessage {
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(EthStreamError::EthInvalidMessageError(
-                        version,
-                        EthMessageID::GetNodeData,
-                    ))
+                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
                 }
                 let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
                 EthMessage::GetNodeData(request_pair)
             }
             EthMessageID::NodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(EthStreamError::EthInvalidMessageError(
-                        version,
-                        EthMessageID::GetNodeData,
-                    ))
+                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
                 }
                 let request_pair = RequestPair::<NodeData>::decode(buf)?;
                 EthMessage::NodeData(request_pair)
@@ -487,9 +493,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::MessageError;
     use crate::{
-        errors::EthStreamError, types::message::RequestPair, EthMessage, EthMessageID, GetNodeData,
-        NodeData, ProtocolMessage,
+        message::RequestPair, EthMessage, EthMessageID, GetNodeData, NodeData, ProtocolMessage,
     };
     use alloy_rlp::{Decodable, Encodable, Error};
     use reth_primitives::hex;
@@ -509,14 +515,14 @@ mod tests {
             message: get_node_data,
         });
         let msg = ProtocolMessage::decode_message(crate::EthVersion::Eth67, &mut &buf[..]);
-        assert!(matches!(msg, Err(EthStreamError::EthInvalidMessageError(..))));
+        assert!(matches!(msg, Err(MessageError::Invalid(..))));
 
         let node_data =
             EthMessage::NodeData(RequestPair { request_id: 1337, message: NodeData(vec![]) });
         let buf =
             encode(ProtocolMessage { message_type: EthMessageID::NodeData, message: node_data });
         let msg = ProtocolMessage::decode_message(crate::EthVersion::Eth67, &mut &buf[..]);
-        assert!(matches!(msg, Err(EthStreamError::EthInvalidMessageError(..))));
+        assert!(matches!(msg, Err(MessageError::Invalid(..))));
     }
 
     #[test]

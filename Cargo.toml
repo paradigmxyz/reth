@@ -8,7 +8,8 @@ members = [
     "crates/consensus/beacon-core/",
     "crates/consensus/common/",
     "crates/ethereum-forks/",
-    "crates/etl",
+    "crates/etl/",
+    "crates/evm/",
     "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
@@ -18,6 +19,7 @@ members = [
     "crates/net/downloaders/",
     "crates/net/ecies/",
     "crates/net/eth-wire/",
+    "crates/net/eth-wire-types",
     "crates/net/nat/",
     "crates/net/network/",
     "crates/net/network-api/",
@@ -147,7 +149,7 @@ unnecessary_struct_initialization = "allow"
 use_self = "allow"
 
 [workspace.package]
-version = "0.2.0-beta.3"
+version = "0.2.0-beta.4"
 edition = "2021"
 rust-version = "1.76"
 license = "MIT OR Apache-2.0"
@@ -206,9 +208,11 @@ reth-node-api = { path = "crates/node-api" }
 reth-downloaders = { path = "crates/net/downloaders" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
+reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
 reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
 reth-etl = { path = "crates/etl" }
+reth-evm = { path = "crates/evm" }
 reth-optimism-payload-builder = { path = "crates/payload/optimism" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
@@ -246,21 +250,21 @@ reth-trie-parallel = { path = "crates/trie-parallel" }
 # revm
 revm = { version = "7.2.0", features = ["std", "secp256k1"], default-features = false }
 revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "b3082f3" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "0ad0338" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
-alloy-primitives = "0.6"
-alloy-dyn-abi = "0.6"
-alloy-sol-types = "0.6"
-alloy-rlp = "0.3"
+alloy-primitives = "0.6.4"
+alloy-dyn-abi = "0.6.4"
+alloy-sol-types = "0.6.4"
+alloy-rlp = "0.3.4"
 alloy-trie = "0.3"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
-alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "410850b" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
 
 # TODO: Remove
 ethers-core = { version = "2.0.14", default-features = false }
@@ -327,7 +331,6 @@ jsonrpsee-types = "0.20"
 # crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [
     "global-context",
-    "rand-std",
     "recovery",
 ] }
 enr = { version = "=0.10.0", default-features = false, features = ["k256"] }
