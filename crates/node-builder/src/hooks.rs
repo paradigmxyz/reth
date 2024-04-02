@@ -9,16 +9,16 @@ use std::fmt;
 /// See [DefaultLauncher](crate::DefaultLauncher) for an example.
 pub struct NodeHooks<Node: FullNodeComponents> {
     /// The event hook that can be called once the node's components are initialized.
-    pub on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
+    pub(crate) on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
     /// The event hook that can be called once the [FullNodeComponents] are available.
-    pub on_node_started: Box<dyn OnNodeStartedHook<Node>>,
+    pub(crate) on_node_started: Box<dyn OnNodeStartedHook<Node>>,
     /// Phantom data to enforce [FullNodeComponents].
-    pub _marker: std::marker::PhantomData<Node>,
+    pub(crate) _marker: std::marker::PhantomData<Node>,
 }
 
 impl<Node: FullNodeComponents> NodeHooks<Node> {
     /// Creates a new, empty [NodeHooks] instance for the given node type.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             on_component_initialized: Box::<()>::default(),
             on_node_started: Box::<()>::default(),
@@ -27,7 +27,7 @@ impl<Node: FullNodeComponents> NodeHooks<Node> {
     }
 
     /// Sets the hook that is run once the node's components are initialized.
-    pub fn set_on_component_initialized<F>(&mut self, hook: F) -> &mut Self
+    pub(crate) fn set_on_component_initialized<F>(&mut self, hook: F) -> &mut Self
     where
         F: OnComponentInitializedHook<Node> + 'static,
     {
@@ -37,7 +37,7 @@ impl<Node: FullNodeComponents> NodeHooks<Node> {
 
     /// Sets the hook that is run once the node's components are initialized.
     #[allow(unused)]
-    pub fn on_component_initialized<F>(mut self, hook: F) -> Self
+    pub(crate) fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
         F: OnComponentInitializedHook<Node> + 'static,
     {
@@ -46,7 +46,7 @@ impl<Node: FullNodeComponents> NodeHooks<Node> {
     }
 
     /// Sets the hook that is run once the node has started.
-    pub fn set_on_node_started<F>(&mut self, hook: F) -> &mut Self
+    pub(crate) fn set_on_node_started<F>(&mut self, hook: F) -> &mut Self
     where
         F: OnNodeStartedHook<Node> + 'static,
     {
@@ -56,7 +56,7 @@ impl<Node: FullNodeComponents> NodeHooks<Node> {
 
     /// Sets the hook that is run once the node has started.
     #[allow(unused)]
-    pub fn on_node_started<F>(mut self, hook: F) -> Self
+    pub(crate) fn on_node_started<F>(mut self, hook: F) -> Self
     where
         F: OnNodeStartedHook<Node> + 'static,
     {

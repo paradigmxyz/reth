@@ -37,9 +37,9 @@ pub struct RethRpcServerHandles {
 /// Contains hooks that are called during the rpc setup.
 pub struct RpcHooks<Node: FullNodeComponents> {
     /// The event hook that can be run once the rpc server is started.
-    pub on_rpc_started: Box<dyn OnRpcStarted<Node>>,
+    pub(crate) on_rpc_started: Box<dyn OnRpcStarted<Node>>,
     /// The event hook that can be run once the rpc server is started.
-    pub extend_rpc_modules: Box<dyn ExtendRpcModules<Node>>,
+    pub(crate) extend_rpc_modules: Box<dyn ExtendRpcModules<Node>>,
 }
 
 impl<N: FullNodeComponents> Default for RpcHooks<N> {
@@ -50,12 +50,12 @@ impl<N: FullNodeComponents> Default for RpcHooks<N> {
 
 impl<Node: FullNodeComponents> RpcHooks<Node> {
     /// Creates a new, empty [RpcHooks] instance for the given node type.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { on_rpc_started: Box::<()>::default(), extend_rpc_modules: Box::<()>::default() }
     }
 
     /// Sets the hook that is run once the rpc server is started.
-    pub fn set_on_rpc_started<F>(&mut self, hook: F) -> &mut Self
+    pub(crate) fn set_on_rpc_started<F>(&mut self, hook: F) -> &mut Self
     where
         F: OnRpcStarted<Node> + 'static,
     {
@@ -65,7 +65,7 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
 
     /// Sets the hook that is run once the rpc server is started.
     #[allow(unused)]
-    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
+    pub(crate) fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
         F: OnRpcStarted<Node> + 'static,
     {
@@ -74,7 +74,7 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
     }
 
     /// Sets the hook that is run to configure the rpc modules.
-    pub fn set_extend_rpc_modules<F>(&mut self, hook: F) -> &mut Self
+    pub(crate) fn set_extend_rpc_modules<F>(&mut self, hook: F) -> &mut Self
     where
         F: ExtendRpcModules<Node> + 'static,
     {
@@ -84,7 +84,7 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
 
     /// Sets the hook that is run to configure the rpc modules.
     #[allow(unused)]
-    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
+    pub(crate) fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
         F: ExtendRpcModules<Node> + 'static,
     {
