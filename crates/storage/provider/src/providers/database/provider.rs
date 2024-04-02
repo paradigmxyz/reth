@@ -57,7 +57,7 @@ use std::{
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB> = DatabaseProvider<<DB as Database>::TX>;
@@ -859,16 +859,24 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut deleted_entries = 0;
 
         for key in &mut keys {
+            if limiter.is_limit_reached() {
+                debug!(
+                    target: "providers::db",
+                    ?limiter,
+                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
+                    time_limit = %limiter.is_time_limit_reached(),
+                    table = %T::NAME,
+                    "Pruning limit reached"
+                );
+                break
+            }
+
             let row = cursor.seek_exact(key)?;
             if let Some(row) = row {
                 cursor.delete_current()?;
                 limiter.increment_deleted_entries_count();
                 deleted_entries += 1;
                 delete_callback(row);
-            }
-
-            if limiter.is_limit_reached() {
-                break
             }
         }
 
@@ -893,8 +901,16 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let done = loop {
             // check for time out must be done in this scope since it's not done in
-            // `step_prune_range`
+            // `prune_table_with_range_step`
             if limiter.is_limit_reached() {
+                debug!(
+                    target: "providers::db",
+                    ?limiter,
+                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
+                    time_limit = %limiter.is_time_limit_reached(),
+                    table = %T::NAME,
+                    "Pruning limit reached"
+                );
                 break false
             }
 
@@ -937,10 +953,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             walker.delete_current()?;
             limiter.increment_deleted_entries_count();
             delete_callback(row);
-
-            trace!(target: "provider",
-                "deleted entry"
-            );
         }
 
         Ok(false)
