@@ -18,7 +18,7 @@ use std::{
 
 use ::enr::Enr;
 use alloy_rlp::Decodable;
-use derive_more::{Deref, DerefMut};
+use derive_more::Deref;
 use discv5::ListenConfig;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
@@ -49,10 +49,9 @@ use metrics::Discv5Metrics;
 const MAX_LOG2_DISTANCE: usize = 255;
 
 /// Transparent wrapper around [`discv5::Discv5`].
-#[derive(Deref, DerefMut, Clone)]
+#[derive(Deref, Clone)]
 pub struct Discv5 {
     #[deref]
-    #[deref_mut]
     /// sigp/discv5 node.
     discv5: Arc<discv5::Discv5>,
     /// [`IpMode`] of the the node.
