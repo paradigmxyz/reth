@@ -6126,6 +6126,7 @@ version = "0.2.0-beta.4"
 dependencies = [
  "reth-evm",
  "reth-primitives",
+ "reth-provider",
  "reth-rpc-types",
  "serde",
  "thiserror",
