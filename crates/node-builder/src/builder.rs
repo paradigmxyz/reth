@@ -9,7 +9,7 @@ use crate::{
     },
     exex::{BoxedLaunchExEx, ExExContext},
     hooks::NodeHooks,
-    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter},
+    node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     Node, NodeHandle,
 };
@@ -30,7 +30,7 @@ use reth_db::{
 };
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
-use reth_node_api::NodeTypes;
+use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
