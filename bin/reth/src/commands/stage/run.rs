@@ -133,7 +133,7 @@ impl Command {
         // add network name to data dir
         let data_dir =
             self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
-        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let config: Config = confy::load_path(config_path).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", SHORT_VERSION, self.stage);
