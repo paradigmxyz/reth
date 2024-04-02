@@ -233,8 +233,9 @@ where
     /// Note: if not [BlockNumberOrTag::Pending] then this will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
     pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox> {
         self.provider().state_by_block_id(at).map_err(|e| match e {
-            ProviderError::HeaderNotFound(_) => EthApiError::UnknownBlockId(at),
-            ProviderError::BlockHashNotFound(_) => EthApiError::UnknownBlockId(at),
+            ProviderError::HeaderNotFound(_) | ProviderError::BlockHashNotFound(_) => {
+                EthApiError::UnknownBlockId(at)
+            }
             _ => e.into(),
         })
     }
