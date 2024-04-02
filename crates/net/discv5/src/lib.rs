@@ -272,9 +272,9 @@ impl Discv5 {
                         return Err(Error::Discv5ErrorStr(err))
                     }
                 }
-                BootNode::Enode(enode) => enr_requests.push(task::spawn({
+                BootNode::Enode(enode) => {
                     let discv5 = discv5.clone();
-                    async move {
+                    enr_requests.push(async move {
                         if let Err(err) = discv5.request_enr(enode.to_string()).await {
                             debug!(target: "net::discv5",
                                 ?enode,
@@ -282,8 +282,8 @@ impl Discv5 {
                                 "failed adding boot node"
                             );
                         }
-                    }
-                })),
+                    })
+                }
             }
         }
         _ = join_all(enr_requests);
