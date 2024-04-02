@@ -738,7 +738,8 @@ impl ChainSpec {
         self.hardfork_fork_id(Hardfork::Cancun)
     }
 
-    /// Convenience method to get the latest fork id from the chainspec.
+    /// Convenience method to get the latest fork id from the chainspec. Panics if chainspec has no
+    /// hardforks.
     #[inline]
     pub fn latest_fork_id(&self) -> ForkId {
         self.hardfork_fork_id(*self.hardforks().last_key_value().unwrap().0).unwrap()
