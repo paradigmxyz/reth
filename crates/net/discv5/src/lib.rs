@@ -23,10 +23,7 @@ use discv5::ListenConfig;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
-use reth_primitives::{
-    bytes::{Bytes, BytesMut},
-    ForkId, NodeRecord, PeerId,
-};
+use reth_primitives::{bytes::Bytes, ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use tokio::{sync::mpsc, task};
 use tracing::{debug, error, trace};
@@ -106,7 +103,7 @@ impl Discv5 {
     ) {
         let mut buf = Vec::new();
         value.encode(&mut buf);
-        self.set_eip868_in_local_enr(key, buf.freeze())
+        self.set_eip868_in_local_enr(key, buf.into())
     }
 
     /// Adds the peer and id to the ban list.

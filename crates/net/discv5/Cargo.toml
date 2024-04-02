@@ -27,13 +27,9 @@ secp256k1.workspace = true
 
 # async/futures
 tokio.workspace = true
-tokio-stream.workspace = true
 futures.workspace = true
-pin-project.workspace = true
-parking_lot.workspace = true
 
 # io
-serde_json.workspace = true
 rand.workspace = true
 
 # misc
