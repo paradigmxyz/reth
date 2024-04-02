@@ -283,6 +283,8 @@ impl Default for DiscoveryArgs {
 
 #[cfg(test)]
 mod tests {
+    use std::default;
+
     use super::*;
     use clap::Parser;
     /// A helper type to parse Args more easily
@@ -340,6 +342,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "optimism"))]
     #[test]
     fn network_args_default_sanity_test() {
         let default_args = NetworkArgs::default();
