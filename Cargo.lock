@@ -808,6 +808,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
+name = "beacon-api-sidecar-fetcher"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "futures-util",
+ "mev-share-sse",
+ "reth",
+ "reth-node-ethereum",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "beacon-api-sse"
 version = "0.0.0"
 dependencies = [

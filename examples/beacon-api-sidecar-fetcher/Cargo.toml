@@ -1,0 +1,16 @@
+[package]
+name = "beacon-api-sidecar-fetcher"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-node-ethereum.workspace = true
+
+clap.workspace = true
+tracing.workspace = true
+futures-util.workspace = true
+tokio = { workspace = true, features = ["time"] }
+mev-share-sse = {  version = "0.1.6" , default-features = false }
