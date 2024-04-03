@@ -158,12 +158,18 @@ impl Discovery {
         if let Some(discv4) = &self.discv4 {
             discv4.ban_ip(ip)
         }
+        if let Some(discv5) = &self.discv5 {
+            discv5.ban_peer_by_ip(ip)
+        }
     }
 
     /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
     pub(crate) fn ban(&self, peer_id: PeerId, ip: IpAddr) {
         if let Some(discv4) = &self.discv4 {
             discv4.ban(peer_id, ip)
+        }
+        if let Some(discv5) = &self.discv5 {
+            discv5.ban_peer_by_ip_and_node_id(peer_id, ip)
         }
     }
 
