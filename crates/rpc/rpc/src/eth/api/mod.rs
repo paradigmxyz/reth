@@ -42,7 +42,7 @@ pub(crate) mod fee_history;
 
 mod fees;
 #[cfg(feature = "optimism")]
-mod optimism;
+pub mod optimism;
 mod pending_block;
 mod server;
 mod sign;

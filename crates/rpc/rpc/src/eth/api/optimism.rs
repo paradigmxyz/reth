@@ -1,3 +1,5 @@
+//! Optimism helpers.
+
 use reqwest::Client;
 use reth_primitives::U256;
 use revm::L1BlockInfo;
