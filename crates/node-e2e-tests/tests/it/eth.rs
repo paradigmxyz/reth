@@ -47,9 +47,6 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let eth_attr = eth_payload_attributes();
     let payload_id = node.payload_builder.new_payload(eth_attr.clone()).await?;
 
-    // resolve best payload via engine api
-    let client = node.engine_http_client();
-
     // first event is the payload attributes
     let first_event = payload_event_stream.next().await.unwrap()?;
     if let reth::payload::Events::Attributes(attr) = first_event {
@@ -68,10 +65,11 @@ async fn can_run_eth_node() -> eyre::Result<()> {
         break;
     }
 
+    let client = node.engine_http_client();
     // trigger resolve payload via engine api
     let _ = client.get_payload_v3(payload_id).await?;
 
-    // second event is built payload
+    // ensure we're also receiving the built payload as event
     let second_event = payload_event_stream.next().await.unwrap()?;
     if let reth::payload::Events::BuiltPayload(payload) = second_event {
         // setup payload for submission
