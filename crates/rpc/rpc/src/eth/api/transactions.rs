@@ -20,7 +20,7 @@ use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionKind::{Call, Create},
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U128, U256, U64,
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U256, U64,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
@@ -32,7 +32,7 @@ use reth_revm::{
 use reth_rpc_types::{transaction::{
     EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
     LegacyTransactionRequest,
-}, Index, Log, Transaction, TransactionInfo, TransactionKind as RpcTransactionKind, TransactionReceipt, TransactionRequest, TypedTransactionRequest, WithOtherFields};
+}, Index, Log, Transaction, TransactionInfo, TransactionKind as RpcTransactionKind, TransactionReceipt, TransactionRequest, TypedTransactionRequest, WithOtherFields, AnyReceiptEnvelope};
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
@@ -1260,7 +1260,7 @@ where
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> EthResult<WithOtherFields<TransactionReceipt>> {
+    ) -> EthResult<WithOtherFields<TransactionReceipt<AnyReceiptEnvelope>>> {
         // get all receipts for the block
         let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
             Some(recpts) => recpts,
@@ -1278,7 +1278,7 @@ where
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> EthResult<WithOtherFields<TransactionReceipt>> {
+    ) -> EthResult<WithOtherFields<TransactionReceipt<AnyReceiptEnvelope>>> {
         let (block, receipts) = self
             .cache()
             .get_block_and_receipts(meta.block_hash)
@@ -1530,7 +1530,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     receipt: Receipt,
     all_receipts: &[Receipt],
     #[cfg(feature = "optimism")] optimism_tx_meta: OptimismTxMeta,
-) -> EthResult<WithOtherFields<TransactionReceipt>> {
+) -> EthResult<WithOtherFields<TransactionReceipt<AnyReceiptEnvelope>>> {
     // Note: we assume this transaction is valid, because it's mined (or part of pending block) and
     // we don't need to check for pre EIP-2
     let from =
@@ -1552,10 +1552,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     let blob_gas_price =
         blob_gas_used.and_then(|_| meta.excess_blob_gas.map(calc_blob_gasprice));
 
-    // TODO populate receipt
-    let receipt = reth_rpc_types::Receipt {
 
-    }
 
     #[allow(clippy::needless_update)]
     let mut res_receipt = TransactionReceipt {

@@ -3,7 +3,7 @@ use reth_primitives::{
     serde_helper::{num::U64HexOrNumber, JsonStorageKey},
     Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
-use reth_rpc_types::{state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work, WithOtherFields};
+use reth_rpc_types::{state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work, WithOtherFields, AnyReceiptEnvelope};
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
@@ -70,7 +70,7 @@ pub trait EthApi {
     /// Returns all transaction receipts for a given block.
     #[method(name = "getBlockReceipts")]
     async fn block_receipts(&self, block_id: BlockId)
-        -> RpcResult<Option<Vec<WithOtherFields<TransactionReceipt>>>>;
+        -> RpcResult<Option<Vec<WithOtherFields<TransactionReceipt<AnyReceiptEnvelope>>>>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockHashAndIndex")]
