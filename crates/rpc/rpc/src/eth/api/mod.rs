@@ -36,9 +36,6 @@ use std::{
 };
 use tokio::sync::{oneshot, Mutex};
 
-#[cfg(feature = "optimism")]
-pub use optimism::SequencerClient;
-
 mod block;
 mod call;
 pub(crate) mod fee_history;
@@ -107,7 +104,6 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
-        #[cfg(feature = "optimism")] sequencer_client: SequencerClient,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -120,8 +116,6 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
-            #[cfg(feature = "optimism")]
-            sequencer_client,
         )
     }
 
@@ -138,7 +132,6 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
-        #[cfg(feature = "optimism")] sequencer_client: SequencerClient,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -163,7 +156,7 @@ where
             fee_history_cache,
             evm_config,
             #[cfg(feature = "optimism")]
-            sequencer_client,
+            http_client: reqwest::Client::builder().use_rustls_tls().build().unwrap(),
         };
 
         Self { inner: Arc::new(inner) }
@@ -493,7 +486,7 @@ struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     fee_history_cache: FeeHistoryCache,
     /// The type that defines how to configure the EVM
     evm_config: EvmConfig,
-    /// Optimism Sequencer Client for communicating with sequencers.
+    /// An http client for communicating with sequencers.
     #[cfg(feature = "optimism")]
-    sequencer_client: SequencerClient,
+    http_client: reqwest::Client,
 }

@@ -1,7 +1,6 @@
+use reqwest::Client;
 use reth_primitives::U256;
 use revm::L1BlockInfo;
-
-use reqwest::Client;
 
 /// Optimism Transaction Metadata
 ///
@@ -31,15 +30,18 @@ impl OptimismTxMeta {
     }
 }
 
-/// Optimism Sequencer Client
+/// A client to interact with a Sequencer
 #[derive(Debug, Default, Clone)]
 pub struct SequencerClient {
-    pub sequencer_endpoint: Option<String>,
-    pub http_client: Option<Client>,
+    /// The endpoint of the sequencer
+    pub sequencer_endpoint: String,
+    /// The HTTP client
+    pub http_client: Client,
 }
 
 impl SequencerClient {
-    pub fn new(sequencer_endpoint: Option<String>, http_client: Option<Client>) -> Self {
-        Self { sequencer_endpoint, http_client }
+    /// Creates a new [SequencerClient].
+    pub fn new(sequencer_endpoint: impl Into<String>, http_client: Client) -> Self {
+        Self { sequencer_endpoint: sequencer_endpoint.into(), http_client }
     }
 }
