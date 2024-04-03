@@ -236,7 +236,7 @@ impl Discv5 {
         //
         // 4. add boot nodes
         //
-        Self::bootstrap(bootstrap_nodes, &discv5)?;
+        Self::bootstrap(bootstrap_nodes, &discv5).await?;
 
         let metrics = Discv5Metrics::default();
 
@@ -253,7 +253,7 @@ impl Discv5 {
     }
 
     /// Bootstraps underlying [`discv5::Discv5`] node with configured peers.
-    fn bootstrap(
+    async fn bootstrap(
         bootstrap_nodes: HashSet<BootNode>,
         discv5: &Arc<discv5::Discv5>,
     ) -> Result<(), Error> {
@@ -284,18 +284,8 @@ impl Discv5 {
                 }
             }
         }
-        _ = join_all(enr_requests);
 
-        debug!(target: "net::discv5",
-            nodes=format!("[{:#}]", discv5.with_kbuckets(|kbuckets| kbuckets
-                .write()
-                .iter()
-                .map(|peer| format!("enr: {:?}, status: {:?}", peer.node.value, peer.status)).collect::<Vec<_>>()
-            ).into_iter().format(", ")),
-            "added boot nodes"
-        );
-
-        Ok(())
+        Ok(_ = join_all(enr_requests).await)
     }
 
     /// Backgrounds regular look up queries, in order to keep kbuckets populated.
