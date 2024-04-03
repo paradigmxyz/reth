@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 /// Helper struct to customize the chain spec during e2e tests
 pub struct TestSuite {
-    pub chain_spec: Arc<ChainSpec>,
     test_account: Account,
 }
 
@@ -18,9 +17,8 @@ impl TestSuite {
     /// Creates a new e2e test suite with a test account prefunded with 10_000 ETH from genesis
     /// allocations and the eth mainnet latest chainspec.
     pub fn new() -> Self {
-        let chain_spec = TestSuite::chain_spec();
         let test_account = Account::new();
-        Self { chain_spec, test_account }
+        Self { test_account }
     }
 
     /// Creates a signed transfer tx and returns its hash and raw bytes
@@ -33,7 +31,7 @@ impl TestSuite {
     ///
     /// Includes 20 prefunded accounts with 10_000 ETH each derived from mnemonic "test test test
     /// test test test test test test test test junk".
-    fn chain_spec() -> Arc<ChainSpec> {
+    pub fn chain_spec(&self) -> Arc<ChainSpec> {
         let genesis: Genesis = serde_json::from_str(include_str!("./genesis.json")).unwrap();
         Arc::new(genesis.into())
     }

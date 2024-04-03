@@ -18,12 +18,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
     let tasks = TaskManager::current();
     let test_suite = TestSuite::new();
 
     // Node setup
     let node_config = NodeConfig::test()
-        .with_chain(test_suite.chain_spec.clone())
+        .with_chain(test_suite.chain_spec())
         .with_rpc(RpcServerArgs::default().with_http());
 
     let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
@@ -35,6 +36,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     // setup engine api events and payload service events
     let mut notifications = node.provider.canonical_state_stream();
     let payload_events = node.payload_builder.subscribe().await?;
+    let mut payload_event_stream = payload_events.into_stream();
 
     // push tx into pool via RPC server
     let eth_api = node.rpc_registry.eth_api();
@@ -46,14 +48,6 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let eth_attr = eth_payload_attributes();
     let payload_id = node.payload_builder.new_payload(eth_attr.clone()).await?;
 
-    // resolve best payload via engine api
-    let client = node.engine_http_client();
-
-    // ensure we can get the payload over the engine api
-    let _payload = client.get_payload_v3(payload_id).await?;
-
-    let mut payload_event_stream = payload_events.into_stream();
-
     // first event is the payload attributes
     let first_event = payload_event_stream.next().await.unwrap()?;
     if let reth::payload::Events::Attributes(attr) = first_event {
@@ -62,7 +56,21 @@ async fn can_run_eth_node() -> eyre::Result<()> {
         panic!("Expect first event as payload attributes.")
     }
 
-    // second event is built payload
+    // wait until an actual payload is built before we resolve it via engine api
+    loop {
+        let payload = node.payload_builder.best_payload(payload_id).await.unwrap().unwrap();
+        if payload.block().body.is_empty() {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            continue;
+        }
+        break;
+    }
+
+    let client = node.engine_http_client();
+    // trigger resolve payload via engine api
+    let _ = client.get_payload_v3(payload_id).await?;
+
+    // ensure we're also receiving the built payload as event
     let second_event = payload_event_stream.next().await.unwrap()?;
     if let reth::payload::Events::BuiltPayload(payload) = second_event {
         // setup payload for submission
@@ -94,8 +102,8 @@ async fn can_run_eth_node() -> eyre::Result<()> {
         // get head block from notifications stream and verify the tx has been pushed to the pool
         // is actually present in the canonical block
         let head = notifications.next().await.unwrap();
-        let tx = head.tip().transactions().next().unwrap();
-        assert_eq!(tx.hash().as_slice(), expected_hash.as_slice());
+        let tx = head.tip().transactions().next();
+        assert_eq!(tx.unwrap().hash().as_slice(), expected_hash.as_slice());
 
         // make sure the block hash we submitted via FCU engine api is the new latest block using an
         // RPC call
