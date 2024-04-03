@@ -202,11 +202,14 @@ impl<DB: Database> Pruner<DB> {
                     .get_prune_segment_metrics(segment.segment())
                     .duration_seconds
                     .record(segment_start.elapsed());
-
-                self.metrics
-                    .get_prune_segment_metrics(segment.segment())
-                    .highest_pruned_block
-                    .set(to_block as f64);
+                if let Some(highest_pruned_block) =
+                    output.checkpoint.and_then(|checkpoint| checkpoint.block_number)
+                {
+                    self.metrics
+                        .get_prune_segment_metrics(segment.segment())
+                        .highest_pruned_block
+                        .set(highest_pruned_block as f64);
+                }
 
                 progress = output.progress;
 
