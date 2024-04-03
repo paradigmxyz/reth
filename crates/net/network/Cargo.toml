@@ -18,6 +18,7 @@ reth-primitives.workspace = true
 reth-net-common.workspace = true
 reth-network-api.workspace = true
 reth-discv4.workspace = true
+reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
 reth-eth-wire.workspace = true
 reth-ecies.workspace = true
@@ -30,6 +31,7 @@ reth-tokio-util.workspace = true
 # ethereum
 enr = { workspace = true, features = ["rust-secp256k1"], optional = true }
 alloy-rlp.workspace = true
+discv5.workspace = true
 
 # async/futures
 futures.workspace = true
