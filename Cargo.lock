@@ -4610,6 +4610,7 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-primitives",
+ "reth-tracing",
  "secp256k1 0.27.0",
  "serde_json",
  "tokio",
