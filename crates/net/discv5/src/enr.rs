@@ -60,7 +60,7 @@ impl From<EnrCombinedKeyWrapper> for Enr<SecretKey> {
 mod tests {
     use alloy_rlp::Encodable;
     use discv5::enr::{CombinedKey, EnrKey};
-    use reth_primitives::{pk_to_id, Hardfork, NodeRecord, MAINNET};
+    use reth_primitives::{Hardfork, NodeRecord, MAINNET};
 
     use super::*;
 
@@ -105,7 +105,7 @@ mod tests {
                 address: IP.parse().unwrap(),
                 tcp_port: TCP_PORT,
                 udp_port: UDP_PORT,
-                id: pk_to_id(&enr.public_key())
+                id: pk2id(&enr.public_key())
             },
             node_record
         )
