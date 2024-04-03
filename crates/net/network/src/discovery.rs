@@ -46,8 +46,6 @@ pub struct Discovery {
     discv4_updates: Option<ReceiverStream<DiscoveryUpdate>>,
     /// The handle to the spawned discv4 service
     _discv4_service: Option<JoinHandle<()>>,
-    /// Local ENR of the discovery v5 service.
-    local_enr_discv5: Option<NodeRecord>,
     /// Handler to interact with the Discovery v5 service
     discv5: Option<Discv5>,
     /// All KAD table updates from the discv5 service.
@@ -93,13 +91,14 @@ impl Discovery {
             (None, None, None)
         };
 
-        let (discv5, discv5_updates, local_enr_discv5) = match discv5_config {
+        let (discv5, discv5_updates) = match discv5_config {
             Some(config) => {
-                let (discv5, discv5_updates, local_enr_discv5) = Discv5::start(&sk, config).await?;
+                let (discv5, discv5_updates, _local_enr_discv5) =
+                    Discv5::start(&sk, config).await?;
 
-                (Some(discv5), Some(discv5_updates.into()), Some(local_enr_discv5))
+                (Some(discv5), Some(discv5_updates.into()))
             }
-            None => (None, None, None),
+            None => (None, None),
         };
 
         // setup DNS discovery
@@ -122,7 +121,6 @@ impl Discovery {
             discv4,
             discv4_updates,
             _discv4_service,
-            local_enr_discv5,
             discv5,
             discv5_updates,
             discovered_nodes: LruMap::new(DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE),
@@ -171,14 +169,9 @@ impl Discovery {
         self.discv4.clone()
     }
 
-    /// Returns the id with which the local discv4 node identifies itself in the network
+    /// Returns the id with which the local node identifies itself in the network
     pub(crate) fn local_id(&self) -> PeerId {
-        self.local_enr.id
-    }
-
-    /// Returns the id with which the local discv5 node identifies itself in the network
-    pub(crate) fn local_id_discv5(&self) -> Option<PeerId> {
-        self.local_enr_discv5.map(|discv5| discv5.id)
+        self.local_enr.id // local discv4 and discv5 have same id, since signed with same secret key
     }
 
     /// Add a node to the discv4 table.
@@ -294,7 +287,6 @@ impl Discovery {
             },
             discv4: Default::default(),
             discv4_updates: Default::default(),
-            local_enr_discv5: None,
             discv5: None,
             discv5_updates: None,
             queued_events: Default::default(),
