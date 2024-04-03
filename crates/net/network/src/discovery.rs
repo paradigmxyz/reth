@@ -159,7 +159,7 @@ impl Discovery {
             discv4.ban_ip(ip)
         }
         if let Some(discv5) = &self.discv5 {
-            discv5.ban_peer_by_ip(ip)
+            discv5.ban_ip(ip)
         }
     }
 
@@ -169,7 +169,7 @@ impl Discovery {
             discv4.ban(peer_id, ip)
         }
         if let Some(discv5) = &self.discv5 {
-            discv5.ban_peer_by_ip_and_node_id(peer_id, ip)
+            discv5.ban(peer_id, ip)
         }
     }
 

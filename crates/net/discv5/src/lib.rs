@@ -18,7 +18,6 @@ use std::{
 
 use ::enr::Enr;
 use alloy_rlp::Decodable;
-use derive_more::Deref;
 use discv5::ListenConfig;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
@@ -46,9 +45,8 @@ use metrics::Discv5Metrics;
 const MAX_LOG2_DISTANCE: usize = 255;
 
 /// Transparent wrapper around [`discv5::Discv5`].
-#[derive(Deref, Clone)]
+#[derive(Clone)]
 pub struct Discv5 {
-    #[deref]
     /// sigp/discv5 node.
     discv5: Arc<discv5::Discv5>,
     /// [`IpMode`] of the the node.
@@ -69,7 +67,7 @@ impl Discv5 {
     /// Adds the node to the table, if it is not already present.
     pub fn add_node(&self, node_record: Enr<SecretKey>) -> Result<(), Error> {
         let EnrCombinedKeyWrapper(enr) = node_record.into();
-        self.add_enr(enr).map_err(Error::AddNodeFailed)
+        self.discv5.add_enr(enr).map_err(Error::AddNodeFailed)
     }
 
     /// Sets the pair in the EIP-868 [`Enr`] of the node.
@@ -85,7 +83,7 @@ impl Discv5 {
             );
             return
         };
-        if let Err(err) = self.enr_insert(key_str, &rlp) {
+        if let Err(err) = self.discv5.enr_insert(key_str, &rlp) {
             error!(target: "discv5",
                 %err,
                 "failed to update local enr"
@@ -109,11 +107,11 @@ impl Discv5 {
     /// Adds the peer and id to the ban list.
     ///
     /// This will prevent any future inclusion in the table
-    pub fn ban_peer_by_ip_and_node_id(&self, peer_id: PeerId, ip: IpAddr) {
+    pub fn ban(&self, peer_id: PeerId, ip: IpAddr) {
         match discv4_id_to_discv5_id(peer_id) {
             Ok(node_id) => {
-                self.ban_node(&node_id, None);
-                self.ban_peer_by_ip(ip);
+                self.discv5.ban_node(&node_id, None);
+                self.ban_ip(ip);
             }
             Err(err) => error!(target: "discv5",
                 %err,
@@ -125,15 +123,15 @@ impl Discv5 {
     /// Adds the ip to the ban list.
     ///
     /// This will prevent any future inclusion in the table
-    pub fn ban_peer_by_ip(&self, ip: IpAddr) {
-        self.ban_ip(ip, None);
+    pub fn ban_ip(&self, ip: IpAddr) {
+        self.discv5.ban_ip(ip, None);
     }
 
     /// Returns the [`NodeRecord`] of the local node.
     ///
     /// This includes the currently tracked external IP address of the node.
     pub fn node_record(&self) -> NodeRecord {
-        let enr: Enr<_> = EnrCombinedKeyWrapper(self.local_enr()).into();
+        let enr: Enr<_> = EnrCombinedKeyWrapper(self.discv5.local_enr()).into();
         (&enr).try_into().unwrap()
     }
 
@@ -491,9 +489,9 @@ impl Discv5 {
     /// Exposes API of [`discv5::Discv5`].
     pub fn with_discv5<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&Self) -> R,
+        F: FnOnce(&discv5::Discv5) -> R,
     {
-        f(self)
+        f(&self.discv5)
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
