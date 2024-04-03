@@ -12,8 +12,8 @@ pub enum Error {
     #[error("incompatible key type (not secp256k1)")]
     IncompatibleKeyType,
     /// Missing key used to identify rlpx network.
-    #[error("fork missing on enr, 'eth' key missing")]
-    ForkMissing,
+    #[error("fork missing on enr, key missing")]
+    ForkMissing(&'static [u8]),
     /// Failed to decode [`ForkId`](reth_primitives::ForkId) rlp value.
     #[error("failed to decode fork id, 'eth': {0:?}")]
     ForkIdDecodeError(#[from] alloy_rlp::Error),

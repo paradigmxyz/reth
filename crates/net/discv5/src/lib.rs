@@ -477,7 +477,8 @@ impl Discv5 {
         &self,
         enr: &discv5::enr::Enr<K>,
     ) -> Result<ForkId, Error> {
-        let mut fork_id_bytes = enr.get_raw_rlp(self.fork_id_key()).ok_or(Error::ForkMissing)?;
+        let key = self.fork_id_key;
+        let mut fork_id_bytes = enr.get_raw_rlp(key).ok_or(Error::ForkMissing(key))?;
 
         Ok(ForkId::decode(&mut fork_id_bytes)?)
     }
