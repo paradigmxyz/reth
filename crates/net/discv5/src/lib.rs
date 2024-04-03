@@ -629,21 +629,21 @@ mod tests {
         // verify node_1:discv5 is connected to node_2:discv5 and vv
         let event_2_v5 = stream_2.recv().await.unwrap();
         let event_1_v5 = stream_1.recv().await.unwrap();
-        matches!(
+        assert!(matches!(
             event_1_v5,
             discv5::Event::SessionEstablished(node, socket) if node == node_2_enr && socket == node_2_enr.udp4_socket().unwrap().into()
-        );
-        matches!(
+        ));
+        assert!(matches!(
             event_2_v5,
             discv5::Event::SessionEstablished(node, socket) if node == node_1_enr && socket == node_1_enr.udp4_socket().unwrap().into()
-        );
+        ));
 
         // verify node_1 is in KBuckets of node_2:discv5
         let event_2_v5 = stream_2.recv().await.unwrap();
-        matches!(
+        assert!(matches!(
             event_2_v5,
             discv5::Event::NodeInserted { node_id, replaced } if node_id == node_1_enr.node_id() && replaced.is_none()
-        );
+        ));
     }
 
     #[test]
