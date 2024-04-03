@@ -1416,51 +1416,53 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         let len = range.end().saturating_sub(*range.start()) as usize;
         let mut blocks = Vec::with_capacity(len);
 
-        let mut headers_cursor = self.tx.cursor_read::<tables::Headers>()?;
+        let headers = self.headers_range(range)?;
         let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
         let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
 
-        for num in range {
-            if let Some((_, header)) = headers_cursor.seek_exact(num)? {
-                // If the body indices are not found, this means that the transactions either do
-                // not exist in the database yet, or they do exit but are
-                // not indexed. If they exist but are not indexed, we don't
-                // have enough information to return the block anyways, so
-                // we skip the block.
-                if let Some((_, block_body_indices)) = block_body_cursor.seek_exact(num)? {
-                    let tx_range = block_body_indices.tx_num_range();
-                    let body = if tx_range.is_empty() {
+        for header in headers {
+            // If the body indices are not found, this means that the transactions either do
+            // not exist in the database yet, or they do exit but are
+            // not indexed. If they exist but are not indexed, we don't
+            // have enough information to return the block anyways, so
+            // we skip the block.
+            if let Some((_, block_body_indices)) = block_body_cursor.seek_exact(header.number)? {
+                let tx_range = block_body_indices.tx_num_range();
+                let body = if tx_range.is_empty() {
+                    Vec::new()
+                } else {
+                    self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
+                        .into_iter()
+                        .map(Into::into)
+                        .collect()
+                };
+
+                // If we are past shanghai, then all blocks should have a withdrawal list,
+                // even if empty
+                let withdrawals =
+                    if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
+                        Some(
+                            withdrawals_cursor
+                                .seek_exact(header.number)?
+                                .map(|(_, w)| w.withdrawals)
+                                .unwrap_or_default(),
+                        )
+                    } else {
+                        None
+                    };
+                let ommers =
+                    if self.chain_spec.final_paris_total_difficulty(header.number).is_some() {
                         Vec::new()
                     } else {
-                        self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
-                            .into_iter()
-                            .map(Into::into)
-                            .collect()
+                        ommers_cursor
+                            .seek_exact(header.number)?
+                            .map(|(_, o)| o.ommers)
+                            .unwrap_or_default()
                     };
 
-                    // If we are past shanghai, then all blocks should have a withdrawal list,
-                    // even if empty
-                    let withdrawals =
-                        if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
-                            Some(
-                                withdrawals_cursor
-                                    .seek_exact(num)?
-                                    .map(|(_, w)| w.withdrawals)
-                                    .unwrap_or_default(),
-                            )
-                        } else {
-                            None
-                        };
-                    let ommers = if self.chain_spec.final_paris_total_difficulty(num).is_some() {
-                        Vec::new()
-                    } else {
-                        ommers_cursor.seek_exact(num)?.map(|(_, o)| o.ommers).unwrap_or_default()
-                    };
-
-                    blocks.push(Block { header, body, ommers, withdrawals });
-                }
+                blocks.push(Block { header, body, ommers, withdrawals });
             }
         }
         Ok(blocks)
