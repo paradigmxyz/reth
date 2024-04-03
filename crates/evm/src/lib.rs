@@ -10,7 +10,7 @@
 
 use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Transaction, U256};
 use revm::{Database, Evm, EvmBuilder};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
@@ -23,11 +23,42 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         EvmBuilder::default().with_db(db).build()
     }
 
+    /// Returns a new EVM with the given database configured with the given environment settings,
+    /// including the spec id.
+    ///
+    /// This will preserve any handler modifications
+    fn evm_with_env<'a, DB: Database + 'a>(
+        &self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Evm<'a, (), DB> {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
+    }
+
+    /// Returns a new EVM with the given database configured with the given environment settings,
+    /// including the spec id.
+    ///
+    /// This will preserve any handler modifications
+    fn evm_with_env_and_inspector<'a, DB: Database + 'a, I>(
+        &self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+        inspector: I,
+    ) -> Evm<'a, I, DB> {
+        let mut evm = self.evm_with_inspector(db, inspector);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
+    }
+
     /// Returns a new EVM with the given inspector.
     ///
-    /// This does not automatically configure the EVM with [ConfigureEvmEnv] methods. It is up to
-    /// the caller to call an appropriate method to fill the transaction and block environment
-    /// before executing any transactions using the provided EVM.
+    /// Caution: This does not automatically configure the EVM with [ConfigureEvmEnv] methods. It is
+    /// up to the caller to call an appropriate method to fill the transaction and block
+    /// environment before executing any transactions using the provided EVM.
     fn evm_with_inspector<'a, DB: Database + 'a, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB> {
         EvmBuilder::default().with_db(db).with_external_context(inspector).build()
     }
