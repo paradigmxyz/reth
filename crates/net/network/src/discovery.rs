@@ -1,6 +1,7 @@
 //! Discovery support for the network.
 
 use crate::{
+    cache::LruMap,
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
 };
@@ -13,7 +14,7 @@ use reth_dns_discovery::{
 use reth_primitives::{ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use std::{
-    collections::{hash_map::Entry, HashMap, VecDeque},
+    collections::VecDeque,
     net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::Arc,
@@ -21,6 +22,11 @@ use std::{
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
+
+/// Default max capacity for cache of discovered peers.
+///
+/// Default is 1000 peers.
+pub const DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE: u32 = 1000;
 
 /// An abstraction over the configured discovery protocol.
 ///
@@ -31,7 +37,7 @@ pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///
     /// These nodes can be ephemeral and are updated via the discovery protocol.
-    discovered_nodes: HashMap<PeerId, SocketAddr>,
+    discovered_nodes: LruMap<PeerId, SocketAddr>,
     /// Local ENR of the discovery v4 service.
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
@@ -119,7 +125,7 @@ impl Discovery {
             local_enr_discv5,
             discv5,
             discv5_updates,
-            discovered_nodes: Default::default(),
+            discovered_nodes: LruMap::new(DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE),
             queued_events: Default::default(),
             _dns_disc_service,
             _dns_discovery,
@@ -186,15 +192,14 @@ impl Discovery {
     fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
         let id = record.id;
         let addr = record.tcp_addr();
-        match self.discovered_nodes.entry(id) {
-            Entry::Occupied(_entry) => {}
-            Entry::Vacant(entry) => {
-                entry.insert(addr);
+        _ =
+            self.discovered_nodes.get_or_insert(id, || {
                 self.queued_events.push_back(DiscoveryEvent::NewNode(
                     DiscoveredEvent::EventQueued { peer_id: id, socket_addr: addr, fork_id },
                 ));
-            }
-        }
+
+                addr
+            })
     }
 
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
@@ -280,7 +285,7 @@ impl Discovery {
             mpsc::unbounded_channel();
 
         Self {
-            discovered_nodes: Default::default(),
+            discovered_nodes: LruMap::new(0),
             local_enr: NodeRecord {
                 address: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
                 tcp_port: 0,
