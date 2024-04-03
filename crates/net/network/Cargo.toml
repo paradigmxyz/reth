@@ -29,7 +29,7 @@ reth-rpc-types.workspace = true
 reth-tokio-util.workspace = true
 
 # ethereum
-enr = { workspace = true, features = ["rust-secp256k1"], optional = true }
+enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 alloy-rlp.workspace = true
 discv5.workspace = true
 
@@ -84,8 +84,6 @@ alloy-node-bindings.workspace = true
 ethers-core = { workspace = true, default-features = false }
 ethers-providers = { workspace = true, default-features = false, features = ["ws"] }
 
-enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
-
 # misc
 serial_test.workspace = true
 tempfile.workspace = true
@@ -96,10 +94,9 @@ criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 
 [features]
 default = ["serde"]
-serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr?/serde", "dep:serde_json"]
+serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr/serde", "dep:serde_json"]
 test-utils = [
     "reth-provider/test-utils",
-    "dep:enr",
     "dep:tempfile",
     "reth-transaction-pool/test-utils",
 ]
