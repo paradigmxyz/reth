@@ -156,9 +156,9 @@ pub struct AuthServerConfig {
     /// Configs for JSON-RPC Http.
     pub(crate) server_config: ServerBuilder,
     /// Configs for IPC server
-    pub(crate) ipc_server_config: IpcServerBuilder,
+    pub(crate) ipc_server_config: Option<IpcServerBuilder>,
     /// IPC endpoint
-    pub(crate) ipc_endpoint: Endpoint,
+    pub(crate) ipc_endpoint: Option<Endpoint>,
 }
 
 impl fmt::Debug for AuthServerConfig {
