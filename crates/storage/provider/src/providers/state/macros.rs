@@ -41,10 +41,12 @@ macro_rules! delegate_provider_impls {
                 fn block_hash(&self, number: u64) -> reth_interfaces::provider::ProviderResult<Option<reth_primitives::B256>>;
                 fn canonical_hashes_range(&self, start: reth_primitives::BlockNumber, end: reth_primitives::BlockNumber) -> reth_interfaces::provider::ProviderResult<Vec<reth_primitives::B256>>;
             }
+            BytecodeProvider $(where [$($generics)*])? {
+                fn bytecode_by_hash(&self, code_hash: reth_primitives::B256) -> reth_interfaces::provider::ProviderResult<Option<reth_primitives::Bytecode>>;
+            }
             StateProvider $(where [$($generics)*])?{
                 fn storage(&self, account: reth_primitives::Address, storage_key: reth_primitives::StorageKey) -> reth_interfaces::provider::ProviderResult<Option<reth_primitives::StorageValue>>;
                 fn proof(&self, address: reth_primitives::Address, keys: &[reth_primitives::B256]) -> reth_interfaces::provider::ProviderResult<reth_primitives::trie::AccountProof>;
-                fn bytecode_by_hash(&self, code_hash: reth_primitives::B256) -> reth_interfaces::provider::ProviderResult<Option<reth_primitives::Bytecode>>;
             }
         );
     }

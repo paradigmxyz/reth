@@ -1,10 +1,10 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PruneCheckpointReader,
-    ReceiptProviderIdExt, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
-    WithdrawalsProvider,
+    BytecodeProvider, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider,
+    PruneCheckpointReader, ReceiptProviderIdExt, StageCheckpointReader, StateProvider,
+    StateProviderBox, StateProviderFactory, StateRootProvider, TransactionVariant,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
@@ -308,12 +308,14 @@ impl StateProvider for NoopProvider {
         Ok(None)
     }
 
-    fn bytecode_by_hash(&self, _code_hash: B256) -> ProviderResult<Option<Bytecode>> {
-        Ok(None)
-    }
-
     fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
         Ok(AccountProof::default())
+    }
+}
+
+impl BytecodeProvider for NoopProvider {
+    fn bytecode_by_hash(&self, _code_hash: B256) -> ProviderResult<Option<Bytecode>> {
+        Ok(None)
     }
 }
 

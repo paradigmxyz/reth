@@ -25,6 +25,7 @@ revm-inspectors.workspace = true
 
 # common
 tracing.workspace = true
+derive_more.workspace = true
 
 [dev-dependencies]
 reth-trie.workspace = true

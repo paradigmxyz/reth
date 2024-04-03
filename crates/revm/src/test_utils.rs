@@ -7,7 +7,9 @@ use reth_primitives::{
 
 #[cfg(not(feature = "optimism"))]
 use reth_primitives::revm::env::fill_tx_env;
-use reth_provider::{AccountReader, BlockHashReader, StateProvider, StateRootProvider};
+use reth_provider::{
+    AccountReader, BlockHashReader, BytecodeProvider, StateProvider, StateRootProvider,
+};
 use reth_trie::updates::TrieUpdates;
 use revm::{
     db::BundleState,
@@ -54,6 +56,12 @@ impl AccountReader for StateProviderTest {
     }
 }
 
+impl BytecodeProvider for StateProviderTest {
+    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
+        Ok(self.contracts.get(&code_hash).cloned())
+    }
+}
+
 impl BlockHashReader for StateProviderTest {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         Ok(self.block_hash.get(&number).cloned())
@@ -93,10 +101,6 @@ impl StateProvider for StateProviderTest {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
         Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).cloned()))
-    }
-
-    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
-        Ok(self.contracts.get(&code_hash).cloned())
     }
 
     fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {

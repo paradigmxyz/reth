@@ -1,5 +1,6 @@
 use crate::{
-    AccountReader, BlockHashReader, BundleStateDataProvider, StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, BundleStateDataProvider, BytecodeProvider, StateProvider,
+    StateRootProvider,
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{trie::AccountProof, Account, Address, BlockNumber, Bytecode, B256};
@@ -94,15 +95,19 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateProvider
         self.state_provider.storage(account, storage_key)
     }
 
+    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
+    }
+}
+
+impl<SP: StateProvider, BSDP: BundleStateDataProvider> BytecodeProvider
+    for BundleStateProvider<SP, BSDP>
+{
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(bytecode) = self.bundle_state_data_provider.state().bytecode(&code_hash) {
             return Ok(Some(bytecode))
         }
 
         self.state_provider.bytecode_by_hash(code_hash)
-    }
-
-    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }

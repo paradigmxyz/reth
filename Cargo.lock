@@ -6779,6 +6779,7 @@ dependencies = [
 name = "reth-revm"
 version = "0.2.0-beta.4"
 dependencies = [
+ "derive_more",
  "reth-consensus-common",
  "reth-interfaces",
  "reth-node-api",

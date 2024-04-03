@@ -1,6 +1,7 @@
 use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
-    AccountReader, BlockHashReader, StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, BytecodeProvider, HashedAccountReader, HashedStateProvider,
+    StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -107,15 +108,40 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
         Ok(None)
     }
 
-    /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
-        self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
-    }
-
     fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof> {
         Ok(Proof::new(self.tx)
             .account_proof(address, slots)
             .map_err(Into::<reth_db::DatabaseError>::into)?)
+    }
+}
+
+impl<'b, TX: DbTx> HashedAccountReader for LatestStateProviderRef<'b, TX> {
+    fn basic_hashed_account(&self, hashed_address: B256) -> ProviderResult<Option<Account>> {
+        self.tx.get::<tables::HashedAccounts>(hashed_address).map_err(Into::into)
+    }
+}
+
+impl<'b, TX: DbTx> HashedStateProvider for LatestStateProviderRef<'b, TX> {
+    /// Get storage of given account.
+    fn hashed_storage(
+        &self,
+        hashed_address: B256,
+        hashed_storage_key: B256,
+    ) -> ProviderResult<Option<StorageValue>> {
+        let mut cursor = self.tx.cursor_dup_read::<tables::HashedStorages>()?;
+        if let Some(entry) = cursor.seek_by_key_subkey(hashed_address, hashed_storage_key)? {
+            if entry.key == hashed_storage_key {
+                return Ok(Some(entry.value))
+            }
+        }
+        Ok(None)
+    }
+}
+
+impl<'b, TX: DbTx> BytecodeProvider for LatestStateProviderRef<'b, TX> {
+    /// Get account code by its hash
+    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
+        self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 }
 

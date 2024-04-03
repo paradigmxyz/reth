@@ -1,6 +1,7 @@
 use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
-    AccountReader, BlockHashReader, ProviderError, StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, BytecodeProvider, ProviderError, StateProvider,
+    StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -303,14 +304,16 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
         }
     }
 
-    /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
-        self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
-    }
-
     /// Get account and storage proofs.
     fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
+    }
+}
+
+impl<'b, TX: DbTx> BytecodeProvider for HistoricalStateProviderRef<'b, TX> {
+    /// Get account code by its hash
+    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
+        self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 }
 

@@ -1,13 +1,13 @@
 use auto_impl::auto_impl;
 use reth_db::models::AccountBeforeTx;
 use reth_interfaces::provider::ProviderResult;
-use reth_primitives::{Account, Address, BlockNumber};
+use reth_primitives::{Account, Address, BlockNumber, B256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::{RangeBounds, RangeInclusive},
 };
 
-/// Account reader
+/// Account reader.
 #[auto_impl(&, Arc, Box)]
 pub trait AccountReader: Send + Sync {
     /// Get basic account information.
@@ -16,7 +16,16 @@ pub trait AccountReader: Send + Sync {
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>>;
 }
 
-/// Account reader
+/// Hashed account reader.
+#[auto_impl(&, Arc, Box)]
+pub trait HashedAccountReader: Send + Sync {
+    /// Get basic account information by hashed address.
+    ///
+    /// Returns `None` if the account doesn't exist.
+    fn basic_hashed_account(&self, hashed_address: B256) -> ProviderResult<Option<Account>>;
+}
+
+/// Account reader extension.
 #[auto_impl(&, Arc, Box)]
 pub trait AccountExtReader: Send + Sync {
     /// Iterate over account changesets and return all account address that were changed.

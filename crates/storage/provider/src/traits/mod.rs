@@ -1,7 +1,7 @@
 //! Collection of common provider traits.
 
 mod account;
-pub use account::{AccountExtReader, AccountReader, ChangeSetReader};
+pub use account::{AccountExtReader, AccountReader, ChangeSetReader, HashedAccountReader};
 
 mod storage;
 pub use storage::StorageReader;
@@ -35,8 +35,8 @@ pub use receipts::{ReceiptProvider, ReceiptProviderIdExt};
 
 mod state;
 pub use state::{
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, StateProvider, StateProviderBox,
-    StateProviderFactory,
+    BlockchainTreePendingStateProvider, BundleStateDataProvider, BytecodeProvider,
+    HashedStateProvider, StateProvider, StateProviderBox, StateProviderFactory,
 };
 
 mod trie;

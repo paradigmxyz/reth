@@ -1,5 +1,7 @@
 use super::AccountReader;
-use crate::{BlockHashReader, BlockIdReader, BundleStateWithReceipts, StateRootProvider};
+use crate::{
+    BlockHashReader, BlockIdReader, BundleStateWithReceipts, HashedAccountReader, StateRootProvider,
+};
 use auto_impl::auto_impl;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
@@ -12,7 +14,9 @@ pub type StateProviderBox = Box<dyn StateProvider>;
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
-pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + Send + Sync {
+pub trait StateProvider:
+    BlockHashReader + AccountReader + BytecodeProvider + StateRootProvider + Send + Sync
+{
     /// Get storage of given account.
     fn storage(
         &self,
@@ -20,58 +24,86 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
 
-    /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>>;
-
-    /// Get account and storage proofs.
-    fn proof(&self, address: Address, keys: &[B256]) -> ProviderResult<AccountProof>;
-
     /// Get account code by its address.
     ///
     /// Returns `None` if the account doesn't exist or account is not a contract
-    fn account_code(&self, addr: Address) -> ProviderResult<Option<Bytecode>> {
-        // Get basic account information
-        // Returns None if acc doesn't exist
-        let acc = match self.basic_account(addr)? {
-            Some(acc) => acc,
-            None => return Ok(None),
-        };
+    fn account_code(&self, address: Address) -> ProviderResult<Option<Bytecode>> {
+        // Get basic account information.
+        // Returns `None` if account doesn't exist.
+        let Some(account) = self.basic_account(address)? else { return Ok(None) };
 
-        if let Some(code_hash) = acc.bytecode_hash {
-            if code_hash == KECCAK_EMPTY {
-                return Ok(None)
-            }
-            // Get the code from the code hash
-            return self.bytecode_by_hash(code_hash)
+        if let Some(code_hash) = account.bytecode_hash.filter(|hash| hash != &KECCAK_EMPTY) {
+            self.bytecode_by_hash(code_hash)
+        } else {
+            Ok(None)
         }
-
-        // Return `None` if no code hash is set
-        Ok(None)
     }
 
     /// Get account balance by its address.
     ///
-    /// Returns `None` if the account doesn't exist
-    fn account_balance(&self, addr: Address) -> ProviderResult<Option<U256>> {
-        // Get basic account information
-        // Returns None if acc doesn't exist
-        match self.basic_account(addr)? {
-            Some(acc) => Ok(Some(acc.balance)),
-            None => Ok(None),
-        }
+    /// Returns `None` if the account doesn't exist.
+    fn account_balance(&self, address: Address) -> ProviderResult<Option<U256>> {
+        Ok(self.basic_account(address)?.map(|a| a.balance))
     }
 
     /// Get account nonce by its address.
     ///
-    /// Returns `None` if the account doesn't exist
-    fn account_nonce(&self, addr: Address) -> ProviderResult<Option<u64>> {
+    /// Returns `None` if the account doesn't exist.
+    fn account_nonce(&self, address: Address) -> ProviderResult<Option<u64>> {
+        Ok(self.basic_account(address)?.map(|a| a.nonce))
+    }
+
+    /// Get account and storage proofs.
+    fn proof(&self, address: Address, keys: &[B256]) -> ProviderResult<AccountProof>;
+}
+
+/// An abstraction for a type that provides state data for accounts by their hashed address.
+#[auto_impl(&, Arc, Box)]
+pub trait HashedStateProvider:
+    BlockHashReader + HashedAccountReader + BytecodeProvider + Send + Sync
+{
+    /// Get storage of given account.
+    fn hashed_storage(
+        &self,
+        hashed_address: B256,
+        hashed_storage_key: B256,
+    ) -> ProviderResult<Option<StorageValue>>;
+
+    /// Get account code by its hashed address.
+    ///
+    /// Returns `None` if the account doesn't exist or account is not a contract
+    fn hashed_account_code(&self, hashed_address: B256) -> ProviderResult<Option<Bytecode>> {
         // Get basic account information
-        // Returns None if acc doesn't exist
-        match self.basic_account(addr)? {
-            Some(acc) => Ok(Some(acc.nonce)),
-            None => Ok(None),
+        // Returns `None` if account doesn't exist
+        let Some(account) = self.basic_hashed_account(hashed_address)? else { return Ok(None) };
+
+        if let Some(code_hash) = account.bytecode_hash.filter(|hash| hash != &KECCAK_EMPTY) {
+            self.bytecode_by_hash(code_hash)
+        } else {
+            Ok(None)
         }
     }
+
+    /// Get account balance by its hashed address.
+    ///
+    /// Returns `None` if the account doesn't exist
+    fn hashed_account_balance(&self, hashed_address: B256) -> ProviderResult<Option<U256>> {
+        Ok(self.basic_hashed_account(hashed_address)?.map(|a| a.balance))
+    }
+
+    /// Get account nonce by its hashed address.
+    ///
+    /// Returns `None` if the account doesn't exist
+    fn hashed_account_nonce(&self, hashed_address: B256) -> ProviderResult<Option<u64>> {
+        Ok(self.basic_hashed_account(hashed_address)?.map(|a| a.nonce))
+    }
+}
+
+/// An abstraction for a type that provides bytecode by its hash.
+#[auto_impl(&, Arc, Box)]
+pub trait BytecodeProvider {
+    /// Get bytecode by its hash.
+    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
