@@ -81,7 +81,7 @@ where
     ) -> EthResult<Vec<TraceResult>> {
         if transactions.is_empty() {
             // nothing to trace
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         // replay all transactions of the block
