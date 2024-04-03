@@ -1031,7 +1031,7 @@ pub enum NetworkEvent {
     PeerRemoved(PeerId),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoveredEvent {
     EventQueued { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
 }

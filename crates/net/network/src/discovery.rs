@@ -324,7 +324,7 @@ impl Discovery {
 }
 
 /// Events produced by the [`Discovery`] manager.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoveryEvent {
     /// Discovered a node
     NewNode(DiscoveredEvent),
@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn discv5_with_discv4_downgrade() {
+    async fn discv5_and_discv4_same_pk() {
         reth_tracing::init_test_tracing();
 
         // set up test
@@ -409,14 +409,32 @@ mod tests {
         assert_eq!(discv4_id_1, enr_to_discv4_id(&discv5_enr_node_1).unwrap());
         assert_eq!(discv4_id_2, enr_to_discv4_id(&discv5_enr_node_2).unwrap());
 
-        // add node_2:discv4 manually to node_1:discv4 kbuckets
+        // add node_2:discv4 manually to node_1:discv4
         node_1.add_discv4_node(discv4_enr_2);
 
-        // verify node_2:discv4 is in KBuckets of node_1:discv4 and vv
-        let event_1_v4 = node_1.discv4_updates.as_mut().unwrap().next().await.unwrap();
-        let event_2_v4 = node_2.discv4_updates.as_mut().unwrap().next().await.unwrap();
-        matches!(event_1_v4, DiscoveryUpdate::Added(node) if node == discv4_enr_2);
-        matches!(event_2_v4, DiscoveryUpdate::Added(node) if node == discv4_enr_1);
+        // verify node_2:discv4 discovered node_1:discv4 and vv
+        let event_node_1 = node_1.next().await.unwrap();
+        let event_node_2 = node_2.next().await.unwrap();
+
+        assert_eq!(
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id: discv4_id_2,
+                socket_addr: discv4_enr_2.tcp_addr(),
+                fork_id: None
+            }),
+            event_node_1
+        );
+        assert_eq!(
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id: discv4_id_1,
+                socket_addr: discv4_enr_1.tcp_addr(),
+                fork_id: None
+            }),
+            event_node_2
+        );
+
+        assert_eq!(1, node_1.discovered_nodes.len());
+        assert_eq!(1, node_2.discovered_nodes.len());
 
         // add node_2:discv5 to node_1:discv5, manual insertion won't emit an event
         node_1.add_discv5_node(EnrCombinedKeyWrapper(discv5_enr_node_2.clone()).into()).unwrap();
@@ -436,14 +454,9 @@ mod tests {
             .await
             .unwrap();
 
-        // verify node_1:discv5 is connected to node_2:discv5 and vv
-        let event_2_v5 = node_2.discv5_updates.as_mut().unwrap().next().await.unwrap();
-        let event_1_v5 = node_1.discv5_updates.as_mut().unwrap().next().await.unwrap();
-        matches!(event_1_v5, discv5::Event::SessionEstablished(node, socket) if node == discv5_enr_node_2 && socket == discv5_enr_node_2.udp4_socket().unwrap().into());
-        matches!(event_2_v5, discv5::Event::SessionEstablished(node, socket) if node == discv5_enr_node_1 && socket == discv5_enr_node_1.udp4_socket().unwrap().into());
-
-        // verify node_1 is in KBuckets of node_2:discv5
-        let event_2_v5 = node_2.discv5_updates.as_mut().unwrap().next().await.unwrap();
-        matches!(event_2_v5, discv5::Event::NodeInserted { node_id, .. } if node_id == discv5_id_2);
+        // this won't emit an event, since the nodes already discovered each other on discv4, the
+        // number of nodes stored for each node on this level remains 1.
+        assert_eq!(1, node_1.discovered_nodes.len());
+        assert_eq!(1, node_2.discovered_nodes.len());
     }
 }
