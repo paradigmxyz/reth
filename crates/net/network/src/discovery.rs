@@ -5,6 +5,7 @@ use crate::{
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
 };
+use enr::Enr;
 use futures::StreamExt;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
 use reth_discv5::{DiscoveredPeer, Discv5};
@@ -181,6 +182,15 @@ impl Discovery {
         }
     }
 
+    /// Add a node to the discv4 table.
+    pub(crate) fn add_discv5_node(&self, enr: Enr<SecretKey>) -> Result<(), NetworkError> {
+        if let Some(discv5) = &self.discv5 {
+            discv5.add_node_to_routing_table(enr).map_err(NetworkError::Discv5Error)?;
+        }
+
+        Ok(())
+    }
+
     /// Processes an incoming [NodeRecord] update from a discovery service
     fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
         let id = record.id;
@@ -329,5 +339,97 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    use reth_discv4::{DiscoveryUpdate, Discv4ConfigBuilder};
+    use reth_discv5::{enr::EnrCombinedKeyWrapper, enr_to_discv4_id};
+    use tracing::trace;
+
+    async fn start_discovery_node(udp_port_discv4: u16, udp_port_discv5: u16) -> Discovery {
+        let secret_key = SecretKey::new(&mut thread_rng());
+
+        let discv4_addr = format!("127.0.0.1:{udp_port_discv4}").parse().unwrap();
+        let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
+
+        // disable `NatResolver`
+        let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
+
+        let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
+        let discv5_config = reth_discv5::Config::builder(0)
+            .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
+            .build();
+
+        Discovery::new(discv4_addr, secret_key, Some(discv4_config), Some(discv5_config), None)
+            .await
+            .expect("should build discv5 with discv4 downgrade")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn discv5_with_discv4_downgrade() {
+        reth_tracing::init_test_tracing();
+
+        // set up test
+        let mut node_1 = start_discovery_node(40014, 40015).await;
+        let discv4_enr_1 = node_1.discv4.as_ref().unwrap().node_record();
+        let discv5_enr_node_1 =
+            node_1.discv5.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
+        let discv4_id_1 = discv4_enr_1.id;
+        let discv5_id_1 = discv5_enr_node_1.node_id();
+
+        let mut node_2 = start_discovery_node(40024, 40025).await;
+        let discv4_enr_2 = node_2.discv4.as_ref().unwrap().node_record();
+        let discv5_enr_node_2 =
+            node_2.discv5.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
+        let discv4_id_2 = discv4_enr_2.id;
+        let discv5_id_2 = discv5_enr_node_2.node_id();
+
+        trace!(target: "net::discovery::discv5_downgrade_v4::tests",
+            node_1_node_id=format!("{:#}", discv5_id_1),
+            node_2_node_id=format!("{:#}", discv5_id_2),
+            "started nodes"
+        );
+
+        // test
+
+        // assert discovery version 4 and version 5 nodes have same id
+        assert_eq!(discv4_id_1, enr_to_discv4_id(&discv5_enr_node_1).unwrap());
+        assert_eq!(discv4_id_2, enr_to_discv4_id(&discv5_enr_node_2).unwrap());
+
+        // add node_2:discv4 manually to node_1:discv4 kbuckets
+        node_1.add_discv4_node(discv4_enr_2);
+
+        // verify node_2:discv4 is in KBuckets of node_1:discv4 and vv
+        let event_1_v4 = node_1.discv4_updates.as_mut().unwrap().next().await.unwrap();
+        let event_2_v4 = node_2.discv4_updates.as_mut().unwrap().next().await.unwrap();
+        matches!(event_1_v4, DiscoveryUpdate::Added(node) if node == discv4_enr_2);
+        matches!(event_2_v4, DiscoveryUpdate::Added(node) if node == discv4_enr_1);
+
+        // add node_2:discv5 to node_1:discv5, manual insertion won't emit an event
+        node_1.add_discv5_node(EnrCombinedKeyWrapper(discv5_enr_node_2.clone()).into()).unwrap();
+        // verify node_2 is in KBuckets of node_1:discv5
+        assert!(node_1
+            .discv5
+            .as_ref()
+            .unwrap()
+            .with_discv5(|discv5| discv5.table_entries_id().contains(&discv5_id_2)));
+
+        // manually trigger connection from node_1:discv5 to node_2:discv5
+        node_1
+            .discv5
+            .as_ref()
+            .unwrap()
+            .with_discv5(|discv5| discv5.send_ping(discv5_enr_node_2.clone()))
+            .await
+            .unwrap();
+
+        // verify node_1:discv5 is connected to node_2:discv5 and vv
+        let event_2_v5 = node_2.discv5_updates.as_mut().unwrap().next().await.unwrap();
+        let event_1_v5 = node_1.discv5_updates.as_mut().unwrap().next().await.unwrap();
+        matches!(event_1_v5, discv5::Event::SessionEstablished(node, socket) if node == discv5_enr_node_2 && socket == discv5_enr_node_2.udp4_socket().unwrap().into());
+        matches!(event_2_v5, discv5::Event::SessionEstablished(node, socket) if node == discv5_enr_node_1 && socket == discv5_enr_node_1.udp4_socket().unwrap().into());
+
+        // verify node_1 is in KBuckets of node_2:discv5
+        let event_2_v5 = node_2.discv5_updates.as_mut().unwrap().next().await.unwrap();
+        matches!(event_2_v5, discv5::Event::NodeInserted { node_id, .. } if node_id == discv5_id_2);
     }
 }
