@@ -816,6 +816,8 @@ dependencies = [
  "mev-share-sse",
  "reth",
  "reth-node-ethereum",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
