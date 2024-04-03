@@ -1,7 +1,26 @@
+//! Run with
+//!
+//! ```not_rust
+//! cargo run -p beacon-api-sidecar-fetcher -- node
+
 use serde::{self, Deserialize, Serialize};
 
 fn main() {
-    println!("Hello, world!");
+    // Example JSON string (replace this with your actual JSON string)
+    let json_str = r#"
+    {
+        "code": 400,
+        "message": "Invalid block ID: current"
+    }
+    "#;
+
+    // Deserialize the JSON string into the BlobError struct
+    let parsed: Result<BlobError, serde_json::Error> = serde_json::from_str(json_str);
+
+    match parsed {
+        Ok(blob_error) => println!("{:?}: {}", blob_error.code, blob_error.message),
+        Err(e) => println!("Failed to parse JSON: {}", e),
+    }
 }
 
 /// TODO: Import as feature
@@ -41,4 +60,12 @@ pub struct Message {
     pub state_root: String,
     #[serde(rename = "body_root")]
     pub body_root: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct BlobError {
+    #[serde(rename = "code")]
+    code: u16,
+    #[serde(rename = "message")]
+    message: String,
 }
