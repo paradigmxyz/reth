@@ -27,8 +27,8 @@ use tracing::trace;
 
 /// Default max capacity for cache of discovered peers.
 ///
-/// Default is 1000 peers.
-pub const DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE: u32 = 1000;
+/// Default is 10 000 peers.
+pub const DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE: u32 = 10_000;
 
 /// An abstraction over the configured discovery protocol.
 ///
