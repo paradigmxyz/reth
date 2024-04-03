@@ -177,8 +177,9 @@ where
         let NetworkConfig {
             client,
             secret_key,
+            discovery_v4_addr,
             mut discovery_v4_config,
-            discovery_addr,
+            discovery_v5_config,
             listener_addr,
             peers_config,
             sessions_config,
@@ -195,7 +196,7 @@ where
             tx_gossip_disabled,
             #[cfg(feature = "optimism")]
                 optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
-            ..
+            transactions_manager_config: _,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -213,9 +214,14 @@ where
             disc_config
         });
 
-        let discovery =
-            Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
-                .await?;
+        let discovery = Discovery::new(
+            discovery_v4_addr,
+            secret_key,
+            discovery_v4_config,
+            discovery_v5_config,
+            dns_discovery_config,
+        )
+        .await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
         let discv4 = discovery.discv4();
