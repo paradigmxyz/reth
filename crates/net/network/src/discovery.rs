@@ -23,6 +23,7 @@ use std::{
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tracing::trace;
 
 /// Default max capacity for cache of discovered peers.
 ///
@@ -185,7 +186,7 @@ impl Discovery {
     /// Add a node to the discv4 table.
     pub(crate) fn add_discv5_node(&self, enr: Enr<SecretKey>) -> Result<(), NetworkError> {
         if let Some(discv5) = &self.discv5 {
-            discv5.add_node_to_routing_table(enr).map_err(NetworkError::Discv5Error)?;
+            discv5.add_node(enr).map_err(NetworkError::Discv5Error)?;
         }
 
         Ok(())
@@ -260,6 +261,12 @@ impl Discovery {
                 self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
             {
                 self.add_discv4_node(update.node_record);
+                if let Err(err) = self.add_discv5_node(update.enr) {
+                    trace!(target: "net::discovery",
+                        %err,
+                        "failed adding node discovered by dns to discv5"
+                    );
+                }
                 self.on_node_record_update(update.node_record, update.fork_id);
             }
 
@@ -383,7 +390,7 @@ mod tests {
         let discv4_id_2 = discv4_enr_2.id;
         let discv5_id_2 = discv5_enr_node_2.node_id();
 
-        trace!(target: "net::discovery::discv5_downgrade_v4::tests",
+        trace!(target: "net::discovery::tests",
             node_1_node_id=format!("{:#}", discv5_id_1),
             node_2_node_id=format!("{:#}", discv5_id_2),
             "started nodes"

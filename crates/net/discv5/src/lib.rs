@@ -67,9 +67,9 @@ impl Discv5 {
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /// Adds the node to the table, if it is not already present.
-    pub fn add_node_to_routing_table(&self, node_record: Enr<SecretKey>) -> Result<(), Error> {
+    pub fn add_node(&self, node_record: Enr<SecretKey>) -> Result<(), Error> {
         let EnrCombinedKeyWrapper(enr) = node_record.into();
-        self.add_enr(enr).map_err(Error::AddNodeToDiscv5Failed)
+        self.add_enr(enr).map_err(Error::AddNodeFailed)
     }
 
     /// Sets the pair in the EIP-868 [`Enr`] of the node.
@@ -269,7 +269,7 @@ impl Discv5 {
             match node {
                 BootNode::Enr(node) => {
                     if let Err(err) = discv5.add_enr(node) {
-                        return Err(Error::Discv5ErrorStr(err))
+                        return Err(Error::AddNodeFailed(err))
                     }
                 }
                 BootNode::Enode(enode) => {
@@ -617,7 +617,7 @@ mod tests {
         // add node_2 to discovery handle of node_1 (should add node to discv5 kbuckets)
         let node_2_enr_reth_compatible_ty: Enr<SecretKey> =
             EnrCombinedKeyWrapper(node_2_enr.clone()).into();
-        node_1.add_node_to_routing_table(node_2_enr_reth_compatible_ty).unwrap();
+        node_1.add_node(node_2_enr_reth_compatible_ty).unwrap();
 
         // verify node_2 is in KBuckets of node_1:discv5
         assert!(
