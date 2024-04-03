@@ -1,6 +1,5 @@
 //! Optimism helpers.
 
-use reqwest::Client;
 use reth_primitives::U256;
 use revm::L1BlockInfo;
 
@@ -29,21 +28,5 @@ impl OptimismTxMeta {
         l1_data_gas: Option<U256>,
     ) -> Self {
         Self { l1_block_info, l1_fee, l1_data_gas }
-    }
-}
-
-/// A client to interact with a Sequencer
-#[derive(Debug, Default, Clone)]
-pub struct SequencerClient {
-    /// The endpoint of the sequencer
-    pub sequencer_endpoint: String,
-    /// The HTTP client
-    pub http_client: Client,
-}
-
-impl SequencerClient {
-    /// Creates a new [SequencerClient].
-    pub fn new(sequencer_endpoint: impl Into<String>, http_client: Client) -> Self {
-        Self { sequencer_endpoint: sequencer_endpoint.into(), http_client }
     }
 }
