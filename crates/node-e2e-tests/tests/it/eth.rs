@@ -38,8 +38,9 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 
     // push tx into pool via RPC server
     let eth_api = node.rpc_registry.eth_api();
-    let transfer_tx = test_suite.transfer_tx();
-    eth_api.send_raw_transaction(transfer_tx.envelope_encoded()).await?;
+    let (expected_hash, raw_tx) = test_suite.transfer_tx().await;
+
+    eth_api.send_raw_transaction(raw_tx).await?;
 
     // trigger new payload building draining the pool
     let eth_attr = eth_payload_attributes();
@@ -94,7 +95,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
         // is actually present in the canonical block
         let head = notifications.next().await.unwrap();
         let tx = head.tip().transactions().next().unwrap();
-        assert_eq!(tx.hash(), transfer_tx.hash);
+        assert_eq!(tx.hash().as_slice(), expected_hash.as_slice());
 
         // make sure the block hash we submitted via FCU engine api is the new latest block using an
         // RPC call
