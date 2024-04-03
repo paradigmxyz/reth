@@ -355,7 +355,7 @@ mod tests {
         .unwrap();
     }
 
-    use reth_discv4::{DiscoveryUpdate, Discv4ConfigBuilder};
+    use reth_discv4::Discv4ConfigBuilder;
     use reth_discv5::{enr::EnrCombinedKeyWrapper, enr_to_discv4_id};
     use tracing::trace;
 
