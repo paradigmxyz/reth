@@ -155,10 +155,8 @@ impl<C> NetworkConfig<C> {
     }
 
     /// Sets the config to use for the discovery v5 protocol.
-
     pub fn set_discovery_v5(mut self, discv5_config: reth_discv5::Config) -> Self {
         self.discovery_v5_config = Some(discv5_config);
-        self.discovery_v4_addr = self.discovery_v5_config.as_ref().unwrap().discovery_socket();
         self
     }
 
