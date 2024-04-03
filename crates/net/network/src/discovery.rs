@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::StreamExt;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
-use reth_discv5::Discv5;
+use reth_discv5::{DiscoveredPeer, Discv5};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
@@ -227,13 +227,27 @@ impl Discovery {
                 return Poll::Ready(event)
             }
 
-            // drain the update streams
+            // drain the discv4 update stream
             while let Some(Poll::Ready(Some(update))) =
                 self.discv4_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
             {
                 self.on_discv4_update(update)
             }
 
+            // drain the discv5 update stream
+            while let Some(Poll::Ready(Some(update))) =
+                self.discv5_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
+            {
+                if let Some(discv5) = self.discv5.as_mut() {
+                    if let Some(DiscoveredPeer { node_record, fork_id }) =
+                        discv5.on_discv5_update(update)
+                    {
+                        self.on_node_record_update(node_record, fork_id);
+                    }
+                }
+            }
+
+            // drain the dns update stream
             while let Some(Poll::Ready(Some(update))) =
                 self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
             {
