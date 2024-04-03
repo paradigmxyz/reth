@@ -150,6 +150,7 @@ impl Discovery {
             // use forward-compatible forkid entry
             discv4.set_eip868_rlp("eth".as_bytes().to_vec(), EnrForkIdEntry::from(fork_id))
         }
+        // todo: update discv5 enr
     }
 
     /// Bans the [`IpAddr`] in the discovery service.
