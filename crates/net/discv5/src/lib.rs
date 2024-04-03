@@ -376,8 +376,7 @@ impl Discv5 {
 
                 // node has been inserted into kbuckets
 
-                // `replaced` covers `reth_discv4::DiscoveryUpdate::Removed(_)` .. but we can't get 
-                // a `PeerId` from a `NodeId`
+                // `replaced` partly covers `reth_discv4::DiscoveryUpdate::Removed(_)`
 
                 self.metrics.discovered_peers.increment_kbucket_insertions(1);
 
