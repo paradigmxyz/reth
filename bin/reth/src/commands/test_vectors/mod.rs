@@ -7,7 +7,7 @@ mod tables;
 /// Generate test-vectors for different data types.
 #[derive(Debug, Parser)]
 pub struct Command {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Subcommands,
 }
 

@@ -7,7 +7,7 @@
 //!
 //! Components depend on a fully type configured node: [FullNodeTypes](crate::node::FullNodeTypes).
 
-use crate::node::FullNodeTypes;
+use crate::FullNodeTypes;
 pub use builder::*;
 pub use network::*;
 pub use payload::*;

@@ -33,7 +33,7 @@ pub trait Suite {
             .join(self.suite_name());
 
         // Verify that the path exists
-        assert!(suite_path.exists(), "Test suite path does not exist: {:?}", suite_path);
+        assert!(suite_path.exists(), "Test suite path does not exist: {suite_path:?}");
 
         // Find all files with the ".json" extension in the test suite directory
         let test_cases = find_all_files_with_extension(&suite_path, ".json")

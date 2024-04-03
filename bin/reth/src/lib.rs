@@ -26,7 +26,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod builder;
 pub mod cli;
 pub mod commands;
 pub mod utils;
@@ -60,6 +59,11 @@ pub mod args {
 /// the `reth_node_core::args` re-export for more details.
 pub mod version {
     pub use reth_node_core::version::*;
+}
+
+/// Re-exported from `reth_node_builder`
+pub mod builder {
+    pub use reth_node_builder::*;
 }
 
 /// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment on
@@ -146,8 +150,20 @@ pub mod rpc {
     }
 }
 
+#[cfg(all(unix, any(target_env = "gnu", target_os = "macos")))]
+pub mod sigsegv_handler;
+
+/// Signal handler to extract a backtrace from stack overflow.
+///
+/// This is a no-op because this platform doesn't support our signal handler's requirements.
+#[cfg(not(all(unix, any(target_env = "gnu", target_os = "macos"))))]
+pub mod sigsegv_handler {
+    /// No-op function.
+    pub fn install() {}
+}
+
 #[cfg(all(feature = "jemalloc", unix))]
-use jemallocator as _;
+use tikv_jemallocator as _;
 
 // for rendering diagrams
 use aquamarine as _;

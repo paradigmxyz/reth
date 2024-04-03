@@ -3,12 +3,17 @@ use crate::{
 };
 use futures_util::Future;
 use reth_db::database::Database;
+use reth_interfaces::RethResult;
 use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
     stage::{StageCheckpoint, StageId},
+    static_file::HighestStaticFiles,
     BlockNumber, B256,
 };
-use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
+use reth_provider::{
+    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+};
+use reth_static_file::StaticFileProducer;
 use reth_tokio_util::EventListeners;
 use std::pin::Pin;
 use tokio::sync::watch;
@@ -66,6 +71,7 @@ pub struct Pipeline<DB: Database> {
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
+    static_file_producer: StaticFileProducer<DB>,
     /// All listeners for events the pipeline emits.
     listeners: EventListeners<PipelineEvent>,
     /// Keeps track of the progress of the pipeline.
@@ -177,6 +183,8 @@ where
     /// pipeline (for example the `Finish` stage). Or [ControlFlow::Unwind] of the stage that caused
     /// the unwind.
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
+        self.produce_static_files()?;
+
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
             let stage = &self.stages[stage_index];
@@ -210,6 +218,38 @@ where
         }
 
         Ok(self.progress.next_ctrl())
+    }
+
+    /// Run [static file producer](StaticFileProducer) and move all data from the database to static
+    /// files for corresponding [segments](reth_primitives::static_file::StaticFileSegment),
+    /// according to their [stage checkpoints](StageCheckpoint):
+    /// - [StaticFileSegment::Headers](reth_primitives::static_file::StaticFileSegment::Headers) ->
+    ///   [StageId::Headers]
+    /// - [StaticFileSegment::Receipts](reth_primitives::static_file::StaticFileSegment::Receipts)
+    ///   -> [StageId::Execution]
+    /// - [StaticFileSegment::Transactions](reth_primitives::static_file::StaticFileSegment::Transactions)
+    ///   -> [StageId::Bodies]
+    ///
+    /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
+    /// lock is occupied.
+    pub fn produce_static_files(&mut self) -> RethResult<()> {
+        let mut static_file_producer = self.static_file_producer.lock();
+
+        let provider = self.provider_factory.provider()?;
+        let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
+            headers: provider
+                .get_stage_checkpoint(StageId::Headers)?
+                .map(|checkpoint| checkpoint.block_number),
+            receipts: provider
+                .get_stage_checkpoint(StageId::Execution)?
+                .map(|checkpoint| checkpoint.block_number),
+            transactions: provider
+                .get_stage_checkpoint(StageId::Bodies)?
+                .map(|checkpoint| checkpoint.block_number),
+        })?;
+        static_file_producer.run(targets)?;
+
+        Ok(())
     }
 
     /// Unwind the stages to the target block.
@@ -279,7 +319,9 @@ where
                         self.listeners
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
+                        self.provider_factory.static_file_provider().commit()?;
                         provider_rw.commit()?;
+
                         provider_rw = self.provider_factory.provider_rw()?;
                     }
                     Err(err) => {
@@ -329,6 +371,16 @@ where
 
             let exec_input = ExecInput { target, checkpoint: prev_checkpoint };
 
+            self.listeners.notify(PipelineEvent::Prepare {
+                pipeline_stages_progress: event::PipelineStagesProgress {
+                    current: stage_index + 1,
+                    total: total_stages,
+                },
+                stage_id,
+                checkpoint: prev_checkpoint,
+                target,
+            });
+
             if let Err(err) = stage.execute_ready(exec_input).await {
                 self.listeners.notify(PipelineEvent::Error { stage_id });
                 match on_stage_error(&self.provider_factory, stage_id, prev_checkpoint, err)? {
@@ -371,6 +423,7 @@ where
                         result: out.clone(),
                     });
 
+                    self.provider_factory.static_file_provider().commit()?;
                     provider_rw.commit()?;
 
                     if done {
@@ -403,7 +456,7 @@ fn on_stage_error<DB: Database>(
     err: StageError,
 ) -> Result<Option<ControlFlow>, PipelineError> {
     if let StageError::DetachedHead { local_head, header, error } = err {
-        warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, ?error, "Stage encountered detached head");
+        warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, %error, "Stage encountered detached head");
 
         // We unwind because of a detached head.
         let unwind_to =
@@ -428,6 +481,7 @@ fn on_stage_error<DB: Database>(
                     StageId::MerkleExecute,
                     prev_checkpoint.unwrap_or_default(),
                 )?;
+                factory.static_file_provider().commit()?;
                 provider_rw.commit()?;
 
                 // We unwind because of a validation error. If the unwind itself
@@ -457,6 +511,16 @@ fn on_stage_error<DB: Database>(
                 }))
             }
         }
+    } else if let StageError::MissingStaticFileData { block, segment } = err {
+        error!(
+            target: "sync::pipeline",
+            stage = %stage_id,
+            bad_block = %block.number,
+            segment = %segment,
+            "Stage is missing static file data."
+        );
+
+        Ok(Some(ControlFlow::Unwind { target: block.number - 1, bad_block: block }))
     } else if err.is_fatal() {
         error!(target: "sync::pipeline", stage = %stage_id, "Stage encountered a fatal error: {err}");
         Err(err.into())
@@ -492,6 +556,7 @@ mod tests {
         provider::ProviderError,
         test_utils::{generators, generators::random_header},
     };
+    use reth_primitives::PruneModes;
     use reth_provider::test_utils::create_test_provider_factory;
     use tokio_stream::StreamExt;
 
@@ -537,7 +602,14 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(provider_factory);
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
+            );
         let events = pipeline.events();
 
         // Run pipeline
@@ -549,6 +621,12 @@ mod tests {
         assert_eq!(
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
+                PipelineEvent::Prepare {
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
+                    stage_id: StageId::Other("A"),
+                    checkpoint: None,
+                    target: Some(10),
+                },
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
@@ -559,6 +637,12 @@ mod tests {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(20), done: true },
+                },
+                PipelineEvent::Prepare {
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
+                    stage_id: StageId::Other("B"),
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -597,7 +681,14 @@ mod tests {
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) })),
             )
             .with_max_block(10)
-            .build(provider_factory);
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
+            );
         let events = pipeline.events();
 
         // Run pipeline
@@ -614,6 +705,12 @@ mod tests {
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 // Executing
+                PipelineEvent::Prepare {
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 3 },
+                    stage_id: StageId::Other("A"),
+                    checkpoint: None,
+                    target: Some(10),
+                },
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 3 },
                     stage_id: StageId::Other("A"),
@@ -625,6 +722,12 @@ mod tests {
                     stage_id: StageId::Other("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
                 },
+                PipelineEvent::Prepare {
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 3 },
+                    stage_id: StageId::Other("B"),
+                    checkpoint: None,
+                    target: Some(10),
+                },
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 3 },
                     stage_id: StageId::Other("B"),
@@ -635,6 +738,12 @@ mod tests {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 3 },
                     stage_id: StageId::Other("B"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                },
+                PipelineEvent::Prepare {
+                    pipeline_stages_progress: PipelineStagesProgress { current: 3, total: 3 },
+                    stage_id: StageId::Other("C"),
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 3, total: 3 },
@@ -704,7 +813,14 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(provider_factory);
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
+            );
         let events = pipeline.events();
 
         // Run pipeline
@@ -721,6 +837,12 @@ mod tests {
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 // Executing
+                PipelineEvent::Prepare {
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
+                    stage_id: StageId::Other("A"),
+                    checkpoint: None,
+                    target: Some(10),
+                },
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
@@ -731,6 +853,12 @@ mod tests {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
+                },
+                PipelineEvent::Prepare {
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
+                    stage_id: StageId::Other("B"),
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -801,7 +929,14 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(provider_factory);
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
+            );
         let events = pipeline.events();
 
         // Run pipeline
@@ -813,6 +948,12 @@ mod tests {
         assert_eq!(
             events.collect::<Vec<PipelineEvent>>().await,
             vec![
+                PipelineEvent::Prepare {
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
+                    stage_id: StageId::Other("A"),
+                    checkpoint: None,
+                    target: Some(10),
+                },
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
@@ -823,6 +964,12 @@ mod tests {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                },
+                PipelineEvent::Prepare {
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
+                    stage_id: StageId::Other("B"),
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -843,6 +990,12 @@ mod tests {
                     stage_id: StageId::Other("A"),
                     result: UnwindOutput { checkpoint: StageCheckpoint::new(0) },
                 },
+                PipelineEvent::Prepare {
+                    pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
+                    stage_id: StageId::Other("A"),
+                    checkpoint: Some(StageCheckpoint::new(0)),
+                    target: Some(10),
+                },
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
@@ -853,6 +1006,12 @@ mod tests {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                },
+                PipelineEvent::Prepare {
+                    pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
+                    stage_id: StageId::Other("B"),
+                    checkpoint: None,
+                    target: Some(10),
                 },
                 PipelineEvent::Run {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -881,7 +1040,14 @@ mod tests {
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
             )
             .with_max_block(10)
-            .build(provider_factory);
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
+            );
         let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
 
@@ -891,7 +1057,14 @@ mod tests {
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))
-            .build(provider_factory);
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
+            );
         let result = pipeline.run().await;
         assert_matches!(
             result,

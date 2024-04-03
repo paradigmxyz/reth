@@ -2,7 +2,9 @@
 
 use crate::events::cl::ConsensusLayerHealthEvent;
 use futures::Stream;
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, ForkchoiceStatus};
+use reth_beacon_consensus::{
+    BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
+};
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
@@ -14,6 +16,7 @@ use reth_primitives::{
 };
 use reth_prune::PrunerEvent;
 use reth_stages::{ExecOutput, PipelineEvent};
+use reth_static_file::StaticFileProducerEvent;
 use std::{
     fmt::{Display, Formatter},
     future::Future,
@@ -22,12 +25,15 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::time::Interval;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
-/// The current high-level state of the node.
+/// The current high-level state of the node, including the node's database environment, network
+/// connections, current processing stage, and the latest block information. It provides
+/// methods to handle different types of events that affect the node's state, such as pipeline
+/// events, network events, and consensus engine events.
 struct NodeState<DB> {
     /// Database environment.
     /// Used for freelist calculation reported in the "Status" log message.
@@ -70,6 +76,36 @@ impl<DB> NodeState<DB> {
     /// Processes an event emitted by the pipeline
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
+            PipelineEvent::Prepare { pipeline_stages_progress, stage_id, checkpoint, target } => {
+                let checkpoint = checkpoint.unwrap_or_default();
+                let current_stage = CurrentStage {
+                    stage_id,
+                    eta: match &self.current_stage {
+                        Some(current_stage) if current_stage.stage_id == stage_id => {
+                            current_stage.eta
+                        }
+                        _ => Eta::default(),
+                    },
+                    checkpoint,
+                    entities_checkpoint: match &self.current_stage {
+                        Some(current_stage) if current_stage.stage_id == stage_id => {
+                            current_stage.entities_checkpoint
+                        }
+                        _ => None,
+                    },
+                    target,
+                };
+
+                info!(
+                    pipeline_stages = %pipeline_stages_progress,
+                    stage = %stage_id,
+                    checkpoint = %checkpoint.block_number,
+                    target = %OptionalField(target),
+                    "Preparing stage",
+                );
+
+                self.current_stage = Some(current_stage);
+            }
             PipelineEvent::Run { pipeline_stages_progress, stage_id, checkpoint, target } => {
                 let checkpoint = checkpoint.unwrap_or_default();
                 let current_stage = CurrentStage {
@@ -81,6 +117,12 @@ impl<DB> NodeState<DB> {
                         _ => Eta::default(),
                     },
                     checkpoint,
+                    entities_checkpoint: match &self.current_stage {
+                        Some(current_stage) if current_stage.stage_id == stage_id => {
+                            current_stage.entities_checkpoint
+                        }
+                        _ => None,
+                    },
                     target,
                 };
 
@@ -116,35 +158,58 @@ impl<DB> NodeState<DB> {
 
                 if let Some(current_stage) = self.current_stage.as_mut() {
                     current_stage.checkpoint = checkpoint;
-                    current_stage.eta.update(checkpoint);
+                    current_stage.entities_checkpoint = checkpoint.entities();
+                    current_stage.eta.update(stage_id, checkpoint);
 
                     let target = OptionalField(current_stage.target);
-                    let stage_progress = OptionalField(
-                        checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
-                    );
+                    let stage_progress = current_stage
+                        .entities_checkpoint
+                        .and_then(|entities| entities.fmt_percentage());
+                    let stage_eta = current_stage.eta.fmt_for_stage(stage_id);
 
-                    let message =
-                        if done { "Stage finished executing" } else { "Stage committed progress" };
+                    let message = if done { "Finished stage" } else { "Committed stage progress" };
 
-                    if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
-                        info!(
-                            pipeline_stages = %pipeline_stages_progress,
-                            stage = %stage_id,
-                            checkpoint = %checkpoint.block_number,
-                            %target,
-                            %stage_progress,
-                            %stage_eta,
-                            "{message}",
-                        )
-                    } else {
-                        info!(
-                            pipeline_stages = %pipeline_stages_progress,
-                            stage = %stage_id,
-                            checkpoint = %checkpoint.block_number,
-                            %target,
-                            %stage_progress,
-                            "{message}",
-                        )
+                    match (stage_progress, stage_eta) {
+                        (Some(stage_progress), Some(stage_eta)) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_progress,
+                                %stage_eta,
+                                "{message}",
+                            )
+                        }
+                        (Some(stage_progress), None) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_progress,
+                                "{message}",
+                            )
+                        }
+                        (None, Some(stage_eta)) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_eta,
+                                "{message}",
+                            )
+                        }
+                        (None, None) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                "{message}",
+                            )
+                        }
                     }
                 }
 
@@ -167,21 +232,35 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
-                if status != ForkchoiceStatus::Valid ||
-                    (self.safe_block_hash != Some(safe_block_hash) &&
-                        self.finalized_block_hash != Some(finalized_block_hash))
+                if self.safe_block_hash != Some(safe_block_hash) &&
+                    self.finalized_block_hash != Some(finalized_block_hash)
                 {
-                    info!(
-                        ?head_block_hash,
-                        ?safe_block_hash,
-                        ?finalized_block_hash,
-                        ?status,
-                        "Forkchoice updated"
-                    );
+                    let msg = match status {
+                        ForkchoiceStatus::Valid => "Forkchoice updated",
+                        ForkchoiceStatus::Invalid => "Received invalid forkchoice updated message",
+                        ForkchoiceStatus::Syncing => {
+                            "Received forkchoice updated message when syncing"
+                        }
+                    };
+                    info!(?head_block_hash, ?safe_block_hash, ?finalized_block_hash, "{}", msg);
                 }
                 self.head_block_hash = Some(head_block_hash);
                 self.safe_block_hash = Some(safe_block_hash);
                 self.finalized_block_hash = Some(finalized_block_hash);
+            }
+            BeaconConsensusEngineEvent::LiveSyncProgress(live_sync_progress) => {
+                match live_sync_progress {
+                    ConsensusEngineLiveSyncProgress::DownloadingBlocks {
+                        remaining_blocks,
+                        target,
+                    } => {
+                        info!(
+                            remaining_blocks,
+                            target_block_hash=?target,
+                            "Live sync in progress, downloading blocks"
+                        );
+                    }
+                }
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
                 info!(
@@ -233,8 +312,22 @@ impl<DB> NodeState<DB> {
 
     fn handle_pruner_event(&self, event: PrunerEvent) {
         match event {
+            PrunerEvent::Started { tip_block_number } => {
+                info!(tip_block_number, "Pruner started");
+            }
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
                 info!(tip_block_number, ?elapsed, ?stats, "Pruner finished");
+            }
+        }
+    }
+
+    fn handle_static_file_producer_event(&self, event: StaticFileProducerEvent) {
+        match event {
+            StaticFileProducerEvent::Started { targets } => {
+                info!(?targets, "Static File Producer started");
+            }
+            StaticFileProducerEvent::Finished { targets, elapsed } => {
+                info!(?targets, ?elapsed, "Static File Producer finished");
             }
         }
     }
@@ -266,6 +359,10 @@ struct CurrentStage {
     stage_id: StageId,
     eta: Eta,
     checkpoint: StageCheckpoint,
+    /// The entities checkpoint for reporting the progress. If `None`, then the progress is not
+    /// available, probably because the stage didn't finish running and didn't update its
+    /// checkpoint yet.
+    entities_checkpoint: Option<EntitiesCheckpoint>,
     target: Option<BlockNumber>,
 }
 
@@ -282,6 +379,8 @@ pub enum NodeEvent {
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
     /// A pruner event
     Pruner(PrunerEvent),
+    /// A static_file_producer event
+    StaticFileProducer(StaticFileProducerEvent),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -311,6 +410,12 @@ impl From<ConsensusLayerHealthEvent> for NodeEvent {
 impl From<PrunerEvent> for NodeEvent {
     fn from(event: PrunerEvent) -> Self {
         NodeEvent::Pruner(event)
+    }
+}
+
+impl From<StaticFileProducerEvent> for NodeEvent {
+    fn from(event: StaticFileProducerEvent) -> Self {
+        NodeEvent::StaticFileProducer(event)
     }
 }
 
@@ -358,36 +463,62 @@ where
         while this.info_interval.poll_tick(cx).is_ready() {
             let freelist = OptionalField(this.state.freelist());
 
-            if let Some(CurrentStage { stage_id, eta, checkpoint, target }) =
+            if let Some(CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target }) =
                 &this.state.current_stage
             {
-                let stage_progress = OptionalField(
-                    checkpoint.entities().and_then(|entities| entities.fmt_percentage()),
-                );
+                let stage_progress =
+                    entities_checkpoint.and_then(|entities| entities.fmt_percentage());
+                let stage_eta = eta.fmt_for_stage(*stage_id);
 
-                if let Some(stage_eta) = eta.fmt_for_stage(*stage_id) {
-                    info!(
-                        target: "reth::cli",
-                        connected_peers = this.state.num_connected_peers(),
-                        %freelist,
-                        stage = %stage_id,
-                        checkpoint = checkpoint.block_number,
-                        target = %OptionalField(*target),
-                        %stage_progress,
-                        %stage_eta,
-                        "Status"
-                    );
-                } else {
-                    info!(
-                        target: "reth::cli",
-                        connected_peers = this.state.num_connected_peers(),
-                        %freelist,
-                        stage = %stage_id,
-                        checkpoint = checkpoint.block_number,
-                        target = %OptionalField(*target),
-                        %stage_progress,
-                        "Status"
-                    );
+                match (stage_progress, stage_eta) {
+                    (Some(stage_progress), Some(stage_eta)) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_progress,
+                            %stage_eta,
+                            "Status"
+                        )
+                    }
+                    (Some(stage_progress), None) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_progress,
+                            "Status"
+                        )
+                    }
+                    (None, Some(stage_eta)) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_eta,
+                            "Status"
+                        )
+                    }
+                    (None, None) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %freelist,
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            "Status"
+                        )
+                    }
                 }
             } else if let Some(latest_block) = this.state.latest_block {
                 let now =
@@ -430,6 +561,9 @@ where
                 NodeEvent::Pruner(event) => {
                     this.state.handle_pruner_event(event);
                 }
+                NodeEvent::StaticFileProducer(event) => {
+                    this.state.handle_static_file_producer_event(event);
+                }
             }
         }
 
@@ -453,18 +587,27 @@ struct Eta {
 
 impl Eta {
     /// Update the ETA given the checkpoint, if possible.
-    fn update(&mut self, checkpoint: StageCheckpoint) {
+    fn update(&mut self, stage: StageId, checkpoint: StageCheckpoint) {
         let Some(current) = checkpoint.entities() else { return };
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
-            let processed_since_last = current.processed - self.last_checkpoint.processed;
+            let Some(processed_since_last) =
+                current.processed.checked_sub(self.last_checkpoint.processed)
+            else {
+                self.eta = None;
+                debug!(target: "reth::cli", %stage, ?current, ?self.last_checkpoint, "Failed to calculate the ETA: processed entities is less than the last checkpoint");
+                return
+            };
             let elapsed = last_checkpoint_time.elapsed();
             let per_second = processed_since_last as f64 / elapsed.as_secs_f64();
 
-            self.eta = Duration::try_from_secs_f64(
-                ((current.total - current.processed) as f64) / per_second,
-            )
-            .ok();
+            let Some(remaining) = current.total.checked_sub(current.processed) else {
+                self.eta = None;
+                debug!(target: "reth::cli", %stage, ?current, "Failed to calculate the ETA: total entities is less than processed entities");
+                return
+            };
+
+            self.eta = Duration::try_from_secs_f64(remaining as f64 / per_second).ok();
         }
 
         self.last_checkpoint = current;

@@ -5,9 +5,8 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-
-//! Consensus for ethereum network
 
 use reth_consensus_common::validation;
 use reth_interfaces::consensus::{Consensus, ConsensusError};
@@ -84,7 +83,7 @@ impl Consensus for BeaconConsensus {
             //  * difficulty, mix_hash & nonce aka PoW stuff
             // low priority as syncing is done in reverse order
 
-            // Check if timestamp is in future. Clock can drift but this can be consensus issue.
+            // Check if timestamp is in the future. Clock can drift but this can be consensus issue.
             let present_timestamp =
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 

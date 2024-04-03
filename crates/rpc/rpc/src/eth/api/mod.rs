@@ -21,12 +21,11 @@ use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, B256,
     U256, U64,
 };
-
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_types::{SyncInfo, SyncStatus};
-use reth_tasks::{TaskSpawner, TokioTaskExecutor};
+use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{CfgEnv, SpecId};
 use std::{
@@ -35,7 +34,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-
 use tokio::sync::{oneshot, Mutex};
 
 #[cfg(feature = "optimism")]
@@ -44,6 +42,7 @@ pub use optimism::SequencerClient;
 mod block;
 mod call;
 pub(crate) mod fee_history;
+
 mod fees;
 #[cfg(feature = "optimism")]
 mod optimism;
@@ -53,7 +52,6 @@ mod sign;
 mod state;
 mod transactions;
 
-use crate::BlockingTaskPool;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -154,7 +152,7 @@ where
             provider,
             pool,
             network,
-            signers: Default::default(),
+            signers: parking_lot::RwLock::new(Default::default()),
             eth_cache,
             gas_oracle,
             gas_cap,
@@ -175,6 +173,8 @@ where
     ///
     /// This accepts a closure that creates a new future using a clone of this type and spawns the
     /// future onto a new task that is allowed to block.
+    ///
+    /// Note: This is expected for futures that are dominated by blocking IO operations.
     pub(crate) async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
     where
         C: FnOnce(Self) -> F,
@@ -346,11 +346,6 @@ where
                 }
             }
 
-            // if we're currently syncing, we're unable to build a pending block
-            if this.network().is_syncing() {
-                return Ok(None)
-            }
-
             // we rebuild the block
             let pending_block = match pending.build_block(this.provider(), this.pool()) {
                 Ok(block) => block,
@@ -414,7 +409,7 @@ where
     }
 
     fn accounts(&self) -> Vec<Address> {
-        self.inner.signers.iter().flat_map(|s| s.accounts()).collect()
+        self.inner.signers.read().iter().flat_map(|s| s.accounts()).collect()
     }
 
     fn is_syncing(&self) -> bool {
@@ -479,7 +474,7 @@ struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// An interface to interact with the network
     network: Network,
     /// All configured Signers
-    signers: Vec<Box<dyn EthSigner>>,
+    signers: parking_lot::RwLock<Vec<Box<dyn EthSigner>>>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache,
     /// The async gas oracle frontend for gas price suggestions

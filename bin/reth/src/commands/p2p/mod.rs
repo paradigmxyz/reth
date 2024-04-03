@@ -12,7 +12,7 @@ use crate::{
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_config::Config;
-use reth_db::{mdbx::DatabaseArguments, open_db};
+use reth_db::create_db;
 use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
@@ -73,10 +73,10 @@ pub struct Command {
     #[arg(long, default_value = "any")]
     nat: NatResolver,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Subcommands,
 }
 
@@ -100,14 +100,11 @@ impl Command {
     /// Execute `p2p` command
     pub async fn execute(&self) -> eyre::Result<()> {
         let tempdir = tempfile::TempDir::new()?;
-        let noop_db = Arc::new(open_db(
-            &tempdir.into_path(),
-            DatabaseArguments::default().log_level(self.db.log_level),
-        )?);
+        let noop_db = Arc::new(create_db(tempdir.into_path(), self.db.database_args())?);
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
 
@@ -119,7 +116,7 @@ impl Command {
             eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
         }
 
-        config.peers.connect_trusted_nodes_only = self.trusted_only;
+        config.peers.trusted_nodes_only = self.trusted_only;
 
         let default_secret_key_path = data_dir.p2p_secret_path();
         let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
@@ -131,7 +128,11 @@ impl Command {
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 
         let network = network_config_builder
-            .build(Arc::new(ProviderFactory::new(noop_db, self.chain.clone())))
+            .build(Arc::new(ProviderFactory::new(
+                noop_db,
+                self.chain.clone(),
+                data_dir.static_files_path(),
+            )?))
             .start_network()
             .await?;
 

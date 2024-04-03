@@ -75,7 +75,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     /// stored in file.
     pub fn row_by_key(&mut self, key: &[u8]) -> Result<Option<RefRow<'_>>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
-            // TODO: is it worth to parallize both?
+            // TODO: is it worth to parallelize both?
 
             // May have false positives
             if filter.contains(key)? {
@@ -143,7 +143,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         mask: usize,
     ) -> Result<Option<RefRow<'_>>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
-            // TODO: is it worth to parallize both?
+            // TODO: is it worth to parallelize both?
 
             // May have false positives
             if filter.contains(key)? {

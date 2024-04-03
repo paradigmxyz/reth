@@ -1,3 +1,5 @@
+#[cfg(any(test, feature = "arbitrary"))]
+use crate::block::{generate_valid_header, valid_header_strategy};
 use crate::{
     basefee::calculate_next_block_base_fee,
     constants,
@@ -9,14 +11,16 @@ use crate::{
     keccak256, Address, BaseFeeParams, BlockHash, BlockNumHash, BlockNumber, Bloom, Bytes,
     ChainSpec, GotExpected, GotExpectedBoxed, Hardfork, B256, B64, U256,
 };
-use alloy_rlp::{length_of_length, Decodable, Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
-use bytes::{Buf, BufMut, BytesMut};
+use alloy_rlp::{length_of_length, Decodable, Encodable};
+use bytes::BufMut;
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 
 /// Errors that can occur during header sanity checks.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum HeaderError {
     /// Represents an error when the block difficulty is too large.
     LargeDifficulty,
@@ -202,9 +206,7 @@ impl Header {
     /// Heavy function that will calculate hash of data and will *not* save the change to metadata.
     /// Use [`Header::seal`], [`SealedHeader`] and unlock if you need hash to be persistent.
     pub fn hash_slow(&self) -> B256 {
-        let mut out = BytesMut::new();
-        self.encode(&mut out);
-        keccak256(&out)
+        keccak256(alloy_rlp::encode(self))
     }
 
     /// Checks if the header is empty - has no transactions and no ommers
@@ -299,34 +301,6 @@ impl Header {
         self.extra_data.len() // extra data
     }
 
-    /// Checks if `blob_gas_used` is present in the header.
-    ///
-    /// Returns `true` if `blob_gas_used` is `Some`, otherwise `false`.
-    fn has_blob_gas_used(&self) -> bool {
-        self.blob_gas_used.is_some()
-    }
-
-    /// Checks if `excess_blob_gas` is present in the header.
-    ///
-    /// Returns `true` if `excess_blob_gas` is `Some`, otherwise `false`.
-    fn has_excess_blob_gas(&self) -> bool {
-        self.excess_blob_gas.is_some()
-    }
-
-    // Checks if `withdrawals_root` is present in the header.
-    ///
-    /// Returns `true` if `withdrawals_root` is `Some`, otherwise `false`.
-    fn has_withdrawals_root(&self) -> bool {
-        self.withdrawals_root.is_some()
-    }
-
-    /// Checks if `parent_beacon_block_root` is present in the header.
-    ///
-    /// Returns `true` if `parent_beacon_block_root` is `Some`, otherwise `false`.
-    fn has_parent_beacon_block_root(&self) -> bool {
-        self.parent_beacon_block_root.is_some()
-    }
-
     fn header_payload_length(&self) -> usize {
         let mut length = 0;
         length += self.parent_hash.length(); // Hash of the previous block.
@@ -348,49 +322,23 @@ impl Header {
         if let Some(base_fee) = self.base_fee_per_gas {
             // Adding base fee length if it exists.
             length += U256::from(base_fee).length();
-        } else if self.has_withdrawals_root() ||
-            self.has_blob_gas_used() ||
-            self.has_excess_blob_gas() ||
-            self.has_parent_beacon_block_root()
-        {
-            // Placeholder code for empty lists.
-            length += 1;
         }
 
         if let Some(root) = self.withdrawals_root {
             // Adding withdrawals_root length if it exists.
             length += root.length();
-        } else if self.has_blob_gas_used() ||
-            self.has_excess_blob_gas() ||
-            self.has_parent_beacon_block_root()
-        {
-            // Placeholder code for a missing string value.
-            length += 1;
         }
 
         if let Some(blob_gas_used) = self.blob_gas_used {
             // Adding blob_gas_used length if it exists.
             length += U256::from(blob_gas_used).length();
-        } else if self.has_excess_blob_gas() || self.has_parent_beacon_block_root() {
-            // Placeholder code for empty lists.
-            length += 1;
         }
 
         if let Some(excess_blob_gas) = self.excess_blob_gas {
             // Adding excess_blob_gas length if it exists.
             length += U256::from(excess_blob_gas).length();
-        } else if self.has_parent_beacon_block_root() {
-            // Placeholder code for empty lists.
-            length += 1;
         }
 
-        // Encode parent beacon block root length. If new fields are added, the above pattern will
-        // need to be repeated and placeholder length added. Otherwise, it's impossible to
-        // tell _which_ fields are missing. This is mainly relevant for contrived cases
-        // where a header is created at random, for example:
-        //  * A header is created with a withdrawals root, but no base fee. Shanghai blocks are
-        //    post-London, so this is technically not valid. However, a tool like proptest would
-        //    generate a block like this.
         if let Some(parent_beacon_block_root) = self.parent_beacon_block_root {
             length += parent_beacon_block_root.length();
         }
@@ -424,49 +372,28 @@ impl Encodable for Header {
         self.mix_hash.encode(out); // Encode mix hash.
         B64::new(self.nonce.to_be_bytes()).encode(out); // Encode nonce.
 
-        // The following code is needed only to handle proptest-generated headers that are
-        // technically invalid.
-        //
-        // TODO: make proptest generate more valid headers, ie if there is no base fee, there
-        // should be no withdrawals root or any future fork field.
-
         // Encode base fee. Put empty list if base fee is missing,
         // but withdrawals root is present.
         if let Some(ref base_fee) = self.base_fee_per_gas {
             U256::from(*base_fee).encode(out);
-        } else if self.has_withdrawals_root() ||
-            self.has_blob_gas_used() ||
-            self.has_excess_blob_gas() ||
-            self.has_parent_beacon_block_root()
-        {
-            out.put_u8(EMPTY_LIST_CODE);
         }
 
         // Encode withdrawals root. Put empty string if withdrawals root is missing,
         // but blob gas used is present.
         if let Some(ref root) = self.withdrawals_root {
             root.encode(out);
-        } else if self.has_blob_gas_used() ||
-            self.has_excess_blob_gas() ||
-            self.has_parent_beacon_block_root()
-        {
-            out.put_u8(EMPTY_STRING_CODE);
         }
 
         // Encode blob gas used. Put empty list if blob gas used is missing,
         // but excess blob gas is present.
         if let Some(ref blob_gas_used) = self.blob_gas_used {
             U256::from(*blob_gas_used).encode(out);
-        } else if self.has_excess_blob_gas() || self.has_parent_beacon_block_root() {
-            out.put_u8(EMPTY_LIST_CODE);
         }
 
         // Encode excess blob gas. Put empty list if excess blob gas is missing,
         // but parent beacon block root is present.
         if let Some(ref excess_blob_gas) = self.excess_blob_gas {
             U256::from(*excess_blob_gas).encode(out);
-        } else if self.has_parent_beacon_block_root() {
-            out.put_u8(EMPTY_LIST_CODE);
         }
 
         // Encode parent beacon block root. If new fields are added, the above pattern will need to
@@ -518,39 +445,22 @@ impl Decodable for Header {
             excess_blob_gas: None,
             parent_beacon_block_root: None,
         };
-
         if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
-                buf.advance(1)
-            } else {
-                this.base_fee_per_gas = Some(u64::decode(buf)?);
-            }
+            this.base_fee_per_gas = Some(u64::decode(buf)?);
         }
 
         // Withdrawals root for post-shanghai headers
         if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
-                buf.advance(1)
-            } else {
-                this.withdrawals_root = Some(Decodable::decode(buf)?);
-            }
+            this.withdrawals_root = Some(Decodable::decode(buf)?);
         }
 
         // Blob gas used and excess blob gas for post-cancun headers
         if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
-                buf.advance(1)
-            } else {
-                this.blob_gas_used = Some(u64::decode(buf)?);
-            }
+            this.blob_gas_used = Some(u64::decode(buf)?);
         }
 
         if started_len - buf.len() < rlp_head.payload_length {
-            if buf.first().map(|b| *b == EMPTY_LIST_CODE).unwrap_or_default() {
-                buf.advance(1)
-            } else {
-                this.excess_blob_gas = Some(u64::decode(buf)?);
-            }
+            this.excess_blob_gas = Some(u64::decode(buf)?);
         }
 
         // Decode parent beacon block root. If new fields are added, the above pattern will need to
@@ -663,13 +573,14 @@ pub enum HeaderValidationError {
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
-#[add_arbitrary_tests(rlp)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[main_codec(no_arbitrary)]
+#[add_arbitrary_tests(rlp, compact)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SealedHeader {
-    /// Locked Header fields.
-    header: Header,
     /// Locked Header hash.
     hash: BlockHash,
+    /// Locked Header fields.
+    header: Header,
 }
 
 impl SealedHeader {
@@ -741,11 +652,12 @@ impl SealedHeader {
         chain_spec: &ChainSpec,
     ) -> Result<(), HeaderValidationError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
-        let mut parent_gas_limit = parent.gas_limit;
-        if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
-            parent_gas_limit =
-                parent.gas_limit * chain_spec.base_fee_params(self.timestamp).elasticity_multiplier;
-        }
+        let parent_gas_limit =
+            if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
+                parent.gas_limit * chain_spec.base_fee_params(self.timestamp).elasticity_multiplier
+            } else {
+                parent.gas_limit
+            };
 
         // Check for an increase in gas limit beyond the allowed threshold.
         if self.gas_limit > parent_gas_limit {
@@ -862,7 +774,7 @@ impl SealedHeader {
         }
 
         // ensure that the blob gas fields for this block
-        if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(self.timestamp) {
+        if chain_spec.is_cancun_active_at_timestamp(self.timestamp) {
             self.validate_4844_header_against_parent(parent)?;
         }
 
@@ -931,18 +843,24 @@ impl SealedHeader {
 impl proptest::arbitrary::Arbitrary for SealedHeader {
     type Parameters = ();
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::{any, Strategy};
-
-        any::<(Header, BlockHash)>().prop_map(move |(header, _)| header.seal_slow()).boxed()
+        // map valid header strategy by sealing
+        valid_header_strategy().prop_map(|header| header.seal_slow()).boxed()
     }
-
     type Strategy = proptest::strategy::BoxedStrategy<SealedHeader>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(Header::arbitrary(u)?.seal_slow())
+        let sealed_header = generate_valid_header(
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+        )
+        .seal_slow();
+        Ok(sealed_header)
     }
 }
 
@@ -1065,49 +983,6 @@ impl From<HeadersDirection> for bool {
         match value {
             HeadersDirection::Rising => false,
             HeadersDirection::Falling => true,
-        }
-    }
-}
-
-#[cfg(feature = "test-utils")]
-mod ethers_compat {
-    use super::*;
-    use ethers_core::types::{Block, H256};
-
-    impl From<&Block<H256>> for Header {
-        fn from(block: &Block<H256>) -> Self {
-            Header {
-                parent_hash: block.parent_hash.0.into(),
-                number: block.number.unwrap().as_u64(),
-                gas_limit: block.gas_limit.as_u64(),
-                difficulty: U256::from_limbs(block.difficulty.0),
-                nonce: block.nonce.unwrap().to_low_u64_be(),
-                extra_data: block.extra_data.0.clone().into(),
-                state_root: block.state_root.0.into(),
-                transactions_root: block.transactions_root.0.into(),
-                receipts_root: block.receipts_root.0.into(),
-                timestamp: block.timestamp.as_u64(),
-                mix_hash: block.mix_hash.unwrap().0.into(),
-                beneficiary: block.author.unwrap().0.into(),
-                base_fee_per_gas: block.base_fee_per_gas.map(|fee| fee.as_u64()),
-                ommers_hash: block.uncles_hash.0.into(),
-                gas_used: block.gas_used.as_u64(),
-                withdrawals_root: None,
-                logs_bloom: block.logs_bloom.unwrap_or_default().0.into(),
-                blob_gas_used: None,
-                excess_blob_gas: None,
-                parent_beacon_block_root: None,
-            }
-        }
-    }
-
-    impl From<&Block<H256>> for SealedHeader {
-        fn from(block: &Block<H256>) -> Self {
-            let header = Header::from(block);
-            match block.hash {
-                Some(hash) => header.seal(hash.0.into()),
-                None => header.seal_slow(),
-            }
         }
     }
 }

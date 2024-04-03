@@ -103,7 +103,6 @@ use crate::{
     traits::{GetPooledTransactionLimit, NewBlobSidecar, TransactionListenerKind},
     validate::ValidTransaction,
 };
-use alloy_rlp::Encodable;
 pub use best::BestTransactionFilter;
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
@@ -319,18 +318,29 @@ where
         let mut elements = Vec::with_capacity(transactions.len());
         let mut size = 0;
         for transaction in transactions {
+            let encoded_len = transaction.encoded_length();
             let tx = transaction.to_recovered_transaction().into_signed();
             let pooled = if tx.is_eip4844() {
+                // for EIP-4844 transactions, we need to fetch the blob sidecar from the blob store
                 if let Some(blob) = self.get_blob_transaction(tx) {
                     PooledTransactionsElement::BlobTransaction(blob)
                 } else {
                     continue
                 }
             } else {
-                PooledTransactionsElement::from(tx)
+                match PooledTransactionsElement::try_from(tx) {
+                    Ok(element) => element,
+                    Err(err) => {
+                        debug!(
+                            target: "txpool", %err,
+                            "failed to convert transaction to pooled element; skipping",
+                        );
+                        continue
+                    }
+                }
             };
 
-            size += pooled.length();
+            size += encoded_len;
             elements.push(pooled);
 
             if limit.exceeds(size) {
@@ -341,9 +351,24 @@ where
         elements
     }
 
+    /// Returns converted [PooledTransactionsElement] for the given transaction hash.
+    pub(crate) fn get_pooled_transaction_element(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<PooledTransactionsElement> {
+        self.get(&tx_hash).and_then(|transaction| {
+            let tx = transaction.to_recovered_transaction().into_signed();
+            if tx.is_eip4844() {
+                self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
+            } else {
+                PooledTransactionsElement::try_from(tx).ok()
+            }
+        })
+    }
+
     /// Updates the entire pool after a new block was executed.
     pub(crate) fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
-        trace!(target: "txpool", %update, "updating pool on canonical state change");
+        trace!(target: "txpool", ?update, "updating pool on canonical state change");
 
         let block_info = update.block_info();
         let CanonicalStateUpdate { new_tip, changed_accounts, mined_transactions, .. } = update;
@@ -670,15 +695,15 @@ where
     }
 
     /// Removes and returns all transactions that are present in the pool.
-    pub(crate) fn retain_unknown<A: HandleMempoolData>(&self, announcement: &mut A) -> Option<A>
+    pub(crate) fn retain_unknown<A>(&self, announcement: &mut A)
     where
         A: HandleMempoolData,
     {
         if announcement.is_empty() {
-            return None
+            return
         }
         let pool = self.get_pool_data();
-        Some(announcement.retain_by_hash(|tx| !pool.contains(tx)))
+        announcement.retain_by_hash(|tx| !pool.contains(tx))
     }
 
     /// Returns the transaction by hash.
@@ -761,7 +786,7 @@ where
     /// Inserts a blob transaction into the blob store
     fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecar) {
         if let Err(err) = self.blob_store.insert(hash, blob) {
-            warn!(target: "txpool", ?err, "[{:?}] failed to insert blob", hash);
+            warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
             self.blob_store_metrics.blobstore_failed_inserts.increment(1);
         }
         self.update_blob_store_metrics();
@@ -769,26 +794,18 @@ where
 
     /// Delete a blob from the blob store
     pub(crate) fn delete_blob(&self, blob: TxHash) {
-        if let Err(err) = self.blob_store.delete(blob) {
-            warn!(target: "txpool", ?err, "[{:?}] failed to delete blobs", blob);
-            self.blob_store_metrics.blobstore_failed_deletes.increment(1);
-        }
-        self.update_blob_store_metrics();
+        let _ = self.blob_store.delete(blob);
     }
 
     /// Delete all blobs from the blob store
     pub(crate) fn delete_blobs(&self, txs: Vec<TxHash>) {
-        let num = txs.len();
-        if let Err(err) = self.blob_store.delete_all(txs) {
-            warn!(target: "txpool", ?err,?num, "failed to delete blobs");
-            self.blob_store_metrics.blobstore_failed_deletes.increment(num as u64);
-        }
-        self.update_blob_store_metrics();
+        let _ = self.blob_store.delete_all(txs);
     }
 
     /// Cleans up the blob store
     pub(crate) fn cleanup_blobs(&self) {
-        self.blob_store.cleanup();
+        let stat = self.blob_store.cleanup();
+        self.blob_store_metrics.blobstore_failed_deletes.increment(stat.delete_failed as u64);
         self.update_blob_store_metrics();
     }
 
@@ -1153,7 +1170,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs.
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = generate_blob_sidecar(blobs);
 
         // Create an in-memory blob store.
         let blob_store = InMemoryBlobStore::default();

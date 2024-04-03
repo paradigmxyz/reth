@@ -9,7 +9,7 @@ use reth_db::{
     init_db, tables,
     transaction::DbTx,
 };
-use reth_node_core::init::init_genesis;
+use reth_node_core::{args::DatabaseArgs, init::init_genesis};
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
 use reth_trie::StateRoot;
@@ -40,6 +40,10 @@ pub struct Command {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    /// All database related arguments
+    #[command(flatten)]
+    pub db: DatabaseArgs,
 }
 
 impl Command {
@@ -48,12 +52,13 @@ impl Command {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
-        let db = Arc::new(init_db(db_path, Default::default())?);
+        let db = Arc::new(init_db(db_path, self.db.database_args())?);
+
+        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files_path())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        init_genesis(db.clone(), self.chain.clone())?;
+        init_genesis(factory.clone())?;
 
-        let factory = ProviderFactory::new(&db, self.chain);
         let mut provider = factory.provider_rw()?;
         let best_block = provider.best_block_number()?;
         let best_header = provider
@@ -62,7 +67,7 @@ impl Command {
 
         let mut deleted_tries = 0;
         let tx_mut = provider.tx_mut();
-        let mut hashed_account_cursor = tx_mut.cursor_read::<tables::HashedAccount>()?;
+        let mut hashed_account_cursor = tx_mut.cursor_read::<tables::HashedAccounts>()?;
         let mut storage_trie_cursor = tx_mut.cursor_dup_read::<tables::StoragesTrie>()?;
         let mut entry = storage_trie_cursor.first()?;
 

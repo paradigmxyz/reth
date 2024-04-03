@@ -32,7 +32,7 @@ impl StateReverts {
         // Write storage changes
         tracing::trace!(target: "provider::reverts", "Writing storage changes");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-        let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
+        let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
         for (block_index, mut storage_changes) in self.0.storage.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
 
@@ -73,7 +73,7 @@ impl StateReverts {
 
         // Write account changes
         tracing::trace!(target: "provider::reverts", "Writing account changes");
-        let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
+        let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
         for (block_index, mut account_block_reverts) in self.0.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
             // Sort accounts by address.
@@ -97,7 +97,7 @@ struct StorageRevertsIter<R: Iterator, W: Iterator> {
     wiped: Peekable<W>,
 }
 
-impl<R: Iterator, W: Iterator> StorageRevertsIter<R, W>
+impl<R, W> StorageRevertsIter<R, W>
 where
     R: Iterator<Item = (B256, RevertToSlot)>,
     W: Iterator<Item = (B256, U256)>,

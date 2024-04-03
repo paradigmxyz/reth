@@ -1,4 +1,8 @@
-use crate::{Block, BlockTransactions, Rich, Transaction, TransactionReceipt};
+#![allow(missing_docs)]
+
+use crate::{
+    serde_helpers::u64_hex, Block, BlockTransactions, Rich, Transaction, TransactionReceipt,
+};
 use alloy_primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
@@ -18,30 +22,30 @@ pub enum OperationType {
 /// Custom struct for otterscan `getInternalOperations` RPC response
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct InternalOperation {
-    r#type: OperationType,
-    from: Address,
-    to: Address,
-    value: u128,
+    pub r#type: OperationType,
+    pub from: Address,
+    pub to: Address,
+    pub value: U256,
 }
 
 /// Custom struct for otterscan `traceTransaction` RPC response
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TraceEntry {
-    r#type: String,
-    depth: u32,
-    from: Address,
-    to: Address,
-    value: u128,
-    input: Bytes,
+    pub r#type: String,
+    pub depth: u32,
+    pub from: Address,
+    pub to: Address,
+    pub value: U256,
+    pub input: Bytes,
 }
 
 /// Internal issuance struct for `BlockDetails` struct
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct InternalIssuance {
-    block_reward: U256,
-    uncle_reward: U256,
-    issuance: U256,
+    pub block_reward: U256,
+    pub uncle_reward: U256,
+    pub issuance: U256,
 }
 
 /// Custom `Block` struct that includes transaction count for Otterscan responses
@@ -49,17 +53,17 @@ pub struct InternalIssuance {
 #[serde(rename_all = "camelCase")]
 pub struct OtsBlock {
     #[serde(flatten)]
-    block: Block,
-    transaction_count: usize,
+    pub block: Block,
+    pub transaction_count: usize,
 }
 
 /// Custom struct for otterscan `getBlockDetails` RPC response
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockDetails {
-    block: OtsBlock,
-    issuance: InternalIssuance,
-    total_fees: U256,
+    pub block: OtsBlock,
+    pub issuance: InternalIssuance,
+    pub total_fees: U256,
 }
 
 /// Custom transaction receipt struct for otterscan `OtsBlockTransactions` struct
@@ -67,15 +71,16 @@ pub struct BlockDetails {
 #[serde(rename_all = "camelCase")]
 pub struct OtsTransactionReceipt {
     #[serde(flatten)]
-    receipt: TransactionReceipt,
-    timestamp: u64,
+    pub receipt: TransactionReceipt,
+    #[serde(with = "u64_hex")]
+    pub timestamp: u64,
 }
 
 /// Custom struct for otterscan `getBlockTransactions` RPC response
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct OtsBlockTransactions {
-    fullblock: OtsBlock,
-    receipts: Vec<OtsTransactionReceipt>,
+    pub fullblock: OtsBlock,
+    pub receipts: Vec<OtsTransactionReceipt>,
 }
 
 /// Custom struct for otterscan `searchTransactionsAfter`and `searchTransactionsBefore` RPC
@@ -83,17 +88,17 @@ pub struct OtsBlockTransactions {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionsWithReceipts {
-    txs: Vec<Transaction>,
-    receipts: Vec<OtsTransactionReceipt>,
-    first_page: bool,
-    last_page: bool,
+    pub txs: Vec<Transaction>,
+    pub receipts: Vec<OtsTransactionReceipt>,
+    pub first_page: bool,
+    pub last_page: bool,
 }
 
 /// Custom struct for otterscan `getContractCreator` RPC responses
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ContractCreator {
-    tx: Transaction,
-    creator: Address,
+    pub tx: Transaction,
+    pub creator: Address,
 }
 
 impl From<Block> for OtsBlock {

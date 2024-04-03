@@ -1,12 +1,14 @@
 mod checkpoint;
+mod limiter;
 mod mode;
 mod segment;
 mod target;
 
 use crate::{Address, BlockNumber};
 pub use checkpoint::PruneCheckpoint;
+pub use limiter::PruneLimiter;
 pub use mode::PruneMode;
-pub use segment::{PruneSegment, PruneSegmentError};
+pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
@@ -53,7 +55,7 @@ impl ReceiptsLogPruneConfig {
             // Reminder, that we increment because the [`BlockNumber`] key of the new map should be
             // viewed as `PruneMode::Before(block)`
             let block = (pruned_block + 1).max(
-                mode.prune_target_block(tip, PruneSegment::ContractLogs)?
+                mode.prune_target_block(tip, PruneSegment::ContractLogs, PrunePurpose::User)?
                     .map(|(block, _)| block)
                     .unwrap_or_default() +
                     1,
@@ -76,7 +78,7 @@ impl ReceiptsLogPruneConfig {
         for (_, mode) in self.0.iter() {
             if let PruneMode::Distance(_) = mode {
                 if let Some((block, _)) =
-                    mode.prune_target_block(tip, PruneSegment::ContractLogs)?
+                    mode.prune_target_block(tip, PruneSegment::ContractLogs, PrunePurpose::User)?
                 {
                     lowest = Some(lowest.unwrap_or(u64::MAX).min(block));
                 }
@@ -91,21 +93,61 @@ impl ReceiptsLogPruneConfig {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PruneProgress {
     /// There is more data to prune.
-    HasMoreData,
+    HasMoreData(PruneInterruptReason),
     /// Pruning has been finished.
     Finished,
 }
 
+/// Reason for interrupting a prune run.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum PruneInterruptReason {
+    /// Prune run timed out.
+    Timeout,
+    /// Limit on the number of deleted entries (rows in the database) per prune run was reached.
+    DeletedEntriesLimitReached,
+    /// Unknown reason for stopping prune run.
+    Unknown,
+}
+
+impl PruneInterruptReason {
+    /// Creates new [PruneInterruptReason] based on the [PruneLimiter].
+    pub fn new(limiter: &PruneLimiter) -> Self {
+        if limiter.is_time_limit_reached() {
+            Self::Timeout
+        } else if limiter.is_deleted_entries_limit_reached() {
+            Self::DeletedEntriesLimitReached
+        } else {
+            Self::Unknown
+        }
+    }
+
+    /// Returns `true` if the reason is timeout.
+    pub const fn is_timeout(&self) -> bool {
+        matches!(self, Self::Timeout)
+    }
+
+    /// Returns `true` if the reason is reaching the limit on deleted entries.
+    pub const fn is_entries_limit_reached(&self) -> bool {
+        matches!(self, Self::DeletedEntriesLimitReached)
+    }
+}
+
 impl PruneProgress {
-    /// Creates new [PruneProgress] from `done` boolean value.
+    /// Creates new [PruneProgress].
     ///
-    /// If `done == true`, returns [PruneProgress::Finished], otherwise [PruneProgress::HasMoreData]
-    /// is returned.
-    pub fn from_done(done: bool) -> Self {
+    /// If `done == true`, returns [PruneProgress::Finished], otherwise
+    /// [PruneProgress::HasMoreData] is returned with [PruneInterruptReason] according to the passed
+    /// limiter.
+    pub fn new(done: bool, limiter: &PruneLimiter) -> Self {
         if done {
             Self::Finished
         } else {
-            Self::HasMoreData
+            Self::HasMoreData(PruneInterruptReason::new(limiter))
         }
+    }
+
+    /// Returns `true` if prune run is finished.
+    pub const fn is_finished(&self) -> bool {
+        matches!(self, Self::Finished)
     }
 }

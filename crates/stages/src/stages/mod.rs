@@ -18,8 +18,6 @@ mod index_storage_history;
 mod merkle;
 /// The sender recovery stage.
 mod sender_recovery;
-/// The total difficulty stage
-mod total_difficulty;
 /// The transaction lookup stage
 mod tx_lookup;
 
@@ -32,9 +30,12 @@ pub use headers::*;
 pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
+
 pub use sender_recovery::*;
-pub use total_difficulty::*;
 pub use tx_lookup::*;
+
+mod utils;
+use utils::*;
 
 #[cfg(test)]
 mod tests {
@@ -47,16 +48,17 @@ mod tests {
         tables,
         test_utils::TempDatabase,
         transaction::{DbTx, DbTxMut},
-        AccountHistory, DatabaseEnv,
+        AccountsHistory, DatabaseEnv,
     };
     use reth_interfaces::test_utils::generators::{self, random_block};
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
-        PruneModes, SealedBlock, U256,
+        PruneModes, SealedBlock, StaticFileSegment, U256,
     };
     use reth_provider::{
-        AccountExtReader, BlockWriter, ProviderFactory, ReceiptProvider, StorageReader,
+        providers::StaticFileWriter, AccountExtReader, ProviderFactory, ReceiptProvider,
+        StorageReader,
     };
     use reth_revm::EvmProcessorFactory;
     use std::sync::Arc;
@@ -73,8 +75,12 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider_rw.insert_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
-        provider_rw.insert_block(block.clone().try_seal_with_senders().unwrap(), None).unwrap();
+        provider_rw
+            .insert_historical_block(genesis.try_seal_with_senders().unwrap(), None)
+            .unwrap();
+        provider_rw
+            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
+            .unwrap();
 
         // Fill with bogus blocks to respect PruneMode distance.
         let mut head = block.hash();
@@ -82,8 +88,16 @@ mod tests {
         for block_number in 2..=tip {
             let nblock = random_block(&mut rng, block_number, Some(head), Some(0), Some(0));
             head = nblock.hash();
-            provider_rw.insert_block(nblock.try_seal_with_senders().unwrap(), None).unwrap();
+            provider_rw
+                .insert_historical_block(nblock.try_seal_with_senders().unwrap(), None)
+                .unwrap();
         }
+        provider_rw
+            .static_file_provider()
+            .latest_writer(StaticFileSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
         provider_rw.commit().unwrap();
 
         // insert pre state
@@ -160,13 +174,13 @@ mod tests {
                 ..Default::default()
             };
 
-            if let Some(PruneMode::Full) = prune_modes.account_history {
+            if prune_modes.account_history == Some(PruneMode::Full) {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {
                 acc_indexing_stage.execute(&provider, input).unwrap();
-                let mut account_history: Cursor<RW, AccountHistory> =
-                    provider.tx_ref().cursor_read::<tables::AccountHistory>().unwrap();
+                let mut account_history: Cursor<RW, AccountsHistory> =
+                    provider.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap();
                 assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
             }
 
@@ -176,14 +190,14 @@ mod tests {
                 ..Default::default()
             };
 
-            if let Some(PruneMode::Full) = prune_modes.storage_history {
+            if prune_modes.storage_history == Some(PruneMode::Full) {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {
                 storage_indexing_stage.execute(&provider, input).unwrap();
 
                 let mut storage_history =
-                    provider.tx_ref().cursor_read::<tables::StorageHistory>().unwrap();
+                    provider.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap();
                 assert_eq!(
                     storage_history.walk(None).unwrap().count(),
                     expect_num_storage_changesets

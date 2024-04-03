@@ -4,8 +4,7 @@ use crate::{
     components::{
         NetworkBuilder, NodeComponents, NodeComponentsBuilder, PayloadServiceBuilder, PoolBuilder,
     },
-    node::FullNodeTypes,
-    BuilderContext,
+    BuilderContext, FullNodeTypes,
 };
 use std::marker::PhantomData;
 
@@ -87,11 +86,14 @@ where
     Node: FullNodeTypes,
 {
     /// Configures the pool builder.
+    ///
+    /// This accepts a [PoolBuilder] instance that will be used to create the node's transaction
+    /// pool.
     pub fn pool<PB>(self, pool_builder: PB) -> ComponentsBuilder<Node, PB, PayloadB, NetworkB>
     where
         PB: PoolBuilder<Node>,
     {
-        let Self { payload_builder, network_builder, _marker, .. } = self;
+        let Self { pool_builder: _, payload_builder, network_builder, _marker } = self;
         ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
     }
 }
@@ -102,20 +104,26 @@ where
     PoolB: PoolBuilder<Node>,
 {
     /// Configures the network builder.
+    ///
+    /// This accepts a [NetworkBuilder] instance that will be used to create the node's network
+    /// stack.
     pub fn network<NB>(self, network_builder: NB) -> ComponentsBuilder<Node, PoolB, PayloadB, NB>
     where
         NB: NetworkBuilder<Node, PoolB::Pool>,
     {
-        let Self { payload_builder, pool_builder, _marker, .. } = self;
+        let Self { pool_builder, payload_builder, network_builder: _, _marker } = self;
         ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
     }
 
     /// Configures the payload builder.
+    ///
+    /// This accepts a [PayloadServiceBuilder] instance that will be used to create the node's
+    /// payload builder service.
     pub fn payload<PB>(self, payload_builder: PB) -> ComponentsBuilder<Node, PoolB, PB, NetworkB>
     where
         PB: PayloadServiceBuilder<Node, PoolB::Pool>,
     {
-        let Self { pool_builder, network_builder, _marker, .. } = self;
+        let Self { pool_builder, payload_builder: _, network_builder, _marker } = self;
         ComponentsBuilder { pool_builder, payload_builder, network_builder, _marker }
     }
 }
@@ -130,15 +138,15 @@ where
 {
     type Pool = PoolB::Pool;
 
-    fn build_components(
+    async fn build_components(
         self,
         context: &BuilderContext<Node>,
     ) -> eyre::Result<NodeComponents<Node, Self::Pool>> {
         let Self { pool_builder, payload_builder, network_builder, _marker } = self;
 
-        let pool = pool_builder.build_pool(context)?;
-        let network = network_builder.build_network(context, pool.clone())?;
-        let payload_builder = payload_builder.spawn_payload_service(context, pool.clone())?;
+        let pool = pool_builder.build_pool(context).await?;
+        let network = network_builder.build_network(context, pool.clone()).await?;
+        let payload_builder = payload_builder.spawn_payload_service(context, pool.clone()).await?;
 
         Ok(NodeComponents { transaction_pool: pool, network, payload_builder })
     }

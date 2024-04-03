@@ -5,7 +5,7 @@ use crate::{
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
-use reth_node_api::ConfigureEvmEnv;
+use reth_node_api::ConfigureEvm;
 use reth_primitives::{
     Address, Block, BlockNumber, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
     PruneMode, PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts,
@@ -19,7 +19,7 @@ use revm::{
     inspector_handle_register,
     interpreter::Host,
     primitives::{CfgEnvWithHandlerCfg, ResultAndState},
-    Evm, Handler, State, StateBuilder,
+    Evm, State, StateBuilder,
 };
 use std::{sync::Arc, time::Instant};
 
@@ -50,8 +50,6 @@ use tracing::{debug, trace};
 ///
 /// InspectorStack are used for optional inspecting execution. And it contains
 /// various duration of parts of execution.
-// TODO: https://github.com/bluealloy/revm/pull/745
-// #[derive(Debug)]
 #[allow(missing_debug_implementations)]
 pub struct EVMProcessor<'a, EvmConfig> {
     /// The configured chain-spec
@@ -83,7 +81,7 @@ pub struct EVMProcessor<'a, EvmConfig> {
 
 impl<'a, EvmConfig> EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: ConfigureEvm,
 {
     /// Return chain spec.
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
@@ -93,17 +91,14 @@ where
     /// Create a new pocessor with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         // create evm with boxed empty db that is going to be set later.
-        let evm = Evm::builder()
-            .with_db(
-                Box::new(
-                    StateBuilder::new()
-                        .with_database_boxed(Box::new(EmptyDBTyped::<ProviderError>::new())),
-                )
-                .build(),
-            )
-            // Hook and inspector stack that we want to invoke on that hook.
-            .with_external_context(InspectorStack::new(InspectorStackConfig::default()))
-            .build();
+        let db = Box::new(
+            StateBuilder::new().with_database_boxed(Box::new(EmptyDBTyped::<ProviderError>::new())),
+        )
+        .build();
+
+        // Hook and inspector stack that we want to invoke on that hook.
+        let stack = InspectorStack::new(InspectorStackConfig::default());
+        let evm = evm_config.evm_with_inspector(db, stack);
         EVMProcessor {
             chain_spec,
             evm,
@@ -137,10 +132,8 @@ where
         revm_state: StateDBBox<'a, ProviderError>,
         evm_config: EvmConfig,
     ) -> Self {
-        let evm = Evm::builder()
-            .with_db(revm_state)
-            .with_external_context(InspectorStack::new(InspectorStackConfig::default()))
-            .build();
+        let stack = InspectorStack::new(InspectorStackConfig::default());
+        let evm = evm_config.evm_with_inspector(revm_state, stack);
         EVMProcessor {
             chain_spec,
             evm,
@@ -177,7 +170,7 @@ where
 
         self.db_mut().set_state_clear_flag(state_clear_flag);
 
-        let mut cfg: CfgEnvWithHandlerCfg =
+        let mut cfg =
             CfgEnvWithHandlerCfg::new_with_spec_id(self.evm.cfg().clone(), self.evm.spec_id());
         EvmConfig::fill_cfg_and_block_env(
             &mut cfg,
@@ -187,7 +180,9 @@ where
             total_difficulty,
         );
         *self.evm.cfg_mut() = cfg.cfg_env;
-        self.evm.handler = Handler::new(cfg.handler_cfg);
+
+        // This will update the spec in case it changed
+        self.evm.modify_spec_id(cfg.handler_cfg.spec_id);
     }
 
     /// Applies the pre-block call to the EIP-4788 beacon block root contract.
@@ -267,7 +262,7 @@ where
             fill_op_tx_env(self.evm.tx_mut(), transaction, sender, envelope_buf.into());
         }
 
-        let hash = transaction.hash();
+        let hash = transaction.hash_ref();
         let should_inspect = self.evm.context.external.should_inspect(self.evm.env(), hash);
         let out = if should_inspect {
             // push inspector handle register.
@@ -275,7 +270,7 @@ where
             let output = self.evm.transact();
             tracing::trace!(
                 target: "evm",
-                ?hash, ?output, ?transaction, env = ?self.evm.context.evm.env,
+                %hash, ?output, ?transaction, env = ?self.evm.context.evm.env,
                 "Executed transaction"
             );
             // pop last handle register
@@ -409,8 +404,10 @@ where
 #[cfg(not(feature = "optimism"))]
 impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: ConfigureEvm,
 {
+    type Error = BlockExecutionError;
+
     fn execute(
         &mut self,
         block: &BlockWithSenders,
@@ -437,7 +434,7 @@ where
             if let Err(error) =
                 verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
             {
-                debug!(target: "evm", ?error, ?receipts, "receipts verification failed");
+                debug!(target: "evm", %error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
             self.stats.receipt_root_duration += time.elapsed();
@@ -505,16 +502,13 @@ where
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
+        self.stats.log_debug();
         let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
             self.evm.context.evm.db.take_bundle(),
             receipts,
             self.first_block.unwrap_or_default(),
         )
-    }
-
-    fn stats(&self) -> BlockExecutorStats {
-        self.stats.clone()
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -524,7 +518,7 @@ where
 
 impl<'a, EvmConfig> PrunableBlockExecutor for EVMProcessor<'a, EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: ConfigureEvm,
 {
     fn set_tip(&mut self, tip: BlockNumber) {
         self.tip = Some(tip);
@@ -587,114 +581,19 @@ pub fn compare_receipts_root_and_logs_bloom(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_interfaces::provider::ProviderResult;
-    use reth_node_ethereum::EthEvmConfig;
+    use crate::test_utils::{StateProviderTest, TestEvmConfig};
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS},
-        keccak256,
-        trie::AccountProof,
-        Account, Bytecode, Bytes, ChainSpecBuilder, ForkCondition, Signature, StorageKey,
-        Transaction, TransactionKind, TxEip1559, MAINNET,
+        keccak256, Account, Bytes, ChainSpecBuilder, ForkCondition, Signature, Transaction,
+        TransactionKind, TxEip1559, MAINNET,
     };
-    use reth_provider::{
-        AccountReader, BlockHashReader, BundleStateWithReceipts, StateRootProvider,
-    };
-    use reth_trie::updates::TrieUpdates;
     use revm::{Database, TransitionState};
     use std::collections::HashMap;
 
     static BEACON_ROOT_CONTRACT_CODE: Bytes = bytes!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
 
-    #[derive(Debug, Default, Clone, Eq, PartialEq)]
-    struct StateProviderTest {
-        accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
-        contracts: HashMap<B256, Bytecode>,
-        block_hash: HashMap<u64, B256>,
-    }
-
-    impl StateProviderTest {
-        /// Insert account.
-        fn insert_account(
-            &mut self,
-            address: Address,
-            mut account: Account,
-            bytecode: Option<Bytes>,
-            storage: HashMap<StorageKey, U256>,
-        ) {
-            if let Some(bytecode) = bytecode {
-                let hash = keccak256(&bytecode);
-                account.bytecode_hash = Some(hash);
-                self.contracts.insert(hash, Bytecode::new_raw(bytecode));
-            }
-            self.accounts.insert(address, (storage, account));
-        }
-    }
-
-    impl AccountReader for StateProviderTest {
-        fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-            Ok(self.accounts.get(&address).map(|(_, acc)| *acc))
-        }
-    }
-
-    impl BlockHashReader for StateProviderTest {
-        fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-            Ok(self.block_hash.get(&number).cloned())
-        }
-
-        fn canonical_hashes_range(
-            &self,
-            start: BlockNumber,
-            end: BlockNumber,
-        ) -> ProviderResult<Vec<B256>> {
-            let range = start..end;
-            Ok(self
-                .block_hash
-                .iter()
-                .filter_map(|(block, hash)| range.contains(block).then_some(*hash))
-                .collect())
-        }
-    }
-
-    impl StateRootProvider for StateProviderTest {
-        fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
-            unimplemented!("state root computation is not supported")
-        }
-
-        fn state_root_with_updates(
-            &self,
-            _bundle_state: &BundleStateWithReceipts,
-        ) -> ProviderResult<(B256, TrieUpdates)> {
-            unimplemented!("state root computation is not supported")
-        }
-    }
-
-    impl StateProvider for StateProviderTest {
-        fn storage(
-            &self,
-            account: Address,
-            storage_key: StorageKey,
-        ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
-            Ok(self
-                .accounts
-                .get(&account)
-                .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
-        }
-
-        fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
-            Ok(self.contracts.get(&code_hash).cloned())
-        }
-
-        fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-            unimplemented!("proof generation is not supported")
-        }
-    }
-
-    #[test]
-    fn eip_4788_non_genesis_call() {
-        let mut header =
-            Header { timestamp: 1, number: 1, excess_blob_gas: Some(0), ..Header::default() };
-
+    fn create_state_provider_with_beacon_root_contract() -> StateProviderTest {
         let mut db = StateProviderTest::default();
 
         let beacon_root_contract_account = Account {
@@ -710,6 +609,16 @@ mod tests {
             HashMap::new(),
         );
 
+        db
+    }
+
+    #[test]
+    fn eip_4788_non_genesis_call() {
+        let mut header =
+            Header { timestamp: 1, number: 1, excess_blob_gas: Some(0), ..Header::default() };
+
+        let db = create_state_provider_with_beacon_root_contract();
+
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
@@ -721,7 +630,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
 
         // attempt to execute a block without parent beacon block root, expect err
@@ -813,7 +722,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
         executor.init_env(&header, U256::ZERO);
 
@@ -846,20 +755,8 @@ mod tests {
     fn eip_4788_empty_account_call() {
         // This test ensures that we do not increment the nonce of an empty SYSTEM_ADDRESS account
         // during the pre-block call
-        let mut db = StateProviderTest::default();
 
-        let beacon_root_contract_account = Account {
-            balance: U256::ZERO,
-            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
-            nonce: 1,
-        };
-
-        db.insert_account(
-            BEACON_ROOTS_ADDRESS,
-            beacon_root_contract_account,
-            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
-            HashMap::new(),
-        );
+        let mut db = create_state_provider_with_beacon_root_contract();
 
         // insert an empty SYSTEM_ADDRESS
         db.insert_account(SYSTEM_ADDRESS, Account::default(), None, HashMap::new());
@@ -874,7 +771,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
 
         // construct the header for block one
@@ -913,20 +810,7 @@ mod tests {
 
     #[test]
     fn eip_4788_genesis_call() {
-        let mut db = StateProviderTest::default();
-
-        let beacon_root_contract_account = Account {
-            balance: U256::ZERO,
-            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
-            nonce: 1,
-        };
-
-        db.insert_account(
-            BEACON_ROOTS_ADDRESS,
-            beacon_root_contract_account,
-            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
-            HashMap::new(),
-        );
+        let db = create_state_provider_with_beacon_root_contract();
 
         // activate cancun at genesis
         let chain_spec = Arc::new(
@@ -941,7 +825,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
         executor.init_env(&header, U256::ZERO);
 
@@ -986,11 +870,9 @@ mod tests {
 
         // there is no system contract call so there should be NO STORAGE CHANGES
         // this means we'll check the transition state
-        let state = executor.evm.context.evm.db;
-        let transition_state = state
-            .transition_state
-            .clone()
-            .expect("the evm should be initialized with bundle updates");
+        let state = executor.evm.context.evm.inner.db;
+        let transition_state =
+            state.transition_state.expect("the evm should be initialized with bundle updates");
 
         // assert that it is the default (empty) transition state
         assert_eq!(transition_state, TransitionState::default());
@@ -1009,20 +891,7 @@ mod tests {
             ..Header::default()
         };
 
-        let mut db = StateProviderTest::default();
-
-        let beacon_root_contract_account = Account {
-            balance: U256::ZERO,
-            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
-            nonce: 1,
-        };
-
-        db.insert_account(
-            BEACON_ROOTS_ADDRESS,
-            beacon_root_contract_account,
-            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
-            HashMap::new(),
-        );
+        let db = create_state_provider_with_beacon_root_contract();
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
@@ -1035,7 +904,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
         executor.init_env(&header, U256::ZERO);
 
@@ -1097,7 +966,7 @@ mod tests {
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            EthEvmConfig::default(),
+            TestEvmConfig::default(),
         );
 
         // Create a test transaction that gonna fail

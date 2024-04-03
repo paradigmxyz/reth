@@ -8,9 +8,10 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
-use reth_db::{init_db, mdbx::DatabaseArguments};
+use reth_db::init_db;
 use reth_node_core::init::init_genesis;
 use reth_primitives::ChainSpec;
+use reth_provider::ProviderFactory;
 use std::sync::Arc;
 use tracing::info;
 
@@ -39,7 +40,7 @@ pub struct InitCommand {
     )]
     chain: Arc<ChainSpec>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 }
 
@@ -52,12 +53,14 @@ impl InitCommand {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db =
-            Arc::new(init_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
+        let db = Arc::new(init_db(&db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
 
+        let provider_factory = ProviderFactory::new(db, self.chain, data_dir.static_files_path())?;
+
         info!(target: "reth::cli", "Writing genesis block");
-        let hash = init_genesis(db, self.chain)?;
+
+        let hash = init_genesis(provider_factory)?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())

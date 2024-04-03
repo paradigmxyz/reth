@@ -151,28 +151,8 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    str::FromStr,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-
-use hyper::{header::AUTHORIZATION, HeaderMap};
-pub use jsonrpsee::server::ServerBuilder;
-use jsonrpsee::{
-    server::{IdProvider, Server, ServerHandle},
-    Methods, RpcModule,
-};
-use reth_node_api::{ConfigureEvmEnv, EngineTypes};
-use serde::{Deserialize, Serialize, Serializer};
-use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
-use tower::layer::util::{Identity, Stack};
-use tower_http::cors::CorsLayer;
-use tracing::{instrument, trace};
 
 use crate::{
     auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
@@ -180,9 +160,16 @@ use crate::{
 };
 use constants::*;
 use error::{RpcError, ServerKind};
+use hyper::{header::AUTHORIZATION, HeaderMap};
+pub use jsonrpsee::server::ServerBuilder;
+use jsonrpsee::{
+    server::{IdProvider, Server, ServerHandle},
+    Methods, RpcModule,
+};
 use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
+use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -194,16 +181,28 @@ use reth_rpc::{
         gas_oracle::GasPriceOracle,
         EthBundle, FeeHistoryCache,
     },
-    AdminApi, AuthLayer, BlockingTaskGuard, BlockingTaskPool, Claims, DebugApi, EngineEthApi,
-    EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi,
-    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+    AdminApi, AuthLayer, Claims, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub,
+    EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi, OtterscanApi, RPCApi, RethApi,
+    TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
-use reth_tasks::{TaskSpawner, TokioTaskExecutor};
+use reth_tasks::{
+    pool::{BlockingTaskGuard, BlockingTaskPool},
+    TaskSpawner, TokioTaskExecutor,
+};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
-
-#[cfg(feature = "optimism")]
-use reth_rpc::eth::SequencerClient;
+use serde::{Deserialize, Serialize, Serializer};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    str::FromStr,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
+use tower::layer::util::{Identity, Stack};
+use tower_http::cors::CorsLayer;
+use tracing::{instrument, trace};
 
 // re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
@@ -324,7 +323,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
 
     /// Configure a [NoopTransactionPool] instance.
     ///
-    /// Caution: This will configure a pool API that does abosultely nothing.
+    /// Caution: This will configure a pool API that does absolutely nothing.
     /// This is only intended for allow easier setup of namespaces that depend on the [EthApi] which
     /// requires a [TransactionPool] implementation.
     pub fn with_noop_pool(
@@ -355,7 +354,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
 
     /// Configure a [NoopNetwork] instance.
     ///
-    /// Caution: This will configure a network API that does abosultely nothing.
+    /// Caution: This will configure a network API that does absolutely nothing.
     /// This is only intended for allow easier setup of namespaces that depend on the [EthApi] which
     /// requires a [NetworkInfo] implementation.
     pub fn with_noop_network(
@@ -1015,14 +1014,14 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
+impl<Provider: ChainSpecProvider, Pool, Network, Tasks, Events, EvmConfig>
     RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig>
 where
     Network: NetworkInfo + Peers + Clone + 'static,
 {
     /// Instantiates AdminApi
     pub fn admin_api(&mut self) -> AdminApi<Network> {
-        AdminApi::new(self.network.clone())
+        AdminApi::new(self.network.clone(), self.provider.chain_spec())
     }
 
     /// Instantiates Web3Api
@@ -1203,7 +1202,9 @@ where
                     .entry(namespace)
                     .or_insert_with(|| match namespace {
                         RethRpcModule::Admin => {
-                            AdminApi::new(self.network.clone()).into_rpc().into()
+                            AdminApi::new(self.network.clone(), self.provider.chain_spec())
+                                .into_rpc()
+                                .into()
                         }
                         RethRpcModule::Debug => DebugApi::new(
                             self.provider.clone(),
@@ -1329,8 +1330,6 @@ where
             blocking_task_pool.clone(),
             fee_history_cache,
             self.evm_config.clone(),
-            #[cfg(feature = "optimism")]
-            SequencerClient::default(),
         );
         let filter = EthFilter::new(
             self.provider.clone(),
@@ -1731,7 +1730,7 @@ impl RpcServerConfig {
     ///
     /// This consumes the builder and returns a server.
     ///
-    /// Note: The server ist not started and does nothing unless polled, See also [RpcServer::start]
+    /// Note: The server is not started and does nothing unless polled, See also [RpcServer::start]
     pub async fn build(mut self, modules: &TransportRpcModules) -> Result<RpcServer, RpcError> {
         let mut server = RpcServer::empty();
         server.ws_http = self.build_ws_http(modules).await?;
@@ -2120,7 +2119,7 @@ impl RpcServer {
     pub fn http_local_addr(&self) -> Option<SocketAddr> {
         self.ws_http.http_local_addr
     }
-    /// Return the JwtSecret of the the server
+    /// Return the JwtSecret of the server
     pub fn jwt(&self) -> Option<JwtSecret> {
         self.ws_http.jwt_secret.clone()
     }

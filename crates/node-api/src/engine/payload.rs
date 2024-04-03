@@ -2,6 +2,8 @@ use crate::PayloadAttributes;
 use reth_primitives::B256;
 use reth_rpc_types::engine::ExecutionPayload;
 
+use super::MessageValidationKind;
+
 /// Either an [ExecutionPayload] or a types that implements the [PayloadAttributes] trait.
 #[derive(Debug)]
 pub enum PayloadOrAttributes<'a, AttributesType> {
@@ -30,7 +32,7 @@ where
     }
 
     /// Return the withdrawals for the payload or attributes.
-    pub fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::withdrawal::Withdrawal>> {
+    pub fn withdrawals(&self) -> Option<&Vec<reth_rpc_types::Withdrawal>> {
         match self {
             Self::ExecutionPayload { payload, .. } => payload.withdrawals(),
             Self::PayloadAttributes(attributes) => attributes.withdrawals(),
@@ -50,6 +52,14 @@ where
         match self {
             Self::ExecutionPayload { parent_beacon_block_root, .. } => *parent_beacon_block_root,
             Self::PayloadAttributes(attributes) => attributes.parent_beacon_block_root(),
+        }
+    }
+
+    /// Return a [MessageValidationKind] for the payload or attributes.
+    pub fn message_validation_kind(&self) -> MessageValidationKind {
+        match self {
+            Self::ExecutionPayload { .. } => MessageValidationKind::Payload,
+            Self::PayloadAttributes(_) => MessageValidationKind::PayloadAttributes,
         }
     }
 }

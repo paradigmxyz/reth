@@ -1,5 +1,4 @@
 use crate::{
-    bundle_state::BundleStateWithReceipts,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BundleStateDataProvider, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider,
@@ -8,8 +7,8 @@ use crate::{
 };
 use parking_lot::Mutex;
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
     BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
@@ -18,7 +17,10 @@ use reth_primitives::{
     U256,
 };
 use reth_trie::updates::TrieUpdates;
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
+use revm::{
+    db::BundleState,
+    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+};
 use std::{
     collections::{BTreeMap, HashMap},
     ops::{RangeBounds, RangeInclusive},
@@ -516,13 +518,13 @@ impl AccountReader for MockEthProvider {
 }
 
 impl StateRootProvider for MockEthProvider {
-    fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+    fn state_root(&self, _bundle_state: &BundleState) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
     fn state_root_with_updates(
         &self,
-        _bundle_state: &BundleStateWithReceipts,
+        _bundle_state: &BundleState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), Default::default()))
     }
@@ -690,14 +692,14 @@ impl StateProviderFactory for Arc<MockEthProvider> {
 }
 
 impl WithdrawalsProvider for MockEthProvider {
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        Ok(None)
-    }
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,
         _timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
+        Ok(None)
+    }
+    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         Ok(None)
     }
 }

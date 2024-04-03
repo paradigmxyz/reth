@@ -9,7 +9,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(unused_crate_dependencies)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Consensus traits.
@@ -27,6 +27,9 @@ pub use error::{RethError, RethResult};
 
 /// P2P traits.
 pub mod p2p;
+
+/// Trie error
+pub mod trie;
 
 /// Provider error
 pub mod provider;

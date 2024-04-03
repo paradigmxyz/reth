@@ -6,13 +6,18 @@ use crate::{
     Metrics, PrunerError, PrunerEvent,
 };
 use reth_db::database::Database;
-use reth_primitives::{BlockNumber, PruneMode, PruneProgress, PruneSegment};
-use reth_provider::{ProviderFactory, PruneCheckpointReader};
-use reth_snapshot::HighestSnapshotsTracker;
+use reth_primitives::{
+    BlockNumber, PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
+    StaticFileSegment,
+};
+use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
 use reth_tokio_util::EventListeners;
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{
+    collections::BTreeMap,
+    time::{Duration, Instant},
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, trace};
+use tracing::debug;
 
 /// Result of [Pruner::run] execution.
 pub type PrunerResult = Result<PruneProgress, PrunerError>;
@@ -20,11 +25,13 @@ pub type PrunerResult = Result<PruneProgress, PrunerError>;
 /// The pruner type itself with the result of [Pruner::run]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
+type PrunerStats = BTreeMap<PruneSegment, (PruneProgress, usize)>;
+
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
 #[derive(Debug)]
 pub struct Pruner<DB> {
     provider_factory: ProviderFactory<DB>,
-    segments: Vec<Arc<dyn Segment<DB>>>,
+    segments: Vec<Box<dyn Segment<DB>>>,
     /// Minimum pruning interval measured in blocks. All prune segments are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: usize,
@@ -33,12 +40,13 @@ pub struct Pruner<DB> {
     /// conjunction with `min_block_interval` to determine when the pruning needs to be initiated.
     previous_tip_block_number: Option<BlockNumber>,
     /// Maximum total entries to prune (delete from database) per block.
-    delete_limit: usize,
+    delete_limit_per_block: usize,
     /// Maximum number of blocks to be pruned per run, as an additional restriction to
     /// `previous_tip_block_number`.
     prune_max_blocks_per_run: usize,
-    #[allow(dead_code)]
-    highest_snapshots_tracker: HighestSnapshotsTracker,
+    /// Maximum time for a one pruner run.
+    timeout: Option<Duration>,
+    #[doc(hidden)]
     metrics: Metrics,
     listeners: EventListeners<PrunerEvent>,
 }
@@ -47,26 +55,26 @@ impl<DB: Database> Pruner<DB> {
     /// Creates a new [Pruner].
     pub fn new(
         provider_factory: ProviderFactory<DB>,
-        segments: Vec<Arc<dyn Segment<DB>>>,
+        segments: Vec<Box<dyn Segment<DB>>>,
         min_block_interval: usize,
         delete_limit: usize,
         prune_max_blocks_per_run: usize,
-        highest_snapshots_tracker: HighestSnapshotsTracker,
+        timeout: Option<Duration>,
     ) -> Self {
         Self {
             provider_factory,
             segments,
             min_block_interval,
             previous_tip_block_number: None,
-            delete_limit,
+            delete_limit_per_block: delete_limit,
             prune_max_blocks_per_run,
-            highest_snapshots_tracker,
+            timeout,
             metrics: Metrics::default(),
             listeners: Default::default(),
         }
     }
 
-    /// Listen for events on the prune.
+    /// Listen for events on the pruner.
     pub fn events(&mut self) -> UnboundedReceiverStream<PrunerEvent> {
         self.listeners.new_listener()
     }
@@ -76,20 +84,14 @@ impl<DB: Database> Pruner<DB> {
         if tip_block_number == 0 {
             self.previous_tip_block_number = Some(tip_block_number);
 
-            trace!(target: "pruner", %tip_block_number, "Nothing to prune yet");
+            debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
             return Ok(PruneProgress::Finished)
         }
 
-        trace!(target: "pruner", %tip_block_number, "Pruner started");
+        self.listeners.notify(PrunerEvent::Started { tip_block_number });
+
+        debug!(target: "pruner", %tip_block_number, "Pruner started");
         let start = Instant::now();
-
-        let provider = self.provider_factory.provider_rw()?;
-
-        let mut done = true;
-        let mut stats = BTreeMap::new();
-
-        // TODO(alexey): prune snapshotted segments of data (headers, transactions)
-        let highest_snapshots = *self.highest_snapshots_tracker.borrow();
 
         // Multiply `self.delete_limit` (number of rows to delete per block) by number of blocks
         // since last pruner run. `self.previous_tip_block_number` is close to
@@ -98,42 +100,103 @@ impl<DB: Database> Pruner<DB> {
         // `self.prune_max_blocks_per_run`.
         //
         // Also see docs for `self.previous_tip_block_number`.
-        let blocks_since_last_run =
-            (self.previous_tip_block_number.map_or(1, |previous_tip_block_number| {
+        let blocks_since_last_run = self
+            .previous_tip_block_number
+            .map_or(1, |previous_tip_block_number| {
                 // Saturating subtraction is needed for the case when the chain was reverted,
                 // meaning current block number might be less than the previous tip
                 // block number.
                 tip_block_number.saturating_sub(previous_tip_block_number) as usize
-            }))
+            })
             .min(self.prune_max_blocks_per_run);
-        let mut delete_limit = self.delete_limit * blocks_since_last_run;
 
-        for segment in &self.segments {
-            if delete_limit == 0 {
+        let mut limiter = PruneLimiter::default()
+            .set_deleted_entries_limit(self.delete_limit_per_block * blocks_since_last_run);
+        if let Some(timeout) = self.timeout {
+            limiter = limiter.set_time_limit(timeout);
+        };
+
+        let provider = self.provider_factory.provider_rw()?;
+        let (stats, deleted_entries, progress) =
+            self.prune_segments(&provider, tip_block_number, &mut limiter)?;
+        provider.commit()?;
+
+        self.previous_tip_block_number = Some(tip_block_number);
+
+        let elapsed = start.elapsed();
+        self.metrics.duration_seconds.record(elapsed);
+
+        let message = match progress {
+            PruneProgress::HasMoreData(_) => "Pruner interrupted and has more data to prune",
+            PruneProgress::Finished => "Pruner finished",
+        };
+
+        debug!(
+            target: "pruner",
+            %tip_block_number,
+            ?elapsed,
+            ?deleted_entries,
+            ?limiter,
+            ?progress,
+            ?stats,
+            "{message}",
+        );
+
+        self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
+
+        Ok(progress)
+    }
+
+    /// Prunes the segments that the [Pruner] was initialized with, and the segments that needs to
+    /// be pruned according to the highest static_files. Segments are parts of the database that
+    /// represent one or more tables.
+    ///
+    /// Returns [PrunerStats], total number of entries pruned, and [PruneProgress].
+    fn prune_segments(
+        &mut self,
+        provider: &DatabaseProviderRW<DB>,
+        tip_block_number: BlockNumber,
+        limiter: &mut PruneLimiter,
+    ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
+        let static_file_segments = self.static_file_segments();
+        let segments = static_file_segments
+            .iter()
+            .map(|segment| (segment, PrunePurpose::StaticFile))
+            .chain(self.segments.iter().map(|segment| (segment, PrunePurpose::User)));
+
+        let mut stats = PrunerStats::new();
+        let mut pruned = 0;
+        let mut progress = PruneProgress::Finished;
+
+        for (segment, purpose) in segments {
+            if limiter.is_limit_reached() {
                 break
             }
 
             if let Some((to_block, prune_mode)) = segment
                 .mode()
-                .map(|mode| mode.prune_target_block(tip_block_number, segment.segment()))
+                .map(|mode| mode.prune_target_block(tip_block_number, segment.segment(), purpose))
                 .transpose()?
                 .flatten()
             {
-                trace!(
+                debug!(
                     target: "pruner",
                     segment = ?segment.segment(),
+                    ?purpose,
                     %to_block,
                     ?prune_mode,
-                    "Got target block to prune"
+                    "Segment pruning started"
                 );
 
                 let segment_start = Instant::now();
                 let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
-                let output = segment
-                    .prune(&provider, PruneInput { previous_checkpoint, to_block, delete_limit })?;
+                let output = segment.prune(
+                    provider,
+                    PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() },
+                )?;
                 if let Some(checkpoint) = output.checkpoint {
                     segment
-                        .save_checkpoint(&provider, checkpoint.as_prune_checkpoint(prune_mode))?;
+                        .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
                 }
                 self.metrics
                     .get_prune_segment_metrics(segment.segment())
@@ -145,114 +208,70 @@ impl<DB: Database> Pruner<DB> {
                     .highest_pruned_block
                     .set(to_block as f64);
 
-                done = done && output.done;
-                delete_limit = delete_limit.saturating_sub(output.pruned);
-                stats.insert(
-                    segment.segment(),
-                    (PruneProgress::from_done(output.done), output.pruned),
+                progress = output.progress;
+
+                debug!(
+                    target: "pruner",
+                    segment = ?segment.segment(),
+                    ?purpose,
+                    %to_block,
+                    ?prune_mode,
+                    %output.pruned,
+                    "Segment pruning finished"
                 );
+
+                if output.pruned > 0 {
+                    limiter.increment_deleted_entries_count_by(output.pruned);
+                    pruned += output.pruned;
+                    stats.insert(segment.segment(), (output.progress, output.pruned));
+                }
             } else {
-                trace!(target: "pruner", segment = ?segment.segment(), "No target block to prune");
+                debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
             }
         }
 
-        if let Some(snapshots) = highest_snapshots {
-            if let (Some(to_block), true) = (snapshots.headers, delete_limit > 0) {
-                let prune_mode = PruneMode::Before(to_block + 1);
-                trace!(
-                    target: "pruner",
-                    prune_segment = ?PruneSegment::Headers,
-                    %to_block,
-                    ?prune_mode,
-                    "Got target block to prune"
-                );
+        Ok((stats, pruned, progress))
+    }
 
-                let segment_start = Instant::now();
-                let segment = segments::Headers::new(prune_mode);
-                let previous_checkpoint = provider.get_prune_checkpoint(PruneSegment::Headers)?;
-                let output = segment
-                    .prune(&provider, PruneInput { previous_checkpoint, to_block, delete_limit })?;
-                if let Some(checkpoint) = output.checkpoint {
-                    segment
-                        .save_checkpoint(&provider, checkpoint.as_prune_checkpoint(prune_mode))?;
-                }
-                self.metrics
-                    .get_prune_segment_metrics(PruneSegment::Headers)
-                    .duration_seconds
-                    .record(segment_start.elapsed());
+    /// Returns pre-configured segments that needs to be pruned according to the highest
+    /// static_files for [PruneSegment::Transactions], [PruneSegment::Headers] and
+    /// [PruneSegment::Receipts].
+    fn static_file_segments(&self) -> Vec<Box<dyn Segment<DB>>> {
+        let mut segments = Vec::<Box<dyn Segment<DB>>>::new();
 
-                done = done && output.done;
-                delete_limit = delete_limit.saturating_sub(output.pruned);
-                stats.insert(
-                    PruneSegment::Headers,
-                    (PruneProgress::from_done(output.done), output.pruned),
-                );
-            }
+        let static_file_provider = self.provider_factory.static_file_provider();
 
-            if let (Some(to_block), true) = (snapshots.transactions, delete_limit > 0) {
-                let prune_mode = PruneMode::Before(to_block + 1);
-                trace!(
-                    target: "pruner",
-                    prune_segment = ?PruneSegment::Transactions,
-                    %to_block,
-                    ?prune_mode,
-                    "Got target block to prune"
-                );
-
-                let segment_start = Instant::now();
-                let segment = segments::Transactions::new(prune_mode);
-                let previous_checkpoint = provider.get_prune_checkpoint(PruneSegment::Headers)?;
-                let output = segment
-                    .prune(&provider, PruneInput { previous_checkpoint, to_block, delete_limit })?;
-                if let Some(checkpoint) = output.checkpoint {
-                    segment
-                        .save_checkpoint(&provider, checkpoint.as_prune_checkpoint(prune_mode))?;
-                }
-                self.metrics
-                    .get_prune_segment_metrics(PruneSegment::Transactions)
-                    .duration_seconds
-                    .record(segment_start.elapsed());
-
-                done = done && output.done;
-                delete_limit = delete_limit.saturating_sub(output.pruned);
-                stats.insert(
-                    PruneSegment::Transactions,
-                    (PruneProgress::from_done(output.done), output.pruned),
-                );
-            }
+        if let Some(to_block) =
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Transactions)
+        {
+            segments
+                .push(Box::new(segments::Transactions::new(PruneMode::before_inclusive(to_block))))
         }
 
-        provider.commit()?;
-        self.previous_tip_block_number = Some(tip_block_number);
+        if let Some(to_block) =
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers)
+        {
+            segments.push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
+        }
 
-        let elapsed = start.elapsed();
-        self.metrics.duration_seconds.record(elapsed);
+        if let Some(to_block) =
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts)
+        {
+            segments.push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
+        }
 
-        trace!(
-            target: "pruner",
-            %tip_block_number,
-            ?elapsed,
-            %delete_limit,
-            %done,
-            ?stats,
-            "Pruner finished"
-        );
-
-        self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
-
-        Ok(PruneProgress::from_done(done))
+        segments
     }
 
     /// Returns `true` if the pruning is needed at the provided tip block number.
     /// This determined by the check against minimum pruning interval and last pruned block number.
     pub fn is_pruning_needed(&self, tip_block_number: BlockNumber) -> bool {
-        if self.previous_tip_block_number.map_or(true, |previous_tip_block_number| {
-            // Saturating subtraction is needed for the case when the chain was reverted, meaning
-            // current block number might be less than the previous tip block number.
-            // If that's the case, no pruning is needed as outdated data is also reverted.
-            tip_block_number.saturating_sub(previous_tip_block_number) >=
-                self.min_block_interval as u64
-        }) {
+        // Saturating subtraction is needed for the case when the chain was reverted, meaning
+        // current block number might be less than the previous tip block number.
+        // If that's the case, no pruning is needed as outdated data is also reverted.
+        if tip_block_number.saturating_sub(self.previous_tip_block_number.unwrap_or_default()) >=
+            self.min_block_interval as u64
+        {
             debug!(
                 target: "pruner",
                 previous_tip_block_number = ?self.previous_tip_block_number,
@@ -268,21 +287,23 @@ impl<DB: Database> Pruner<DB> {
 
 #[cfg(test)]
 mod tests {
+
     use crate::Pruner;
-    use reth_db::test_utils::create_test_rw_db;
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_primitives::MAINNET;
     use reth_provider::ProviderFactory;
-    use tokio::sync::watch;
 
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
-        let provider_factory = ProviderFactory::new(db, MAINNET.clone());
-        let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5, watch::channel(None).1);
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
+        let provider_factory = ProviderFactory::new(db, MAINNET.clone(), static_dir_path)
+            .expect("create provide factory with static_files");
+        let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5, None);
 
         // No last pruned block number was set before
         let first_block_number = 1;
-        assert!(pruner.is_pruning_needed(first_block_number));
+        assert!(!pruner.is_pruning_needed(first_block_number));
         pruner.previous_tip_block_number = Some(first_block_number);
 
         // Tip block number delta is >= than min block interval

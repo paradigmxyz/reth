@@ -183,7 +183,7 @@ impl PendingBlockEnv {
                 tx_type: tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs: result.logs().into_iter().map(Into::into).collect(),
+                logs: result.into_logs().into_iter().map(Into::into).collect(),
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
                 #[cfg(feature = "optimism")]
@@ -215,19 +215,22 @@ impl PendingBlockEnv {
             block_number,
         );
 
+        #[cfg(feature = "optimism")]
         let receipts_root = bundle
-            .receipts_root_slow(
+            .optimism_receipts_root_slow(
                 block_number,
-                #[cfg(feature = "optimism")]
                 chain_spec.as_ref(),
-                #[cfg(feature = "optimism")]
                 block_env.timestamp.to::<u64>(),
             )
             .expect("Block is present");
+
+        #[cfg(not(feature = "optimism"))]
+        let receipts_root = bundle.receipts_root_slow(block_number).expect("Block is present");
+
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");
 
         // calculate the state root
-        let state_root = state_provider.state_root(&bundle)?;
+        let state_root = state_provider.state_root(bundle.state())?;
 
         // create the block header
         let transactions_root = proofs::calculate_transaction_root(&executed_txs);

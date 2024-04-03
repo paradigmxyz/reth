@@ -9,18 +9,12 @@ use crate::{
     utils::DbTool,
 };
 use clap::{Parser, Subcommand};
-use comfy_table::{Cell, Row, Table as ComfyTable};
-use eyre::WrapErr;
-use human_bytes::human_bytes;
 use reth_db::{
-    database::Database,
-    mdbx,
-    mdbx::DatabaseArguments,
     open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
-    Tables,
 };
 use reth_primitives::ChainSpec;
+use reth_provider::ProviderFactory;
 use std::{
     io::{self, Write},
     sync::Arc,
@@ -30,7 +24,8 @@ mod clear;
 mod diff;
 mod get;
 mod list;
-mod snapshots;
+mod static_files;
+mod stats;
 /// DB List TUI
 mod tui;
 
@@ -60,10 +55,10 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Subcommands,
 }
 
@@ -71,7 +66,7 @@ pub struct Command {
 /// `reth db` subcommands
 pub enum Subcommands {
     /// Lists all the tables, their entry count and their size
-    Stats,
+    Stats(stats::Command),
     /// Lists the contents of a table
     List(list::Command),
     /// Create a diff between two database tables or two entire databases.
@@ -86,12 +81,23 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
-    /// Snapshots tables from database
-    Snapshot(snapshots::Command),
+    /// Creates static files from database tables
+    CreateStaticFiles(static_files::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
     Path,
+}
+
+/// db_ro_exec opens a database in read-only mode, and then execute with the provided command
+macro_rules! db_ro_exec {
+    ($chain:expr, $db_path:expr, $db_args:ident, $sfp:ident, $tool:ident, $command:block) => {
+        let db = open_db_read_only($db_path, $db_args)?;
+        let provider_factory = ProviderFactory::new(db, $chain.clone(), $sfp)?;
+
+        let $tool = DbTool::new(provider_factory, $chain.clone())?;
+        $command;
+    };
 }
 
 impl Command {
@@ -100,124 +106,35 @@ impl Command {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
+        let db_args = self.db.database_args();
+        let static_files_path = data_dir.static_files_path();
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.
-            Subcommands::Stats { .. } => {
-                let db = open_db_read_only(
-                    &db_path,
-                    DatabaseArguments::default().log_level(self.db.log_level),
-                )?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
-                let mut stats_table = ComfyTable::new();
-                stats_table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-                stats_table.set_header([
-                    "Table Name",
-                    "# Entries",
-                    "Branch Pages",
-                    "Leaf Pages",
-                    "Overflow Pages",
-                    "Total Size",
-                ]);
-
-                tool.db.view(|tx| {
-                    let mut tables =
-                        Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
-                    tables.sort();
-                    let mut total_size = 0;
-                    for table in tables {
-                        let table_db =
-                            tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
-
-                        let stats = tx
-                            .inner
-                            .db_stat(&table_db)
-                            .wrap_err(format!("Could not find table: {table}"))?;
-
-                        // Defaults to 16KB right now but we should
-                        // re-evaluate depending on the DB we end up using
-                        // (e.g. REDB does not have these options as configurable intentionally)
-                        let page_size = stats.page_size() as usize;
-                        let leaf_pages = stats.leaf_pages();
-                        let branch_pages = stats.branch_pages();
-                        let overflow_pages = stats.overflow_pages();
-                        let num_pages = leaf_pages + branch_pages + overflow_pages;
-                        let table_size = page_size * num_pages;
-
-                        total_size += table_size;
-                        let mut row = Row::new();
-                        row.add_cell(Cell::new(table))
-                            .add_cell(Cell::new(stats.entries()))
-                            .add_cell(Cell::new(branch_pages))
-                            .add_cell(Cell::new(leaf_pages))
-                            .add_cell(Cell::new(overflow_pages))
-                            .add_cell(Cell::new(human_bytes(table_size as f64)));
-                        stats_table.add_row(row);
-                    }
-
-                    let max_widths = stats_table.column_max_content_widths();
-
-                    let mut seperator = Row::new();
-                    for width in max_widths {
-                        seperator.add_cell(Cell::new("-".repeat(width as usize)));
-                    }
-                    stats_table.add_row(seperator);
-
-                    let mut row = Row::new();
-                    row.add_cell(Cell::new("Total DB size"))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(human_bytes(total_size as f64)));
-                    stats_table.add_row(row);
-
-                    let freelist = tx.inner.env().freelist()?;
-                    let freelist_size = freelist *
-                        tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
-
-                    let mut row = Row::new();
-                    row.add_cell(Cell::new("Freelist size"))
-                        .add_cell(Cell::new(freelist))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(""))
-                        .add_cell(Cell::new(human_bytes(freelist_size as f64)));
-                    stats_table.add_row(row);
-
-                    Ok::<(), eyre::Report>(())
-                })??;
-
-                println!("{stats_table}");
+            Subcommands::Stats(command) => {
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(data_dir, &tool)?;
+                });
             }
             Subcommands::List(command) => {
-                let db = open_db_read_only(
-                    &db_path,
-                    DatabaseArguments::default().log_level(self.db.log_level),
-                )?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
-                command.execute(&tool)?;
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(&tool)?;
+                });
             }
             Subcommands::Diff(command) => {
-                let db = open_db_read_only(
-                    &db_path,
-                    DatabaseArguments::default().log_level(self.db.log_level),
-                )?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
-                command.execute(&tool)?;
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(&tool)?;
+                });
             }
             Subcommands::Get(command) => {
-                let db = open_db_read_only(
-                    &db_path,
-                    DatabaseArguments::default().log_level(self.db.log_level),
-                )?;
-                let tool = DbTool::new(&db, self.chain.clone())?;
-                command.execute(&tool)?;
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(&tool)?;
+                });
             }
             Subcommands::Drop { force } => {
                 if !force {
                     // Ask for confirmation
-                    print!("Are you sure you want to drop the database at {db_path:?}? This cannot be undone. (y/N): ");
+                    print!("Are you sure you want to drop the database at {data_dir}? This cannot be undone. (y/N): ");
                     // Flush the buffer to ensure the message is printed immediately
                     io::stdout().flush().unwrap();
 
@@ -230,18 +147,22 @@ impl Command {
                     }
                 }
 
-                let db =
-                    open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
-                let mut tool = DbTool::new(&db, self.chain.clone())?;
-                tool.drop(db_path)?;
+                let db = open_db(&db_path, db_args)?;
+                let provider_factory =
+                    ProviderFactory::new(db, self.chain.clone(), static_files_path.clone())?;
+
+                let mut tool = DbTool::new(provider_factory, self.chain.clone())?;
+                tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {
-                let db =
-                    open_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?;
-                command.execute(&db)?;
+                let db = open_db(&db_path, db_args)?;
+                let provider_factory =
+                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
+
+                command.execute(provider_factory)?;
             }
-            Subcommands::Snapshot(command) => {
-                command.execute(&db_path, self.db.log_level, self.chain.clone())?;
+            Subcommands::CreateStaticFiles(command) => {
+                command.execute(data_dir, self.db.database_args(), self.chain.clone())?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {

@@ -161,7 +161,7 @@ impl State {
                 bytecode_hash: code_hash,
             };
             tx.put::<tables::PlainAccountState>(address, reth_account)?;
-            tx.put::<tables::HashedAccount>(hashed_address, reth_account)?;
+            tx.put::<tables::HashedAccounts>(hashed_address, reth_account)?;
             if let Some(code_hash) = code_hash {
                 tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.clone()))?;
             }
@@ -171,7 +171,7 @@ impl State {
                     address,
                     StorageEntry { key: storage_key, value: *v },
                 )?;
-                tx.put::<tables::HashedStorage>(
+                tx.put::<tables::HashedStorages>(
                     hashed_address,
                     StorageEntry { key: keccak256(storage_key), value: *v },
                 )
@@ -235,18 +235,16 @@ impl Account {
                     assert_equal(
                         *value,
                         entry.value,
-                        &format!("Storage for slot {:?} does not match", slot),
+                        &format!("Storage for slot {slot:?} does not match"),
                     )?;
                 } else {
                     return Err(Error::Assertion(format!(
-                        "Slot {:?} is missing from the database. Expected {:?}",
-                        slot, value
+                        "Slot {slot:?} is missing from the database. Expected {value:?}"
                     )))
                 }
             } else {
                 return Err(Error::Assertion(format!(
-                    "Slot {:?} is missing from the database. Expected {:?}",
-                    slot, value
+                    "Slot {slot:?} is missing from the database. Expected {value:?}"
                 )))
             }
         }

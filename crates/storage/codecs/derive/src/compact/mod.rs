@@ -63,8 +63,9 @@ pub fn get_fields(data: &Data) -> FieldList {
                 assert_eq!(fields.len(), data_fields.named.len());
             }
             syn::Fields::Unnamed(ref data_fields) => {
-                assert!(
-                    data_fields.unnamed.len() == 1,
+                assert_eq!(
+                    data_fields.unnamed.len(),
+                    1,
                     "Compact only allows one unnamed field. Consider making it a struct."
                 );
                 load_field(&data_fields.unnamed[0], &mut fields, false);
@@ -80,8 +81,9 @@ pub fn get_fields(data: &Data) -> FieldList {
                         panic!("Not allowed to have Enum Variants with multiple named fields. Make it a struct instead.")
                     }
                     syn::Fields::Unnamed(data_fields) => {
-                        assert!(
-                            data_fields.unnamed.len() == 1,
+                        assert_eq!(
+                            data_fields.unnamed.len(),
+                            1,
                             "Compact only allows one unnamed field. Consider making it a struct."
                         );
                         load_field(&data_fields.unnamed[0], &mut fields, true);
@@ -143,7 +145,7 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                 if let (Some(path), 1) =
                     (arg_path.path.segments.first(), arg_path.path.segments.len())
                 {
-                    if ["B256", "Address", "Address", "Bloom", "TxHash"]
+                    if ["B256", "Address", "Address", "Bloom", "TxHash", "BlockHash"]
                         .contains(&path.ident.to_string().as_str())
                     {
                         return true
@@ -164,11 +166,6 @@ pub fn get_bit_size(ftype: &str) -> u8 {
         "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "NumTransactions" => 4,
         "u128" => 5,
         "U256" => 6,
-        #[cfg(not(feature = "optimism"))]
-        "TxValue" => 5, // u128 for ethereum chains assuming high order bits are not used
-        #[cfg(feature = "optimism")]
-        // for fuzz/prop testing and chains that may require full 256 bits
-        "TxValue" => 6,
         _ => 0,
     }
 }

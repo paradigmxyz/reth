@@ -18,18 +18,12 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db::{init_db, DatabaseEnv};
 use reth_interfaces::{consensus::Consensus, RethResult};
 use reth_node_api::PayloadBuilderAttributes;
 #[cfg(not(feature = "optimism"))]
 use reth_node_ethereum::EthEvmConfig;
-#[cfg(feature = "optimism")]
-use reth_node_optimism::OptimismEvmConfig;
 use reth_payload_builder::database::CachedReads;
-#[cfg(not(feature = "optimism"))]
-use reth_payload_builder::EthPayloadBuilderAttributes;
-#[cfg(feature = "optimism")]
-use reth_payload_builder::OptimismPayloadBuilderAttributes;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     fs,
@@ -81,7 +75,7 @@ pub struct Command {
     chain: Arc<ChainSpec>,
 
     /// Database arguments.
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
     /// Overrides the KZG trusted setup by reading from the supplied file.
@@ -116,7 +110,11 @@ impl Command {
     ///
     /// If the database is empty, returns the genesis block.
     fn lookup_best_block(&self, db: Arc<DatabaseEnv>) -> RethResult<Arc<SealedBlock>> {
-        let factory = ProviderFactory::new(db, self.chain.clone());
+        let factory = ProviderFactory::new(
+            db,
+            self.chain.clone(),
+            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+        )?;
         let provider = factory.provider()?;
 
         let best_number =
@@ -153,14 +151,17 @@ impl Command {
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
-        let db =
-            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
-        let provider_factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&self.chain));
+        let db = Arc::new(init_db(db_path, self.db.database_args())?);
+        let provider_factory = ProviderFactory::new(
+            Arc::clone(&db),
+            Arc::clone(&self.chain),
+            data_dir.static_files_path(),
+        )?;
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 
         #[cfg(feature = "optimism")]
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = reth_node_optimism::OptimismEvmConfig::default();
 
         #[cfg(not(feature = "optimism"))]
         let evm_config = EthEvmConfig::default();
@@ -254,11 +255,11 @@ impl Command {
             // TODO: add support for withdrawals
             withdrawals: None,
         };
-        #[cfg(feature = "optimism")]
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            OptimismPayloadBuilderAttributes::try_new(
+            #[cfg(feature = "optimism")]
+            reth_node_optimism::OptimismPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 OptimismPayloadAttributes {
                     payload_attributes: payload_attrs,
@@ -267,14 +268,11 @@ impl Command {
                     gas_limit: None,
                 },
             )?,
-            self.chain.clone(),
-        );
-
-        #[cfg(not(feature = "optimism"))]
-        let payload_config = PayloadConfig::new(
-            Arc::clone(&best_block),
-            Bytes::default(),
-            EthPayloadBuilderAttributes::try_new(best_block.hash(), payload_attrs)?,
+            #[cfg(not(feature = "optimism"))]
+            reth_payload_builder::EthPayloadBuilderAttributes::try_new(
+                best_block.hash(),
+                payload_attrs,
+            )?,
             self.chain.clone(),
         );
 
@@ -288,7 +286,7 @@ impl Command {
         );
 
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default()
+        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(self.chain.clone())
             .compute_pending_block();
 
         #[cfg(not(feature = "optimism"))]

@@ -28,13 +28,13 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-trie.workspace = true
-reth-node-ethereum.workspace = true
 
 [features]
 optimism = [
-  "revm/optimism",
-  "reth-primitives/optimism",
-  "reth-consensus-common/optimism",
-  "reth-interfaces/optimism",
+    "revm/optimism",
+    "reth-primitives/optimism",
+    "reth-provider/optimism",
+    "reth-consensus-common/optimism",
+    "reth-interfaces/optimism",
 ]
 js-tracer = ["revm-inspectors/js-tracer"]

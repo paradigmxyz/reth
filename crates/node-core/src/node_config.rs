@@ -2,14 +2,15 @@
 
 use crate::{
     args::{
-        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
+        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, DiscoveryArgs, NetworkArgs,
+        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
-    cli::{config::RethTransactionPoolConfig, db_type::DatabaseBuilder},
-    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+    cli::config::RethTransactionPoolConfig,
+    dirs::{ChainPath, DataDirPath},
     metrics::prometheus_exporter,
     utils::{get_single_header, write_peers_to_file},
 };
+use discv5::ListenConfig;
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
@@ -39,40 +40,38 @@ use reth_network::{
     transactions::{TransactionFetcherConfig, TransactionsManagerConfig},
     NetworkBuilder, NetworkConfig, NetworkHandle, NetworkManager,
 };
-use reth_node_api::ConfigureEvmEnv;
+use reth_node_api::ConfigureEvm;
 use reth_primitives::{
-    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    kzg::KzgSettings,
-    stage::StageId,
+    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
     BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256, MAINNET,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader,
-    BlockchainTreePendingStateProvider, CanonStateSubscriptions, HeaderProvider, HeaderSyncMode,
-    ProviderFactory, StageCheckpointReader,
+    providers::{BlockchainProvider, StaticFileProvider},
+    BlockHashReader, BlockNumReader, BlockReader, BlockchainTreePendingStateProvider,
+    CanonStateSubscriptions, HeaderProvider, HeaderSyncMode, ProviderFactory,
+    StageCheckpointReader,
 };
-use reth_revm::EvmProcessorFactory;
+use reth_revm::{
+    stack::{Hook, InspectorStackConfig},
+    EvmProcessorFactory,
+};
 use reth_stages::{
     prelude::*,
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
         IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
-        TotalDifficultyStage, TransactionLookupStage,
+        TransactionLookupStage,
     },
     MetricEvent,
 };
+use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
-    TransactionValidationTaskExecutor,
+    blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
+    EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
 };
-use revm_inspectors::stack::Hook;
 use secp256k1::SecretKey;
-use std::{
-    net::{SocketAddr, SocketAddrV4},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{
     mpsc::{Receiver, UnboundedSender},
     watch,
@@ -141,9 +140,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// ```
 #[derive(Debug, Clone)]
 pub struct NodeConfig {
-    /// The test database
-    pub database: DatabaseBuilder,
-
     /// The path to the configuration file to use.
     pub config: Option<PathBuf>,
 
@@ -167,13 +163,11 @@ pub struct NodeConfig {
     ///
     /// Changes to the following port numbers:
     /// - DISCOVERY_PORT: default + `instance` - 1
+    /// - DISCOVERY_V5_PORT: default + `instance` - 1
     /// - AUTH_PORT: default + `instance` * 100 - 100
     /// - HTTP_RPC_PORT: default - `instance` + 1
     /// - WS_RPC_PORT: default + `instance` * 2 - 2
     pub instance: u16,
-
-    /// Overrides the KZG trusted setup by reading from the supplied file.
-    pub trusted_setup_file: Option<PathBuf>,
 
     /// All networking related arguments
     pub network: NetworkArgs,
@@ -198,42 +192,19 @@ pub struct NodeConfig {
 
     /// All pruning related arguments
     pub pruning: PruningArgs,
-
-    /// Rollup related arguments
-    #[cfg(feature = "optimism")]
-    pub rollup: crate::args::RollupArgs,
 }
 
 impl NodeConfig {
     /// Creates a testing [NodeConfig], causing the database to be launched ephemerally.
     pub fn test() -> Self {
-        let mut test = Self {
-            database: DatabaseBuilder::test(),
-            config: None,
-            chain: MAINNET.clone(),
-            metrics: None,
-            instance: 1,
-            trusted_setup_file: None,
-            network: NetworkArgs::default(),
-            rpc: RpcServerArgs::default(),
-            txpool: TxPoolArgs::default(),
-            builder: PayloadBuilderArgs::default(),
-            debug: DebugArgs::default(),
-            db: DatabaseArgs::default(),
-            dev: DevArgs::default(),
-            pruning: PruningArgs::default(),
-            #[cfg(feature = "optimism")]
-            rollup: crate::args::RollupArgs::default(),
-        };
-
-        // set all ports to zero by default for test instances
-        test = test.with_unused_ports();
-        test
+        Self::default()
+            // set all ports to zero by default for test instances
+            .with_unused_ports()
     }
 
-    /// Set the datadir for the node
-    pub fn with_datadir(mut self, datadir: MaybePlatformPath<DataDirPath>) -> Self {
-        self.database = DatabaseBuilder::Real(datadir);
+    /// Sets --dev mode for the node
+    pub const fn dev(mut self) -> Self {
+        self.dev.dev = true;
         self
     }
 
@@ -258,12 +229,6 @@ impl NodeConfig {
     /// Set the instance for the node
     pub fn with_instance(mut self, instance: u16) -> Self {
         self.instance = instance;
-        self
-    }
-
-    /// Set the trusted setup file for the node
-    pub fn with_trusted_setup_file(mut self, trusted_setup_file: impl Into<PathBuf>) -> Self {
-        self.trusted_setup_file = Some(trusted_setup_file.into());
         self
     }
 
@@ -312,13 +277,6 @@ impl NodeConfig {
     /// Set the pruning args for the node
     pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
         self.pruning = pruning;
-        self
-    }
-
-    /// Set the rollup args for the node
-    #[cfg(feature = "optimism")]
-    pub fn with_rollup(mut self, rollup: crate::args::RollupArgs) -> Self {
-        self.rollup = rollup;
         self
     }
 
@@ -391,6 +349,21 @@ impl NodeConfig {
         }
     }
 
+    /// Create the [NetworkConfig] for the node
+    pub fn network_config<C>(
+        &self,
+        config: &Config,
+        client: C,
+        executor: TaskExecutor,
+        head: Head,
+        data_dir: &ChainPath<DataDirPath>,
+    ) -> eyre::Result<NetworkConfig<C>> {
+        info!(target: "reth::cli", "Connecting to P2P network");
+        let secret_key = self.network_secret(data_dir)?;
+        let default_peers_path = data_dir.known_peers_path();
+        Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
+    }
+
     /// Create the [NetworkBuilder].
     ///
     /// This only configures it and does not spawn it.
@@ -405,23 +378,53 @@ impl NodeConfig {
     where
         C: BlockNumReader,
     {
-        info!(target: "reth::cli", "Connecting to P2P network");
-        let secret_key = self.network_secret(data_dir)?;
-        let default_peers_path = data_dir.known_peers_path();
-        let network_config = self.load_network_config(
-            config,
-            client,
-            executor.clone(),
-            head,
-            secret_key,
-            default_peers_path.clone(),
-        );
-
+        let network_config = self.network_config(config, client, executor, head, data_dir)?;
         let builder = NetworkManager::builder(network_config).await?;
         Ok(builder)
     }
 
-    /// Build the blockchain tree
+    /// Builds the blockchain tree for the node.
+    ///
+    /// This method configures the blockchain tree, which is a critical component of the node,
+    /// responsible for managing the blockchain state, including blocks, transactions, and receipts.
+    /// It integrates with the consensus mechanism and the EVM for executing transactions.
+    ///
+    /// # Parameters
+    /// - `provider_factory`: A factory for creating various blockchain-related providers, such as
+    ///   for accessing the database or static files.
+    /// - `consensus`: The consensus configuration, which defines how the node reaches agreement on
+    ///   the blockchain state with other nodes.
+    /// - `prune_config`: Configuration for pruning old blockchain data. This helps in managing the
+    ///   storage space efficiently. It's important to validate this configuration to ensure it does
+    ///   not lead to unintended data loss.
+    /// - `sync_metrics_tx`: A transmitter for sending synchronization metrics. This is used for
+    ///   monitoring the node's synchronization process with the blockchain network.
+    /// - `tree_config`: Configuration for the blockchain tree, including any parameters that affect
+    ///   its structure or performance.
+    /// - `evm_config`: The EVM (Ethereum Virtual Machine) configuration, which affects how smart
+    ///   contracts and transactions are executed. Proper validation of this configuration is
+    ///   crucial for the correct execution of transactions.
+    ///
+    /// # Returns
+    /// A `ShareableBlockchainTree` instance, which provides access to the blockchain state and
+    /// supports operations like block insertion, state reversion, and transaction execution.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let tree = config.build_blockchain_tree(
+    ///     provider_factory,
+    ///     consensus,
+    ///     prune_config,
+    ///     sync_metrics_tx,
+    ///     BlockchainTreeConfig::default(),
+    ///     evm_config,
+    /// )?;
+    /// ```
+    ///
+    /// # Note
+    /// Ensure that all configurations passed to this method are validated beforehand to prevent
+    /// runtime errors. Specifically, `prune_config` and `evm_config` should be checked to ensure
+    /// they meet the node's operational requirements.
     pub fn build_blockchain_tree<DB, EvmConfig>(
         &self,
         provider_factory: ProviderFactory<DB>,
@@ -433,20 +436,20 @@ impl NodeConfig {
     ) -> eyre::Result<BlockchainTree<DB, EvmProcessorFactory<EvmConfig>>>
     where
         DB: Database + Unpin + Clone + 'static,
-        EvmConfig: ConfigureEvmEnv + Clone + 'static,
+        EvmConfig: ConfigureEvm + Clone + 'static,
     {
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
-            provider_factory.clone(),
+            provider_factory,
             consensus.clone(),
             EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(
             tree_externals,
             tree_config,
-            prune_config.clone().map(|config| config.segments),
+            prune_config.map(|config| config.segments),
         )?
-        .with_sync_metrics_tx(sync_metrics_tx.clone());
+        .with_sync_metrics_tx(sync_metrics_tx);
 
         Ok(tree)
     }
@@ -467,7 +470,11 @@ impl NodeConfig {
             + Clone
             + 'static,
     {
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
+        let blob_store = DiskFileBlobStore::open(
+            data_dir.blobstore_path(),
+            DiskFileBlobStoreConfig::default()
+                .with_max_cached_entries(self.txpool.max_cached_entries),
+        )?;
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
             .with_head_timestamp(head.timestamp)
             .kzg_settings(self.kzg_settings()?)
@@ -542,12 +549,13 @@ impl NodeConfig {
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
         max_block: Option<BlockNumber>,
+        static_file_producer: StaticFileProducer<DB>,
         evm_config: EvmConfig,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
         Client: HeadersClient + BodiesClient + Clone + 'static,
-        EvmConfig: ConfigureEvmEnv + Clone + 'static,
+        EvmConfig: ConfigureEvm + Clone + 'static,
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -569,6 +577,7 @@ impl NodeConfig {
                 self.debug.continuous,
                 metrics_tx,
                 prune_config,
+                static_file_producer,
                 evm_config,
             )
             .await?;
@@ -576,16 +585,9 @@ impl NodeConfig {
         Ok(pipeline)
     }
 
-    /// Loads the trusted setup params from a given file path or falls back to
-    /// `MAINNET_KZG_TRUSTED_SETUP`.
+    /// Loads 'MAINNET_KZG_TRUSTED_SETUP'
     pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .map_err(LoadKzgSettingsError::KzgError)?;
-            Ok(Arc::new(trusted_setup))
-        } else {
-            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
-        }
+        Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
     }
 
     /// Installs the prometheus recorder.
@@ -598,6 +600,7 @@ impl NodeConfig {
         &self,
         prometheus_handle: PrometheusHandle,
         db: Metrics,
+        static_file_provider: StaticFileProvider,
     ) -> eyre::Result<()>
     where
         Metrics: DatabaseMetrics + 'static + Send + Sync,
@@ -608,6 +611,7 @@ impl NodeConfig {
                 listen_addr,
                 prometheus_handle,
                 db,
+                static_file_provider,
                 metrics_process::Collector::default(),
             )
             .await?;
@@ -709,7 +713,7 @@ impl NodeConfig {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.number)
+            return Ok(header.number);
         }
 
         Ok(self.fetch_tip_from_network(client, tip.into()).await?.number)
@@ -731,7 +735,7 @@ impl NodeConfig {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
@@ -755,26 +759,36 @@ impl NodeConfig {
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
+            .listener_addr(SocketAddr::new(
                 self.network.addr,
                 // set discovery port based on instance number
                 self.network.port + self.instance - 1,
-            )))
-            .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
-                self.network.addr,
+            ))
+            .discovery_addr(SocketAddr::new(
+                self.network.discovery.addr,
                 // set discovery port based on instance number
-                self.network.port + self.instance - 1,
-            )));
+                self.network.discovery.port + self.instance - 1,
+            ));
 
-        // When `sequencer_endpoint` is configured, the node will forward all transactions to a
-        // Sequencer node for execution and inclusion on L1, and disable its own txpool
-        // gossip to prevent other parties in the network from learning about them.
-        #[cfg(feature = "optimism")]
-        let cfg_builder = cfg_builder
-            .sequencer_endpoint(self.rollup.sequencer_http.clone())
-            .disable_tx_gossip(self.rollup.disable_txpool_gossip);
+        let config = cfg_builder.build(client);
 
-        cfg_builder.build(client)
+        if !self.network.discovery.enable_discv5_discovery {
+            return config
+        }
+        // work around since discv5 config builder can't be integrated into network config builder
+        // due to unsatisfied trait bounds
+        config.discovery_v5_with_config_builder(|builder| {
+            let DiscoveryArgs { discv5_addr, discv5_port, .. } = self.network.discovery;
+            builder
+                .discv5_config(
+                    discv5::ConfigBuilder::new(ListenConfig::from(Into::<SocketAddr>::into((
+                        discv5_addr,
+                        discv5_port + self.instance - 1,
+                    ))))
+                    .build(),
+                )
+                .build()
+        })
     }
 
     /// Builds the [Pipeline] with the given [ProviderFactory] and downloaders.
@@ -790,13 +804,14 @@ impl NodeConfig {
         continuous: bool,
         metrics_tx: reth_stages::MetricEventsSender,
         prune_config: Option<PruneConfig>,
+        static_file_producer: StaticFileProducer<DB>,
         evm_config: EvmConfig,
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Clone + 'static,
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
-        EvmConfig: ConfigureEvmEnv + Clone + 'static,
+        EvmConfig: ConfigureEvm + Clone + 'static,
     {
         let mut builder = Pipeline::builder();
 
@@ -806,7 +821,6 @@ impl NodeConfig {
         }
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        use revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone(), evm_config);
 
         let stack_config = InspectorStackConfig {
@@ -839,10 +853,7 @@ impl NodeConfig {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                )
-                .set(
-                    TotalDifficultyStage::new(consensus)
-                        .with_commit_threshold(stage_config.total_difficulty.commit_threshold),
+                    stage_config.etl.clone(),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_config.sender_recovery.commit_threshold,
@@ -868,26 +879,31 @@ impl NodeConfig {
                 .set(AccountHashingStage::new(
                     stage_config.account_hashing.clean_threshold,
                     stage_config.account_hashing.commit_threshold,
+                    stage_config.etl.clone(),
                 ))
                 .set(StorageHashingStage::new(
                     stage_config.storage_hashing.clean_threshold,
                     stage_config.storage_hashing.commit_threshold,
+                    stage_config.etl.clone(),
                 ))
                 .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
                 .set(TransactionLookupStage::new(
-                    stage_config.transaction_lookup.commit_threshold,
+                    stage_config.transaction_lookup.chunk_size,
+                    stage_config.etl.clone(),
                     prune_modes.transaction_lookup,
                 ))
                 .set(IndexAccountHistoryStage::new(
                     stage_config.index_account_history.commit_threshold,
                     prune_modes.account_history,
+                    stage_config.etl.clone(),
                 ))
                 .set(IndexStorageHistoryStage::new(
                     stage_config.index_storage_history.commit_threshold,
                     prune_modes.storage_history,
+                    stage_config.etl.clone(),
                 )),
             )
-            .build(provider_factory);
+            .build(provider_factory, static_file_producer);
 
         Ok(pipeline)
     }
@@ -910,12 +926,10 @@ impl NodeConfig {
 impl Default for NodeConfig {
     fn default() -> Self {
         Self {
-            database: DatabaseBuilder::default(),
             config: None,
             chain: MAINNET.clone(),
             metrics: None,
             instance: 1,
-            trusted_setup_file: None,
             network: NetworkArgs::default(),
             rpc: RpcServerArgs::default(),
             txpool: TxPoolArgs::default(),
@@ -924,8 +938,6 @@ impl Default for NodeConfig {
             db: DatabaseArgs::default(),
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
-            #[cfg(feature = "optimism")]
-            rollup: crate::args::RollupArgs::default(),
         }
     }
 }

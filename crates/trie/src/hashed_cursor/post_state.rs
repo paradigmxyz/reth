@@ -232,9 +232,9 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
                 }
             }
             // Return either non-empty entry
-            _ => {
-                db_item.or(post_state_item.copied().map(|(key, value)| StorageEntry { key, value }))
-            }
+            _ => db_item.or_else(|| {
+                post_state_item.copied().map(|(key, value)| StorageEntry { key, value })
+            }),
         }
     }
 }
@@ -252,7 +252,7 @@ where
             Some(storage) => {
                 // If the storage has been wiped at any point
                 storage.wiped &&
-                    // and the current storage does not contain any non-zero values 
+                    // and the current storage does not contain any non-zero values
                     storage.non_zero_valued_slots.is_empty()
             }
             None => self.cursor.is_storage_empty(key)?,
@@ -315,7 +315,7 @@ where
         Ok(result)
     }
 
-    /// Return the next account storage entry for the current accont key.
+    /// Return the next account storage entry for the current account key.
     ///
     /// # Panics
     ///
@@ -440,7 +440,7 @@ mod tests {
         let db = create_test_rw_db();
         db.update(|tx| {
             for (key, account) in accounts.iter() {
-                tx.put::<tables::HashedAccount>(*key, *account).unwrap();
+                tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
             }
         })
         .unwrap();
@@ -460,7 +460,7 @@ mod tests {
         let db = create_test_rw_db();
         db.update(|tx| {
             for (key, account) in accounts.iter().filter(|x| x.0[31] % 2 == 0) {
-                tx.put::<tables::HashedAccount>(*key, *account).unwrap();
+                tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
             }
         })
         .unwrap();
@@ -487,7 +487,7 @@ mod tests {
         let db = create_test_rw_db();
         db.update(|tx| {
             for (key, account) in accounts.iter().filter(|x| x.0[31] % 2 == 0) {
-                tx.put::<tables::HashedAccount>(*key, *account).unwrap();
+                tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
             }
         })
         .unwrap();
@@ -517,7 +517,7 @@ mod tests {
         db.update(|tx| {
             for (key, _) in accounts.iter() {
                 // insert zero value accounts to the database
-                tx.put::<tables::HashedAccount>(*key, Account::default()).unwrap();
+                tx.put::<tables::HashedAccounts>(*key, Account::default()).unwrap();
             }
         })
         .unwrap();
@@ -539,7 +539,7 @@ mod tests {
                 let db = create_test_rw_db();
                 db.update(|tx| {
                     for (key, account) in db_accounts.iter() {
-                        tx.put::<tables::HashedAccount>(*key, *account).unwrap();
+                        tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
                     }
                 })
                 .unwrap();
@@ -586,7 +586,7 @@ mod tests {
         db.update(|tx| {
             for (slot, value) in db_storage.iter() {
                 // insert zero value accounts to the database
-                tx.put::<tables::HashedStorage>(
+                tx.put::<tables::HashedStorages>(
                     address,
                     StorageEntry { key: *slot, value: *value },
                 )
@@ -664,7 +664,7 @@ mod tests {
         db.update(|tx| {
             for (slot, value) in db_storage.iter() {
                 // insert zero value accounts to the database
-                tx.put::<tables::HashedStorage>(
+                tx.put::<tables::HashedStorages>(
                     address,
                     StorageEntry { key: *slot, value: *value },
                 )
@@ -703,7 +703,7 @@ mod tests {
         db.update(|tx| {
             for (slot, value) in db_storage {
                 // insert zero value accounts to the database
-                tx.put::<tables::HashedStorage>(address, StorageEntry { key: slot, value })
+                tx.put::<tables::HashedStorages>(address, StorageEntry { key: slot, value })
                     .unwrap();
             }
         })
@@ -741,7 +741,7 @@ mod tests {
         db.update(|tx| {
             for (slot, value) in db_storage {
                 // insert zero value accounts to the database
-                tx.put::<tables::HashedStorage>(address, StorageEntry { key: slot, value })
+                tx.put::<tables::HashedStorages>(address, StorageEntry { key: slot, value })
                     .unwrap();
             }
         })
@@ -773,7 +773,7 @@ mod tests {
         db.update(|tx| {
             for (slot, _) in storage.iter() {
                 // insert zero value accounts to the database
-                tx.put::<tables::HashedStorage>(
+                tx.put::<tables::HashedStorages>(
                     address,
                     StorageEntry { key: *slot, value: U256::ZERO },
                 )
@@ -811,7 +811,7 @@ mod tests {
                 for (address, storage) in db_storages.iter() {
                     for (slot, value) in storage {
                         let entry = StorageEntry { key: *slot, value: *value };
-                        tx.put::<tables::HashedStorage>(*address, entry).unwrap();
+                        tx.put::<tables::HashedStorages>(*address, entry).unwrap();
                     }
                 }
             })

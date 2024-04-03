@@ -5,8 +5,8 @@ use reth_primitives::{TxHash, B256};
 use std::path::PathBuf;
 
 /// Parameters for debugging purposes
-#[derive(Debug, Clone, Args, PartialEq, Default)]
-#[clap(next_help_heading = "Debug")]
+#[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
+#[command(next_help_heading = "Debug")]
 pub struct DebugArgs {
     /// Prompt the downloader to download blocks one at a time.
     ///
@@ -74,7 +74,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

@@ -25,10 +25,14 @@ reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
+reth-revm.workspace = true
+revm.workspace = true
 
-# io
+# misc
+clap.workspace = true
 serde.workspace = true
 eyre.workspace = true
+parking_lot.workspace = true
 
 [dev-dependencies]
 reth-db.workspace = true
@@ -37,10 +41,9 @@ reth-db.workspace = true
 optimism = [
     "reth-network/optimism",
     "reth-primitives/optimism",
-    "reth-transaction-pool/optimism",
-    "reth-rpc-types/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-rpc/optimism",
+    "reth-revm/optimism",
     "reth-optimism-payload-builder/optimism",
 ]

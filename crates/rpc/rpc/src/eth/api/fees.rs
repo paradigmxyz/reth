@@ -34,11 +34,11 @@ where
         Ok(suggested_tip + U256::from(base_fee))
     }
 
-    /// Returns a suggestion for a gas price for blob transactions.
-    pub(crate) async fn blob_gas_price(&self) -> EthResult<U256> {
+    /// Returns a suggestion for a base fee for blob transactions.
+    pub(crate) async fn blob_base_fee(&self) -> EthResult<U256> {
         self.block(BlockNumberOrTag::Latest)
             .await?
-            .and_then(|h| h.next_block_blob_fee())
+            .and_then(|h: reth_primitives::SealedBlock| h.next_block_blob_fee())
             .ok_or(EthApiError::ExcessBlobGasNotSet)
             .map(U256::from)
     }
@@ -140,20 +140,10 @@ where
             }
             let last_entry = fee_entries.last().expect("is not empty");
 
-            let last_entry_timestamp = self
-                .provider()
-                .header_by_hash_or_number(last_entry.header_hash.into())?
-                .map(|h| h.timestamp)
-                .unwrap_or_default();
-
-            // Als need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the next
+            // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the next
             // block
-            base_fee_per_gas.push(U256::from(calculate_next_block_base_fee(
-                last_entry.gas_used,
-                last_entry.gas_limit,
-                last_entry.base_fee_per_gas,
-                self.provider().chain_spec().base_fee_params(last_entry_timestamp),
-            )));
+            base_fee_per_gas
+                .push(U256::from(last_entry.next_block_base_fee(&self.provider().chain_spec())));
 
             base_fee_per_blob_gas
                 .push(U256::from(last_entry.next_block_blob_fee().unwrap_or_default()));

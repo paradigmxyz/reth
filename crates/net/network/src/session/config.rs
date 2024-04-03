@@ -11,10 +11,23 @@ use std::time::Duration;
 /// This represents the amount of time we wait for a response until we consider it timed out.
 pub const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Default timeout after which a pending session attempt is considered failed.
+pub const PENDING_SESSION_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// Default timeout after which we'll consider the peer to be in violation of the protocol.
 ///
 /// This is the time a peer has to answer a response.
 pub const PROTOCOL_BREACH_REQUEST_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+
+/// The default maximum number of peers.
+const DEFAULT_MAX_PEERS: usize =
+    DEFAULT_MAX_COUNT_PEERS_OUTBOUND as usize + DEFAULT_MAX_COUNT_PEERS_INBOUND as usize;
+
+/// The default session event buffer size.
+///
+/// The actual capacity of the event channel will be `buffer + num sessions`.
+/// With maxed out peers, this will allow for 3 messages per session (average)
+const DEFAULT_SESSION_EVENT_BUFFER_SIZE: usize = DEFAULT_MAX_PEERS * 2;
 
 /// Configuration options when creating a [SessionManager](crate::session::SessionManager).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +51,8 @@ pub struct SessionsConfig {
     /// `PROTOCOL_BREACH_REQUEST_TIMEOUT`) this is considered a protocol violation and results in a
     /// dropped session.
     pub protocol_breach_request_timeout: Duration,
+    /// The timeout after which a pending session attempt is considered failed.
+    pub pending_session_timeout: Duration,
 }
 
 impl Default for SessionsConfig {
@@ -52,12 +67,11 @@ impl Default for SessionsConfig {
             // `poll`.
             // The default is twice the maximum number of available slots, if all slots are occupied
             // the buffer will have capacity for 3 messages per session (average).
-            session_event_buffer: (DEFAULT_MAX_COUNT_PEERS_OUTBOUND as usize +
-                DEFAULT_MAX_COUNT_PEERS_INBOUND as usize) *
-                2,
+            session_event_buffer: DEFAULT_SESSION_EVENT_BUFFER_SIZE,
             limits: Default::default(),
             initial_internal_request_timeout: INITIAL_REQUEST_TIMEOUT,
             protocol_breach_request_timeout: PROTOCOL_BREACH_REQUEST_TIMEOUT,
+            pending_session_timeout: PENDING_SESSION_TIMEOUT,
         }
     }
 }
@@ -70,6 +84,23 @@ impl SessionsConfig {
     /// buffer size provides backpressure on the network I/O.
     pub fn with_session_event_buffer(mut self, n: usize) -> Self {
         self.session_event_buffer = n;
+        self
+    }
+
+    /// Helper function to set the buffer size for the bounded communication channel between the
+    /// manager and its sessions for events emitted by the sessions.
+    ///
+    /// This scales the buffer size based on the configured number of peers, where the base line is
+    /// the default buffer size.
+    ///
+    /// If the number of peers is greater than the default, the buffer size will be scaled up to
+    /// match the default `buffer size / max peers` ratio.
+    ///
+    /// Note: This is capped at 10 times the default buffer size.
+    pub fn with_upscaled_event_buffer(mut self, num_peers: usize) -> Self {
+        if num_peers > DEFAULT_MAX_PEERS {
+            self.session_event_buffer = (num_peers * 2).min(DEFAULT_SESSION_EVENT_BUFFER_SIZE * 10);
+        }
         self
     }
 }
@@ -211,5 +242,16 @@ mod tests {
         assert!(limits.ensure_pending_inbound().is_ok());
         limits.inc_pending_inbound();
         assert!(limits.ensure_pending_inbound().is_err());
+    }
+
+    #[test]
+    fn scale_session_event_buffer() {
+        let config = SessionsConfig::default().with_upscaled_event_buffer(10);
+        assert_eq!(config.session_event_buffer, DEFAULT_SESSION_EVENT_BUFFER_SIZE);
+        let default_ration = config.session_event_buffer / DEFAULT_MAX_PEERS;
+
+        let config = SessionsConfig::default().with_upscaled_event_buffer(DEFAULT_MAX_PEERS * 2);
+        let expected_ration = config.session_event_buffer / (DEFAULT_MAX_PEERS * 2);
+        assert_eq!(default_ration, expected_ration);
     }
 }

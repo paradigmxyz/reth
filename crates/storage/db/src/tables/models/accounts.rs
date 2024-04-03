@@ -8,10 +8,10 @@ use crate::{
     DatabaseError,
 };
 use reth_codecs::{derive_arbitrary, Compact};
-use reth_primitives::{Account, Address, BlockNumber, Buf};
+use reth_primitives::{Account, Address, BlockNumber, Buf, StorageKey};
 use serde::{Deserialize, Serialize};
 
-/// Account as it is saved inside [`AccountChangeSet`][crate::tables::AccountChangeSet].
+/// Account as it is saved inside [`AccountChangeSets`][crate::tables::AccountChangeSets].
 ///
 /// [`Address`] is the subkey.
 #[derive_arbitrary(compact)]
@@ -45,19 +45,20 @@ impl Compact for AccountBeforeTx {
         let address = Address::from_slice(&buf[..20]);
         buf.advance(20);
 
-        let mut info = None;
-        if len - 20 > 0 {
+        let info = if len - 20 > 0 {
             let (acc, advanced_buf) = Account::from_compact(buf, len - 20);
             buf = advanced_buf;
-            info = Some(acc);
-        }
+            Some(acc)
+        } else {
+            None
+        };
 
         (Self { address, info }, buf)
     }
 }
 
 /// [`BlockNumber`] concatenated with [`Address`]. Used as the key for
-/// [`StorageChangeSet`](crate::tables::StorageChangeSet)
+/// [`StorageChangeSets`](crate::tables::StorageChangeSets)
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
 #[derive(
@@ -120,7 +121,40 @@ impl Decode for BlockNumberAddress {
     }
 }
 
-impl_fixed_arbitrary!(BlockNumberAddress, 28);
+/// [`Address`] concatenated with [`StorageKey`]. Used by `reth_etl` and history stages.
+///
+/// Since it's used as a key, it isn't compressed when encoding it.
+#[derive(
+    Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd, Hash,
+)]
+pub struct AddressStorageKey(pub (Address, StorageKey));
+
+impl Encode for AddressStorageKey {
+    type Encoded = [u8; 52];
+
+    fn encode(self) -> Self::Encoded {
+        let address = self.0 .0;
+        let storage_key = self.0 .1;
+
+        let mut buf = [0u8; 52];
+
+        buf[..20].copy_from_slice(address.as_slice());
+        buf[20..].copy_from_slice(storage_key.as_slice());
+        buf
+    }
+}
+
+impl Decode for AddressStorageKey {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
+        let value = value.as_ref();
+        let address = Address::from_slice(&value[..20]);
+        let storage_key = StorageKey::from_slice(&value[20..]);
+
+        Ok(AddressStorageKey((address, storage_key)))
+    }
+}
+
+impl_fixed_arbitrary!((BlockNumberAddress, 28), (AddressStorageKey, 52));
 
 #[cfg(test)]
 mod tests {
@@ -150,6 +184,31 @@ mod tests {
         let mut bytes = [0u8; 28];
         thread_rng().fill(bytes.as_mut_slice());
         let key = BlockNumberAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
+        assert_eq!(bytes, Encode::encode(key));
+    }
+
+    #[test]
+    fn test_address_storage_key() {
+        let storage_key = StorageKey::random();
+        let address = Address::from_str("ba5e000000000000000000000000000000000000").unwrap();
+        let key = AddressStorageKey((address, storage_key));
+
+        let mut bytes = [0u8; 52];
+        bytes[..20].copy_from_slice(address.as_slice());
+        bytes[20..].copy_from_slice(storage_key.as_slice());
+
+        let encoded = Encode::encode(key);
+        assert_eq!(encoded, bytes);
+
+        let decoded: AddressStorageKey = Decode::decode(encoded).unwrap();
+        assert_eq!(decoded, key);
+    }
+
+    #[test]
+    fn test_address_storage_key_rand() {
+        let mut bytes = [0u8; 52];
+        thread_rng().fill(bytes.as_mut_slice());
+        let key = AddressStorageKey::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
         assert_eq!(bytes, Encode::encode(key));
     }
 }

@@ -23,7 +23,7 @@ reth-tasks.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
 reth-prune.workspace = true
-reth-snapshot.workspace = true
+reth-static-file.workspace = true
 reth-tokio-util.workspace = true
 reth-node-api.workspace = true
 
@@ -40,7 +40,6 @@ metrics.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 schnellru.workspace = true
-cfg-if = "1.0.0"
 
 [dev-dependencies]
 # reth
@@ -56,16 +55,14 @@ reth-tracing.workspace = true
 reth-revm.workspace = true
 reth-downloaders.workspace = true
 reth-node-ethereum.workspace = true
-reth-node-optimism.workspace = true
+reth-config.workspace = true
 
 assert_matches.workspace = true
 
 [features]
 optimism = [
-  "reth-primitives/optimism",
-  "reth-interfaces/optimism",
-  "reth-provider/optimism",
-  "reth-rpc-types/optimism",
-  "reth-payload-builder/optimism",
-  "reth-blockchain-tree/optimism",
+    "reth-primitives/optimism",
+    "reth-interfaces/optimism",
+    "reth-provider/optimism",
+    "reth-blockchain-tree/optimism",
 ]

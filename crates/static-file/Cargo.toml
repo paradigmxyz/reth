@@ -1,0 +1,40 @@
+[package]
+name = "reth-static-file"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Static file producer implementation"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-db.workspace = true
+reth-provider.workspace = true
+reth-interfaces.workspace = true
+reth-nippy-jar.workspace = true
+reth-tokio-util.workspace = true
+
+# async
+tokio-stream.workspace = true
+
+# misc
+tracing.workspace = true
+clap = { workspace = true, features = ["derive"], optional = true }
+rayon.workspace = true
+parking_lot = { workspace = true, features = ["send_guard", "arc_lock"] }
+
+[dev-dependencies]
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-stages = { workspace = true, features = ["test-utils"] }
+
+assert_matches.workspace = true
+tempfile.workspace = true
+
+[features]
+clap = ["dep:clap"]

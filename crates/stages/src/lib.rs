@@ -18,7 +18,7 @@
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
 //! # use reth_revm::EvmProcessorFactory;
-//! # use reth_primitives::{PeerId, MAINNET, B256};
+//! # use reth_primitives::{PeerId, MAINNET, B256, PruneModes};
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;
@@ -26,6 +26,8 @@
 //! # use reth_provider::ProviderFactory;
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
+//! # use reth_static_file::StaticFileProducer;
+//! # use reth_config::config::EtlConfig;
 //! #
 //! # let chain_spec = MAINNET.clone();
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
@@ -41,19 +43,27 @@
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
 //! # let executor_factory = EvmProcessorFactory::new(chain_spec.clone(), EthEvmConfig::default());
+//! # let static_file_producer = StaticFileProducer::new(
+//! #    provider_factory.clone(),
+//! #    provider_factory.static_file_provider(),
+//! #    PruneModes::default()
+//! # );
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::builder()
 //!     .with_tip_sender(tip_tx)
-//!     .add_stages(DefaultStages::new(
-//!         provider_factory.clone(),
-//!         HeaderSyncMode::Tip(tip_rx),
-//!         consensus,
-//!         headers_downloader,
-//!         bodies_downloader,
-//!         executor_factory,
-//!     ))
-//!     .build(provider_factory);
+//!     .add_stages(
+//!         DefaultStages::new(
+//!             provider_factory.clone(),
+//!             HeaderSyncMode::Tip(tip_rx),
+//!             consensus,
+//!             headers_downloader,
+//!             bodies_downloader,
+//!             executor_factory,
+//!             EtlConfig::default(),
+//!         )
+//!     )
+//!     .build(provider_factory, static_file_producer);
 //! ```
 //!
 //! ## Feature Flags

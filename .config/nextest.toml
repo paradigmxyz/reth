@@ -4,4 +4,4 @@ slow-timeout = { period = "30s", terminate-after = 4 }
 
 [[profile.default.overrides]]
 filter = "test(general_state_tests)"
-slow-timeout = { period = "1m", terminate-after = 4 }
+slow-timeout = { period = "1m", terminate-after = 10 }

@@ -1,4 +1,5 @@
 use crate::{
+    models::client_version::ClientVersion,
     table::{Compress, Decompress},
     tables::models::*,
 };
@@ -29,6 +30,7 @@ macro_rules! impl_compression_for_compact {
 }
 
 impl_compression_for_compact!(
+    SealedHeader,
     Header,
     Account,
     Log,
@@ -47,7 +49,8 @@ impl_compression_for_compact!(
     TransactionSignedNoHash,
     CompactU256,
     StageCheckpoint,
-    PruneCheckpoint
+    PruneCheckpoint,
+    ClientVersion
 );
 
 macro_rules! impl_compression_fixed_compact {
@@ -117,3 +120,4 @@ macro_rules! add_wrapper_struct {
 
 add_wrapper_struct!((U256, CompactU256));
 add_wrapper_struct!((u64, CompactU64));
+add_wrapper_struct!((ClientVersion, CompactClientVersion));

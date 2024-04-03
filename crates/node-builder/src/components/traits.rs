@@ -1,11 +1,8 @@
 //! Traits for the builder
 
-use crate::{
-    components::NodeComponents,
-    node::{FullNodeTypes, NodeTypes},
-    BuilderContext,
-};
+use crate::{components::NodeComponents, BuilderContext};
 use reth_network::NetworkHandle;
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
@@ -125,13 +122,14 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
     fn build_components(
         self,
         context: &BuilderContext<Node>,
-    ) -> eyre::Result<NodeComponents<Node, Self::Pool>>;
+    ) -> impl std::future::Future<Output = eyre::Result<NodeComponents<Node, Self::Pool>>> + Send;
 }
 
-impl<Node, F, Pool> NodeComponentsBuilder<Node> for F
+impl<Node, F, Fut, Pool> NodeComponentsBuilder<Node> for F
 where
     Node: FullNodeTypes,
-    F: FnOnce(&BuilderContext<Node>) -> eyre::Result<NodeComponents<Node, Pool>>,
+    F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
+    Fut: std::future::Future<Output = eyre::Result<NodeComponents<Node, Pool>>> + Send,
     Pool: TransactionPool + Unpin + 'static,
 {
     type Pool = Pool;
@@ -139,7 +137,8 @@ where
     fn build_components(
         self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<NodeComponents<Node, Pool>> {
+    ) -> impl std::future::Future<Output = eyre::Result<NodeComponents<Node, Self::Pool>>> + Send
+    {
         self(ctx)
     }
 }

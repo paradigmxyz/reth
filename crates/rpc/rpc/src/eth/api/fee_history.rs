@@ -7,8 +7,9 @@ use futures::{
 };
 use metrics::atomics::AtomicU64;
 use reth_primitives::{
+    basefee::calculate_next_block_base_fee,
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
-    Receipt, SealedBlock, TransactionSigned, B256, U256,
+    ChainSpec, Receipt, SealedBlock, TransactionSigned, B256, U256,
 };
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider};
 use reth_rpc_types::TxGasAndReward;
@@ -29,7 +30,7 @@ pub struct FeeHistoryCache {
 }
 
 impl FeeHistoryCache {
-    /// Creates new FeeHistoryCache instance, initialize it with the mose recent data, set bounds
+    /// Creates new FeeHistoryCache instance, initialize it with the more recent data, set bounds
     pub fn new(eth_cache: EthStateCache, config: FeeHistoryCacheConfig) -> Self {
         let inner = FeeHistoryCacheInner {
             lower_bound: Default::default(),
@@ -68,7 +69,7 @@ impl FeeHistoryCache {
     /// Insert block data into the cache.
     async fn insert_blocks<I>(&self, blocks: I)
     where
-        I: Iterator<Item = (SealedBlock, Arc<Vec<Receipt>>)>,
+        I: IntoIterator<Item = (SealedBlock, Arc<Vec<Receipt>>)>,
     {
         let mut entries = self.inner.entries.write().await;
 
@@ -326,7 +327,9 @@ pub struct FeeHistoryEntry {
     /// For pre EIP-4844 equals to zero.
     pub base_fee_per_blob_gas: Option<u128>,
     /// Blob gas used ratio for this block.
-    /// Calculated as the ratio pf gasUsed and gasLimit.
+    ///
+    /// Calculated as the ratio of blob gas used and the available blob data gas per block.
+    /// Will be zero if no blob gas was used or pre EIP-4844.
     pub blob_gas_used_ratio: f64,
     /// The excess blob gas of the block.
     pub excess_blob_gas: Option<u64>,
@@ -341,6 +344,8 @@ pub struct FeeHistoryEntry {
     pub header_hash: B256,
     /// Approximated rewards for the configured percentiles.
     pub rewards: Vec<U256>,
+    /// The timestamp of the block.
+    pub timestamp: u64,
 }
 
 impl FeeHistoryEntry {
@@ -360,7 +365,18 @@ impl FeeHistoryEntry {
             header_hash: block.hash(),
             gas_limit: block.gas_limit,
             rewards: Vec::new(),
+            timestamp: block.timestamp,
         }
+    }
+
+    /// Returns the base fee for the next block according to the EIP-1559 spec.
+    pub fn next_block_base_fee(&self, chain_spec: &ChainSpec) -> u64 {
+        calculate_next_block_base_fee(
+            self.gas_used,
+            self.gas_limit,
+            self.base_fee_per_gas,
+            chain_spec.base_fee_params(self.timestamp),
+        )
     }
 
     /// Returns the blob fee for the next block according to the EIP-4844 spec.

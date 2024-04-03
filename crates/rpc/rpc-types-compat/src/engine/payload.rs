@@ -124,7 +124,7 @@ pub fn try_block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
 /// Converts [SealedBlock] to [ExecutionPayloadV2]
 pub fn try_block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
     let transactions = value.raw_transactions();
-    let standalone_withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal> = value
+    let standalone_withdrawals: Vec<reth_rpc_types::Withdrawal> = value
         .withdrawals
         .clone()
         .unwrap_or_default()
@@ -157,7 +157,7 @@ pub fn try_block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
 pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
     let transactions = value.raw_transactions();
 
-    let withdrawals: Vec<reth_rpc_types::withdrawal::Withdrawal> = value
+    let withdrawals: Vec<reth_rpc_types::Withdrawal> = value
         .withdrawals
         .clone()
         .unwrap_or_default()
@@ -295,11 +295,11 @@ pub fn validate_block_hash(
     Ok(sealed_block)
 }
 
-/// Converts [Withdrawal] to [reth_rpc_types::withdrawal::Withdrawal]
+/// Converts [Withdrawal] to [reth_rpc_types::Withdrawal]
 pub fn convert_withdrawal_to_standalone_withdraw(
     withdrawal: Withdrawal,
-) -> reth_rpc_types::withdrawal::Withdrawal {
-    reth_rpc_types::withdrawal::Withdrawal {
+) -> reth_rpc_types::Withdrawal {
+    reth_rpc_types::Withdrawal {
         index: withdrawal.index,
         validator_index: withdrawal.validator_index,
         address: withdrawal.address,
@@ -307,9 +307,9 @@ pub fn convert_withdrawal_to_standalone_withdraw(
     }
 }
 
-/// Converts [reth_rpc_types::withdrawal::Withdrawal] to [Withdrawal]
+/// Converts [reth_rpc_types::Withdrawal] to [Withdrawal]
 pub fn convert_standalone_withdraw_to_withdrawal(
-    standalone: reth_rpc_types::withdrawal::Withdrawal,
+    standalone: reth_rpc_types::Withdrawal,
 ) -> Withdrawal {
     Withdrawal {
         index: standalone.index,
@@ -326,13 +326,9 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
         tx.encode_enveloped(&mut out);
         out.into()
     });
-    let withdraw: Option<Vec<reth_rpc_types::withdrawal::Withdrawal>> =
-        value.withdrawals.map(|withdrawals| {
-            withdrawals
-                .into_iter()
-                .map(convert_withdrawal_to_standalone_withdraw)
-                .collect::<Vec<_>>()
-        });
+    let withdraw: Option<Vec<reth_rpc_types::Withdrawal>> = value.withdrawals.map(|withdrawals| {
+        withdrawals.into_iter().map(convert_withdrawal_to_standalone_withdraw).collect::<Vec<_>>()
+    });
     ExecutionPayloadBodyV1 { transactions: transactions.collect(), withdrawals: withdraw }
 }
 
@@ -440,7 +436,7 @@ mod tests {
             excess_blob_gas: 0x580000,
         };
 
-        let _block = try_payload_v3_to_block(new_payload.clone())
+        let _block = try_payload_v3_to_block(new_payload)
             .expect_err("execution payload conversion requires typed txs without a rlp header");
     }
 

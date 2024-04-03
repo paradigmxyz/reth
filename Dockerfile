@@ -12,9 +12,13 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 
-# Set the build profile to be release
+# Build profile, release by default
 ARG BUILD_PROFILE=release
 ENV BUILD_PROFILE $BUILD_PROFILE
+
+# Extra Cargo features
+ARG FEATURES=""
+ENV FEATURES $FEATURES
 
 # Install system dependencies
 RUN apt-get update && apt-get -y upgrade && apt-get install -y libclang-dev pkg-config
@@ -24,7 +28,7 @@ RUN cargo chef cook --profile $BUILD_PROFILE --recipe-path recipe.json
 
 # Build application
 COPY . .
-RUN cargo build --profile $BUILD_PROFILE --no-default-features --locked --bin reth
+RUN cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin reth
 
 # ARG is not resolved in COPY so we have to hack around it by copying the
 # binary to a temporary location

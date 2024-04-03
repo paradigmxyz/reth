@@ -1,44 +1,52 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use rayon::prelude::*;
+use num_traits::Zero;
+use reth_config::config::EtlConfig;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawValue,
 };
+use reth_etl::Collector;
 use reth_interfaces::provider::ProviderError;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    PruneCheckpoint, PruneMode, PruneSegment,
+    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, TxHash, TxNumber,
 };
 use reth_provider::{
-    BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
-    TransactionsProviderExt,
+    BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
+    TransactionsProvider, TransactionsProviderExt,
 };
 use tracing::*;
 
 /// The transaction lookup stage.
 ///
-/// This stage walks over the bodies table, and sets the transaction hash of each transaction in a
-/// block to the corresponding `BlockNumber` at each block. This is written to the
-/// [`tables::TxHashNumber`] This is used for looking up changesets via the transaction hash.
+/// This stage walks over existing transactions, and sets the transaction hash of each transaction
+/// in a block to the corresponding `BlockNumber` at each block. This is written to the
+/// [`tables::TransactionHashNumbers`] This is used for looking up changesets via the transaction
+/// hash.
+///
+/// It uses [`reth_etl::Collector`] to collect all entries before finally writing them to disk.
 #[derive(Debug, Clone)]
 pub struct TransactionLookupStage {
-    /// The number of lookup entries to commit at once
-    commit_threshold: u64,
+    /// The maximum number of lookup entries to hold in memory before pushing them to
+    /// [`reth_etl::Collector`].
+    chunk_size: u64,
+    etl_config: EtlConfig,
     prune_mode: Option<PruneMode>,
 }
 
 impl Default for TransactionLookupStage {
     fn default() -> Self {
-        Self { commit_threshold: 5_000_000, prune_mode: None }
+        Self { chunk_size: 5_000_000, etl_config: EtlConfig::default(), prune_mode: None }
     }
 }
 
 impl TransactionLookupStage {
     /// Create new instance of [TransactionLookupStage].
-    pub fn new(commit_threshold: u64, prune_mode: Option<PruneMode>) -> Self {
-        Self { commit_threshold, prune_mode }
+    pub fn new(chunk_size: u64, etl_config: EtlConfig, prune_mode: Option<PruneMode>) -> Self {
+        Self { chunk_size, etl_config, prune_mode }
     }
 }
 
@@ -56,7 +64,13 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     ) -> Result<ExecOutput, StageError> {
         if let Some((target_prunable_block, prune_mode)) = self
             .prune_mode
-            .map(|mode| mode.prune_target_block(input.target(), PruneSegment::TransactionLookup))
+            .map(|mode| {
+                mode.prune_target_block(
+                    input.target(),
+                    PruneSegment::TransactionLookup,
+                    PrunePurpose::User,
+                )
+            })
             .transpose()?
             .flatten()
         {
@@ -86,43 +100,73 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        let (tx_range, block_range, is_final_range) =
-            input.next_block_range_with_transaction_threshold(provider, self.commit_threshold)?;
-        let end_block = *block_range.end();
+        // 500MB temporary files
+        let mut hash_collector: Collector<TxHash, TxNumber> =
+            Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
 
-        debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Updating transaction lookup");
+        debug!(
+            target: "sync::stages::transaction_lookup",
+            tx_range = ?input.checkpoint().block_number..=input.target(),
+            "Updating transaction lookup"
+        );
 
-        let mut tx_list = provider.transaction_hashes_by_range(tx_range)?;
+        loop {
+            let (tx_range, block_range, is_final_range) =
+                input.next_block_range_with_transaction_threshold(provider, self.chunk_size)?;
 
-        // Sort before inserting the reverse lookup for hash -> tx_id.
-        tx_list.par_sort_unstable_by(|txa, txb| txa.0.cmp(&txb.0));
+            let end_block = *block_range.end();
 
-        let tx = provider.tx_ref();
-        let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
+            debug!(target: "sync::stages::transaction_lookup", ?tx_range, "Calculating transaction hashes");
 
-        // If the last inserted element in the database is equal or bigger than the first
-        // in our set, then we need to insert inside the DB. If it is smaller then last
-        // element in the DB, we can append to the DB.
-        // Append probably only ever happens during sync, on the first table insertion.
-        let insert = tx_list
-            .first()
-            .zip(txhash_cursor.last()?)
-            .map(|((first, _), (last, _))| first <= &last)
-            .unwrap_or_default();
-        // if txhash_cursor.last() is None we will do insert. `zip` would return none if any item is
-        // none. if it is some and if first is smaller than last, we will do append.
-        for (tx_hash, id) in tx_list {
-            if insert {
-                txhash_cursor.insert(tx_hash, id)?;
-            } else {
-                txhash_cursor.append(tx_hash, id)?;
+            for (key, value) in provider.transaction_hashes_by_range(tx_range)? {
+                hash_collector.insert(key, value)?;
+            }
+
+            input.checkpoint = Some(
+                StageCheckpoint::new(end_block)
+                    .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
+            );
+
+            if is_final_range {
+                let append_only =
+                    provider.count_entries::<tables::TransactionHashNumbers>()?.is_zero();
+                let mut txhash_cursor = provider
+                    .tx_ref()
+                    .cursor_write::<tables::RawTable<tables::TransactionHashNumbers>>()?;
+
+                let total_hashes = hash_collector.len();
+                let interval = (total_hashes / 10).max(1);
+                for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
+                    let (hash, number) = hash_to_number?;
+                    if index > 0 && index % interval == 0 {
+                        debug!(
+                            target: "sync::stages::transaction_lookup",
+                            ?append_only,
+                            progress = format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                            "Inserting hashes"
+                        );
+                    }
+
+                    if append_only {
+                        txhash_cursor.append(
+                            RawKey::<TxHash>::from_vec(hash),
+                            RawValue::<TxNumber>::from_vec(number),
+                        )?;
+                    } else {
+                        txhash_cursor.insert(
+                            RawKey::<TxHash>::from_vec(hash),
+                            RawValue::<TxNumber>::from_vec(number),
+                        )?;
+                    }
+                }
+                break
             }
         }
 
         Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(end_block)
+            checkpoint: StageCheckpoint::new(input.target())
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-            done: is_final_range,
+            done: true,
         })
     }
 
@@ -133,12 +177,12 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
-        let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
+        let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.chunk_size);
 
         // Cursors to unwind tx hash to number
         let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-        let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
-        let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
+        let mut tx_hash_number_cursor = tx.cursor_write::<tables::TransactionHashNumbers>()?;
+        let static_file_provider = provider.static_file_provider();
         let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
         while let Some((number, body)) = rev_walker.next().transpose()? {
             if number <= unwind_to {
@@ -148,7 +192,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             // Delete all transactions that belong to this block
             for tx_id in body.tx_num_range() {
                 // First delete the transaction and hash to id mapping
-                if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
+                if let Some(transaction) = static_file_provider.transaction_by_id(tx_id)? {
                     if tx_hash_number_cursor.seek_exact(transaction.hash())?.is_some() {
                         tx_hash_number_cursor.delete_current()?;
                     }
@@ -173,11 +217,15 @@ fn stage_checkpoint<DB: Database>(
         .map(|tx_number| tx_number + 1)
         .unwrap_or_default();
     Ok(EntitiesCheckpoint {
-        // If `TxHashNumber` table was pruned, we will have a number of entries in it not matching
-        // the actual number of processed transactions. To fix that, we add the number of pruned
-        // `TxHashNumber` entries.
-        processed: provider.tx_ref().entries::<tables::TxHashNumber>()? as u64 + pruned_entries,
-        total: provider.tx_ref().entries::<tables::Transactions>()? as u64,
+        // If `TransactionHashNumbers` table was pruned, we will have a number of entries in it not
+        // matching the actual number of processed transactions. To fix that, we add the
+        // number of pruned `TransactionHashNumbers` entries.
+        processed: provider.count_entries::<tables::TransactionHashNumbers>()? as u64 +
+            pruned_entries,
+        // Count only static files entries. If we count the database entries too, we may have
+        // duplicates. We're sure that the static files have all entries that database has,
+        // because we run the `StaticFileProducer` before starting the pipeline.
+        total: provider.static_file_provider().count_entries::<tables::Transactions>()? as u64,
     })
 }
 
@@ -185,8 +233,8 @@ fn stage_checkpoint<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestStageDB, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
+        TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{
@@ -194,7 +242,7 @@ mod tests {
         generators::{random_block, random_block_range},
     };
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, B256};
-    use reth_provider::TransactionsProvider;
+    use reth_provider::providers::StaticFileWriter;
     use std::ops::Sub;
 
     // Implement stage test suite.
@@ -225,7 +273,10 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        runner.db.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
+        runner
+            .db
+            .insert_blocks(blocks.iter(), StorageKind::Static)
+            .expect("failed to insert blocks");
 
         let rx = runner.execute(input);
 
@@ -241,77 +292,11 @@ mod tests {
                     total
                 }))
             }, done: true }) if block_number == previous_stage && processed == total &&
-                total == runner.db.table::<tables::Transactions>().unwrap().len() as u64
+                total == runner.db.factory.static_file_provider().count_entries::<tables::Transactions>().unwrap() as u64
         );
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
-    }
-
-    /// Execute the stage twice with input range that exceeds the commit threshold
-    #[tokio::test]
-    async fn execute_intermediate_commit_transaction_lookup() {
-        let threshold = 50;
-        let mut runner = TransactionLookupTestRunner::default();
-        runner.set_commit_threshold(threshold);
-        let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
-        let first_input = ExecInput {
-            target: Some(previous_stage),
-            checkpoint: Some(StageCheckpoint::new(stage_progress)),
-        };
-        let mut rng = generators::rng();
-
-        // Seed only once with full input range
-        let seed =
-            random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
-        runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
-
-        let total_txs = runner.db.table::<tables::Transactions>().unwrap().len() as u64;
-
-        // Execute first time
-        let result = runner.execute(first_input).await.unwrap();
-        let mut tx_count = 0;
-        let expected_progress = seed
-            .iter()
-            .find(|x| {
-                tx_count += x.body.len();
-                tx_count as u64 > threshold
-            })
-            .map(|x| x.number)
-            .unwrap_or(previous_stage);
-        assert_matches!(result, Ok(_));
-        assert_eq!(
-            result.unwrap(),
-            ExecOutput {
-                checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
-                    EntitiesCheckpoint {
-                        processed: runner.db.table::<tables::TxHashNumber>().unwrap().len() as u64,
-                        total: total_txs
-                    }
-                ),
-                done: false
-            }
-        );
-
-        // Execute second time to completion
-        runner.set_commit_threshold(u64::MAX);
-        let second_input = ExecInput {
-            target: Some(previous_stage),
-            checkpoint: Some(StageCheckpoint::new(expected_progress)),
-        };
-        let result = runner.execute(second_input).await.unwrap();
-        assert_matches!(result, Ok(_));
-        assert_eq!(
-            result.as_ref().unwrap(),
-            &ExecOutput {
-                checkpoint: StageCheckpoint::new(previous_stage).with_entities_stage_checkpoint(
-                    EntitiesCheckpoint { processed: total_txs, total: total_txs }
-                ),
-                done: true
-            }
-        );
-
-        assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
     }
 
     #[tokio::test]
@@ -329,7 +314,10 @@ mod tests {
         // Seed only once with full input range
         let seed =
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..2);
-        runner.db.insert_blocks(seed.iter(), None).expect("failed to seed execution");
+        runner
+            .db
+            .insert_blocks(seed.iter(), StorageKind::Static)
+            .expect("failed to seed execution");
 
         runner.set_prune_mode(PruneMode::Before(prune_target));
 
@@ -347,7 +335,7 @@ mod tests {
                     total
                 }))
             }, done: true }) if block_number == previous_stage && processed == total &&
-                total == runner.db.table::<tables::Transactions>().unwrap().len() as u64
+                total == runner.db.factory.static_file_provider().count_entries::<tables::Transactions>().unwrap() as u64
         );
 
         // Validate the stage execution
@@ -360,7 +348,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
-        db.insert_blocks(blocks.iter(), None).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let max_pruned_block = 30;
         let max_processed_block = 70;
@@ -411,32 +399,34 @@ mod tests {
 
     struct TransactionLookupTestRunner {
         db: TestStageDB,
-        commit_threshold: u64,
+        chunk_size: u64,
+        etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
     }
 
     impl Default for TransactionLookupTestRunner {
         fn default() -> Self {
-            Self { db: TestStageDB::default(), commit_threshold: 1000, prune_mode: None }
+            Self {
+                db: TestStageDB::default(),
+                chunk_size: 1000,
+                etl_config: EtlConfig::default(),
+                prune_mode: None,
+            }
         }
     }
 
     impl TransactionLookupTestRunner {
-        fn set_commit_threshold(&mut self, threshold: u64) {
-            self.commit_threshold = threshold;
-        }
-
         fn set_prune_mode(&mut self, prune_mode: PruneMode) {
             self.prune_mode = Some(prune_mode);
         }
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TxHashNumber] table above a given block
-        ///    number.
+        /// 1. If there are any entries in the [tables::TransactionHashNumbers] table above a given
+        /// block    number.
         ///
-        /// 2. If the is no requested block entry in the bodies table, but [tables::TxHashNumber] is
-        ///    not empty.
+        /// 2. If the is no requested block entry in the bodies table, but
+        /// [tables::TransactionHashNumbers] is    not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .db
@@ -445,12 +435,14 @@ mod tests {
                 .block_body_indices(number)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(number));
             match body_result {
-                Ok(body) => self.db.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
-                    body.last_tx_num(),
-                    |key| key,
-                )?,
+                Ok(body) => {
+                    self.db.ensure_no_entry_above_by_value::<tables::TransactionHashNumbers, _>(
+                        body.last_tx_num(),
+                        |key| key,
+                    )?
+                }
                 Err(_) => {
-                    assert!(self.db.table_is_empty::<tables::TxHashNumber>()?);
+                    assert!(self.db.table_is_empty::<tables::TransactionHashNumbers>()?);
                 }
             };
 
@@ -467,7 +459,8 @@ mod tests {
 
         fn stage(&self) -> Self::S {
             TransactionLookupStage {
-                commit_threshold: self.commit_threshold,
+                chunk_size: self.chunk_size,
+                etl_config: self.etl_config.clone(),
                 prune_mode: self.prune_mode,
             }
         }
@@ -482,7 +475,7 @@ mod tests {
             let mut rng = generators::rng();
 
             let blocks = random_block_range(&mut rng, stage_progress + 1..=end, B256::ZERO, 0..2);
-            self.db.insert_blocks(blocks.iter(), None)?;
+            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             Ok(blocks)
         }
 
@@ -498,7 +491,11 @@ mod tests {
                     if let Some((target_prunable_block, _)) = self
                         .prune_mode
                         .map(|mode| {
-                            mode.prune_target_block(input.target(), PruneSegment::TransactionLookup)
+                            mode.prune_target_block(
+                                input.target(),
+                                PruneSegment::TransactionLookup,
+                                PrunePurpose::User,
+                            )
                         })
                         .transpose()
                         .expect("prune target block for transaction lookup")

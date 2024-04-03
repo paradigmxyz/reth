@@ -1,4 +1,7 @@
-use reth_metrics::{metrics::Gauge, Metrics};
+use reth_metrics::{
+    metrics::{Counter, Gauge},
+    Metrics,
+};
 use reth_primitives::stage::StageId;
 use std::collections::HashMap;
 
@@ -33,5 +36,5 @@ pub(crate) struct StageMetrics {
 #[metrics(scope = "sync.execution")]
 pub(crate) struct ExecutionStageMetrics {
     /// The total amount of gas processed (in millions)
-    pub(crate) mgas_processed_total: Gauge,
+    pub(crate) mgas_processed_total: Counter,
 }

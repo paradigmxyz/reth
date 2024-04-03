@@ -10,9 +10,11 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
+#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod builder;
 pub mod capability;
 mod disconnect;
 pub mod errors;
@@ -23,9 +25,6 @@ pub mod muxdemux;
 mod p2pstream;
 mod pinger;
 pub mod protocol;
-pub use builder::*;
-pub mod types;
-pub use types::*;
 
 #[cfg(test)]
 pub mod test_utils;
@@ -45,5 +44,8 @@ pub use crate::{
         DisconnectP2P, P2PMessage, P2PMessageID, P2PStream, ProtocolVersion, UnauthedP2PStream,
         MAX_RESERVED_MESSAGE_ID,
     },
-    types::EthVersion,
 };
+
+// Re-export wire types
+#[doc(inline)]
+pub use reth_eth_wire_types::*;

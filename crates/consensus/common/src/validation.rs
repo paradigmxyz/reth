@@ -15,7 +15,7 @@ pub fn validate_header_standalone(
     header: &SealedHeader,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    // Gas used needs to be less then gas limit. Gas used is going to be check after execution.
+    // Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
     if header.gas_used > header.gas_limit {
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
             gas_used: header.gas_used,
@@ -33,17 +33,16 @@ pub fn validate_header_standalone(
     let wd_root_missing = header.withdrawals_root.is_none() && !chain_spec.is_optimism();
 
     // EIP-4895: Beacon chain push withdrawals as operations
-    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) && wd_root_missing
-    {
+    if chain_spec.is_shanghai_active_at_timestamp(header.timestamp) && wd_root_missing {
         return Err(ConsensusError::WithdrawalsRootMissing)
-    } else if !chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) &&
+    } else if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
         header.withdrawals_root.is_some()
     {
         return Err(ConsensusError::WithdrawalsRootUnexpected)
     }
 
     // Ensures that EIP-4844 fields are valid once cancun is active.
-    if chain_spec.fork(Hardfork::Cancun).active_at_timestamp(header.timestamp) {
+    if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
         validate_4844_header_standalone(header)?;
     } else if header.blob_gas_used.is_some() {
         return Err(ConsensusError::BlobGasUsedUnexpected)
@@ -56,7 +55,7 @@ pub fn validate_header_standalone(
     Ok(())
 }
 
-/// Validate a transaction in regards to a block header.
+/// Validate a transaction with regard to a block header.
 ///
 /// The only parameter from the header that affects the transaction is `base_fee`.
 pub fn validate_transaction_regarding_header(
@@ -66,6 +65,7 @@ pub fn validate_transaction_regarding_header(
     at_timestamp: u64,
     base_fee: Option<u64>,
 ) -> Result<(), ConsensusError> {
+    #[allow(unreachable_patterns)]
     let chain_id = match transaction {
         Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
@@ -109,7 +109,7 @@ pub fn validate_transaction_regarding_header(
             ..
         }) => {
             // EIP-4844: Shard Blob Transactions https://eips.ethereum.org/EIPS/eip-4844
-            if !chain_spec.fork(Hardfork::Cancun).active_at_timestamp(at_timestamp) {
+            if !chain_spec.is_cancun_active_at_timestamp(at_timestamp) {
                 return Err(InvalidTransactionError::Eip4844Disabled.into())
             }
 
@@ -121,8 +121,10 @@ pub fn validate_transaction_regarding_header(
 
             Some(*chain_id)
         }
-        #[cfg(feature = "optimism")]
-        Transaction::Deposit(_) => None,
+        _ => {
+            // Op Deposit
+            None
+        }
     };
     if let Some(chain_id) = chain_id {
         if chain_id != chain_spec.chain().id() {
@@ -219,7 +221,7 @@ pub fn validate_block_standalone(
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
-    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block.timestamp) {
+    if chain_spec.is_shanghai_active_at_timestamp(block.timestamp) {
         let withdrawals =
             block.withdrawals.as_ref().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
         let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
@@ -249,7 +251,7 @@ pub fn validate_block_standalone(
     Ok(())
 }
 
-/// Validate block in regards to chain (parent)
+/// Validate block with regard to chain (parent)
 ///
 /// Checks:
 ///  If we already know the block.
@@ -283,12 +285,10 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider
 ///  * `parent_beacon_block_root` exists as a header field
 ///  * `blob_gas_used` is less than or equal to `MAX_DATA_GAS_PER_BLOCK`
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
+///  * `excess_blob_gas` is a multiple of `DATA_GAS_PER_BLOB`
 pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), ConsensusError> {
     let blob_gas_used = header.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
-
-    if header.excess_blob_gas.is_none() {
-        return Err(ConsensusError::ExcessBlobGasMissing)
-    }
+    let excess_blob_gas = header.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
     if header.parent_beacon_block_root.is_none() {
         return Err(ConsensusError::ParentBeaconBlockRootMissing)
@@ -304,6 +304,15 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
     if blob_gas_used % DATA_GAS_PER_BLOB != 0 {
         return Err(ConsensusError::BlobGasUsedNotMultipleOfBlobGasPerBlob {
             blob_gas_used,
+            blob_gas_per_blob: DATA_GAS_PER_BLOB,
+        })
+    }
+
+    // `excess_blob_gas` must also be a multiple of `DATA_GAS_PER_BLOB`. This will be checked later
+    // (via `calculate_excess_blob_gas`), but it doesn't hurt to catch the problem sooner.
+    if excess_blob_gas % DATA_GAS_PER_BLOB != 0 {
+        return Err(ConsensusError::ExcessBlobGasNotMultipleOfBlobGasPerBlob {
+            excess_blob_gas,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,
         })
     }
@@ -439,7 +448,7 @@ mod tests {
             gas_price: 0x28f000fff,
             gas_limit: 10,
             to: TransactionKind::Call(Address::default()),
-            value: 3_u64.into(),
+            value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
         });
@@ -461,7 +470,7 @@ mod tests {
             max_fee_per_blob_gas: 0x7,
             gas_limit: 10,
             to: TransactionKind::Call(Address::default()),
-            value: 3_u64.into(),
+            value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
             blob_versioned_hashes: std::iter::repeat_with(|| rng.gen()).take(num_blobs).collect(),

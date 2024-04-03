@@ -11,21 +11,17 @@ use reth_interfaces::test_utils::{
     generators,
     generators::{
         random_block_range, random_changeset_range, random_contract_account_range,
-        random_eoa_account_range,
+        random_eoa_accounts,
     },
 };
 use reth_primitives::{fs, Account, Address, SealedBlock, B256, U256};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
-    test_utils::TestStageDB,
+    test_utils::{StorageKind, TestStageDB},
     ExecInput, Stage, UnwindInput,
 };
 use reth_trie::StateRoot;
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 mod constants;
 
@@ -67,7 +63,7 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>>(
 ) {
     let (input, unwind) = range;
 
-    let mut stage = stage.clone();
+    let mut stage = stage;
     let provider = db.factory.provider_rw().unwrap();
 
     StorageHashingStage::default().unwind(&provider, unwind).unwrap();
@@ -84,8 +80,7 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>>(
 
 // Helper for generating testdata for the benchmarks.
 // Returns the path to the database file.
-pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("txs-bench");
+pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
     let txs_range = 100..150;
 
     // number of storage changes per transition
@@ -101,14 +96,17 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
     // rng
     let mut rng = generators::rng();
 
-    if !path.exists() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("txs-bench");
+    let exists = path.exists();
+    let db = TestStageDB::new(&path);
+
+    if !exists {
         // create the dirs
         fs::create_dir_all(&path).unwrap();
         println!("Transactions testdata not found, generating to {:?}", path.display());
-        let db = TestStageDB::new(&path);
 
         let accounts: BTreeMap<Address, Account> = concat([
-            random_eoa_account_range(&mut rng, 0..n_eoa),
+            random_eoa_accounts(&mut rng, n_eoa),
             random_contract_account_range(&mut rng, &mut (0..n_contract)),
         ])
         .into_iter()
@@ -167,15 +165,15 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         updated_header.state_root = root;
         *last_block = SealedBlock { header: updated_header.seal_slow(), ..cloned_last };
 
-        db.insert_blocks(blocks.iter(), None).unwrap();
+        db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
 
         // initialize TD
         db.commit(|tx| {
             let (head, _) = tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
-            Ok(tx.put::<tables::HeaderTD>(head, U256::from(0).into())?)
+            Ok(tx.put::<tables::HeaderTerminalDifficulties>(head, U256::from(0).into())?)
         })
         .unwrap();
     }
 
-    path
+    db
 }

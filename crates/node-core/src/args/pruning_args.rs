@@ -8,8 +8,8 @@ use reth_primitives::{
 use std::sync::Arc;
 
 /// Parameters for pruning and full node
-#[derive(Debug, Clone, Args, PartialEq, Default)]
-#[clap(next_help_heading = "Pruning")]
+#[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
+#[command(next_help_heading = "Pruning")]
 pub struct PruningArgs {
     /// Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored.
     /// This flag takes priority over pruning configuration in reth.toml.
@@ -56,7 +56,7 @@ mod tests {
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

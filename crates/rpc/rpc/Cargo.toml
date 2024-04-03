@@ -23,7 +23,7 @@ reth-network-api.workspace = true
 reth-network.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-revm = { workspace = true, features = ["js-tracer"] }
-reth-tasks.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
 reth-consensus-common.workspace = true
 reth-rpc-types-compat.workspace = true
 revm-inspectors.workspace = true
@@ -45,7 +45,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 jsonrpsee.workspace = true
 http = "0.2.8"
 http-body = "0.4.5"
-hyper = "0.14.24"
+hyper.workspace = true
 jsonwebtoken = "8"
 
 ## required for optimism sequencer delegation
@@ -56,11 +56,10 @@ reqwest = { version = "0.11", default-features = false, features = [
 # async
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-tower = "0.4"
+tower.workspace = true
 tokio-stream = { workspace = true, features = ["sync"] }
-tokio-util = "0.7"
 pin-project.workspace = true
-rayon.workspace = true
+parking_lot.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -81,8 +80,8 @@ tracing.workspace = true
 tracing-futures = "0.2"
 schnellru.workspace = true
 futures.workspace = true
-derive_more = "0.99"
-lazy_static = "*"
+derive_more.workspace = true
+dyn-clone.workspace = true 
 
 [dev-dependencies]
 jsonrpsee = { workspace = true, features = ["client"] }
@@ -100,5 +99,4 @@ optimism = [
     "reth-network-api/optimism",
     "reth-network/optimism",
     "reth-provider/optimism",
-    "reth-transaction-pool/optimism",
 ]
