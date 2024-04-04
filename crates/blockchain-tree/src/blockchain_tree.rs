@@ -926,7 +926,7 @@ where
     #[instrument(level = "trace", skip(self), target = "blockchain_tree")]
     pub fn make_canonical(
         &mut self,
-        block_hash: &BlockHash,
+        block_hash: BlockHash,
     ) -> Result<CanonicalOutcome, CanonicalError> {
         let mut durations_recorder = MakeCanonicalDurationsRecorder::default();
 
@@ -935,16 +935,16 @@ where
         durations_recorder.record_relative(MakeCanonicalAction::CloneOldBlocks);
 
         // If block is already canonical don't return error.
-        let canonical_header = self.find_canonical_header(block_hash)?;
+        let canonical_header = self.find_canonical_header(&block_hash)?;
         durations_recorder.record_relative(MakeCanonicalAction::FindCanonicalHeader);
         if let Some(header) = canonical_header {
-            info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
+            info!(target: "blockchain_tree", %block_hash, "Block is already canonical, ignoring.");
             // TODO: this could be fetched from the chainspec first
             let td =
-                self.externals.provider_factory.provider()?.header_td(block_hash)?.ok_or_else(
+                self.externals.provider_factory.provider()?.header_td(&block_hash)?.ok_or_else(
                     || {
                         CanonicalError::from(BlockValidationError::MissingTotalDifficulty {
-                            hash: *block_hash,
+                            hash: block_hash,
                         })
                     },
                 )?;
@@ -956,16 +956,16 @@ where
                 .active_at_ttd(td, U256::ZERO)
             {
                 return Err(CanonicalError::from(BlockValidationError::BlockPreMerge {
-                    hash: *block_hash,
+                    hash: block_hash,
                 }))
             }
             return Ok(CanonicalOutcome::AlreadyCanonical { header })
         }
 
-        let Some(chain_id) = self.block_indices().get_blocks_chain_id(block_hash) else {
+        let Some(chain_id) = self.block_indices().get_blocks_chain_id(&block_hash) else {
             debug!(target: "blockchain_tree", ?block_hash, "Block hash not found in block indices");
             return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
-                block_hash: *block_hash,
+                block_hash,
             }))
         };
         let chain = self.state.chains.remove(&chain_id).expect("To be present");
@@ -973,7 +973,7 @@ where
         trace!(target: "blockchain_tree", ?chain, "Found chain to make canonical");
 
         // we are splitting chain at the block hash that we want to make canonical
-        let canonical = self.split_chain(chain_id, chain, ChainSplitTarget::Hash(*block_hash));
+        let canonical = self.split_chain(chain_id, chain, ChainSplitTarget::Hash(block_hash));
         durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
 
         let mut fork_block = canonical.fork_block();
@@ -1535,7 +1535,7 @@ mod tests {
         tree.insert_block(fork_block.clone(), BlockValidationKind::Exhaustive).unwrap();
 
         assert_eq!(
-            tree.make_canonical(&fork_block.hash()).unwrap(),
+            tree.make_canonical(fork_block.hash()).unwrap(),
             CanonicalOutcome::Committed { head: fork_block.header.clone() }
         );
 
@@ -1545,7 +1545,7 @@ mod tests {
         );
 
         assert_eq!(
-            tree.make_canonical(&canonical_block_1.hash()).unwrap(),
+            tree.make_canonical(canonical_block_1.hash()).unwrap(),
             CanonicalOutcome::Committed { head: canonical_block_1.header.clone() }
         );
 
@@ -1560,12 +1560,12 @@ mod tests {
         );
 
         assert_eq!(
-            tree.make_canonical(&sidechain_block_1.hash()).unwrap(),
+            tree.make_canonical(sidechain_block_1.hash()).unwrap(),
             CanonicalOutcome::Committed { head: sidechain_block_1.header.clone() }
         );
 
         assert_eq!(
-            tree.make_canonical(&canonical_block_1.hash()).unwrap(),
+            tree.make_canonical(canonical_block_1.hash()).unwrap(),
             CanonicalOutcome::Committed { head: canonical_block_1.header.clone() }
         );
 
@@ -1575,7 +1575,7 @@ mod tests {
         );
 
         assert_eq!(
-            tree.make_canonical(&sidechain_block_2.hash()).unwrap(),
+            tree.make_canonical(sidechain_block_2.hash()).unwrap(),
             CanonicalOutcome::Committed { head: sidechain_block_2.header.clone() }
         );
 
@@ -1585,7 +1585,7 @@ mod tests {
         );
 
         assert_eq!(
-            tree.make_canonical(&canonical_block_3.hash()).unwrap(),
+            tree.make_canonical(canonical_block_3.hash()).unwrap(),
             CanonicalOutcome::Committed { head: canonical_block_3.header.clone() }
         );
     }
@@ -1610,7 +1610,7 @@ mod tests {
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
         // genesis block 10 is already canonical
-        tree.make_canonical(&B256::ZERO).unwrap();
+        tree.make_canonical(B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
         tree.finalize_block(10);
@@ -1632,7 +1632,7 @@ mod tests {
         assert!(block2_chain.trie_updates().is_some());
 
         assert_eq!(
-            tree.make_canonical(&block2.hash()).unwrap(),
+            tree.make_canonical(block2.hash()).unwrap(),
             CanonicalOutcome::Committed { head: block2.header.clone() }
         );
 
@@ -1645,7 +1645,7 @@ mod tests {
         assert!(block3_chain.trie_updates().is_some());
 
         assert_eq!(
-            tree.make_canonical(&block3.hash()).unwrap(),
+            tree.make_canonical(block3.hash()).unwrap(),
             CanonicalOutcome::Committed { head: block3.header.clone() }
         );
 
@@ -1667,7 +1667,7 @@ mod tests {
         assert!(block5_chain.trie_updates().is_some());
 
         assert_eq!(
-            tree.make_canonical(&block5.hash()).unwrap(),
+            tree.make_canonical(block5.hash()).unwrap(),
             CanonicalOutcome::Committed { head: block5.header.clone() }
         );
 
@@ -1695,7 +1695,7 @@ mod tests {
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
         // genesis block 10 is already canonical
-        tree.make_canonical(&B256::ZERO).unwrap();
+        tree.make_canonical(B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
         tree.finalize_block(10);
@@ -1795,7 +1795,7 @@ mod tests {
 
         let mut canon_notif = tree.subscribe_canon_state();
         // genesis block 10 is already canonical
-        tree.make_canonical(&B256::ZERO).unwrap();
+        tree.make_canonical(B256::ZERO).unwrap();
 
         // make sure is_block_hash_canonical returns true for genesis block
         tree.is_block_hash_canonical(&B256::ZERO).unwrap();
@@ -1874,12 +1874,12 @@ mod tests {
         );
 
         // make block1 canonical
-        tree.make_canonical(&block1.hash()).unwrap();
+        tree.make_canonical(block1.hash()).unwrap();
         // check notification
         assert_matches!(canon_notif.try_recv(), Ok(CanonStateNotification::Commit{ new}) if *new.blocks() == BTreeMap::from([(block1.number,block1.clone())]));
 
         // make block2 canonicals
-        tree.make_canonical(&block2.hash()).unwrap();
+        tree.make_canonical(block2.hash()).unwrap();
         // check notification.
         assert_matches!(canon_notif.try_recv(), Ok(CanonStateNotification::Commit{ new}) if *new.blocks() == BTreeMap::from([(block2.number,block2.clone())]));
 
@@ -1950,7 +1950,7 @@ mod tests {
             .assert(&tree);
 
         // make b2a canonical
-        assert!(tree.make_canonical(&block2a_hash).is_ok());
+        assert!(tree.make_canonical(block2a_hash).is_ok());
         // check notification.
         assert_matches!(canon_notif.try_recv(),
             Ok(CanonStateNotification::Reorg{ old, new})
@@ -1979,7 +1979,7 @@ mod tests {
             .with_pending_blocks((block2.number + 1, HashSet::new()))
             .assert(&tree);
 
-        assert_matches!(tree.make_canonical(&block1a_hash), Ok(_));
+        assert_matches!(tree.make_canonical(block1a_hash), Ok(_));
         // Trie state:
         //       b2a   b2 (side chain)
         //       |   /
@@ -2017,7 +2017,7 @@ mod tests {
         assert!(tree.is_block_hash_canonical(&block1a.hash()).unwrap());
 
         // make b2 canonical
-        tree.make_canonical(&block2.hash()).unwrap();
+        tree.make_canonical(block2.hash()).unwrap();
         // Trie state:
         // b2   b2a (side chain)
         // |   /
@@ -2092,7 +2092,7 @@ mod tests {
             .assert(&tree);
 
         // commit b2a
-        tree.make_canonical(&block2.hash()).unwrap();
+        tree.make_canonical(block2.hash()).unwrap();
 
         // Trie state:
         // b2   b2a (side chain)

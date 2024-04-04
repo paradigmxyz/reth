@@ -669,7 +669,7 @@ where
         self.tree.connect_buffered_blocks_to_canonical_hashes()
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         self.tree.make_canonical(block_hash)
     }
 

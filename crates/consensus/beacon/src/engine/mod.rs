@@ -373,7 +373,7 @@ where
         }
 
         let start = Instant::now();
-        let make_canonical_result = self.blockchain.make_canonical(&state.head_block_hash);
+        let make_canonical_result = self.blockchain.make_canonical(state.head_block_hash);
         let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
 
         let status = match make_canonical_result {
@@ -1542,7 +1542,7 @@ where
             // target might have changed since the block download request was issued
             // (new FCU received)
             let start = Instant::now();
-            let make_canonical_result = self.blockchain.make_canonical(&target.head_block_hash);
+            let make_canonical_result = self.blockchain.make_canonical(target.head_block_hash);
             let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
             match make_canonical_result {
                 Ok(outcome) => {
@@ -1586,7 +1586,7 @@ where
                             .filter(|h| !h.is_head())
                         {
                             // TODO: do not ignore this
-                            let _ = self.blockchain.make_canonical(target_hash.as_ref());
+                            let _ = self.blockchain.make_canonical(*target_hash.as_ref());
                         }
                     }
 
