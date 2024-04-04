@@ -11,7 +11,7 @@ use reth_network_api::NetworkInfo;
 use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{BlockId, TransactionMeta};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::{Header, Index, RichBlock, TransactionReceipt};
+use reth_rpc_types::{AnyTransactionReceipt, Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
@@ -62,7 +62,7 @@ where
     pub(crate) async fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> EthResult<Option<Vec<TransactionReceipt>>> {
+    ) -> EthResult<Option<Vec<AnyTransactionReceipt>>> {
         let mut block_and_receipts = None;
 
         if block_id.is_pending() {
