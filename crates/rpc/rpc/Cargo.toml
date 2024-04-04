@@ -82,7 +82,7 @@ derive_more.workspace = true
 dyn-clone.workspace = true 
 
 [dev-dependencies]
-reth-node-ethereum.workspace = true
+reth-evm-ethereum.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
 tempfile.workspace = true
