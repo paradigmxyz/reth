@@ -402,7 +402,7 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
     }
     .into_ipv4_mapped();
 
-    let mut maybe_fork_id = enr.get(b"eth")?;
+    let mut maybe_fork_id = enr.get_raw_rlp(b"eth")?;
     let fork_id = ForkId::decode(&mut maybe_fork_id).ok();
 
     Some(DnsNodeRecordUpdate { node_record, fork_id, enr: enr.clone() })
@@ -465,7 +465,7 @@ mod tests {
         let mut buf = Vec::new();
         let fork_id = MAINNET.hardfork_fork_id(Hardfork::Frontier).unwrap();
         fork_id.encode(&mut buf);
-        builder.ip4(Ipv4Addr::LOCALHOST).udp4(30303).tcp4(30303).add_value(b"eth", &buf);
+        builder.ip4(Ipv4Addr::LOCALHOST).udp4(30303).tcp4(30303).add_value_rlp(b"eth", buf.into());
         let enr = builder.build(&secret_key).unwrap();
 
         resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
