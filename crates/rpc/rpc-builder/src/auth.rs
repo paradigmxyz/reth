@@ -4,15 +4,16 @@ use crate::{
     error::{RpcError, ServerKind},
     EthConfig,
 };
+
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
-
 use jsonrpsee::{
     http_client::HeaderMap,
     server::{RpcModule, ServerHandle},
     Methods,
 };
+use reth_ipc::client::IpcClientBuilder;
+pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
 use crate::constants::DEFAULT_ENGINE_API_IPC_ENDPOINT;
 use reth_network_api::{NetworkInfo, Peers};
@@ -144,7 +145,13 @@ where
     let ipc_endpoint = Endpoint::new(DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
     let ipc_handle = IpcServerBuilder::default().build(ipc_endpoint.path())?.start(module).await?;
 
-    Ok(AuthServerHandle { handle, local_addr, secret, _ipc_handle: Some(ipc_handle) })
+    Ok(AuthServerHandle {
+        handle,
+        local_addr,
+        secret,
+        ipc_endpoint: Some(ipc_endpoint),
+        _ipc_handle: Some(ipc_handle),
+    })
 }
 
 /// Server configuration for the auth server.
@@ -203,12 +210,14 @@ impl AuthServerConfig {
         let local_addr = server.local_addr()?;
         let handle = server.start(module.inner.clone());
         let mut ipc_handle = None;
-        if let (Some(ipc_server_config), Some(ipc_endpoint)) = (ipc_server_config, ipc_endpoint) {
+        if let (Some(ipc_server_config), Some(ipc_endpoint)) =
+            (ipc_server_config, ipc_endpoint.clone())
+        {
             ipc_handle =
                 Some(ipc_server_config.build(ipc_endpoint.path())?.start(module.inner).await?);
         }
 
-        Ok(AuthServerHandle { handle, local_addr, secret, _ipc_handle: ipc_handle })
+        Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint, _ipc_handle: ipc_handle })
     }
 }
 
@@ -380,6 +389,7 @@ pub struct AuthServerHandle {
     local_addr: SocketAddr,
     handle: ServerHandle,
     secret: JwtSecret,
+    ipc_endpoint: Option<Endpoint>,
     _ipc_handle: Option<ServerHandle>,
 }
 
@@ -401,7 +411,7 @@ impl AuthServerHandle {
         format!("http://{}", self.local_addr)
     }
 
-    /// Returns the url to the ws server
+    /// returns the url to the ws server
     pub fn ws_url(&self) -> String {
         format!("ws://{}", self.local_addr)
     }
@@ -435,5 +445,13 @@ impl AuthServerHandle {
             .build(self.ws_url())
             .await
             .expect("Failed to create ws client")
+    }
+
+    /// Returns an ipc client connected to the server.
+    pub async fn ipc_client(&self) -> jsonrpsee::async_client::Client {
+        IpcClientBuilder::default()
+            .build(*self.ipc_endpoint.clone().expect("Empty IPC endpoint"))
+            .await
+            .expect("Failed to create ipc client")
     }
 }
