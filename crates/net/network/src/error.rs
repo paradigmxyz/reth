@@ -53,6 +53,9 @@ pub enum NetworkError {
     /// IO error when creating the discovery service
     #[error("failed to launch discovery service: {0}")]
     Discovery(io::Error),
+    /// An error occurred with discovery v5 node.
+    #[error("discv5 error, {0}")]
+    Discv5Error(#[from] reth_discv5::Error),
     /// Error when setting up the DNS resolver failed
     ///
     /// See also [DnsResolver](reth_dns_discovery::DnsResolver::from_system_conf)

@@ -1,7 +1,8 @@
 //! Interface between node identification on protocol version 5 and 4. Specifically, between types
 //! [`discv5::enr::NodeId`] and [`PeerId`].
 
-use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey, NodeId};
+use discv5::enr::{CombinedPublicKey, EnrPublicKey, NodeId};
+use enr::Enr;
 use reth_primitives::{id2pk, pk2id, PeerId};
 use secp256k1::{PublicKey, SecretKey};
 
