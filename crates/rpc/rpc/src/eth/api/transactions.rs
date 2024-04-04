@@ -1741,7 +1741,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
             inner: log.into(),
             block_hash: Some(meta.block_hash),
             block_number: Some(meta.block_number),
-            block_timestamp: None,
+            block_timestamp: Some(meta.timestamp),
             transaction_hash: Some(meta.tx_hash),
             transaction_index: Some(meta.index),
             log_index: Some((num_logs + tx_log_idx) as u64),

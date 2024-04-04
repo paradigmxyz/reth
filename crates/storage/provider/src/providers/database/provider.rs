@@ -1608,6 +1608,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                                 block_number,
                                 base_fee: header.base_fee_per_gas,
                                 excess_blob_gas: header.excess_blob_gas,
+                                timestamp: header.timestamp,
                             };
 
                             return Ok(Some((transaction, meta)))
