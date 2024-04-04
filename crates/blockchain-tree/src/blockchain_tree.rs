@@ -1,7 +1,6 @@
 //! Implementation of [`BlockchainTree`]
 
 use crate::{
-    canonical_chain::CanonicalChain,
     metrics::{MakeCanonicalAction, MakeCanonicalDurationsRecorder, TreeMetrics},
     state::{BlockChainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
@@ -183,19 +182,8 @@ where
 
     /// Expose internal indices of the BlockchainTree.
     #[inline]
-    fn block_indices_mut(&mut self) -> &mut BlockIndices {
-        &mut self.state.block_indices
-    }
-
-    /// Expose internal indices of the BlockchainTree.
-    #[inline]
     pub fn block_indices(&self) -> &BlockIndices {
         self.state.block_indices()
-    }
-
-    #[inline]
-    fn canonical_chain(&self) -> &CanonicalChain {
-        self.block_indices().canonical_chain()
     }
 
     /// Returns the block with matching hash from any side-chain.
@@ -245,6 +233,9 @@ where
     /// Return none if block unknown.
     pub fn post_state_data(&self, block_hash: BlockHash) -> Option<BundleStateData> {
         trace!(target: "blockchain_tree", ?block_hash, "Searching for post state data");
+
+        let canonical_chain = self.state.block_indices.canonical_chain();
+
         // if it is part of the chain
         if let Some(chain_id) = self.block_indices().get_blocks_chain_id(&block_hash) {
             trace!(target: "blockchain_tree", ?block_hash, "Constructing post state data based on non-canonical chain");
@@ -257,8 +248,7 @@ where
             let mut parent_block_hashed = self.all_chain_hashes(chain_id);
             let first_pending_block_number =
                 *parent_block_hashed.first_key_value().expect("There is at least one block hash").0;
-            let canonical_chain = self
-                .canonical_chain()
+            let canonical_chain = canonical_chain
                 .iter()
                 .filter(|&(key, _)| key < first_pending_block_number)
                 .collect::<Vec<_>>();
@@ -270,12 +260,12 @@ where
         }
 
         // check if there is canonical block
-        if let Some(canonical_number) = self.canonical_chain().canonical_number(block_hash) {
-            trace!(target: "blockchain_tree", ?block_hash, "Constructing post state data based on canonical chain");
+        if let Some(canonical_number) = canonical_chain.canonical_number(block_hash) {
+            trace!(target: "blockchain_tree", %block_hash, "Constructing post state data based on canonical chain");
             return Some(BundleStateData {
                 canonical_fork: ForkBlock { number: canonical_number, hash: block_hash },
                 state: BundleStateWithReceipts::default(),
-                parent_block_hashed: self.canonical_chain().inner().clone(),
+                parent_block_hashed: canonical_chain.inner().clone(),
             })
         }
 
@@ -384,7 +374,7 @@ where
             .ok_or_else(|| BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash })?
             .seal(block.parent_hash);
 
-        let canonical_chain = self.canonical_chain();
+        let canonical_chain = self.state.block_indices.canonical_chain();
 
         let block_attachment = if block.parent_hash == canonical_chain.tip().hash {
             BlockAttachment::Canonical
@@ -459,7 +449,7 @@ where
                 block_validation_kind,
             )?;
 
-            self.block_indices_mut().insert_non_fork_block(block_number, block_hash, chain_id);
+            self.state.block_indices.insert_non_fork_block(block_number, block_hash, chain_id);
             block_attachment
         } else {
             debug!(target: "blockchain_tree", ?canonical_fork, "Starting new fork from side chain");
@@ -772,7 +762,7 @@ where
             .fetch_latest_canonical_hashes(self.config.num_of_canonical_hashes() as usize)?;
 
         let (mut remove_chains, _) =
-            self.block_indices_mut().update_block_hashes(last_canonical_hashes.clone());
+            self.state.block_indices.update_block_hashes(last_canonical_hashes.clone());
 
         // remove all chains that got discarded
         while let Some(chain_id) = remove_chains.first() {
@@ -863,7 +853,7 @@ where
             ChainSplit::Split { canonical, pending } => {
                 trace!(target: "blockchain_tree", ?canonical, ?pending, "Split chain");
                 // rest of split chain is inserted back with same chain_id.
-                self.block_indices_mut().insert_chain(chain_id, &pending);
+                self.state.block_indices.insert_chain(chain_id, &pending);
                 self.state.chains.insert(chain_id, AppendableChain::new(pending));
                 canonical
             }
@@ -1006,7 +996,7 @@ where
             trace!(target: "blockchain_tree", ?new_canon_chain, "Canonical chain appended");
         }
         // update canonical index
-        self.block_indices_mut().canonicalize_blocks(new_canon_chain.blocks());
+        self.state.block_indices.canonicalize_blocks(new_canon_chain.blocks());
         durations_recorder.record_relative(MakeCanonicalAction::UpdateCanonicalIndex);
 
         // event about new canonical chain.
@@ -1178,7 +1168,7 @@ where
 
         // check if there is block in chain
         if let Some(old_canon_chain) = old_canon_chain {
-            self.block_indices_mut().unwind_canonical_chain(unwind_to);
+            self.state.block_indices.unwind_canonical_chain(unwind_to);
             // insert old canonical chain to BlockchainTree.
             self.insert_unwound_chain(AppendableChain::new(old_canon_chain));
         }
@@ -1228,7 +1218,7 @@ where
     /// checkpoint metric will get overwritten. Buffered blocks metrics are updated in
     /// [BlockBuffer](crate::block_buffer::BlockBuffer) during the pipeline sync.
     pub(crate) fn update_chains_metrics(&mut self) {
-        let height = self.canonical_chain().tip().number;
+        let height = self.state.block_indices.canonical_tip().number;
 
         let longest_sidechain_height =
             self.state.chains.values().map(|chain| chain.tip().number).max();
