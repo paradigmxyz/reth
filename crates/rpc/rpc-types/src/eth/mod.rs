@@ -3,4 +3,4 @@
 pub mod transaction;
 
 // re-export
-pub use alloy_rpc_engine_types as engine;
+pub use alloy_rpc_types_engine as engine;

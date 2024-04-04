@@ -31,6 +31,12 @@ impl From<AlloyLog> for Log {
     }
 }
 
+impl From<Log> for AlloyLog {
+    fn from(log: Log) -> AlloyLog {
+        AlloyLog::new_unchecked(log.address, log.topics, log.data)
+    }
+}
+
 /// Calculate receipt logs bloom.
 pub fn logs_bloom<'a, It>(logs: It) -> Bloom
 where
