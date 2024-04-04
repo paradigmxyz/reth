@@ -18,7 +18,7 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_node_api::ConfigureEvmEnv;
+//! use reth_node_api::ConfigureEvm;
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -47,7 +47,7 @@
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
-//!     EvmConfig: ConfigureEvmEnv + 'static,
+//!     EvmConfig: ConfigureEvm + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -78,7 +78,7 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_node_api::{ConfigureEvmEnv, EngineTypes};
+//! use reth_node_api::{ConfigureEvm, EngineTypes};
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -114,7 +114,7 @@
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes + 'static,
-//!     EvmConfig: ConfigureEvmEnv + 'static,
+//!     EvmConfig: ConfigureEvm + 'static,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -169,7 +169,7 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
-use reth_node_api::{ConfigureEvmEnv, EngineTypes};
+use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -251,7 +251,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     let module_config = module_config.into();
     let server_config = server_config.into();
@@ -419,7 +419,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
         evm_config: E,
     ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, E>
     where
-        E: ConfigureEvmEnv + 'static,
+        E: ConfigureEvm + 'static,
     {
         let Self { provider, pool, executor, network, events, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
@@ -442,7 +442,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
     /// used to start the transport server(s).
@@ -496,13 +496,13 @@ where
     ///
     /// ```no_run
     /// use reth_network_api::noop::NoopNetwork;
-    /// use reth_node_api::ConfigureEvmEnv;
+    /// use reth_node_api::ConfigureEvm;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc_builder::RpcModuleBuilder;
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
     ///
-    /// fn init<Evm: ConfigureEvmEnv + 'static>(evm: Evm) {
+    /// fn init<Evm: ConfigureEvm + 'static>(evm: Evm) {
     ///     let mut registry = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())
     ///         .with_pool(NoopTransactionPool::default())
@@ -738,7 +738,7 @@ impl RpcModuleSelection {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
-        EvmConfig: ConfigureEvmEnv + 'static,
+        EvmConfig: ConfigureEvm + 'static,
     {
         let mut registry =
             RethModuleRegistry::new(provider, pool, network, executor, events, config, evm_config);
@@ -1060,7 +1060,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     /// Register Eth Namespace
     ///
