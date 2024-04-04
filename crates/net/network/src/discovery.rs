@@ -40,7 +40,7 @@ pub struct Discovery {
     ///
     /// These nodes can be ephemeral and are updated via the discovery protocol.
     discovered_nodes: LruMap<PeerId, SocketAddr>,
-    /// Local ENR of the discovery v4 service.
+    /// Local ENR of the discovery v4 service (discv5 ENR has same [`PeerId`]).
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
     discv4: Option<Discv4>,
