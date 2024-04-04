@@ -116,8 +116,18 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
             collect(&mut channels, &mut collector)?;
 
+            let total_hashes = collector.len();
+            let interval = (total_hashes / 10).max(1);
             let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
-            for item in collector.iter()? {
+            for (index, item) in collector.iter()?.enumerate() {
+                if index > 0 && index % interval == 0 {
+                    info!(
+                        target: "sync::stages::hashing_storage",
+                        progress = format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                        "Inserting hashes"
+                    );
+                }
+
                 let (addr_key, value) = item?;
                 cursor.append_dup(
                     B256::from_slice(&addr_key[..32]),
@@ -182,7 +192,7 @@ fn collect(
             collector.insert(key, v)?;
         }
     }
-    debug!(target: "sync::stages::hashing_storage", "Hashed {} entries", collector.len());
+    info!(target: "sync::stages::hashing_storage", "Hashed {} entries", collector.len());
     channels.clear();
     Ok(())
 }
