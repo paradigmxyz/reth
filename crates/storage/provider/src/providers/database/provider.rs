@@ -15,7 +15,7 @@ use crate::{
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
@@ -26,22 +26,22 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
+use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::{
     p2p::headers::downloader::SyncTarget,
     provider::{ProviderResult, RootMismatch},
     RethResult,
 };
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     keccak256,
     revm::{config::revm_spec, env::fill_block_env},
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, GotExpected, Head, Header, PruneCheckpoint, PruneModes, PruneSegment,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    ChainInfo, ChainSpec, GotExpected, Head, Header, PruneCheckpoint, PruneLimiter, PruneModes,
+    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
+    StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -850,30 +850,38 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     pub fn prune_table_with_iterator<T: Table>(
         &self,
         keys: impl IntoIterator<Item = T::Key>,
-        limit: usize,
+        limiter: &mut PruneLimiter,
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut deleted = 0;
-
         let mut keys = keys.into_iter();
 
-        if limit != 0 {
-            for key in &mut keys {
-                let row = cursor.seek_exact(key.clone())?;
-                if let Some(row) = row {
-                    cursor.delete_current()?;
-                    deleted += 1;
-                    delete_callback(row);
-                }
+        let mut deleted_entries = 0;
 
-                if deleted == limit {
-                    break
-                }
+        for key in &mut keys {
+            if limiter.is_limit_reached() {
+                debug!(
+                    target: "providers::db",
+                    ?limiter,
+                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
+                    time_limit = %limiter.is_time_limit_reached(),
+                    table = %T::NAME,
+                    "Pruning limit reached"
+                );
+                break
+            }
+
+            let row = cursor.seek_exact(key)?;
+            if let Some(row) = row {
+                cursor.delete_current()?;
+                limiter.increment_deleted_entries_count();
+                deleted_entries += 1;
+                delete_callback(row);
             }
         }
 
-        Ok((deleted, keys.next().is_none()))
+        let done = keys.next().is_none();
+        Ok((deleted_entries, done))
     }
 
     /// Prune the table for the specified key range.
@@ -882,29 +890,72 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     pub fn prune_table_with_range<T: Table>(
         &self,
         keys: impl RangeBounds<T::Key> + Clone + Debug,
-        limit: usize,
+        limiter: &mut PruneLimiter,
         mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> Result<(usize, bool), DatabaseError> {
         let mut cursor = self.tx.cursor_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
-        let mut deleted = 0;
 
-        if limit != 0 {
-            while let Some(row) = walker.next().transpose()? {
-                if !skip_filter(&row) {
-                    walker.delete_current()?;
-                    deleted += 1;
-                    delete_callback(row);
-                }
+        let mut deleted_entries = 0;
 
-                if deleted == limit {
-                    break
-                }
+        let done = loop {
+            // check for time out must be done in this scope since it's not done in
+            // `prune_table_with_range_step`
+            if limiter.is_limit_reached() {
+                debug!(
+                    target: "providers::db",
+                    ?limiter,
+                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
+                    time_limit = %limiter.is_time_limit_reached(),
+                    table = %T::NAME,
+                    "Pruning limit reached"
+                );
+                break false
             }
+
+            let done = self.prune_table_with_range_step(
+                &mut walker,
+                limiter,
+                &mut skip_filter,
+                &mut delete_callback,
+            )?;
+
+            if done {
+                break true
+            } else {
+                deleted_entries += 1;
+            }
+        };
+
+        Ok((deleted_entries, done))
+    }
+
+    /// Steps once with the given walker and prunes the entry in the table.
+    ///
+    /// Returns `true` if the walker is finished, `false` if it may have more data to prune.
+    ///
+    /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
+    /// pruning different tables concurrently, by letting them step to the same height before
+    /// timing out.
+    pub fn prune_table_with_range_step<T: Table>(
+        &self,
+        walker: &mut RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>,
+        limiter: &mut PruneLimiter,
+        skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
+        delete_callback: &mut impl FnMut(TableRow<T>),
+    ) -> Result<bool, DatabaseError> {
+        let Some(res) = walker.next() else { return Ok(true) };
+
+        let row = res?;
+
+        if !skip_filter(&row) {
+            walker.delete_current()?;
+            limiter.increment_deleted_entries_count();
+            delete_callback(row);
         }
 
-        Ok((deleted, walker.next().transpose()?.is_none()))
+        Ok(false)
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -1418,18 +1469,76 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+        if range.is_empty() {
+            return Ok(Vec::new())
+        }
+
+        let len = range.end().saturating_sub(*range.start()) as usize;
+        let mut blocks = Vec::with_capacity(len);
+
+        let headers = self.headers_range(range)?;
+        let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
+        let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
+        let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
-        self.process_block_range(range, |tx_range, header, ommers, withdrawals| {
-            let body = if tx_range.is_empty() {
-                Vec::new()
-            } else {
-                self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
-                    .into_iter()
-                    .map(Into::into)
-                    .collect()
-            };
-            Ok(Block { header, body, ommers, withdrawals })
-        })
+
+        for header in headers {
+            // If the body indices are not found, this means that the transactions either do
+            // not exist in the database yet, or they do exit but are
+            // not indexed. If they exist but are not indexed, we don't
+            // have enough information to return the block anyways, so
+            // we skip the block.
+            if let Some((_, block_body_indices)) = block_body_cursor.seek_exact(header.number)? {
+                let tx_range = block_body_indices.tx_num_range();
+                let body = if tx_range.is_empty() {
+                    Vec::new()
+                } else {
+                    self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
+                        .into_iter()
+                        .map(Into::into)
+                        .collect()
+                };
+
+                // If we are past shanghai, then all blocks should have a withdrawal list,
+                // even if empty
+                let withdrawals =
+                    if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
+                        Some(
+                            withdrawals_cursor
+                                .seek_exact(header.number)?
+                                .map(|(_, w)| w.withdrawals)
+                                .unwrap_or_default(),
+                        )
+                    } else {
+                        None
+                    };
+                let ommers =
+                    if self.chain_spec.final_paris_total_difficulty(header.number).is_some() {
+                        Vec::new()
+                    } else {
+                        ommers_cursor
+                            .seek_exact(header.number)?
+                            .map(|(_, o)| o.ommers)
+                            .unwrap_or_default()
+                    };
+
+                blocks.push(Block { header, body, ommers, withdrawals });
+            }
+        }
+        Ok(blocks)
+
+        // let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+        // self.process_block_range(range, |tx_range, header, ommers, withdrawals| {
+        //     let body = if tx_range.is_empty() {
+        //         Vec::new()
+        //     } else {
+        //         self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
+        //             .into_iter()
+        //             .map(Into::into)
+        //             .collect()
+        //     };
+        //     Ok(Block { header, body, ommers, withdrawals })
+        // })
     }
 
     fn block_with_senders_range(
@@ -1602,6 +1711,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                                 block_number,
                                 base_fee: header.base_fee_per_gas,
                                 excess_blob_gas: header.excess_blob_gas,
+                                timestamp: header.timestamp,
                             };
 
                             return Ok(Some((transaction, meta)))

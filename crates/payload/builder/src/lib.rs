@@ -114,6 +114,7 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
+pub use events::Events;
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};

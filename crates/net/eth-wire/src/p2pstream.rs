@@ -226,7 +226,7 @@ where
 /// This stream emits _non-empty_ Bytes that start with the normalized message id, so that the first
 /// byte of each message starts from 0. If this stream only supports a single capability, for
 /// example `eth` then the first byte of each message will match
-/// [EthMessageID](crate::types::EthMessageID).
+/// [EthMessageID](reth_eth_wire_types::message::EthMessageID).
 #[pin_project]
 #[derive(Debug)]
 pub struct P2PStream<S> {

@@ -1,30 +1,30 @@
 participants:
-- el_client_type: reth
-  el_client_image: ghcr.io/paradigmxyz/reth
-  cl_client_type: lighthouse
-  cl_client_image: sigp/lighthouse:latest
+- el_type: reth
+  el_image: ghcr.io/paradigmxyz/reth
+  cl_type: lighthouse
+  cl_image: sigp/lighthouse:latest
   count: 1
-- el_client_type: reth
-  el_client_image: ghcr.io/paradigmxyz/reth
-  cl_client_type: teku
-  cl_client_image: consensys/teku:latest
+- el_type: reth
+  el_image: ghcr.io/paradigmxyz/reth
+  cl_type: teku
+  cl_image: consensys/teku:latest
   count: 1
-- el_client_type: reth
-  el_client_image: ghcr.io/paradigmxyz/reth
-  cl_client_type: prysm
-  cl_client_image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
-  validator_client_type: prysm
-  validator_client_image: gcr.io/prysmaticlabs/prysm/validator:stable
+- el_type: reth
+  el_image: ghcr.io/paradigmxyz/reth
+  cl_type: prysm
+  cl_image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
+  vc_type: prysm
+  vc_image: gcr.io/prysmaticlabs/prysm/validator:stable
   count: 1
-- el_client_type: reth
-  el_client_image: ghcr.io/paradigmxyz/reth
-  cl_client_type: nimbus
-  cl_client_image: statusim/nimbus-eth2:amd64-latest
+- el_type: reth
+  el_image: ghcr.io/paradigmxyz/reth
+  cl_type: nimbus
+  cl_image: statusim/nimbus-eth2:amd64-latest
   count: 1
-- el_client_type: reth
-  el_client_image: ghcr.io/paradigmxyz/reth
-  cl_client_type: lodestar
-  cl_client_image: chainsafe/lodestar:latest
+- el_type: reth
+  el_image: ghcr.io/paradigmxyz/reth
+  cl_type: lodestar
+  cl_image: chainsafe/lodestar:latest
   count: 1
 network_params:
   genesis_delay: 120

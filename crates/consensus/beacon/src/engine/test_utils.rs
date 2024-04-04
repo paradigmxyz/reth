@@ -434,6 +434,7 @@ where
             5,
             self.base_config.chain_spec.prune_delete_limit,
             config.max_reorg_depth() as usize,
+            None,
         );
 
         let mut hooks = EngineHooks::new();

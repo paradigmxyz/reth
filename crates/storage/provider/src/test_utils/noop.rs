@@ -7,8 +7,8 @@ use crate::{
     WithdrawalsProvider,
 };
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::provider::ProviderResult;
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::AccountProof,

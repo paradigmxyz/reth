@@ -77,3 +77,6 @@ pub use database_provider::DatabaseProviderFactory;
 
 mod stats;
 pub use stats::StatsReader;
+
+mod full;
+pub use full::FullProvider;

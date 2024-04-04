@@ -9,7 +9,7 @@ use crate::{
     },
     exex::{BoxedLaunchExEx, ExExContext},
     hooks::NodeHooks,
-    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter},
+    node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     Node, NodeHandle,
 };
@@ -30,7 +30,7 @@ use reth_db::{
 };
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
-use reth_node_api::NodeTypes;
+use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
@@ -677,6 +677,7 @@ where
         let mut pruner = PrunerBuilder::new(prune_config.clone())
             .max_reorg_depth(tree_config.max_reorg_depth() as usize)
             .prune_delete_limit(config.chain.prune_delete_limit)
+            .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
             .build(provider_factory.clone());
 
         let pruner_events = pruner.events();

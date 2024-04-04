@@ -11,8 +11,11 @@ reth.workspace = true
 reth-node-core.workspace = true
 reth-primitives.workspace = true
 reth-node-ethereum.workspace = true
-futures-util.workspace = true
+reth-tracing.workspace = true
 
+futures-util.workspace = true
 eyre.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
+rand.workspace = true
+secp256k1.workspace = true

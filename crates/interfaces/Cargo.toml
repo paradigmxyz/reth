@@ -14,8 +14,7 @@ workspace = true
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 reth-network-api.workspace = true
-# TODO(onbjerg): We only need this for [BlockBody]
-reth-eth-wire.workspace = true
+reth-eth-wire-types.workspace = true
 
 # async
 futures.workspace = true
@@ -43,4 +42,4 @@ secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 [features]
 test-utils = ["secp256k1", "rand", "parking_lot"]
 cli = ["clap"]
-optimism = ["reth-eth-wire/optimism"]
+optimism = ["reth-eth-wire-types/optimism"]

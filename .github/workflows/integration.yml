@@ -36,11 +36,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Run tests
+      - if: matrix.network == 'ethereum'
+        name: Run tests
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
             --workspace --exclude examples --exclude ef-tests \
+            -E "kind(test)"
+      - if: matrix.network == 'optimism'
+        name: Run tests
+        run: |
+          cargo nextest run \
+            --locked --features "asm-keccak ${{ matrix.network }}" \
+            --workspace --exclude examples --exclude ef-tests node-e2e-tests \
             -E "kind(test)"
 
   sync:
