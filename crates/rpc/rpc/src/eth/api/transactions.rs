@@ -29,10 +29,15 @@ use reth_revm::{
     database::StateProviderDatabase,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
-use reth_rpc_types::{transaction::{
-    EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
-    LegacyTransactionRequest,
-}, Index, Log, Transaction, TransactionInfo, TransactionKind as RpcTransactionKind, TransactionReceipt, TransactionRequest, TypedTransactionRequest, WithOtherFields, AnyReceiptEnvelope};
+use reth_rpc_types::{
+    transaction::{
+        EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
+        LegacyTransactionRequest,
+    },
+    AnyReceiptEnvelope, AnyTransactionReceipt, Index, Log, ReceiptWithBloom, Transaction,
+    TransactionInfo, TransactionKind as RpcTransactionKind, TransactionReceipt, TransactionRequest,
+    TypedTransactionRequest, WithOtherFields,
+};
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
@@ -195,7 +200,7 @@ pub trait EthTransactions: Send + Sync {
     ///
     /// Returns None if the transaction does not exist or is pending
     /// Note: The tx receipt is not available for pending transactions.
-    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<TransactionReceipt>>;
+    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>>;
 
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
@@ -674,7 +679,7 @@ where
         }
     }
 
-    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<TransactionReceipt>> {
+    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>> {
         let result = self
             .on_blocking_task(|this| async move {
                 let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
@@ -1260,7 +1265,7 @@ where
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> EthResult<WithOtherFields<TransactionReceipt<AnyReceiptEnvelope>>> {
+    ) -> EthResult<AnyTransactionReceipt> {
         // get all receipts for the block
         let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
             Some(recpts) => recpts,
@@ -1278,7 +1283,7 @@ where
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> EthResult<WithOtherFields<TransactionReceipt<AnyReceiptEnvelope>>> {
+    ) -> EthResult<AnyTransactionReceipt> {
         let (block, receipts) = self
             .cache()
             .get_block_and_receipts(meta.block_hash)
@@ -1530,7 +1535,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     receipt: Receipt,
     all_receipts: &[Receipt],
     #[cfg(feature = "optimism")] optimism_tx_meta: OptimismTxMeta,
-) -> EthResult<WithOtherFields<TransactionReceipt<AnyReceiptEnvelope>>> {
+) -> EthResult<AnyTransactionReceipt> {
     // Note: we assume this transaction is valid, because it's mined (or part of pending block) and
     // we don't need to check for pre EIP-2
     let from =
@@ -1549,34 +1554,58 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 
     let blob_gas_used = transaction.transaction.blob_gas_used();
     // Blob gas price should only be present if the transaction is a blob transaction
-    let blob_gas_price =
-        blob_gas_used.and_then(|_| meta.excess_blob_gas.map(calc_blob_gasprice));
+    let blob_gas_price = blob_gas_used.and_then(|_| meta.excess_blob_gas.map(calc_blob_gasprice));
+    let logs_bloom = receipt.bloom_slow();
 
+    // get number of logs in the block
+    let mut num_logs = 0;
+    for prev_receipt in all_receipts.iter().take(meta.index as usize) {
+        num_logs += prev_receipt.logs.len();
+    }
 
+    let mut logs = Vec::with_capacity(receipt.logs.len());
+    for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
+        let rpclog = Log {
+            inner: log.into(),
+            block_hash: Some(meta.block_hash),
+            block_number: Some(meta.block_number),
+            block_timestamp: None,
+            transaction_hash: Some(meta.tx_hash),
+            transaction_index: Some(meta.index),
+            log_index: Some((num_logs + tx_log_idx) as u64),
+            removed: false,
+        };
+        logs.push(rpclog);
+    }
+
+    let rpc_receipt = reth_rpc_types::Receipt {
+        status: receipt.success,
+        cumulative_gas_used: receipt.cumulative_gas_used,
+        logs,
+    };
 
     #[allow(clippy::needless_update)]
-    let mut res_receipt = TransactionReceipt {
+    let res_receipt = TransactionReceipt {
+        inner: AnyReceiptEnvelope {
+            inner: ReceiptWithBloom { receipt: rpc_receipt, logs_bloom },
+            r#type: transaction.transaction.tx_type().into(),
+        },
         transaction_hash: meta.tx_hash,
         transaction_index: meta.index,
         block_hash: Some(meta.block_hash),
         block_number: Some(meta.block_number),
         from,
         to: None,
-        cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
         gas_used: Some(gas_used),
         contract_address: None,
-        logs: Vec::with_capacity(receipt.logs.len()),
         effective_gas_price: transaction.effective_gas_price(meta.base_fee) as u64,
-        transaction_type: transaction.transaction.tx_type().into(),
         // TODO pre-byzantium receipts have a post-transaction state root
         state_root: None,
-        logs_bloom: receipt.bloom_slow(),
-        status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
         // EIP-4844 fields
         blob_gas_price: blob_gas_price.map(|gas| gas as u64),
         blob_gas_used,
-        ..Default::default()
     };
+    let mut res_receipt = WithOtherFields::new(res_receipt);
 
     #[cfg(feature = "optimism")]
     {
@@ -1605,26 +1634,6 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         Call(addr) => {
             res_receipt.to = Some(*addr);
         }
-    }
-
-    // get number of logs in the block
-    let mut num_logs = 0;
-    for prev_receipt in all_receipts.iter().take(meta.index as usize) {
-        num_logs += prev_receipt.logs.len();
-    }
-
-    for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
-        let rpclog = Log {
-            inner: log.into(),
-            block_hash: Some(meta.block_hash),
-            block_number: Some(U256::from(meta.block_number)),
-            block_timestamp: None,
-            transaction_hash: Some(meta.tx_hash),
-            transaction_index: Some(U256::from(meta.index)),
-            log_index: Some(U256::from(num_logs + tx_log_idx)),
-            removed: false,
-        };
-        res_receipt.logs.push(rpclog);
     }
 
     Ok(res_receipt)

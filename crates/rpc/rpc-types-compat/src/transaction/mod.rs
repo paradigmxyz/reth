@@ -1,9 +1,7 @@
 //! Compatibility functions for rpc `Transaction` type.
 mod signature;
 mod typed;
-use alloy_rpc_types::{
-    request::{TransactionInput, TransactionRequest},
-};
+use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
 use reth_primitives::{
     BlockNumber, Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
     TransactionSignedEcRecovered, TxType, B256, U128, U256, U8,

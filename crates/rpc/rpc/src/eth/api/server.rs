@@ -22,7 +22,11 @@ use reth_provider::{
     HeaderProvider, StateProviderFactory,
 };
 use reth_rpc_api::EthApiServer;
-use reth_rpc_types::{state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, TransactionReceipt, TransactionRequest, Work, WithOtherFields, AnyReceiptEnvelope};
+use reth_rpc_types::{
+    state::StateOverride, AccessListWithGasUsed, AnyTransactionReceipt, BlockOverrides, Bundle,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
+    StateContext, SyncStatus, TransactionRequest, Work,
+};
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
 use tracing::trace;
@@ -124,7 +128,10 @@ where
     }
 
     /// Handler for: `eth_getBlockReceipts`
-    async fn block_receipts(&self, block_id: BlockId) -> Result<Option<Vec<WithOtherFields<TransactionReceipt<AnyReceiptEnvelope>>>>> {
+    async fn block_receipts(
+        &self,
+        block_id: BlockId,
+    ) -> Result<Option<Vec<AnyTransactionReceipt>>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
         Ok(EthApi::block_receipts(self, block_id).await?)
     }
@@ -202,7 +209,7 @@ where
     }
 
     /// Handler for: `eth_getTransactionReceipt`
-    async fn transaction_receipt(&self, hash: B256) -> Result<Option<TransactionReceipt>> {
+    async fn transaction_receipt(&self, hash: B256) -> Result<Option<AnyTransactionReceipt>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
         Ok(EthTransactions::transaction_receipt(self, hash).await?)
     }
