@@ -1,10 +1,7 @@
 //! Compatibility functions for rpc `Transaction` type.
 mod signature;
 mod typed;
-use alloy_rpc_types::{
-    other::OtherFields,
-    request::{TransactionInput, TransactionRequest},
-};
+use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
 use reth_primitives::{
     BlockNumber, Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
     TransactionSignedEcRecovered, TxType, B256, U128, U256, U8,
@@ -216,6 +213,5 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         blob_versioned_hashes,
         transaction_type: Some(tx_type.into()),
         sidecar: None,
-        other: OtherFields::default(),
     }
 }

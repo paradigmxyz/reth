@@ -1,7 +1,8 @@
 //! Interface between node identification on protocol version 5 and 4. Specifically, between types
 //! [`discv5::enr::NodeId`] and [`PeerId`].
 
-use discv5::enr::{CombinedPublicKey, Enr, EnrPublicKey, NodeId};
+use discv5::enr::{CombinedPublicKey, EnrPublicKey, NodeId};
+use enr::Enr;
 use reth_primitives::{id2pk, pk2id, PeerId};
 use secp256k1::{PublicKey, SecretKey};
 
@@ -60,7 +61,7 @@ impl From<EnrCombinedKeyWrapper> for Enr<SecretKey> {
 mod tests {
     use alloy_rlp::Encodable;
     use discv5::enr::{CombinedKey, EnrKey};
-    use reth_primitives::{pk_to_id, Hardfork, NodeRecord, MAINNET};
+    use reth_primitives::{Hardfork, NodeRecord, MAINNET};
 
     use super::*;
 
@@ -105,7 +106,7 @@ mod tests {
                 address: IP.parse().unwrap(),
                 tcp_port: TCP_PORT,
                 udp_port: UDP_PORT,
-                id: pk_to_id(&enr.public_key())
+                id: pk2id(&enr.public_key())
             },
             node_record
         )

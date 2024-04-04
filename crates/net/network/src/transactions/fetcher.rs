@@ -668,7 +668,7 @@ impl TransactionFetcher {
         {
             for hash in new_announced_hashes.iter() {
                 if self.hashes_pending_fetch.contains(hash) {
-                    panic!("`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and
+                    debug!(target: "net::tx", "`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and
 `@inflight_requests`,
 `@hashes_fetch_inflight_and_pending_fetch` for `%new_announced_hashes`: {:?}",
                         new_announced_hashes.iter().map(|hash|

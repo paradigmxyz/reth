@@ -8,8 +8,11 @@ use revm_primitives::ExecutionResult;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_types::{
-    BlockDetails, BlockTransactions, ContractCreator, InternalOperation, OperationType,
-    OtsBlockTransactions, OtsTransactionReceipt, TraceEntry, Transaction, TransactionsWithReceipts,
+    trace::otterscan::{
+        BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
+        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+    },
+    BlockTransactions, Transaction, TransactionReceipt,
 };
 
 use crate::{eth::EthTransactions, result::internal_rpc_err};
@@ -155,10 +158,48 @@ where
         }
 
         // Crop receipts and transform them into OtsTransactionReceipt
-        let timestamp = u64::try_from(block.header.timestamp).unwrap_or(u64::MAX);
+        let timestamp = Some(u64::try_from(block.header.timestamp).unwrap_or(u64::MAX));
         let receipts = receipts
             .drain(page_start..page_end)
-            .map(|receipt| OtsTransactionReceipt { receipt, timestamp })
+            .map(|receipt| {
+                let TransactionReceipt {
+                    inner,
+                    transaction_hash,
+                    transaction_index,
+                    block_hash,
+                    block_number,
+                    gas_used,
+                    effective_gas_price,
+                    blob_gas_used,
+                    blob_gas_price,
+                    from,
+                    to,
+                    contract_address,
+                    state_root,
+                } = receipt.inner;
+                let receipt = TransactionReceipt {
+                    inner: OtsReceipt {
+                        status: inner.inner.receipt.status,
+                        cumulative_gas_used: inner.inner.receipt.cumulative_gas_used,
+                        logs: None,
+                        logs_bloom: None,
+                        r#type: inner.r#type,
+                    },
+                    transaction_hash,
+                    transaction_index,
+                    block_hash,
+                    block_number,
+                    gas_used,
+                    effective_gas_price,
+                    blob_gas_used,
+                    blob_gas_price,
+                    from,
+                    to,
+                    contract_address,
+                    state_root,
+                };
+                OtsTransactionReceipt { receipt, timestamp }
+            })
             .collect();
         Ok(OtsBlockTransactions { fullblock: block.inner.into(), receipts })
     }

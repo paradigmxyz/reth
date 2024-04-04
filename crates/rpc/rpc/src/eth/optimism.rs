@@ -5,6 +5,7 @@ use crate::{
     result::internal_rpc_err,
 };
 use jsonrpsee::types::ErrorObject;
+use reqwest::Client;
 
 /// Eth Optimism Api Error
 #[cfg(feature = "optimism")]
@@ -42,5 +43,21 @@ impl ToRpcError for OptimismEthApiError {
 impl From<OptimismEthApiError> for EthApiError {
     fn from(err: OptimismEthApiError) -> Self {
         EthApiError::other(err)
+    }
+}
+
+/// A client to interact with a Sequencer
+#[derive(Debug, Default, Clone)]
+pub struct SequencerClient {
+    /// The endpoint of the sequencer
+    pub sequencer_endpoint: String,
+    /// The HTTP client
+    pub http_client: Client,
+}
+
+impl SequencerClient {
+    /// Creates a new [SequencerClient].
+    pub fn new(sequencer_endpoint: impl Into<String>, http_client: Client) -> Self {
+        Self { sequencer_endpoint: sequencer_endpoint.into(), http_client }
     }
 }

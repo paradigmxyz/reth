@@ -200,7 +200,17 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             let mut hashed_account_cursor =
                 tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
 
-            for item in collector.iter()? {
+            let total_hashes = collector.len();
+            let interval = (total_hashes / 10).max(1);
+            for (index, item) in collector.iter()?.enumerate() {
+                if index > 0 && index % interval == 0 {
+                    info!(
+                        target: "sync::stages::hashing_account",
+                        progress = format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                        "Inserting hashes"
+                    );
+                }
+
                 let (key, value) = item?;
                 hashed_account_cursor
                     .append(RawKey::<B256>::from_vec(key), RawValue::<Account>::from_vec(value))?;
@@ -262,7 +272,7 @@ fn collect(
             collector.insert(key, v)?;
         }
     }
-    debug!(target: "sync::stages::hashing_account", "Hashed {} entries", collector.len());
+    info!(target: "sync::stages::hashing_account", "Hashed {} entries", collector.len());
     channels.clear();
     Ok(())
 }

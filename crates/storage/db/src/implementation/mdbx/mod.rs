@@ -222,6 +222,10 @@ impl DatabaseMetrics for DatabaseEnv {
             metrics.push(("db.freelist", freelist as f64, vec![]));
         }
 
+        if let Ok(stat) = self.stat().map_err(|error| error!(%error, "Failed to read db.stat")) {
+            metrics.push(("db.page_size", stat.page_size() as f64, vec![]));
+        }
+
         metrics.push((
             "db.timed_out_not_aborted_transactions",
             self.timed_out_not_aborted_transactions() as f64,

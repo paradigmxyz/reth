@@ -17,7 +17,7 @@ pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
 use crate::constants::DEFAULT_ENGINE_API_IPC_ENDPOINT;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::{ConfigureEvmEnv, EngineTypes};
+use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
     StateProviderFactory,
@@ -66,7 +66,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     EngineT: EngineTypes + 'static,
     EngineApi: EngineApiServer<EngineT>,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     // spawn a new cache task
     let eth_cache = EthStateCache::spawn_with(
@@ -121,7 +121,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     EngineT: EngineTypes + 'static,
     EngineApi: EngineApiServer<EngineT>,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     // Configure the module and start the server.
     let mut module = RpcModule::new(());
