@@ -1501,9 +1501,10 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                     .map(Into::into)
                     .collect::<Vec<TransactionSigned>>();
                 // fetch senders from the senders table
-                let known_senders = senders_cursor
-                    .walk_range(tx_range.clone())?
-                    .collect::<Result<HashMap<_, _>, _>>()?;
+                let known_senders =
+                    senders_cursor
+                        .walk_range(tx_range.clone())?
+                        .collect::<Result<HashMap<_, _>, _>>()?;
 
                 let mut senders = Vec::with_capacity(body.len());
                 for (tx_num, tx) in tx_range.zip(body.iter()) {
