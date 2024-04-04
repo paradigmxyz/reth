@@ -3,9 +3,12 @@
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
-use reth_interfaces::{consensus::Consensus, RethResult};
-use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
-use reth_provider::{ProviderFactory, StatsReader};
+use reth_interfaces::{
+    blockchain_tree::error::CanonicalError, consensus::Consensus, executor::BlockValidationError,
+    RethResult,
+};
+use reth_primitives::{BlockHash, BlockNumber, Hardfork, StaticFileSegment, B256, U256};
+use reth_provider::{ChainSpecProvider, HeaderProvider, ProviderFactory, StatsReader};
 use std::{collections::BTreeMap, sync::Arc};
 
 /// A container for external components.
@@ -39,6 +42,22 @@ impl<DB, EVM> TreeExternals<DB, EVM> {
 }
 
 impl<DB: Database, EVM> TreeExternals<DB, EVM> {
+    /// Retrieves parent block total difficulty and returns `true` if the block is pre-merge.
+    pub(crate) fn is_canonical_block_pre_merge(
+        &self,
+        parent_hash: B256,
+    ) -> Result<bool, CanonicalError> {
+        // Validate that the block is post merge
+        let provider = self.provider_factory.provider()?;
+        let parent_td = provider.header_td(&parent_hash)?.ok_or_else(|| {
+            CanonicalError::from(BlockValidationError::MissingTotalDifficulty { hash: parent_hash })
+        })?;
+
+        // Pass the parent total difficulty to short-circuit unnecessary calculations.
+        let chain_spec = self.provider_factory.chain_spec();
+        Ok(!chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO))
+    }
+
     /// Fetches the latest canonical block hashes by walking backwards from the head.
     ///
     /// Returns the hashes sorted by increasing block numbers

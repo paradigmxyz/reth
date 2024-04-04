@@ -18,8 +18,8 @@ use reth_interfaces::{
     RethResult,
 };
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, PruneModes, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, U256,
+    BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, PruneModes, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
     chain::{ChainSplit, ChainSplitTarget},
@@ -358,27 +358,15 @@ where
         let block_num_hash = block.num_hash();
         debug!(target: "blockchain_tree", head = ?block_num_hash.hash, ?parent, "Appending block to canonical chain");
 
-        let provider = self.externals.provider_factory.provider()?;
-
         // Validate that the block is post merge
-        let parent_td = provider
-            .header_td(&block.parent_hash)?
-            .ok_or_else(|| BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash })?;
-
-        // Pass the parent total difficulty to short-circuit unnecessary calculations.
-        if !self
-            .externals
-            .provider_factory
-            .chain_spec()
-            .fork(Hardfork::Paris)
-            .active_at_ttd(parent_td, U256::ZERO)
-        {
+        if self.externals.is_canonical_block_pre_merge(block.parent_hash)? {
             return Err(BlockExecutionError::Validation(BlockValidationError::BlockPreMerge {
                 hash: block.hash(),
             })
             .into())
         }
 
+        let provider = self.externals.provider_factory.provider()?;
         let parent_header = provider
             .header(&block.parent_hash)?
             .ok_or_else(|| BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash })?
@@ -939,27 +927,13 @@ where
         durations_recorder.record_relative(MakeCanonicalAction::FindCanonicalHeader);
         if let Some(header) = canonical_header {
             info!(target: "blockchain_tree", ?block_hash, "Block is already canonical, ignoring.");
-            // TODO: this could be fetched from the chainspec first
-            let td =
-                self.externals.provider_factory.provider()?.header_td(block_hash)?.ok_or_else(
-                    || {
-                        CanonicalError::from(BlockValidationError::MissingTotalDifficulty {
-                            hash: *block_hash,
-                        })
-                    },
-                )?;
-            if !self
-                .externals
-                .provider_factory
-                .chain_spec()
-                .fork(Hardfork::Paris)
-                .active_at_ttd(td, U256::ZERO)
-            {
-                return Err(CanonicalError::from(BlockValidationError::BlockPreMerge {
-                    hash: *block_hash,
-                }))
+
+            // Validate that the block is post merge
+            return if self.externals.is_canonical_block_pre_merge(header.parent_hash)? {
+                Err(CanonicalError::from(BlockValidationError::BlockPreMerge { hash: *block_hash }))
+            } else {
+                Ok(CanonicalOutcome::AlreadyCanonical { header })
             }
-            return Ok(CanonicalOutcome::AlreadyCanonical { header })
         }
 
         let Some(chain_id) = self.block_indices().get_blocks_chain_id(block_hash) else {
