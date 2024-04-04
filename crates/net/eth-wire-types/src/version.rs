@@ -1,5 +1,4 @@
-//! Support for representing the version of the `eth`. [`Capability`](crate::capability::Capability)
-//! and [Protocol](crate::protocol::Protocol).
+//! Support for representing the version of the `eth`
 
 use std::str::FromStr;
 
@@ -59,7 +58,7 @@ impl EthVersion {
 ///
 /// # Example
 /// ```
-/// use reth_eth_wire::types::EthVersion;
+/// use reth_eth_wire_types::EthVersion;
 ///
 /// let version = EthVersion::try_from("67").unwrap();
 /// assert_eq!(version, EthVersion::Eth67);
@@ -82,7 +81,7 @@ impl TryFrom<&str> for EthVersion {
 ///
 /// # Example
 /// ```
-/// use reth_eth_wire::types::EthVersion;
+/// use reth_eth_wire_types::EthVersion;
 ///
 /// let version = EthVersion::try_from(67).unwrap();
 /// assert_eq!(version, EthVersion::Eth67);

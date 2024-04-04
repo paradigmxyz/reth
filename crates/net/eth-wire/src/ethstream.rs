@@ -2,8 +2,7 @@ use crate::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     p2pstream::HANDSHAKE_TIMEOUT,
-    types::{EthMessage, ProtocolMessage, Status},
-    CanDisconnect, DisconnectReason, EthVersion,
+    CanDisconnect, DisconnectReason, EthMessage, EthVersion, ProtocolMessage, Status,
 };
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
@@ -111,7 +110,7 @@ where
             Err(err) => {
                 debug!("decode error in eth handshake: msg={their_msg:x}");
                 self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
-                return Err(err)
+                return Err(EthStreamError::InvalidMessage(err))
             }
         };
 
@@ -278,7 +277,7 @@ where
                     %msg,
                     "failed to decode protocol message"
                 );
-                return Poll::Ready(Some(Err(err)))
+                return Poll::Ready(Some(Err(EthStreamError::InvalidMessage(err))))
             }
         };
 
@@ -347,10 +346,10 @@ where
 mod tests {
     use super::UnauthedEthStream;
     use crate::{
+        broadcast::BlockHashNumber,
         errors::{EthHandshakeError, EthStreamError},
         p2pstream::{ProtocolVersion, UnauthedP2PStream},
-        types::{broadcast::BlockHashNumber, EthMessage, EthVersion, Status},
-        EthStream, HelloMessageWithProtocols, PassthroughCodec,
+        EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec, Status,
     };
     use alloy_chains::NamedChain;
     use futures::{SinkExt, StreamExt};

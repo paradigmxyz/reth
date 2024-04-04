@@ -2,6 +2,7 @@ use crate::processor::{compare_receipts_root_and_logs_bloom, EVMProcessor};
 use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
+
 use reth_node_api::ConfigureEvm;
 use reth_primitives::{
     proofs::calculate_receipt_root_optimism, revm_primitives::ResultAndState, BlockWithSenders,
@@ -145,7 +146,11 @@ where
                         .map(|acc| acc.account_info().unwrap_or_default())
                 })
                 .transpose()
-                .map_err(|_| BlockExecutionError::ProviderError)?;
+                .map_err(|_| {
+                    BlockExecutionError::OptimismBlockExecution(
+                        OptimismBlockExecutionError::AccountLoadFailed(*sender),
+                    )
+                })?;
 
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, *sender)?;
