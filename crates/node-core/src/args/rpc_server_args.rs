@@ -176,6 +176,14 @@ pub struct RpcServerArgs {
     /// Gas price oracle configuration.
     #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
+
+    /// Enable auth engine api over IPC  
+    #[arg(long, default_value_if("dev", "true", Some("true")))]
+    pub auth_ipc: bool,
+
+    /// Filename for auth IPC socket/pipe within the datadir
+    #[arg(long = "auth-ipc.path", default_value = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT)]
+    pub auth_ipc_path: Option<String>,
 }
 
 impl RpcServerArgs {
@@ -494,6 +502,8 @@ impl Default for RpcServerArgs {
             auth_addr: Ipv4Addr::LOCALHOST.into(),
             auth_port: constants::DEFAULT_AUTH_PORT,
             auth_jwtsecret: None,
+            auth_ipc: false,
+            auth_ipc_path: None,
             rpc_jwtsecret: None,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),

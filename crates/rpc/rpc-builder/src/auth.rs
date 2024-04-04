@@ -14,7 +14,7 @@ use jsonrpsee::{
     Methods,
 };
 
-use crate::constants::ENGINE_API_IPC_ENDPOINT;
+use crate::constants::DEFAULT_ENGINE_API_IPC_ENDPOINT;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_provider::{
@@ -141,10 +141,10 @@ where
     let local_addr = server.local_addr()?;
     let handle = server.start(module.clone());
 
-    let ipc_endpoint = Endpoint::new(ENGINE_API_IPC_ENDPOINT.to_string());
+    let ipc_endpoint = Endpoint::new(DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
     let ipc_handle = IpcServerBuilder::default().build(ipc_endpoint.path())?.start(module).await?;
 
-    Ok(AuthServerHandle { handle, local_addr, secret, _ipc_handle: ipc_handle })
+    Ok(AuthServerHandle { handle, local_addr, secret, _ipc_handle: Some(ipc_handle) })
 }
 
 /// Server configuration for the auth server.
@@ -168,7 +168,7 @@ impl fmt::Debug for AuthServerConfig {
             .field("secret", &self.secret)
             .field("server_config", &self.server_config)
             .field("ipc_server_config", &self.ipc_server_config)
-            .field("ipc_endpoint", &self.ipc_endpoint.path())
+            .field("ipc_endpoint", &self.ipc_endpoint.as_ref().map(|endpoint| endpoint.path()))
             .finish()
     }
 }
@@ -202,7 +202,11 @@ impl AuthServerConfig {
 
         let local_addr = server.local_addr()?;
         let handle = server.start(module.inner.clone());
-        let ipc_handle = ipc_server_config.build(ipc_endpoint.path())?.start(module.inner).await?;
+        let mut ipc_handle = None;
+        if let (Some(ipc_server_config), Some(ipc_endpoint)) = (ipc_server_config, ipc_endpoint) {
+            ipc_handle =
+                Some(ipc_server_config.build(ipc_endpoint.path())?.start(module.inner).await?);
+        }
 
         Ok(AuthServerHandle { handle, local_addr, secret, _ipc_handle: ipc_handle })
     }
@@ -307,16 +311,17 @@ impl AuthServerConfigBuilder {
                     .max_request_body_size(128 * 1024 * 1024)
                     .set_id_provider(EthSubscriptionIdProvider::default())
             }),
-            ipc_server_config: self.ipc_server_config.unwrap_or_else(|| {
+            ipc_server_config: Some(self.ipc_server_config.unwrap_or_else(|| {
                 IpcServerBuilder::default()
                     .max_response_body_size(750 * 1024 * 1024)
                     .max_connections(500)
                     .max_request_body_size(128 * 1024 * 1024)
                     .set_id_provider(EthSubscriptionIdProvider::default())
-            }),
-            ipc_endpoint: self
-                .ipc_endpoint
-                .unwrap_or_else(|| Endpoint::new(ENGINE_API_IPC_ENDPOINT.to_string())),
+            })),
+            ipc_endpoint: Some(
+                self.ipc_endpoint
+                    .unwrap_or_else(|| Endpoint::new(DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())),
+            ),
         }
     }
 }
@@ -375,7 +380,7 @@ pub struct AuthServerHandle {
     local_addr: SocketAddr,
     handle: ServerHandle,
     secret: JwtSecret,
-    _ipc_handle: ServerHandle,
+    _ipc_handle: Option<ServerHandle>,
 }
 
 // === impl AuthServerHandle ===

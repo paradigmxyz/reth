@@ -41,4 +41,4 @@ pub const DEFAULT_IPC_ENDPOINT: &str = "/tmp/reth.ipc";
 
 /// The engine_api IPC endpoint
 #[cfg(not(windows))]
-pub const ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
+pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
