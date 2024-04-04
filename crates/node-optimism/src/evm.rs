@@ -60,8 +60,8 @@ impl ConfigureEvm for OptimismEvmConfig {
         let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
         EvmBuilder::default()
             .with_db(db)
-            .with_handler_cfg(handler_cfg)
             .with_external_context(inspector)
+            .with_handler_cfg(handler_cfg)
             .append_handler_register(inspector_handle_register)
             .build()
     }
