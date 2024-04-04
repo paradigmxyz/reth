@@ -278,6 +278,7 @@ address.to_string(), format_ether(alloc.balance));
         let mut pruner = PrunerBuilder::new(prune_config.clone())
             .max_reorg_depth(tree_config.max_reorg_depth() as usize)
             .prune_delete_limit(config.chain.prune_delete_limit)
+            .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
             .build(provider_factory.clone());
 
         let pruner_events = pruner.events();

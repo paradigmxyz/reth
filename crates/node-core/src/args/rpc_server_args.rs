@@ -14,7 +14,7 @@ use clap::{
 };
 use rand::Rng;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::{ConfigureEvmEnv, EngineTypes};
+use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -288,7 +288,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         Events: CanonStateSubscriptions + Clone + 'static,
-        EvmConfig: ConfigureEvmEnv + 'static,
+        EvmConfig: ConfigureEvm + 'static,
     {
         reth_rpc_builder::launch(
             provider,
@@ -328,7 +328,7 @@ impl RpcServerArgs {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         EngineT: EngineTypes + 'static,
-        EvmConfig: ConfigureEvmEnv + 'static,
+        EvmConfig: ConfigureEvm + 'static,
     {
         let socket_address = SocketAddr::new(self.auth_addr, self.auth_port);
 

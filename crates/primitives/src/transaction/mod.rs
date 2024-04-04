@@ -1702,7 +1702,6 @@ mod tests {
     };
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
-    use bytes::BytesMut;
     use reth_codecs::Compact;
     use secp256k1::{KeyPair, Secp256k1};
     use std::str::FromStr;
@@ -1963,10 +1962,8 @@ mod tests {
         let tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         let recovered = tx.into_ecrecovered().unwrap();
 
-        let mut encoded = BytesMut::new();
-        recovered.encode(&mut encoded);
-
-        let decoded = TransactionSignedEcRecovered::decode(&mut &encoded[..]).unwrap();
+        let decoded =
+            TransactionSignedEcRecovered::decode(&mut &alloy_rlp::encode(&recovered)[..]).unwrap();
         assert_eq!(recovered, decoded)
     }
 

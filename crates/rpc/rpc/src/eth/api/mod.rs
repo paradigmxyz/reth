@@ -13,9 +13,9 @@ use crate::eth::{
 };
 
 use async_trait::async_trait;
+use reth_evm::ConfigureEvm;
 use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, B256,
@@ -265,7 +265,7 @@ where
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvmEnv + Clone + 'static,
+    EvmConfig: ConfigureEvm + Clone + 'static,
 {
     /// Configures the [CfgEnvWithHandlerCfg] and [BlockEnv] for the pending block
     ///
@@ -381,7 +381,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     /// Returns the current ethereum protocol version.
     ///

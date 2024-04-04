@@ -126,7 +126,7 @@ jobs:
         # https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/.github/workflows/build.yml
         run: |
           body=$(cat <<- "ENDBODY"
-          ![image](https://github.com/paradigmxyz/reth/assets/17802178/b906d475-a594-4eb9-80cc-222eb441fd08)
+          ![image](https://github.com/paradigmxyz/reth/assets/17802178/d02595cf-7130-418f-81a3-ec91f614abf5)
 
           ## Testing Checklist (DELETE ME)
 

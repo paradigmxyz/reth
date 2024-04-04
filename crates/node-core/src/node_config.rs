@@ -2,14 +2,15 @@
 
 use crate::{
     args::{
-        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
+        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, DiscoveryArgs, NetworkArgs,
+        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     cli::config::RethTransactionPoolConfig,
     dirs::{ChainPath, DataDirPath},
     metrics::prometheus_exporter,
     utils::{get_single_header, write_peers_to_file},
 };
+use discv5::ListenConfig;
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
@@ -162,6 +163,7 @@ pub struct NodeConfig {
     ///
     /// Changes to the following port numbers:
     /// - DISCOVERY_PORT: default + `instance` - 1
+    /// - DISCOVERY_V5_PORT: default + `instance` - 1
     /// - AUTH_PORT: default + `instance` * 100 - 100
     /// - HTTP_RPC_PORT: default - `instance` + 1
     /// - WS_RPC_PORT: default + `instance` * 2 - 2
@@ -768,7 +770,25 @@ impl NodeConfig {
                 self.network.discovery.port + self.instance - 1,
             ));
 
-        cfg_builder.build(client)
+        let config = cfg_builder.build(client);
+
+        if !self.network.discovery.enable_discv5_discovery {
+            return config
+        }
+        // work around since discv5 config builder can't be integrated into network config builder
+        // due to unsatisfied trait bounds
+        config.discovery_v5_with_config_builder(|builder| {
+            let DiscoveryArgs { discv5_addr, discv5_port, .. } = self.network.discovery;
+            builder
+                .discv5_config(
+                    discv5::ConfigBuilder::new(ListenConfig::from(Into::<SocketAddr>::into((
+                        discv5_addr,
+                        discv5_port + self.instance - 1,
+                    ))))
+                    .build(),
+                )
+                .build()
+        })
     }
 
     /// Builds the [Pipeline] with the given [ProviderFactory] and downloaders.
