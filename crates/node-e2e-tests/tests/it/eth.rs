@@ -1,5 +1,5 @@
-use crate::test_suite::TestSuite;
 use futures_util::StreamExt;
+use node_e2e_tests::test_suite::TestSuite;
 use reth::{
     builder::{NodeBuilder, NodeHandle},
     payload::EthPayloadBuilderAttributes,
@@ -25,7 +25,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     // Node setup
     let node_config = NodeConfig::test()
         .with_chain(test_suite.chain_spec())
-        .with_rpc(RpcServerArgs::default().with_http());
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
 
     let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
