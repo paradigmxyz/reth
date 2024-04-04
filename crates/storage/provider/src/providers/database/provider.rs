@@ -1499,12 +1499,27 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                     .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
                     .into_iter()
                     .map(Into::into)
-                    .collect();
+                    .collect::<Vec<TransactionSigned>>();
                 // fetch senders from the senders table
-                let senders = senders_cursor
-                    .walk_range(tx_range)?
-                    .map(|entry| entry.map(|(_, sender)| sender))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let mut known_senders = senders_cursor
+                    .walk_range(tx_range.clone())?
+                    .map(|entry| entry.map(|(key, sender)| (key, sender)))
+                    .collect::<Result<HashMap<_, _>, _>>()?;
+
+                let mut senders = Vec::with_capacity(body.len());
+                for (tx_num, tx) in tx_range.zip(body.iter()) {
+                    match known_senders.get(&tx_num) {
+                        None => {
+                            // recover the sender from the transaction if not found
+                            let sender = tx
+                                .recover_signer_unchecked()
+                                .ok_or_else(|| ProviderError::SenderRecoveryError)?;
+                            senders.push(sender);
+                        }
+                        Some(sender) => senders.push(*sender),
+                    }
+                }
+
                 (body, senders)
             };
 
