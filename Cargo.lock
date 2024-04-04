@@ -6276,6 +6276,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-evm-ethereum"
+version = "0.2.0-beta.5"
+dependencies = [
+ "reth-evm",
+ "reth-primitives",
+]
+
+[[package]]
 name = "reth-interfaces"
 version = "0.2.0-beta.5"
 dependencies = [
@@ -6604,6 +6612,7 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-db",
  "reth-ethereum-payload-builder",
+ "reth-evm-ethereum",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
