@@ -10,6 +10,7 @@ members = [
     "crates/ethereum-forks/",
     "crates/etl/",
     "crates/evm/",
+    "crates/evm-ethereum/",
     "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
@@ -215,6 +216,7 @@ reth-ethereum-forks = { path = "crates/ethereum-forks" }
 reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
+reth-evm-ethereum = { path = "crates/evm-ethereum" }
 reth-optimism-payload-builder = { path = "crates/payload/optimism" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
