@@ -79,6 +79,7 @@ where
             let base_fee = block.base_fee_per_gas;
             let block_hash = block.hash();
             let excess_blob_gas = block.excess_blob_gas;
+            let timestamp = block.timestamp;
             let block = block.unseal();
 
             #[cfg(feature = "optimism")]
@@ -100,6 +101,7 @@ where
                         block_number,
                         base_fee,
                         excess_blob_gas,
+                        timestamp,
                     };
 
                     #[cfg(feature = "optimism")]
