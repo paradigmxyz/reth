@@ -1,7 +1,7 @@
 //! Helpers for testing trace calls.
 
 use futures::{Stream, StreamExt};
-use jsonrpsee::core::Error as RpcError;
+use jsonrpsee::core::client::Error as RpcError;
 use reth_primitives::{BlockId, Bytes, TxHash, B256};
 use reth_rpc_api::clients::TraceApiClient;
 use reth_rpc_types::{
@@ -17,6 +17,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+
 /// A type alias that represents the result of a raw transaction trace stream.
 type RawTransactionTraceResult<'a> =
     Pin<Box<dyn Stream<Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>> + 'a>>;
