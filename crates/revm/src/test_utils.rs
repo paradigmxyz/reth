@@ -11,7 +11,9 @@ use reth_provider::{AccountReader, BlockHashReader, StateProvider, StateRootProv
 use reth_trie::updates::TrieUpdates;
 use revm::{
     db::BundleState,
+    inspector_handle_register,
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+    GetInspector,
 };
 use std::collections::HashMap;
 #[cfg(feature = "optimism")]
@@ -162,12 +164,17 @@ impl ConfigureEvm for TestEvmConfig {
     }
 
     #[cfg(feature = "optimism")]
-    fn evm_with_inspector<'a, DB: Database + 'a, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB> {
+    fn evm_with_inspector<'a, DB, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB>
+    where
+        DB: Database + 'a,
+        I: GetInspector<DB>,
+    {
         let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
             .with_handler_cfg(handler_cfg)
+            .append_handler_register(inspector_handle_register)
             .build()
     }
 }

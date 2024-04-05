@@ -39,7 +39,6 @@ use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
-    inspector_handle_register,
     primitives::{
         db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult,
         ResultAndState, SpecId, State,
@@ -553,7 +552,7 @@ where
         DB: Database,
         <DB as Database>::Error: Into<EthApiError>,
     {
-        let mut evm = revm::Evm::builder().with_db(db).with_env_with_handler_cfg(env).build();
+        let mut evm = self.inner.evm_config.evm_with_env(db, env);
         let res = evm.transact()?;
         let (_, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env))
@@ -570,12 +569,7 @@ where
         <DB as Database>::Error: Into<EthApiError>,
         I: GetInspector<DB>,
     {
-        let mut evm = revm::Evm::builder()
-            .with_db(db)
-            .with_external_context(inspector)
-            .with_env_with_handler_cfg(env)
-            .append_handler_register(inspector_handle_register)
-            .build();
+        let mut evm = self.inner.evm_config.evm_with_env_and_inspector(db, env, inspector);
         let res = evm.transact()?;
         let (_, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env))
@@ -592,12 +586,7 @@ where
         <DB as Database>::Error: Into<EthApiError>,
         I: GetInspector<DB>,
     {
-        let mut evm = revm::Evm::builder()
-            .with_external_context(inspector)
-            .with_db(db)
-            .with_env_with_handler_cfg(env)
-            .append_handler_register(inspector_handle_register)
-            .build();
+        let mut evm = self.inner.evm_config.evm_with_env_and_inspector(db, env, inspector);
         let res = evm.transact()?;
         let (db, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env, db))
@@ -617,14 +606,9 @@ where
         I: IntoIterator<Item = Tx>,
         Tx: FillableTransaction,
     {
-        let mut evm = revm::Evm::builder()
-            .with_db(db)
-            .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-                cfg,
-                block_env,
-                Default::default(),
-            ))
-            .build();
+        let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
+
+        let mut evm = self.inner.evm_config.evm_with_env(db, env);
         let mut index = 0;
         for tx in transactions.into_iter() {
             if tx.hash() == target_tx_hash {
@@ -1817,8 +1801,8 @@ mod tests {
     use crate::eth::{
         cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig,
     };
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex};
     use reth_provider::test_utils::NoopProvider;
     use reth_tasks::pool::BlockingTaskPool;
