@@ -125,8 +125,6 @@ optimism = [
     "reth-provider/optimism",
     "reth-beacon-consensus/optimism",
     "reth-auto-seal-consensus/optimism",
-    "reth-network/optimism",
-    "reth-network-api/optimism",
     "reth-blockchain-tree/optimism",
     "dep:reth-node-optimism",
     "reth-node-core/optimism"
