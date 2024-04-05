@@ -244,6 +244,60 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     .into()
 });
 
+/// The Optimism Goerli spec
+#[cfg(feature = "optimism")]
+pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: Chain::optimism_goerli(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_op_original.json"))
+            .expect("Can't deserialize Optimism Goerli genesis json"),
+        genesis_hash: Some(b256!(
+            "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
+        )),
+        fork_timestamps: ForkTimestamps::default()
+            .shanghai(1699981200)
+            .canyon(1699981200)
+            .cancun(1707238800)
+            .ecotone(1707238800),
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Bedrock, ForkCondition::Block(4061224)),
+            (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1707238800)),
+            (Hardfork::Ecotone, ForkCondition::Timestamp(1707238800)),
+        ]),
+        base_fee_params: BaseFeeParamsKind::Variable(
+            vec![
+                (Hardfork::London, BaseFeeParams::optimism_goerli()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
+            ]
+            .into(),
+        ),
+        prune_delete_limit: 1700,
+        ..Default::default()
+    }
+    .into()
+});
+
 /// The OP Sepolia spec
 #[cfg(feature = "optimism")]
 pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -470,7 +524,29 @@ impl BaseFeeParams {
         }
     }
 
+    /// Get the base fee parameters for optimism sepolia
+    #[cfg(feature = "optimism")]
+    pub const fn optimism_goerli() -> BaseFeeParams {
+        BaseFeeParams {
+            max_change_denominator:
+            crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+            elasticity_multiplier:
+            crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        }
+    }
+
     /// Get the base fee parameters for optimism goerli (post Canyon)
+    #[cfg(feature = "optimism")]
+    pub const fn optimism_goerli_canyon() -> BaseFeeParams {
+        BaseFeeParams {
+            max_change_denominator:
+            crate::constants::OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
+            elasticity_multiplier:
+            crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+        }
+    }
+
+    /// Get the base fee parameters for optimism sepolia (post Canyon)
     #[cfg(feature = "optimism")]
     pub const fn optimism_sepolia_canyon() -> BaseFeeParams {
         BaseFeeParams {
