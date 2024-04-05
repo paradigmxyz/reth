@@ -13,53 +13,10 @@
 
 pub use reth_codecs_derive::*;
 
-use alloy_primitives::{Address, Bloom, Bytes, Log, LogData, B256, B512, U256};
+use alloy_primitives::{Address, Bloom, Bytes, B256, B512, U256};
 use bytes::Buf;
 
-impl Compact for LogData {
-    fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        let mut buffer = bytes::BytesMut::new();
-        self.topics().to_vec().specialized_to_compact(&mut buffer);
-        self.data.to_compact(&mut buffer);
-        let total_length = buffer.len();
-        buf.put(buffer);
-        total_length
-    }
-
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let (topics, new_buf) = Vec::specialized_from_compact(buf, buf.len());
-        buf = new_buf;
-        let (data, buf) = Bytes::from_compact(buf, buf.len());
-        let log_data = LogData::new_unchecked(topics, data);
-        (log_data, buf)
-    }
-}
-
-impl Compact for Log {
-    fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        let mut buffer = bytes::BytesMut::new();
-        self.address.to_compact(&mut buffer);
-        self.data.to_compact(&mut buffer);
-        let total_length = buffer.len();
-        buf.put(buffer);
-        total_length
-    }
-
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let (address, new_buf) = Address::from_compact(buf, buf.len());
-        buf = new_buf;
-        let (log_data, new_buf) = LogData::from_compact(buf, buf.len());
-        buf = new_buf;
-        let log = Log { address, data: log_data };
-        (log, buf)
-    }
-}
+mod log;
 
 /// Trait that implements the `Compact` codec.
 ///
