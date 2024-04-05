@@ -839,27 +839,28 @@ where
         }
     }
 
-    /// Split a sidechain at the given point, and return the canonical part of it.
+    /// Removes chain corresponding to provided chain id from block indices,
+    /// splits it at split target, and returns the canonical part of it.
+    /// Returns [None] if chain is missing.
     ///
-    /// The pending part of the chain is reinserted into the tree with the same `chain_id`.
-    fn split_chain(
+    /// The pending part of the chain is reinserted back into the tree with the same `chain_id`.
+    fn remove_and_split_chain(
         &mut self,
         chain_id: BlockChainId,
-        chain: AppendableChain,
         split_at: ChainSplitTarget,
-    ) -> Chain {
-        let chain = chain.into_inner();
-        match chain.split(split_at) {
+    ) -> Option<Chain> {
+        let chain = self.state.chains.remove(&chain_id)?;
+        match chain.into_inner().split(split_at) {
             ChainSplit::Split { canonical, pending } => {
                 trace!(target: "blockchain_tree", ?canonical, ?pending, "Split chain");
                 // rest of split chain is inserted back with same chain_id.
                 self.state.block_indices.insert_chain(chain_id, &pending);
                 self.state.chains.insert(chain_id, AppendableChain::new(pending));
-                canonical
+                Some(canonical)
             }
             ChainSplit::NoSplitCanonical(canonical) => {
                 trace!(target: "blockchain_tree", "No split on canonical chain");
-                canonical
+                Some(canonical)
             }
             ChainSplit::NoSplitPending(_) => {
                 unreachable!("Should not happen as block indices guarantee structure of blocks")
@@ -958,12 +959,12 @@ where
                 block_hash,
             }))
         };
-        let chain = self.state.chains.remove(&chain_id).expect("To be present");
-
-        trace!(target: "blockchain_tree", ?chain, "Found chain to make canonical");
 
         // we are splitting chain at the block hash that we want to make canonical
-        let canonical = self.split_chain(chain_id, chain, ChainSplitTarget::Hash(block_hash));
+        let canonical = self
+            .remove_and_split_chain(chain_id, ChainSplitTarget::Hash(block_hash))
+            .expect("to be present");
+        trace!(target: "blockchain_tree", chain = ?canonical, "Found chain to make canonical");
         durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
 
         let mut fork_block = canonical.fork_block();
@@ -971,10 +972,10 @@ where
 
         // loop while fork blocks are found in Tree.
         while let Some(chain_id) = self.block_indices().get_blocks_chain_id(&fork_block.hash) {
-            let chain = self.state.chains.remove(&chain_id).expect("fork is present");
             // canonical chain is lower part of the chain.
-            let canonical =
-                self.split_chain(chain_id, chain, ChainSplitTarget::Number(fork_block.number));
+            let canonical = self
+                .remove_and_split_chain(chain_id, ChainSplitTarget::Number(fork_block.number))
+                .expect("fork is present");
             fork_block = canonical.fork_block();
             chains_to_promote.push(canonical);
         }
