@@ -570,7 +570,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 12,
         "x": 0,
         "y": 4
       },
@@ -638,8 +638,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 12,
+        "x": 12,
         "y": 4
       },
       "id": 20,
@@ -708,112 +708,6 @@
       ],
       "transparent": true,
       "type": "bargauge"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "bytes",
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 4
-      },
-      "id": 218,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "10.3.3",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\"})",
-          "legendFormat": "Database",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "sum(reth_db_freelist{instance=~\"$instance\"} * reth_db_page_size{instance=~\"$instance\"})",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "Freelist",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "sum(reth_static_files_segment_size{instance=~\"$instance\"})",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "Static Files",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "sum(reth_db_table_size{instance=~\"$instance\"}) + sum(reth_db_freelist{instance=~\"$instance\"} * reth_db_page_size{instance=~\"$instance\"}) + sum(reth_static_files_segment_size{instance=~\"$instance\"})",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "Total",
-          "range": true,
-          "refId": "D"
-        }
-      ],
-      "title": "Storage size",
-      "transparent": true,
-      "type": "stat"
     },
     {
       "datasource": {
@@ -2965,664 +2859,6 @@
         "x": 0,
         "y": 95
       },
-      "id": 6,
-      "panels": [],
-      "repeat": "instance",
-      "repeatDirection": "h",
-      "title": "Networking",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "The number of tracked peers in the discovery modules (dnsdisc and discv4)",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 96
-      },
-      "id": 18,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_tracked_peers{instance=~\"$instance\"}",
-          "legendFormat": "Tracked peers",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Discovery: Tracked peers",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "The number of incoming and outgoing connections, as well as the number of peers we are currently connected to. Outgoing and incoming connections also count peers we are trying to connect to.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 96
-      },
-      "id": 16,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_pending_outgoing_connections{instance=~\"$instance\"}",
-          "legendFormat": "Pending outgoing connections",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_outgoing_connections{instance=~\"$instance\"}",
-          "legendFormat": "Outgoing connections",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_total_pending_connections{instance=~\"$instance\"}",
-          "legendFormat": "Total pending connections",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_incoming_connections{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Incoming connections",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_connected_peers{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Connected peers",
-          "range": true,
-          "refId": "E"
-        }
-      ],
-      "title": "Connections",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Internal errors in the P2P module. These are expected to happen from time to time. High error rates should not cause alarm if the node is peering otherwise.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "red",
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "cps",
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 96
-      },
-      "id": 8,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true,
-          "values": [
-            "value"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "rate(reth_p2pstream_disconnected_errors{instance=~\"$instance\"}[$__rate_interval])",
-          "legendFormat": "P2P stream disconnected",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "rate(reth_network_pending_session_failures{instance=~\"$instance\"}[$__rate_interval])",
-          "hide": false,
-          "legendFormat": "Failed pending sessions",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "rate(reth_network_invalid_messages_received{instance=~\"$instance\"}[$__rate_interval])",
-          "hide": false,
-          "legendFormat": "Invalid messages",
-          "range": true,
-          "refId": "C"
-        }
-      ],
-      "title": "P2P errors",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
-          "mappings": [],
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 104
-      },
-      "id": 54,
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "pieType": "pie",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_useless_peer{instance=~\"$instance\"}",
-          "legendFormat": "UselessPeer",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_subprotocol_specific{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "SubprotocolSpecific",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_already_connected{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "AlreadyConnected",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_client_quitting{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "ClientQuitting",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_unexpected_identity{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "UnexpectedHandshakeIdentity",
-          "range": true,
-          "refId": "E"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_disconnect_requested{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "DisconnectRequested",
-          "range": true,
-          "refId": "F"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_null_node_identity{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "NullNodeIdentity",
-          "range": true,
-          "refId": "G"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_tcp_subsystem_error{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "TCPSubsystemError",
-          "range": true,
-          "refId": "H"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_incompatible{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "IncompatibleP2PVersion",
-          "range": true,
-          "refId": "I"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_protocol_breach{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "ProtocolBreach",
-          "range": true,
-          "refId": "J"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_too_many_peers{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "TooManyPeers",
-          "range": true,
-          "refId": "K"
-        }
-      ],
-      "title": "Peer disconnect reasons",
-      "type": "piechart"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Number of successful outgoing dial attempts.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 14,
-        "x": 8,
-        "y": 104
-      },
-      "id": 103,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_network_total_dial_successes{instance=~\"$instance\"}",
-          "legendFormat": "Total Dial Successes",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Total Dial Success",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 112
-      },
       "id": 24,
       "panels": [],
       "repeat": "instance",
@@ -3719,7 +2955,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 113
+        "y": 96
       },
       "id": 26,
       "options": {
@@ -3853,7 +3089,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 113
+        "y": 96
       },
       "id": 33,
       "options": {
@@ -3956,7 +3192,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3972,7 +3209,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 121
+        "y": 104
       },
       "id": 36,
       "options": {
@@ -4021,7 +3258,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 129
+        "y": 112
       },
       "id": 32,
       "panels": [],
@@ -4078,7 +3315,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4128,7 +3366,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 130
+        "y": 113
       },
       "id": 30,
       "options": {
@@ -4280,7 +3518,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
@@ -4293,7 +3532,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 130
+        "y": 113
       },
       "id": 28,
       "options": {
@@ -4396,7 +3635,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4412,7 +3652,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 138
+        "y": 121
       },
       "id": 35,
       "options": {
@@ -4503,7 +3743,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4537,7 +3778,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 138
+        "y": 121
       },
       "id": 73,
       "options": {
@@ -4629,7 +3870,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4663,7 +3905,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 146
+        "y": 129
       },
       "id": 102,
       "options": {
@@ -4726,7 +3968,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 154
+        "y": 137
       },
       "id": 79,
       "panels": [],
@@ -4783,7 +4025,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4799,7 +4042,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 155
+        "y": 138
       },
       "id": 74,
       "options": {
@@ -4879,7 +4122,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4895,7 +4139,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 155
+        "y": 138
       },
       "id": 80,
       "options": {
@@ -4975,7 +4219,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -4991,7 +4236,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 163
+        "y": 146
       },
       "id": 81,
       "options": {
@@ -5070,7 +4315,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5087,7 +4333,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 163
+        "y": 146
       },
       "id": 114,
       "options": {
@@ -5167,7 +4413,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5184,7 +4431,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 171
+        "y": 154
       },
       "id": 158,
       "options": {
@@ -5290,7 +4537,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5307,7 +4555,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 171
+        "y": 154
       },
       "id": 190,
       "options": {
@@ -5345,7 +4593,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 179
+        "y": 162
       },
       "id": 87,
       "panels": [],
@@ -5402,7 +4650,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5418,7 +4667,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 180
+        "y": 163
       },
       "id": 83,
       "options": {
@@ -5497,7 +4746,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5513,7 +4763,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 180
+        "y": 163
       },
       "id": 84,
       "options": {
@@ -5604,7 +4854,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5620,7 +4871,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 188
+        "y": 171
       },
       "id": 85,
       "options": {
@@ -5699,7 +4950,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -5716,7 +4968,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 188
+        "y": 171
       },
       "id": 210,
       "options": {
@@ -6023,7 +5275,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6040,7 +5293,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 196
+        "y": 179
       },
       "id": 211,
       "options": {
@@ -6347,7 +5600,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6364,7 +5618,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 196
+        "y": 179
       },
       "id": 212,
       "options": {
@@ -6550,7 +5804,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 204
+        "y": 187
       },
       "id": 214,
       "panels": [],
@@ -6604,7 +5858,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6621,7 +5876,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 205
+        "y": 188
       },
       "id": 215,
       "options": {
@@ -6700,7 +5955,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6716,7 +5972,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 205
+        "y": 188
       },
       "id": 216,
       "options": {
@@ -6767,7 +6023,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 213
+        "y": 196
       },
       "id": 68,
       "panels": [],
@@ -6824,7 +6080,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6840,7 +6097,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 214
+        "y": 197
       },
       "id": 60,
       "options": {
@@ -6919,7 +6176,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -6935,7 +6193,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 214
+        "y": 197
       },
       "id": 62,
       "options": {
@@ -7014,7 +6272,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -7030,7 +6289,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 222
+        "y": 205
       },
       "id": 64,
       "options": {
@@ -7067,7 +6326,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 230
+        "y": 213
       },
       "id": 97,
       "panels": [],
@@ -7121,7 +6380,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -7151,7 +6411,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 231
+        "y": 214
       },
       "id": 98,
       "options": {
@@ -7296,7 +6556,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -7313,7 +6574,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 231
+        "y": 214
       },
       "id": 101,
       "options": {
@@ -7393,7 +6654,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -7410,7 +6672,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 239
+        "y": 222
       },
       "id": 99,
       "options": {
@@ -7490,7 +6752,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -7507,7 +6770,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 239
+        "y": 222
       },
       "id": 100,
       "options": {
@@ -7545,7 +6808,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 247
+        "y": 230
       },
       "id": 105,
       "panels": [],
@@ -7600,7 +6863,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -7617,7 +6881,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 248
+        "y": 231
       },
       "id": 106,
       "options": {
@@ -7697,7 +6961,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -7714,7 +6979,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 248
+        "y": 231
       },
       "id": 107,
       "options": {
@@ -7757,6 +7022,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -7792,7 +7058,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -7800,7 +7067,8 @@
               }
             ]
           },
-          "unit": "none"
+          "unit": "none",
+          "unitScale": true
         },
         "overrides": []
       },
@@ -7808,7 +7076,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 256
+        "y": 239
       },
       "id": 217,
       "options": {
@@ -7846,7 +7114,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 264
+        "y": 247
       },
       "id": 108,
       "panels": [],
@@ -7901,7 +7169,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -7943,7 +7212,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 265
+        "y": 248
       },
       "id": 109,
       "options": {
@@ -8006,7 +7275,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 265
+        "y": 248
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -8118,7 +7387,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -8135,7 +7405,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 273
+        "y": 256
       },
       "id": 120,
       "options": {
@@ -8194,7 +7464,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 273
+        "y": 256
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -8306,7 +7576,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -8347,7 +7618,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 281
+        "y": 264
       },
       "id": 198,
       "options": {
@@ -8515,7 +7786,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -8532,7 +7804,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 281
+        "y": 264
       },
       "id": 213,
       "options": {
@@ -8650,6 +7922,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24x",
-  "version": 6,
+  "version": 4,
   "weekStart": ""
 }
