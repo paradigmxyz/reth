@@ -22,8 +22,8 @@ impl Wallet {
             nonce: Some(0),
             value: Some(U256::from(100)),
             to: Some(Address::random()),
-            gas_price: Some(U256::from(20e9)),
-            gas: Some(U256::from(21000)),
+            gas_price: Some(20e9 as u128),
+            gas: Some(21000),
             chain_id: Some(1),
             ..Default::default()
         };

@@ -17,7 +17,7 @@ use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionKind::{Call, Create},
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U256, U64,
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
@@ -910,9 +910,9 @@ where
             // gas price required
             (Some(_), None, None, None, None, None) => {
                 Some(TypedTransactionRequest::Legacy(LegacyTransactionRequest {
-                    nonce: U64::from(nonce.unwrap_or_default()),
-                    gas_price: gas_price.unwrap_or_default(),
-                    gas_limit: gas.unwrap_or_default(),
+                    nonce: nonce.unwrap_or_default(),
+                    gas_price: U256::from(gas_price.unwrap_or_default()),
+                    gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
@@ -926,9 +926,9 @@ where
             // if only accesslist is set, and no eip1599 fees
             (_, None, Some(access_list), None, None, None) => {
                 Some(TypedTransactionRequest::EIP2930(EIP2930TransactionRequest {
-                    nonce: U64::from(nonce.unwrap_or_default()),
-                    gas_price: gas_price.unwrap_or_default(),
-                    gas_limit: gas.unwrap_or_default(),
+                    nonce: nonce.unwrap_or_default(),
+                    gas_price: U256::from(gas_price.unwrap_or_default()),
+                    gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
@@ -946,10 +946,12 @@ where
             (None, _, _, None, None, None) => {
                 // Empty fields fall back to the canonical transaction schema.
                 Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
-                    nonce: U64::from(nonce.unwrap_or_default()),
-                    max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
-                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
-                    gas_limit: gas.unwrap_or_default(),
+                    nonce: nonce.unwrap_or_default(),
+                    max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
+                    max_priority_fee_per_gas: U256::from(
+                        max_priority_fee_per_gas.unwrap_or_default(),
+                    ),
+                    gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
@@ -973,10 +975,12 @@ where
                 // As per the EIP, we follow the same semantics as EIP-1559.
                 Some(TypedTransactionRequest::EIP4844(EIP4844TransactionRequest {
                     chain_id: 0,
-                    nonce: U64::from(nonce.unwrap_or_default()),
-                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
-                    max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
-                    gas_limit: gas.unwrap_or_default(),
+                    nonce: nonce.unwrap_or_default(),
+                    max_priority_fee_per_gas: U256::from(
+                        max_priority_fee_per_gas.unwrap_or_default(),
+                    ),
+                    max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
+                    gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
@@ -986,7 +990,7 @@ where
                     access_list: access_list.unwrap_or_default(),
 
                     // eip-4844 specific.
-                    max_fee_per_blob_gas,
+                    max_fee_per_blob_gas: U256::from(max_fee_per_blob_gas),
                     blob_versioned_hashes,
                     sidecar,
                 }))
@@ -998,36 +1002,45 @@ where
         let transaction = match transaction {
             Some(TypedTransactionRequest::Legacy(mut req)) => {
                 req.chain_id = Some(chain_id.to());
-                req.gas_limit = gas_limit;
-                req.gas_price = self.legacy_gas_price(gas_price).await?;
+                req.gas_limit = gas_limit.saturating_to();
+                req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
 
                 TypedTransactionRequest::Legacy(req)
             }
             Some(TypedTransactionRequest::EIP2930(mut req)) => {
                 req.chain_id = chain_id.to();
-                req.gas_limit = gas_limit;
-                req.gas_price = self.legacy_gas_price(gas_price).await?;
+                req.gas_limit = gas_limit.saturating_to();
+                req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
 
                 TypedTransactionRequest::EIP2930(req)
             }
             Some(TypedTransactionRequest::EIP1559(mut req)) => {
-                let (max_fee_per_gas, max_priority_fee_per_gas) =
-                    self.eip1559_fees(max_fee_per_gas, max_priority_fee_per_gas).await?;
+                let (max_fee_per_gas, max_priority_fee_per_gas) = self
+                    .eip1559_fees(
+                        max_fee_per_gas.map(U256::from),
+                        max_priority_fee_per_gas.map(U256::from),
+                    )
+                    .await?;
 
                 req.chain_id = chain_id.to();
-                req.gas_limit = gas_limit;
-                req.max_fee_per_gas = max_fee_per_gas;
-                req.max_priority_fee_per_gas = max_priority_fee_per_gas;
+                req.gas_limit = gas_limit.saturating_to();
+                req.max_fee_per_gas = max_fee_per_gas.saturating_to();
+                req.max_priority_fee_per_gas = max_priority_fee_per_gas.saturating_to();
 
                 TypedTransactionRequest::EIP1559(req)
             }
             Some(TypedTransactionRequest::EIP4844(mut req)) => {
-                let (max_fee_per_gas, max_priority_fee_per_gas) =
-                    self.eip1559_fees(max_fee_per_gas, max_priority_fee_per_gas).await?;
+                let (max_fee_per_gas, max_priority_fee_per_gas) = self
+                    .eip1559_fees(
+                        max_fee_per_gas.map(U256::from),
+                        max_priority_fee_per_gas.map(U256::from),
+                    )
+                    .await?;
 
                 req.max_fee_per_gas = max_fee_per_gas;
                 req.max_priority_fee_per_gas = max_priority_fee_per_gas;
-                req.max_fee_per_blob_gas = self.eip4844_blob_fee(max_fee_per_blob_gas).await?;
+                req.max_fee_per_blob_gas =
+                    self.eip4844_blob_fee(max_fee_per_blob_gas.map(U256::from)).await?;
 
                 req.chain_id = chain_id.to();
                 req.gas_limit = gas_limit;
@@ -1674,7 +1687,7 @@ impl From<TransactionSource> for Transaction {
                     block_hash,
                     block_number,
                     base_fee,
-                    U256::from(index),
+                    index as usize,
                 )
             }
         }
@@ -1768,8 +1781,9 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         let mut op_fields = OptimismTransactionReceiptFields::default();
 
         if transaction.is_deposit() {
-            op_fields.deposit_nonce = receipt.deposit_nonce.map(U64::from);
-            op_fields.deposit_receipt_version = receipt.deposit_receipt_version.map(U64::from);
+            op_fields.deposit_nonce = receipt.deposit_nonce.map(reth_primitives::U64::from);
+            op_fields.deposit_receipt_version =
+                receipt.deposit_receipt_version.map(reth_primitives::U64::from);
         } else if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
             op_fields.l1_fee = optimism_tx_meta.l1_fee;
             op_fields.l1_gas_used = optimism_tx_meta
