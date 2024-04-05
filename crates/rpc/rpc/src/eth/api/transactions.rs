@@ -1781,8 +1781,9 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         let mut op_fields = OptimismTransactionReceiptFields::default();
 
         if transaction.is_deposit() {
-            op_fields.deposit_nonce = receipt.deposit_nonce.map(U64::from);
-            op_fields.deposit_receipt_version = receipt.deposit_receipt_version.map(U64::from);
+            op_fields.deposit_nonce = receipt.deposit_nonce.map(reth_primitives::U64::from);
+            op_fields.deposit_receipt_version =
+                receipt.deposit_receipt_version.map(reth_primitives::U64::from);
         } else if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
             op_fields.l1_fee = optimism_tx_meta.l1_fee;
             op_fields.l1_gas_used = optimism_tx_meta

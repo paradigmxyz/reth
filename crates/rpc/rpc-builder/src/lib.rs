@@ -1998,6 +1998,7 @@ impl Default for WsHttpServers {
 }
 
 /// Http Servers Enum
+#[allow(clippy::type_complexity)]
 enum WsHttpServerKind {
     /// Http server
     Plain(Server<Identity, Stack<RpcRequestMetrics, Identity>>),

@@ -153,7 +153,7 @@ fn fill(
         #[cfg(feature = "optimism")]
         other: OptimismTransactionFields {
             source_hash: signed_tx.source_hash(),
-            mint: signed_tx.mint().map(U128::from),
+            mint: signed_tx.mint().map(reth_primitives::U128::from),
             is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
         }
         .into(),
