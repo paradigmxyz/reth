@@ -254,7 +254,7 @@ reth-trie-parallel = { path = "crates/trie-parallel" }
 # revm
 revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
 revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "0ef5814" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "c34b770" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
@@ -263,12 +263,12 @@ alloy-dyn-abi = "0.7.0"
 alloy-sol-types = "0.7.0"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.3"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "17633df" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "17633df" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "17633df" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "17633df" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "17633df" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "17633df" }
 
 # TODO: Remove
 ethers-core = { version = "2.0.14", default-features = false }
@@ -328,9 +328,9 @@ discv5 = { git = "https://github.com/sigp/discv5", rev = "04ac004" }
 igd-next = "0.14.3"
 
 # rpc
-jsonrpsee = "0.20"
-jsonrpsee-core = "0.20"
-jsonrpsee-types = "0.20"
+jsonrpsee = "0.22"
+jsonrpsee-core = "0.22"
+jsonrpsee-types = "0.22"
 
 # crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [

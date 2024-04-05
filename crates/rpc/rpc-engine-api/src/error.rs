@@ -210,12 +210,6 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     }
 }
 
-impl From<EngineApiError> for jsonrpsee_core::error::Error {
-    fn from(error: EngineApiError) -> Self {
-        jsonrpsee_core::error::Error::Call(error.into())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

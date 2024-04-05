@@ -5,7 +5,6 @@ use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use jsonrpsee::{
     core::{
         client::{ClientT, SubscriptionClientT},
-        error::Error,
         params::ArrayParams,
     },
     http_client::HttpClient,
@@ -30,9 +29,9 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 
-fn is_unimplemented(err: Error) -> bool {
+fn is_unimplemented(err: jsonrpsee::core::client::Error) -> bool {
     match err {
-        Error::Call(error_obj) => {
+        jsonrpsee::core::client::Error::Call(error_obj) => {
             error_obj.code() == ErrorCode::InternalError.code() &&
                 error_obj.message() == "unimplemented"
         }
