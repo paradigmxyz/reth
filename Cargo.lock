@@ -814,6 +814,7 @@ dependencies = [
  "clap",
  "futures-util",
  "mev-share-sse",
+ "pin-project",
  "reth",
  "reth-node-ethereum",
  "serde",
