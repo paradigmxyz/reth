@@ -7,22 +7,10 @@
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
-    },
-    {
-      "name": "DS_EXPRESSION",
-      "label": "Expression",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "__expr__"
     }
   ],
   "__elements": {},
   "__requires": [
-    {
-      "type": "datasource",
-      "id": "__expr__",
-      "version": "1.0.0"
-    },
     {
       "type": "grafana",
       "id": "grafana",
@@ -1040,6 +1028,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1121,7 +1110,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
+          "editorMode": "code",
           "expr": "reth_network_hashes_pending_fetch{instance=~\"$instance\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -1137,7 +1126,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
+          "editorMode": "code",
           "expr": "reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
@@ -1150,13 +1139,16 @@
         },
         {
           "datasource": {
-            "type": "__expr__",
-            "uid": "${DS_EXPRESSION}"
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
           },
-          "expression": "$A + $B",
+          "editorMode": "code",
+          "expr": "sum(reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}) + sum(reth_network_hashes_pending_fetch{instance=~\"$instance\"})",
           "hide": false,
-          "refId": "Total Hashes in Transaction Fetcher",
-          "type": "math"
+          "instant": false,
+          "legendFormat": "Total Hashes in Transaction Fetcher",
+          "range": true,
+          "refId": "C"
         }
       ],
       "title": "Transaction Fetcher Hashes",
@@ -1970,7 +1962,32 @@
           },
           "unitScale": true
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "All transactions by all senders"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -2470,8 +2487,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2590,8 +2606,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2710,8 +2725,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2855,6 +2869,6 @@
   "timezone": "",
   "title": "reth - mempool",
   "uid": "bee34f59-c79c-4669-a000-198057b3703d",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
