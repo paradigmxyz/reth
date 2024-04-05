@@ -2,10 +2,8 @@
 
 use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
 use alloy_sol_types::decode_revert_reason;
-use jsonrpsee::{
-    core::Error as RpcError,
-    types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
-};
+pub use jsonrpsee::types::ErrorObject;
+use jsonrpsee::{core::Error as RpcError, types::error::CALL_EXECUTION_FAILED_CODE};
 use reth_interfaces::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes, U256};
 use reth_revm::tracing::{js::JsInspectorError, MuxError};

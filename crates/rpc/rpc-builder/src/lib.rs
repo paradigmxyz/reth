@@ -1330,6 +1330,7 @@ where
             blocking_task_pool.clone(),
             fee_history_cache,
             self.evm_config.clone(),
+            None,
         );
         let filter = EthFilter::new(
             self.provider.clone(),

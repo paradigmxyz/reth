@@ -159,7 +159,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use http::{header, Method, Request, StatusCode};
     use hyper::{body, Body};
     use jsonrpsee::{

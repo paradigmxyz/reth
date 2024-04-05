@@ -50,7 +50,6 @@ impl NetworkHandle {
         bandwidth_meter: BandwidthMeter,
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
-        #[cfg(feature = "optimism")] sequencer_endpoint: Option<String>,
         discv4: Option<Discv4>,
     ) -> Self {
         let inner = NetworkInner {
@@ -66,8 +65,6 @@ impl NetworkHandle {
             initial_sync_done: Arc::new(AtomicBool::new(false)),
             chain_id,
             tx_gossip_disabled,
-            #[cfg(feature = "optimism")]
-            sequencer_endpoint,
             discv4,
         };
         Self { inner: Arc::new(inner) }
@@ -329,11 +326,6 @@ impl NetworkInfo for NetworkHandle {
     fn is_initially_syncing(&self) -> bool {
         SyncStateProvider::is_initially_syncing(self)
     }
-
-    #[cfg(feature = "optimism")]
-    fn sequencer_endpoint(&self) -> Option<&str> {
-        self.inner.sequencer_endpoint.as_deref()
-    }
 }
 
 impl SyncStateProvider for NetworkHandle {
@@ -391,9 +383,6 @@ struct NetworkInner {
     chain_id: Arc<AtomicU64>,
     /// Whether to disable transaction gossip
     tx_gossip_disabled: bool,
-    /// The sequencer HTTP Endpoint
-    #[cfg(feature = "optimism")]
-    sequencer_endpoint: Option<String>,
     /// The instance of the discv4 service
     discv4: Option<Discv4>,
 }

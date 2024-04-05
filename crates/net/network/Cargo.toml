@@ -101,11 +101,6 @@ test-utils = [
     "reth-transaction-pool/test-utils",
 ]
 geth-tests = []
-optimism = [
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-network-api/optimism",
-]
 
 [[bench]]
 name = "bench"
