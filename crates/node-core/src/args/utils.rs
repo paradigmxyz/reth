@@ -1,10 +1,16 @@
 //! Clap parser utilities
 
 use reth_primitives::{fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
-use std::{net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs}, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 
 #[cfg(feature = "optimism")]
-use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_SEPOLIA, OP_GOERLI};
+use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
 #[cfg(not(feature = "optimism"))]
 use reth_primitives::{DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};
@@ -37,7 +43,7 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
-        "optimism" => OP_GOERLI.clone(), // use görli for pre-bedrock state
+        "optimism" => OP_MAINNET.clone(),
         #[cfg(feature = "optimism")]
         "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
         #[cfg(feature = "optimism")]
@@ -74,7 +80,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
-        "optimism" => OP_GOERLI.clone(), // use görli for pre-bedrock state
+        "optimism" => OP_MAINNET.clone(),
         #[cfg(feature = "optimism")]
         "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
         #[cfg(feature = "optimism")]

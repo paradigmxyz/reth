@@ -6,30 +6,27 @@ use crate::{
         DatabaseArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
-    primitives::{
-        Address, Bytes, TxHash, U256,
-    },
+    primitives::{address, bloom, Address, Bytes, TxHash, U256},
     version::SHORT_VERSION,
 };
-use alloy_rlp::{RlpDecodable};
+use alloy_rlp::RlpDecodable;
 use clap::Parser;
-use reth_db::{init_db, tables};
-use reth_node_core::{init::init_genesis};
-use reth_primitives::{stage::StageId, ChainSpec, B256, SealedBlockWithSenders, SealedBlock, Header, fs, Genesis, b256};
+use reth_db::{
+    init_db, tables,
+    transaction::{DbTx, DbTxMut},
+};
+use reth_node_core::init::init_genesis;
+use reth_primitives::{
+    b256, fs,
+    stage::{StageCheckpoint, StageId},
+    ChainSpec, Genesis, Header, SealedBlock, SealedBlockWithSenders, B256,
+};
 use reth_provider::{BlockWriter, ProviderFactory};
-use reth_stages::{
-    prelude::*,
-};
-use serde::Deserialize;
-use std::{
-    path::{PathBuf},
-    sync::Arc,
-};
-use tracing::{debug, info};
-use reth_db::transaction::{DbTx, DbTxMut};
 use reth_revm::primitives::FixedBytes;
-use reth_primitives::stage::StageCheckpoint;
-use crate::primitives::{address, bloom};
+use reth_stages::prelude::*;
+use serde::Deserialize;
+use std::{path::PathBuf, sync::Arc};
+use tracing::{debug, info};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
@@ -191,7 +188,9 @@ impl ImportOpCommand {
 
         info!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Loading genesis from file");
         let genesis_json: Genesis = serde_json::from_str::<Genesis>(
-            fs::read_to_string("/Users/vacekj/Programming/reth/crates/primitives/res/genesis/goerli_op.json").unwrap().as_str()).unwrap();
+            fs::read_to_string("../../res/genesis/goerli_op.json").unwrap().as_str(),
+        )
+        .unwrap();
         let chain = ChainSpec::from(genesis_json);
 
         // add network name to data dir
@@ -209,21 +208,16 @@ impl ImportOpCommand {
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
         init_genesis(provider_factory.clone())?;
-        
+
         let provider = provider_factory.provider_rw()?;
         /* Fill in fake data for all tables up until block 4061223 inclusive */
         for block_number in 0..=4061223 {
             debug!(target: "reth::cli", "inserting dummy block {}", block_number);
-            let sealed_header = Header {
-                number: block_number,
-                ..Default::default()
-            }.seal(Default::default());
-        
+            let sealed_header =
+                Header { number: block_number, ..Default::default() }.seal(Default::default());
+
             let block: SealedBlockWithSenders = SealedBlockWithSenders {
-                block: SealedBlock {
-                    header: sealed_header,
-                    ..Default::default()
-                },
+                block: SealedBlock { header: sealed_header, ..Default::default() },
                 ..Default::default()
             };
             provider.insert_block(block, None)?;
@@ -259,16 +253,13 @@ impl ImportOpCommand {
                 withdrawals: None,
                 ommers: vec![],
             },
-            senders: vec![]
+            senders: vec![],
         };
         dbg!(block.hash());
         provider.insert_block(block, None)?;
         let tx = provider.into_tx();
 
-        let stage_checkpoint = StageCheckpoint {
-            block_number: 4061224,
-            stage_checkpoint: None,
-        };
+        let stage_checkpoint = StageCheckpoint { block_number: 4061224, stage_checkpoint: None };
 
         info!(target: "reth::cli", "commiting sync stages");
         for stage in StageId::ALL.iter() {

@@ -13,12 +13,12 @@ use crate::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
+use crossterm::ExecutableCommand;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{InitState, WithLaunchContext};
 use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
-use crossterm::ExecutableCommand;
 
 #[cfg(feature = "optimism")]
 use crate::commands::import_op;
