@@ -194,8 +194,6 @@ where
             dns_discovery_config,
             extra_protocols,
             tx_gossip_disabled,
-            #[cfg(feature = "optimism")]
-                optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
             transactions_manager_config: _,
         } = config;
 
@@ -258,8 +256,6 @@ where
             bandwidth_meter,
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
             tx_gossip_disabled,
-            #[cfg(feature = "optimism")]
-            sequencer_endpoint,
             discv4,
         );
 

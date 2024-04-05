@@ -47,11 +47,6 @@ http-body = "0.4.5"
 hyper.workspace = true
 jsonwebtoken = "8"
 
-## required for optimism sequencer delegation
-reqwest = { version = "0.11", default-features = false, features = [
-    "rustls-tls",
-], optional = true }
-
 # async
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
@@ -90,9 +85,7 @@ reth-interfaces = { workspace = true, features = ["test-utils"] }
 
 [features]
 optimism = [
-    "dep:reqwest",
     "reth-primitives/optimism",
     "reth-rpc-types-compat/optimism",
-    "reth-network-api/optimism",
     "reth-provider/optimism",
 ]

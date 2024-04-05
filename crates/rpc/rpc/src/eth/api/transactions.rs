@@ -848,8 +848,10 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256> {
         // On optimism, transactions are forwarded directly to the sequencer to be included in
         // blocks that it builds.
-        #[cfg(feature = "optimism")]
-        self.forward_to_sequencer(&tx).await?;
+        if let Some(client) = self.inner.raw_transaction_forwarder.as_ref() {
+            tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
+            client.forward_raw_transaction(&tx).await?;
+        }
 
         let recovered = recover_raw_transaction(tx)?;
         let pool_transaction = <Pool::Transaction>::from_recovered_pooled_transaction(recovered);
@@ -1506,39 +1508,6 @@ where
 
         Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
     }
-
-    /// Helper function for `eth_sendRawTransaction` for Optimism.
-    ///
-    /// Forwards the raw transaction bytes to the configured sequencer endpoint.
-    /// This is a no-op if the sequencer endpoint is not configured.
-    #[cfg(feature = "optimism")]
-    pub async fn forward_to_sequencer(&self, tx: &Bytes) -> EthResult<()> {
-        if let Some(endpoint) = self.network().sequencer_endpoint() {
-            let body = serde_json::to_string(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "eth_sendRawTransaction",
-                "params": [format!("0x{}", alloy_primitives::hex::encode(tx))],
-                "id": self.network().chain_id()
-            }))
-            .map_err(|_| {
-                tracing::warn!(
-                    target = "rpc::eth",
-                    "Failed to serialize transaction for forwarding to sequencer"
-                );
-                OptimismEthApiError::InvalidSequencerTransaction
-            })?;
-
-            self.inner
-                .http_client
-                .post(endpoint)
-                .header(http::header::CONTENT_TYPE, "application/json")
-                .body(body)
-                .send()
-                .await
-                .map_err(OptimismEthApiError::HttpError)?;
-        }
-        Ok(())
-    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
@@ -1843,6 +1812,7 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
             evm_config,
+            None,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

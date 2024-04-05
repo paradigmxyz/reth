@@ -80,17 +80,6 @@ pub struct NetworkConfig<C> {
     pub tx_gossip_disabled: bool,
     /// How to instantiate transactions manager.
     pub transactions_manager_config: TransactionsManagerConfig,
-    /// Optimism Network Config
-    #[cfg(feature = "optimism")]
-    pub optimism_network_config: OptimismNetworkConfig,
-}
-
-/// Optimism Network Config
-#[cfg(feature = "optimism")]
-#[derive(Debug, Clone, Default)]
-pub struct OptimismNetworkConfig {
-    /// The sequencer HTTP endpoint, if provided via CLI flag
-    pub sequencer_endpoint: Option<String>,
 }
 
 // === impl NetworkConfig ===
@@ -227,18 +216,6 @@ pub struct NetworkConfigBuilder {
     block_import: Option<Box<dyn BlockImport>>,
     /// How to instantiate transactions manager.
     transactions_manager_config: TransactionsManagerConfig,
-    /// Optimism Network Config Builder
-    #[cfg(feature = "optimism")]
-    optimism_network_config: OptimismNetworkConfigBuilder,
-}
-
-/// Optimism Network Config Builder
-#[cfg(feature = "optimism")]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Default)]
-pub struct OptimismNetworkConfigBuilder {
-    /// The sequencer HTTP endpoint, if provided via CLI flag
-    sequencer_endpoint: Option<String>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -264,8 +241,6 @@ impl NetworkConfigBuilder {
             head: None,
             tx_gossip_disabled: false,
             block_import: None,
-            #[cfg(feature = "optimism")]
-            optimism_network_config: OptimismNetworkConfigBuilder::default(),
             transactions_manager_config: Default::default(),
         }
     }
@@ -481,13 +456,6 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Sets the sequencer HTTP endpoint.
-    #[cfg(feature = "optimism")]
-    pub fn sequencer_endpoint(mut self, endpoint: Option<String>) -> Self {
-        self.optimism_network_config.sequencer_endpoint = endpoint;
-        self
-    }
-
     /// Convenience function for creating a [NetworkConfig] with a noop provider that does nothing.
     #[cfg(any(test, feature = "test-utils"))]
     pub fn build_with_noop_provider(
@@ -522,8 +490,6 @@ impl NetworkConfigBuilder {
             head,
             tx_gossip_disabled,
             block_import,
-            #[cfg(feature = "optimism")]
-                optimism_network_config: OptimismNetworkConfigBuilder { sequencer_endpoint },
             transactions_manager_config,
         } = self;
 
@@ -578,8 +544,6 @@ impl NetworkConfigBuilder {
             extra_protocols,
             fork_filter,
             tx_gossip_disabled,
-            #[cfg(feature = "optimism")]
-            optimism_network_config: OptimismNetworkConfig { sequencer_endpoint },
             transactions_manager_config,
         }
     }

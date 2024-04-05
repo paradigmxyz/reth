@@ -180,6 +180,7 @@ use reth_rpc::{
         cache::{cache_new_blocks_task, EthStateCache},
         fee_history_cache_new_blocks_task,
         gas_oracle::GasPriceOracle,
+        traits::RawTransactionForwarder,
         EthBundle, FeeHistoryCache,
     },
     AdminApi, AuthLayer, Claims, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub,
@@ -198,6 +199,7 @@ use std::{
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     str::FromStr,
+    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
@@ -949,6 +951,9 @@ pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig>
     blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
     modules: HashMap<RethRpcModule, Methods>,
+    /// Optional forwarder for `eth_sendRawTransaction`
+    // TODO(mattsse): find a more ergonomic way to configure eth/rpc customizations
+    eth_raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
 }
 
 // === impl RethModuleRegistry ===
@@ -977,7 +982,18 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
             blocking_pool_guard: BlockingTaskGuard::new(config.eth.max_tracing_requests),
             config,
             events,
+            eth_raw_transaction_forwarder: None,
         }
+    }
+
+    /// Sets a forwarder for `eth_sendRawTransaction`
+    ///
+    /// Note: this might be removed in the future in favor of a more generic approach.
+    pub fn set_eth_raw_transaction_forwarder(
+        &mut self,
+        forwarder: Arc<dyn RawTransactionForwarder>,
+    ) {
+        self.eth_raw_transaction_forwarder = Some(forwarder);
     }
 
     /// Returns a reference to the pool
@@ -1331,6 +1347,7 @@ where
             blocking_task_pool.clone(),
             fee_history_cache,
             self.evm_config.clone(),
+            self.eth_raw_transaction_forwarder.clone(),
         );
         let filter = EthFilter::new(
             self.provider.clone(),
