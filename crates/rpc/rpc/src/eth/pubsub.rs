@@ -119,7 +119,7 @@ where
             let filter = match params {
                 Some(Params::Logs(filter)) => FilteredParams::new(Some(*filter)),
                 Some(Params::Bool(_)) => {
-                    return Err(invalid_params_rpc_err("Invalid params for logs").into())
+                    return Err(invalid_params_rpc_err("Invalid params for logs"))
                 }
                 _ => FilteredParams::default(),
             };
@@ -147,8 +147,7 @@ where
                     Params::Logs(_) => {
                         return Err(invalid_params_rpc_err(
                             "Invalid params for newPendingTransactions",
-                        )
-                        .into())
+                        ))
                     }
                 }
             }
@@ -201,7 +200,7 @@ where
 pub(crate) struct SubscriptionSerializeError(#[from] serde_json::Error);
 
 impl SubscriptionSerializeError {
-    pub const fn new(err: serde_json::Error) -> Self {
+    pub(crate) const fn new(err: serde_json::Error) -> Self {
         Self(err)
     }
 }

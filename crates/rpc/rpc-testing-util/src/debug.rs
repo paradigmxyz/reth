@@ -1,7 +1,7 @@
 //! Helpers for testing debug trace calls.
 
 use futures::{Stream, StreamExt};
-use jsonrpsee::Error as RpcError;
+use jsonrpsee::core::client::Error as RpcError;
 use reth_primitives::{BlockId, TxHash, B256};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 use reth_rpc_types::{

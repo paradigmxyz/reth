@@ -157,10 +157,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             ),
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
-                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => {
-                    todo!("mattsse: needs version bump on alloy")
-                    // (*err).into()
-                }
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => (*err).into(),
                 BeaconForkChoiceUpdateError::EngineUnavailable |
                 BeaconForkChoiceUpdateError::Internal(_) => {
                     jsonrpsee_types::error::ErrorObject::owned(

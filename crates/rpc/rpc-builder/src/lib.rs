@@ -201,7 +201,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
-use tower::layer::util::{Identity, Stack};
+pub use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
 

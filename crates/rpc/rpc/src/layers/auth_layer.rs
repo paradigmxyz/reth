@@ -33,7 +33,7 @@ use tower::{Layer, Service};
 ///     let middleware = tower::ServiceBuilder::default().layer(layer);
 ///
 ///     let _server = ServerBuilder::default()
-///         .set_middleware(middleware)
+///         .set_http_middleware(middleware)
 ///         .build(addr.parse::<SocketAddr>().unwrap())
 ///         .await
 ///         .unwrap();
@@ -276,7 +276,7 @@ mod tests {
         // Create a layered server
         let server = ServerBuilder::default()
             .set_id_provider(RandomStringIdProvider::new(16))
-            .set_middleware(middleware)
+            .set_http_middleware(middleware)
             .build(addr.parse::<SocketAddr>().unwrap())
             .await
             .unwrap();

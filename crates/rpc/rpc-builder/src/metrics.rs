@@ -55,6 +55,7 @@ impl RpcRequestMetrics {
     }
 
     /// Creates a new instance of the metrics layer for Ws.
+    #[allow(unused)]
     pub(crate) fn ipc(module: &RpcModule<()>) -> Self {
         Self::new(module, RpcTransport::Ipc)
     }
@@ -176,6 +177,7 @@ impl<F: Future<Output = MethodResponse>> Future for MeteredRequestFuture<F> {
 pub(crate) enum RpcTransport {
     Http,
     WebSocket,
+    #[allow(unused)]
     Ipc,
 }
 
@@ -190,7 +192,7 @@ impl RpcTransport {
     }
 
     /// Returns the connection metrics for the transport protocol.
-    pub(crate) fn connection_metrics(&self) -> RpcServerConnectionMetrics {
+    fn connection_metrics(&self) -> RpcServerConnectionMetrics {
         RpcServerConnectionMetrics::new_with_labels(&[("transport", self.as_str())])
     }
 }
