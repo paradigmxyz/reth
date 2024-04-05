@@ -60,10 +60,7 @@ pub struct ImportOpCommand {
     #[command(flatten)]
     db: DatabaseArgs,
 
-    /// The path to a block file for import.
-    ///
-    /// The online stages (headers and bodies) are replaced by a file import, after which the
-    /// remaining stages are executed.
+    /// Path to file with state at first bedrock block.
     #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
     path: PathBuf,
 }
