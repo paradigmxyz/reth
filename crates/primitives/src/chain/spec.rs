@@ -246,11 +246,11 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Optimism Goerli spec
 #[cfg(feature = "optimism")]
-pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
-        chain: Chain::optimism_goerli(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_op_original.json"))
-            .expect("Can't deserialize Optimism Goerli genesis json"),
+        chain: Chain::optimism_mainnet(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_op.json"))
+            .expect("Can't deserialize Optimism Mainnet genesis (i.e. OP Görli genesis) json"),
         genesis_hash: Some(b256!(
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
         )),
@@ -278,8 +278,8 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 Hardfork::Paris,
                 ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
             ),
-            (Hardfork::Bedrock, ForkCondition::Block(4061224)),
-            (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
+            (Hardfork::Bedrock, ForkCondition::Block(105235063)),
+            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1707238800)),
@@ -287,8 +287,8 @@ pub static OP_GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London, BaseFeeParams::optimism_goerli()),
-                (Hardfork::Canyon, BaseFeeParams::optimism_goerli_canyon()),
+                (Hardfork::London, BaseFeeParams::optimism()),
+                (Hardfork::Canyon, BaseFeeParams::optimism_canyon()),
             ]
             .into(),
         ),
@@ -521,28 +521,6 @@ impl BaseFeeParams {
                 crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
             elasticity_multiplier:
                 crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-        }
-    }
-
-    /// Get the base fee parameters for optimism sepolia
-    #[cfg(feature = "optimism")]
-    pub const fn optimism_goerli() -> BaseFeeParams {
-        BaseFeeParams {
-            max_change_denominator:
-            crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
-            elasticity_multiplier:
-            crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-        }
-    }
-
-    /// Get the base fee parameters for optimism goerli (post Canyon)
-    #[cfg(feature = "optimism")]
-    pub const fn optimism_goerli_canyon() -> BaseFeeParams {
-        BaseFeeParams {
-            max_change_denominator:
-            crate::constants::OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
-            elasticity_multiplier:
-            crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
         }
     }
 
@@ -3252,7 +3230,7 @@ Post-merge hard forks (timestamp based):
 
     #[cfg(feature = "optimism")]
     #[test]
-    fn latest_op_mainnet_fork_id() {
+    fn latest_base_mainnet_fork_id() {
         assert_eq!(
             ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 0 },
             BASE_MAINNET.latest_fork_id()
