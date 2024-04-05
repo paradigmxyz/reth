@@ -7,8 +7,9 @@ use crate::{
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
+    core::RegisterMethodError,
     http_client::HeaderMap,
-    server::{RpcModule, ServerHandle},
+    server::{AlreadyStoppedError, RpcModule, ServerHandle},
     Methods,
 };
 use reth_network_api::{NetworkInfo, Peers};
@@ -32,6 +33,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tower::layer::util::Identity;
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
@@ -129,12 +131,14 @@ where
 
     // By default, both http and ws are enabled.
     let server = ServerBuilder::new()
-        .set_middleware(middleware)
+        .set_http_middleware(middleware)
         .build(socket_addr)
         .await
-        .map_err(|err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)))?;
+        .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
 
-    let local_addr = server.local_addr()?;
+    let local_addr = server
+        .local_addr()
+        .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
 
     let handle = server.start(module);
     Ok(AuthServerHandle { handle, local_addr, secret })
@@ -148,7 +152,7 @@ pub struct AuthServerConfig {
     /// The secret for the auth layer of the server.
     pub(crate) secret: JwtSecret,
     /// Configs for JSON-RPC Http.
-    pub(crate) server_config: ServerBuilder,
+    pub(crate) server_config: ServerBuilder<Identity, Identity>,
 }
 
 // === impl AuthServerConfig ===
@@ -173,12 +177,15 @@ impl AuthServerConfig {
             .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
 
         // By default, both http and ws are enabled.
-        let server =
-            server_config.set_middleware(middleware).build(socket_addr).await.map_err(|err| {
-                RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr))
-            })?;
+        let server = server_config
+            .set_http_middleware(middleware)
+            .build(socket_addr)
+            .await
+            .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
 
-        let local_addr = server.local_addr()?;
+        let local_addr = server
+            .local_addr()
+            .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
 
         let handle = server.start(module.inner);
         Ok(AuthServerHandle { handle, local_addr, secret })
@@ -190,7 +197,7 @@ impl AuthServerConfig {
 pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
-    server_config: Option<ServerBuilder>,
+    server_config: Option<ServerBuilder<Identity, Identity>>,
 }
 
 // === impl AuthServerConfigBuilder ===
@@ -223,7 +230,7 @@ impl AuthServerConfigBuilder {
     ///
     /// Note: this always configures an [EthSubscriptionIdProvider]
     /// [IdProvider](jsonrpsee::server::IdProvider) for convenience.
-    pub fn with_server_config(mut self, config: ServerBuilder) -> Self {
+    pub fn with_server_config(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
         self.server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
@@ -286,7 +293,7 @@ impl AuthRpcModule {
     pub fn merge_auth_methods(
         &mut self,
         other: impl Into<Methods>,
-    ) -> Result<bool, jsonrpsee::core::error::Error> {
+    ) -> Result<bool, RegisterMethodError> {
         self.module_mut().merge(other.into()).map(|_| true)
     }
 
@@ -320,8 +327,8 @@ impl AuthServerHandle {
     }
 
     /// Tell the server to stop without waiting for the server to stop.
-    pub fn stop(self) -> Result<(), RpcError> {
-        Ok(self.handle.stop()?)
+    pub fn stop(self) -> Result<(), AlreadyStoppedError> {
+        self.handle.stop()
     }
 
     /// Returns the url to the http server

@@ -76,7 +76,7 @@ pub fn from_block_full(
                 block_hash,
                 block_number,
                 base_fee_per_gas,
-                U256::from(idx),
+                idx,
             )
         })
         .collect::<Vec<_>>();
