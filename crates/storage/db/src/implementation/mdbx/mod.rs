@@ -58,7 +58,7 @@ impl DatabaseEnvKind {
 }
 
 /// Arguments for database initialization.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DatabaseArguments {
     /// Client version that accesses the database.
     client_version: ClientVersion,
@@ -220,6 +220,10 @@ impl DatabaseMetrics for DatabaseEnv {
             self.freelist().map_err(|error| error!(%error, "Failed to read db.freelist"))
         {
             metrics.push(("db.freelist", freelist as f64, vec![]));
+        }
+
+        if let Ok(stat) = self.stat().map_err(|error| error!(%error, "Failed to read db.stat")) {
+            metrics.push(("db.page_size", stat.page_size() as f64, vec![]));
         }
 
         metrics.push((

@@ -578,13 +578,30 @@ where
             start_block.saturating_sub(1),
         )?,
         Ordering::Less => {
-            let last_block = static_file_provider
+            let mut last_block = static_file_provider
                 .get_highest_static_file_block(StaticFileSegment::Receipts)
                 .unwrap_or(0);
 
-            let missing_block = Box::new(
-                tx.get::<tables::Headers>(last_block + 1)?.unwrap_or_default().seal_slow(),
-            );
+            let last_receipt_num = static_file_provider
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .unwrap_or(0);
+
+            // To be extra safe, we make sure that the last receipt num matches the last block from
+            // its indices. If not, get it.
+            loop {
+                if let Some(indices) = provider.block_body_indices(last_block)? {
+                    if indices.last_tx_num() <= last_receipt_num {
+                        break
+                    }
+                }
+                if last_block == 0 {
+                    break
+                }
+                last_block -= 1;
+            }
+
+            let missing_block =
+                Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
 
             return Err(StageError::MissingStaticFileData {
                 block: missing_block,

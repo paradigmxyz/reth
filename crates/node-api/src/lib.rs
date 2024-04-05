@@ -20,10 +20,12 @@ pub use engine::{
 };
 
 /// Traits and helper types used to abstract over EVM methods and types.
-pub mod evm;
-pub use evm::{ConfigureEvm, ConfigureEvmEnv};
+pub use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 
 pub mod primitives;
 
 pub mod node;
-pub use node::NodeTypes;
+pub use node::*;
+
+// re-export for convenience
+pub use reth_provider::FullProvider;

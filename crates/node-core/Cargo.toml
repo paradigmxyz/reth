@@ -41,6 +41,9 @@ reth-prune.workspace = true
 reth-blockchain-tree.workspace = true
 reth-static-file.workspace = true
 
+# ethereum
+discv5.workspace = true
+
 # async
 tokio.workspace = true
 

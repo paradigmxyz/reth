@@ -18,17 +18,17 @@ First, in your home directory, create a file with the name `network_params.json`
 {
   "participants": [
     {
-      "el_client_type": "reth",
-      "el_client_image": "ghcr.io/paradigmxyz/reth",
-      "cl_client_type": "lighthouse",
-      "cl_client_image": "sigp/lighthouse:latest",
+      "el_type": "reth",
+      "el_image": "ghcr.io/paradigmxyz/reth",
+      "cl_type": "lighthouse",
+      "cl_image": "sigp/lighthouse:latest",
       "count": 1
     },
     {
-      "el_client_type": "reth",
-      "el_client_image": "ghcr.io/paradigmxyz/reth",
-      "cl_client_type": "teku",
-      "cl_client_image": "consensys/teku:latest",
+      "el_type": "reth",
+      "el_image": "ghcr.io/paradigmxyz/reth",
+      "cl_type": "teku",
+      "cl_image": "consensys/teku:latest",
       "count": 1
     }
   ],

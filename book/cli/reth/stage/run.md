@@ -126,7 +126,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/<VERSION>-<SHA>/<ARCH>]
+          [default: reth/<VERSION>-<SHA>/<ARCH>-gnu]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -158,14 +158,14 @@ Networking:
           Maximum number of inbound requests. default: 30
 
       --pooled-tx-response-soft-limit <BYTES>
-          Soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request. Spec'd at 2 MiB.
+          Soft limit for the byte size of a `PooledTransactions` response on assembling a `GetPooledTransactions` request. Spec'd at 2 MiB.
           
           <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
           
           [default: 2097152]
 
       --pooled-tx-pack-soft-limit <BYTES>
-          Default soft limit for the byte size of a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on assembling a [`GetPooledTransactions`](reth_eth_wire::PooledTransactions) request. This defaults to less than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when assembling a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response. Default is 128 KiB
+          Default soft limit for the byte size of a `PooledTransactions` response on assembling a `GetPooledTransactions` request. This defaults to less than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when assembling a `PooledTransactions` response. Default is 128 KiB
           
           [default: 131072]
 
@@ -182,6 +182,11 @@ Database:
           - debug:   Enables logging for debug-level messages
           - trace:   Enables logging for trace debug-level messages
           - extra:   Enables logging for extra debug-level messages
+
+      --db.exclusive <EXCLUSIVE>
+          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
+          
+          [possible values: true, false]
 
   -c, --commit
           Commits the changes in the database. WARNING: potentially destructive.

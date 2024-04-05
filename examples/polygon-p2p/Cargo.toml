@@ -8,7 +8,7 @@ license.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-secp256k1.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 tokio.workspace = true
 reth-network.workspace = true
 reth-primitives.workspace = true

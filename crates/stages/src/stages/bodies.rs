@@ -13,9 +13,12 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    StaticFileSegment,
+    StaticFileSegment, TxNumber,
 };
-use reth_provider::{providers::StaticFileWriter, DatabaseProviderRW, HeaderProvider, StatsReader};
+use reth_provider::{
+    providers::{StaticFileProvider, StaticFileWriter},
+    BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, StatsReader,
+};
 use std::{
     cmp::Ordering,
     task::{ready, Context, Poll},
@@ -145,17 +148,11 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // error will trigger an unwind, that will bring the database to the same height as the
             // static files.
             Ordering::Less => {
-                let last_block = static_file_provider
-                    .get_highest_static_file_block(StaticFileSegment::Transactions)
-                    .unwrap_or_default();
-
-                let missing_block =
-                    Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
-
-                return Err(StageError::MissingStaticFileData {
-                    block: missing_block,
-                    segment: StaticFileSegment::Transactions,
-                })
+                return Err(missing_static_data_error(
+                    next_static_file_tx_num.saturating_sub(1),
+                    static_file_provider,
+                    provider,
+                )?)
             }
             Ordering::Equal => {}
         }
@@ -311,17 +308,11 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // If there are more transactions on database, then we are missing static file data and we
         // need to unwind further.
         if db_tx_num > static_file_tx_num {
-            let last_block = static_file_provider
-                .get_highest_static_file_block(StaticFileSegment::Transactions)
-                .unwrap_or_default();
-
-            let missing_block =
-                Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
-
-            return Err(StageError::MissingStaticFileData {
-                block: missing_block,
-                segment: StaticFileSegment::Transactions,
-            })
+            return Err(missing_static_data_error(
+                static_file_tx_num,
+                static_file_provider,
+                provider,
+            )?)
         }
 
         // Unwinds static file
@@ -333,6 +324,37 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
         })
     }
+}
+
+fn missing_static_data_error<DB: Database>(
+    last_tx_num: TxNumber,
+    static_file_provider: &StaticFileProvider,
+    provider: &DatabaseProviderRW<DB>,
+) -> Result<StageError, ProviderError> {
+    let mut last_block = static_file_provider
+        .get_highest_static_file_block(StaticFileSegment::Transactions)
+        .unwrap_or_default();
+
+    // To be extra safe, we make sure that the last tx num matches the last block from its indices.
+    // If not, get it.
+    loop {
+        if let Some(indices) = provider.block_body_indices(last_block)? {
+            if indices.last_tx_num() <= last_tx_num {
+                break
+            }
+        }
+        if last_block == 0 {
+            break
+        }
+        last_block -= 1;
+    }
+
+    let missing_block = Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
+
+    Ok(StageError::MissingStaticFileData {
+        block: missing_block,
+        segment: StaticFileSegment::Transactions,
+    })
 }
 
 // TODO(alexey): ideally, we want to measure Bodies stage progress in bytes, but it's hard to know

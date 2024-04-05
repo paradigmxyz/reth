@@ -129,7 +129,7 @@ optimism = [
     "reth-network-api/optimism",
     "reth-blockchain-tree/optimism",
     "dep:reth-node-optimism",
-    "reth-node-core/optimism",
+    "reth-node-core/optimism"
 ]
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices

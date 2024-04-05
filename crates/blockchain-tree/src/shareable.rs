@@ -60,7 +60,7 @@ where
         block: SealedBlockWithSenders,
         validation_kind: BlockValidationKind,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
-        trace!(target: "blockchain_tree", hash=?block.hash(), number=block.number, parent_hash=?block.parent_hash, "Inserting block");
+        trace!(target: "blockchain_tree", hash = %block.hash(), number = block.number, parent_hash = %block.parent_hash, "Inserting block");
         let mut tree = self.tree.write();
         let res = tree.insert_block(block, validation_kind);
         tree.update_chains_metrics();
@@ -68,7 +68,7 @@ where
     }
 
     fn finalize_block(&self, finalized_block: BlockNumber) {
-        trace!(target: "blockchain_tree", ?finalized_block, "Finalizing block");
+        trace!(target: "blockchain_tree", finalized_block, "Finalizing block");
         let mut tree = self.tree.write();
         tree.finalize_block(finalized_block);
         tree.update_chains_metrics();
@@ -78,7 +78,7 @@ where
         &self,
         last_finalized_block: BlockNumber,
     ) -> RethResult<()> {
-        trace!(target: "blockchain_tree", ?last_finalized_block, "Connecting buffered blocks to canonical hashes and finalizing the tree");
+        trace!(target: "blockchain_tree", last_finalized_block, "Connecting buffered blocks to canonical hashes and finalizing the tree");
         let mut tree = self.tree.write();
         let res =
             tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(last_finalized_block);
@@ -94,8 +94,8 @@ where
         res
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
-        trace!(target: "blockchain_tree", ?block_hash, "Making block canonical");
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
+        trace!(target: "blockchain_tree", %block_hash, "Making block canonical");
         let mut tree = self.tree.write();
         let res = tree.make_canonical(block_hash);
         tree.update_chains_metrics();
@@ -103,7 +103,7 @@ where
     }
 
     fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()> {
-        trace!(target: "blockchain_tree", ?unwind_to, "Unwinding to block number");
+        trace!(target: "blockchain_tree", unwind_to, "Unwinding to block number");
         let mut tree = self.tree.write();
         let res = tree.unwind(unwind_to);
         tree.update_chains_metrics();

@@ -856,8 +856,37 @@ impl TransactionSignedNoHash {
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
     pub fn recover_signer(&self) -> Option<Address> {
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        #[cfg(feature = "optimism")]
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
+        }
+
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
+    }
+
+    /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
+    /// value_.
+    ///
+    /// Re-uses a given buffer to avoid numerous reallocations when recovering batches. **Clears the
+    /// buffer before use.**
+    ///
+    /// Returns `None` if the transaction's signature is invalid, see also
+    /// [Signature::recover_signer_unchecked].
+    pub fn encode_and_recover_unchecked(&self, buffer: &mut Vec<u8>) -> Option<Address> {
+        buffer.clear();
+        self.transaction.encode_without_signature(buffer);
+
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        #[cfg(feature = "optimism")]
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
+        }
+
+        self.signature.recover_signer_unchecked(keccak256(buffer))
     }
 
     /// Converts into a transaction type with its hash: [`TransactionSigned`].
@@ -1333,13 +1362,14 @@ impl TransactionSigned {
         let Ok(tx_type) = TxType::try_from(tx_type) else {
             return Err(RlpError::Custom("unsupported typed transaction type"))
         };
+
         let transaction = match tx_type {
             TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
             TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
             TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             #[cfg(feature = "optimism")]
             TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
-            TxType::Legacy => unreachable!("path for legacy tx has diverged before this method"),
+            TxType::Legacy => return Err(RlpError::Custom("unexpected legacy tx type")),
         };
 
         #[cfg(not(feature = "optimism"))]
@@ -1672,7 +1702,6 @@ mod tests {
     };
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
-    use bytes::BytesMut;
     use reth_codecs::Compact;
     use secp256k1::{KeyPair, Secp256k1};
     use std::str::FromStr;
@@ -1933,10 +1962,8 @@ mod tests {
         let tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         let recovered = tx.into_ecrecovered().unwrap();
 
-        let mut encoded = BytesMut::new();
-        recovered.encode(&mut encoded);
-
-        let decoded = TransactionSignedEcRecovered::decode(&mut &encoded[..]).unwrap();
+        let decoded =
+            TransactionSignedEcRecovered::decode(&mut &alloy_rlp::encode(&recovered)[..]).unwrap();
         assert_eq!(recovered, decoded)
     }
 

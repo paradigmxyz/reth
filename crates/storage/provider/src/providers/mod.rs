@@ -10,6 +10,7 @@ use reth_db::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
+use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::{
     blockchain_tree::{
         error::{CanonicalError, InsertBlockError},
@@ -20,7 +21,6 @@ use reth_interfaces::{
     provider::ProviderResult,
     RethResult,
 };
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
@@ -669,7 +669,7 @@ where
         self.tree.connect_buffered_blocks_to_canonical_hashes()
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         self.tree.make_canonical(block_hash)
     }
 

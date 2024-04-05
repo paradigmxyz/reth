@@ -3,7 +3,7 @@
 use crate::{
     error::ECIESErrorImpl,
     mac::{HeaderBytes, MAC},
-    util::{hmac_sha256, id2pk, pk2id, sha256},
+    util::{hmac_sha256, sha256},
     ECIESError,
 };
 use aes::{cipher::StreamCipher, Aes128, Aes256};
@@ -15,7 +15,7 @@ use educe::Educe;
 use rand::{thread_rng, Rng};
 use reth_primitives::{
     bytes::{BufMut, Bytes, BytesMut},
-    B128, B256, B512 as PeerId,
+    id2pk, pk2id, B128, B256, B512 as PeerId,
 };
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},

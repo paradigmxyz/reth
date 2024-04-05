@@ -12,8 +12,9 @@ use reth::{
     },
     revm::{
         handler::register::EvmHandler,
+        inspector_handle_register,
         precompile::{Precompile, PrecompileSpecId, Precompiles},
-        Database, Evm, EvmBuilder,
+        Database, Evm, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
@@ -89,12 +90,17 @@ impl ConfigureEvm for MyEvmConfig {
             .build()
     }
 
-    fn evm_with_inspector<'a, DB: Database + 'a, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB> {
+    fn evm_with_inspector<'a, DB, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB>
+    where
+        DB: Database + 'a,
+        I: GetInspector<DB>,
+    {
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
             // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
+            .append_handler_register(inspector_handle_register)
             .build()
     }
 }
