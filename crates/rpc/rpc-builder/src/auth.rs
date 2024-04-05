@@ -9,10 +9,9 @@ pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     core::RegisterMethodError,
     http_client::HeaderMap,
-    server::{RpcModule, ServerHandle},
+    server::{AlreadyStoppedError, RpcModule, ServerHandle},
     Methods,
 };
-use reth_ipc::server::AlreadyStoppedError;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_provider::{
@@ -328,8 +327,8 @@ impl AuthServerHandle {
     }
 
     /// Tell the server to stop without waiting for the server to stop.
-    pub fn stop(self) -> Result<(), RpcError> {
-        self.handle.stop().map_err(|_| RpcError::AlreadyStopped)
+    pub fn stop(self) -> Result<(), AlreadyStoppedError> {
+        self.handle.stop()
     }
 
     /// Returns the url to the http server

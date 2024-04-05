@@ -7,7 +7,7 @@ use crate::server::{
 use futures::{FutureExt, Stream, StreamExt};
 use jsonrpsee::{
     core::TEN_MB_SIZE_BYTES,
-    server::{IdProvider, RandomIntegerIdProvider},
+    server::{AlreadyStoppedError, IdProvider, RandomIntegerIdProvider},
     BoundedSubscriptions, MethodSink, Methods,
 };
 use std::{
@@ -580,7 +580,7 @@ impl ServerHandle {
 
     /// Tell the server to stop without waiting for the server to stop.
     pub fn stop(&self) -> Result<(), AlreadyStoppedError> {
-        self.0.send(()).map_err(|_| AlreadyStoppedError::default())
+        self.0.send(()).map_err(|_| AlreadyStoppedError)
     }
 
     /// Wait for the server to stop.
@@ -593,12 +593,6 @@ impl ServerHandle {
         self.0.is_closed()
     }
 }
-
-/// Error thrown when the server is already stopped.
-#[derive(Debug, Copy, Default, Clone, thiserror::Error)]
-#[error("The server is already stopped")]
-#[non_exhaustive]
-pub struct AlreadyStoppedError;
 
 #[cfg(all(test, unix))]
 mod tests {

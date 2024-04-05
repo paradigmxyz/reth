@@ -3,7 +3,6 @@ use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
 };
-use reth_rpc::AuthLayer;
 use std::{
     collections::HashMap,
     future::Future,
@@ -19,63 +18,83 @@ use tower::Layer;
 /// Metrics are divided into two categories:
 /// - Connection metrics: metrics for the connection (e.g. number of connections opened, relevant
 ///   for WS and IPC)
-/// - Call metrics: metrics for each RPC method (e.g. number of calls started, time taken to process
-///   a call)
-#[derive(Default, Clone)]
-pub(crate) struct RpcServerMetrics {
+/// - Request metrics: metrics for each RPC method (e.g. number of calls started, time taken to
+///   process a call)
+#[derive(Default, Debug, Clone)]
+pub(crate) struct RpcRequestMetrics {
     inner: Arc<RpcServerMetricsInner>,
 }
 
-impl RpcServerMetrics {
-    pub(crate) fn new(module: &RpcModule<()>) -> Self {
+impl RpcRequestMetrics {
+    pub(crate) fn new(module: &RpcModule<()>, transport: RpcTransport) -> Self {
         Self {
             inner: Arc::new(RpcServerMetricsInner {
-                connection_metrics: transport_protocol.connection_metrics(),
+                connection_metrics: transport.connection_metrics(),
                 call_metrics: HashMap::from_iter(module.method_names().map(|method| {
                     (method, RpcServerCallMetrics::new_with_labels(&[("method", method)]))
                 })),
             }),
         }
     }
-}
 
-/// The layer that captures RPC metrics for the server.
-pub(crate) struct RpcServerMetricsLayer {
-    metrics: RpcServerMetrics,
-}
+    /// Creates a new instance of the metrics layer for HTTP.
+    pub(crate) fn http(module: &RpcModule<()>) -> Self {
+        Self::new(module, RpcTransport::Http)
+    }
 
-impl RpcServerMetricsLayer {
-    /// Creates a new instance of the metrics layer.
-    pub(crate) fn new(metrics: RpcServerMetrics) -> Self {
-        Self { metrics }
+    /// Creates a new instance of the metrics layer for same port.
+    ///
+    /// Note: currently it's not possible to track transport specific metrics for a server that runs http and ws on the same port: <https://github.com/paritytech/jsonrpsee/issues/1345> until we have this feature we will use the http metrics for this case.
+    pub(crate) fn same_port(module: &RpcModule<()>) -> Self {
+        Self::http(module)
+    }
+
+    /// Creates a new instance of the metrics layer for Ws.
+    pub(crate) fn ws(module: &RpcModule<()>) -> Self {
+        Self::new(module, RpcTransport::WebSocket)
+    }
+
+    /// Creates a new instance of the metrics layer for Ws.
+    pub(crate) fn ipc(module: &RpcModule<()>) -> Self {
+        Self::new(module, RpcTransport::Ipc)
     }
 }
 
-impl<S> Layer<S> for RpcServerMetricsLayer {
-    type Service = RpcServerMetricsService<S>;
+impl<S> Layer<S> for RpcRequestMetrics {
+    type Service = RpcRequestMetricsService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RpcServerMetricsService::new(inner, self.metrics.clone())
+        RpcRequestMetricsService::new(inner, self.clone())
     }
+}
+
+/// Metrics for the RPC server
+#[derive(Default, Clone, Debug)]
+struct RpcServerMetricsInner {
+    /// Connection metrics per transport type
+    connection_metrics: RpcServerConnectionMetrics,
+    /// Call metrics per RPC method
+    call_metrics: HashMap<&'static str, RpcServerCallMetrics>,
 }
 
 /// A [RpcServiceT] middleware that captures RPC metrics for the server.
 ///
 /// This is created per connection and captures metrics for each request.
-#[derive(Default, Clone)]
-pub(crate) struct RpcServerMetricsService<S> {
-    metrics: RpcServerMetrics,
+#[derive(Clone)]
+pub(crate) struct RpcRequestMetricsService<S> {
+    metrics: RpcRequestMetrics,
     inner: S,
 }
 
-impl<S> RpcServerMetricsService<S> {
-    pub(crate) fn new(service: S, metrics: RpcServerMetrics) -> Self {
+impl<S> RpcRequestMetricsService<S> {
+    pub(crate) fn new(service: S, metrics: RpcRequestMetrics) -> Self {
+        // this instance is kept alive for the duration of the connection
         metrics.inner.connection_metrics.connections_opened.increment(1);
         Self { inner: service, metrics }
     }
 }
 
-impl<'a, S> RpcServiceT<'a> for RpcServerMetricsService<S>
+impl<'a, S> RpcServiceT<'a> for RpcRequestMetricsService<S>
 where
     S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
 {
@@ -96,20 +115,11 @@ where
     }
 }
 
-impl<S> Drop for RpcServerMetricsService<S> {
+impl<S> Drop for RpcRequestMetricsService<S> {
     fn drop(&mut self) {
-        // update connection metrics
+        // update connection metrics, connection closed
         self.metrics.inner.connection_metrics.connections_closed.increment(1);
     }
-}
-
-/// Metrics for the RPC server
-#[derive(Default, Clone)]
-struct RpcServerMetricsInner {
-    /// Connection metrics per transport type
-    connection_metrics: RpcServerConnectionMetrics,
-    /// Call metrics per RPC method
-    call_metrics: HashMap<&'static str, RpcServerCallMetrics>,
 }
 
 /// Response future to update the metrics for a single request/response pair.
@@ -120,16 +130,9 @@ pub(crate) struct MeteredRequestFuture<F> {
     /// time when the request started
     started_at: Instant,
     /// metrics for the method call
-    metrics: RpcServerMetrics,
+    metrics: RpcRequestMetrics,
     /// the method name if known
     method: Option<&'static str>,
-}
-
-impl<F> MeteredRequestFuture<F> {
-    /// Returns the call metrics for the method if known.
-    fn call_metrics(&self) -> Option<&RpcServerCallMetrics> {
-        self.metrics.inner.call_metrics.get(self.method?)
-    }
 }
 
 impl<F> std::fmt::Debug for MeteredRequestFuture<F> {
@@ -142,18 +145,20 @@ impl<F: Future<Output = MethodResponse>> Future for MeteredRequestFuture<F> {
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let fut = self.project().fut;
+        let this = self.project();
 
-        let res = fut.poll(cx);
+        let res = this.fut.poll(cx);
         if let Poll::Ready(resp) = &res {
-            let elapsed = self.started_at.elapsed().as_secs_f64();
+            let elapsed = this.started_at.elapsed().as_secs_f64();
 
             // update transport metrics
-            self.metrics.inner.connection_metrics.requests_finished.increment(1);
-            self.metrics.inner.connection_metrics.request_time_seconds.record(elapsed);
+            this.metrics.inner.connection_metrics.requests_finished.increment(1);
+            this.metrics.inner.connection_metrics.request_time_seconds.record(elapsed);
 
             // update call metrics
-            if let Some(call_metrics) = self.call_metrics() {
+            if let Some(call_metrics) =
+                this.method.and_then(|method| this.metrics.inner.call_metrics.get(method))
+            {
                 call_metrics.time_seconds.record(elapsed);
                 if resp.is_success() {
                     call_metrics.successful.increment(1);
@@ -168,19 +173,19 @@ impl<F: Future<Output = MethodResponse>> Future for MeteredRequestFuture<F> {
 
 /// The transport protocol used for the RPC connection.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum TransportProtocol {
+pub(crate) enum RpcTransport {
     Http,
     WebSocket,
     Ipc,
 }
 
-impl TransportProtocol {
+impl RpcTransport {
     /// Returns the string representation of the transport protocol.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
-            TransportProtocol::Http => "http",
-            TransportProtocol::WebSocket => "ws",
-            TransportProtocol::Ipc => "ipc",
+            RpcTransport::Http => "http",
+            RpcTransport::WebSocket => "ws",
+            RpcTransport::Ipc => "ipc",
         }
     }
 

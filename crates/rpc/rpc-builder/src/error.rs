@@ -63,9 +63,6 @@ pub enum RpcError {
     /// Thrown when IPC server fails to start.
     #[error(transparent)]
     IpcServerError(#[from] IpcServerStartError),
-    /// Thrown if a server cannot be stopped because it is already stopped.
-    #[error("The server is already stopped")]
-    AlreadyStopped,
     /// Custom error.
     #[error("{0}")]
     Custom(String),
@@ -78,12 +75,6 @@ impl RpcError {
             return RpcError::AddressAlreadyInUse { kind, error: io_error }
         }
         RpcError::ServerError { kind, error: io_error }
-    }
-}
-
-impl From<reth_ipc::server::AlreadyStoppedError> for RpcError {
-    fn from(_: reth_ipc::server::AlreadyStoppedError) -> Self {
-        RpcError::AlreadyStopped
     }
 }
 

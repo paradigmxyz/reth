@@ -155,7 +155,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{
-    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcServerMetrics,
+    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics,
     RpcModuleSelection::Selection,
 };
 use constants::*;
@@ -164,7 +164,7 @@ use hyper::{header::AUTHORIZATION, HeaderMap};
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     core::RegisterMethodError,
-    server::{IdProvider, Server, ServerHandle},
+    server::{AlreadyStoppedError, IdProvider, RpcServiceBuilder, Server, ServerHandle},
     Methods, RpcModule,
 };
 use reth_ipc::server::IpcServer;
@@ -1672,7 +1672,7 @@ impl RpcServerConfig {
                     .http
                     .as_ref()
                     .or(modules.ws.as_ref())
-                    .map(RpcServerMetrics::new)
+                    .map(RpcRequestMetrics::same_port)
                     .unwrap_or_default(),
             )
             .await?;
@@ -1697,7 +1697,7 @@ impl RpcServerConfig {
                 self.ws_cors_domains.take(),
                 self.jwt_secret.clone(),
                 ServerKind::WS(ws_socket_addr),
-                modules.ws.as_ref().map(RpcServerMetrics::new).unwrap_or_default(),
+                modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default(),
             )
             .await?;
             ws_local_addr = Some(addr);
@@ -1712,7 +1712,7 @@ impl RpcServerConfig {
                 self.http_cors_domains.take(),
                 self.jwt_secret.clone(),
                 ServerKind::Http(http_socket_addr),
-                modules.http.as_ref().map(RpcServerMetrics::new).unwrap_or_default(),
+                modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
             )
             .await?;
             http_local_addr = Some(addr);
@@ -1737,12 +1737,12 @@ impl RpcServerConfig {
         server.ws_http = self.build_ws_http(modules).await?;
 
         if let Some(builder) = self.ipc_server_config {
-            let metrics = modules.ipc.as_ref().map(RpcServerMetrics::new).unwrap_or_default();
+            // let metrics = modules.ipc.as_ref().map(RpcRequestMetrics::new).unwrap_or_default();
             let ipc_path = self
                 .ipc_endpoint
                 .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
             let ipc = builder
-                // .set_logger(metrics)
+                // .set_middleware(metrics)
                 .build(ipc_path.path());
             server.ipc = Some(ipc);
         }
@@ -2000,13 +2000,20 @@ impl Default for WsHttpServers {
 /// Http Servers Enum
 enum WsHttpServerKind {
     /// Http server
-    Plain(Server<Identity, Identity>),
+    Plain(Server<Identity, Stack<RpcRequestMetrics, Identity>>),
     /// Http server with cors
-    WithCors(Server<Stack<CorsLayer, Identity>, Identity>),
+    WithCors(Server<Stack<CorsLayer, Identity>, Stack<RpcRequestMetrics, Identity>>),
     /// Http server with auth
-    WithAuth(Server<Stack<AuthLayer<JwtAuthValidator>, Identity>, Identity>),
+    WithAuth(
+        Server<Stack<AuthLayer<JwtAuthValidator>, Identity>, Stack<RpcRequestMetrics, Identity>>,
+    ),
     /// Http server with cors and auth
-    WithCorsAuth(Server<Stack<AuthLayer<JwtAuthValidator>, Stack<CorsLayer, Identity>>, Identity>),
+    WithCorsAuth(
+        Server<
+            Stack<AuthLayer<JwtAuthValidator>, Stack<CorsLayer, Identity>>,
+            Stack<RpcRequestMetrics, Identity>,
+        >,
+    ),
 }
 
 // === impl WsHttpServerKind ===
@@ -2031,7 +2038,7 @@ impl WsHttpServerKind {
         cors_domains: Option<String>,
         jwt_secret: Option<JwtSecret>,
         server_kind: ServerKind,
-        metrics: RpcServerMetrics,
+        metrics: RpcRequestMetrics,
     ) -> Result<(Self, SocketAddr), RpcError> {
         if let Some(cors) = cors_domains.as_deref().map(cors::create_cors_layer) {
             let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
@@ -2044,7 +2051,7 @@ impl WsHttpServerKind {
 
                 let server = builder
                     .set_http_middleware(middleware)
-                    // .set_logger(metrics)
+                    .set_rpc_middleware(RpcServiceBuilder::new().layer(metrics))
                     .build(socket_addr)
                     .await
                     .map_err(|err| RpcError::server_error(err, server_kind))?;
@@ -2056,7 +2063,7 @@ impl WsHttpServerKind {
                 let middleware = tower::ServiceBuilder::new().layer(cors);
                 let server = builder
                     .set_http_middleware(middleware)
-                    // .set_logger(metrics)
+                    .set_rpc_middleware(RpcServiceBuilder::new().layer(metrics))
                     .build(socket_addr)
                     .await
                     .map_err(|err| RpcError::server_error(err, server_kind))?;
@@ -2071,7 +2078,7 @@ impl WsHttpServerKind {
                 .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
             let server = builder
                 .set_http_middleware(middleware)
-                // .set_logger(metrics)
+                .set_rpc_middleware(RpcServiceBuilder::new().layer(metrics))
                 .build(socket_addr)
                 .await
                 .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
@@ -2082,7 +2089,7 @@ impl WsHttpServerKind {
         } else {
             // plain server without any middleware
             let server = builder
-                // .set_logger(metrics)
+                .set_rpc_middleware(RpcServiceBuilder::new().layer(metrics))
                 .build(socket_addr)
                 .await
                 .map_err(|err| RpcError::server_error(err, server_kind))?;
@@ -2218,17 +2225,17 @@ impl RpcServerHandle {
     }
 
     /// Tell the server to stop without waiting for the server to stop.
-    pub fn stop(self) -> Result<(), RpcError> {
+    pub fn stop(self) -> Result<(), AlreadyStoppedError> {
         if let Some(handle) = self.http {
-            handle.stop().map_err(|_| RpcError::AlreadyStopped)?
+            handle.stop()?
         }
 
         if let Some(handle) = self.ws {
-            handle.stop().map_err(|_| RpcError::AlreadyStopped)?
+            handle.stop()?
         }
 
         if let Some(handle) = self.ipc {
-            handle.stop().map_err(|_| RpcError::AlreadyStopped)?
+            handle.stop()?
         }
 
         Ok(())
