@@ -187,10 +187,11 @@ impl ImportOpCommand {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         info!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Loading genesis from file");
-        let genesis_json: Genesis = serde_json::from_str::<Genesis>(
-            fs::read_to_string("../../res/genesis/goerli_op.json").unwrap().as_str(),
-        )
-        .unwrap();
+        let genesis_json: Genesis = serde_json::from_str(include_str!(
+            "../../../../crates/primitives/res/genesis/goerli_op.json"
+        ))
+        .expect("Can't deserialize Optimism Mainnet genesis (i.e. OP Görli genesis) json");
+
         let chain = ChainSpec::from(genesis_json);
 
         // add network name to data dir
