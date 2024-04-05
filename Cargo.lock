@@ -2263,8 +2263,37 @@ dependencies = [
  "ethereum-types",
  "ethers-core",
  "hex",
- "ic-log",
+ "ic-log 0.13.0",
  "ic-stable-structures 0.13.0",
+ "jsonrpc-core",
+ "log",
+ "murmur3",
+ "num",
+ "once_cell",
+ "rlp",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "sha2",
+ "sha3",
+ "thiserror",
+]
+
+[[package]]
+name = "did"
+version = "0.15.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=add-endpoint#061d52a7cb0b5665d910bfb8dee0baf995f817e9"
+dependencies = [
+ "alloy-primitives",
+ "bincode",
+ "bytes",
+ "candid",
+ "derive_more",
+ "ethereum-types",
+ "ethers-core",
+ "hex",
+ "ic-log 0.14.0",
+ "ic-stable-structures 0.14.0",
  "jsonrpc-core",
  "log",
  "murmur3",
@@ -2706,15 +2735,15 @@ dependencies = [
 
 [[package]]
 name = "ethereum-json-rpc-client"
-version = "0.13.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.13.x#bb97ffc3fc4f1929092f0d5f02761fd36f84d80e"
+version = "0.15.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=add-endpoint#061d52a7cb0b5665d910bfb8dee0baf995f817e9"
 dependencies = [
  "anyhow",
  "candid",
- "did",
+ "did 0.15.0",
  "ethers-core",
  "hex",
- "ic-exports",
+ "ic-exports 0.14.0",
  "itertools 0.12.1",
  "jsonrpc-core",
  "log",
@@ -3750,6 +3779,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ic-crypto-getrandom-for-wasm"
+version = "0.14.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.14.x#68800737f188d304afe2ff561008fe4cc76517b4"
+dependencies = [
+ "getrandom 0.2.12",
+]
+
+[[package]]
 name = "ic-exports"
 version = "0.13.0"
 source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.13.x#b4bc0a0edbe9d2b56f01de02f3d2ba3f54b0754e"
@@ -3758,8 +3795,22 @@ dependencies = [
  "ic-cdk",
  "ic-cdk-macros",
  "ic-cdk-timers",
- "ic-crypto-getrandom-for-wasm",
- "ic-kit",
+ "ic-crypto-getrandom-for-wasm 0.13.0",
+ "ic-kit 0.13.0",
+ "serde",
+]
+
+[[package]]
+name = "ic-exports"
+version = "0.14.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.14.x#68800737f188d304afe2ff561008fe4cc76517b4"
+dependencies = [
+ "candid",
+ "ic-cdk",
+ "ic-cdk-macros",
+ "ic-cdk-timers",
+ "ic-crypto-getrandom-for-wasm 0.14.0",
+ "ic-kit 0.14.0",
  "serde",
 ]
 
@@ -3767,6 +3818,19 @@ dependencies = [
 name = "ic-kit"
 version = "0.13.0"
 source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.13.x#b4bc0a0edbe9d2b56f01de02f3d2ba3f54b0754e"
+dependencies = [
+ "candid",
+ "futures",
+ "ic-cdk",
+ "ic-cdk-macros",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "ic-kit"
+version = "0.14.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.14.x#68800737f188d304afe2ff561008fe4cc76517b4"
 dependencies = [
  "candid",
  "futures",
@@ -3786,7 +3850,23 @@ dependencies = [
  "candid",
  "env_filter",
  "humantime",
- "ic-exports",
+ "ic-exports 0.13.0",
+ "log",
+ "ringbuffer",
+ "serde",
+]
+
+[[package]]
+name = "ic-log"
+version = "0.14.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.14.x#68800737f188d304afe2ff561008fe4cc76517b4"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "candid",
+ "env_filter",
+ "humantime",
+ "ic-exports 0.14.0",
  "log",
  "ringbuffer",
  "serde",
@@ -3805,6 +3885,17 @@ dependencies = [
 name = "ic-stable-structures"
 version = "0.13.0"
 source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.13.x#b4bc0a0edbe9d2b56f01de02f3d2ba3f54b0754e"
+dependencies = [
+ "ic-stable-structures 0.6.2",
+ "parking_lot 0.12.1",
+ "schnellru",
+ "thiserror",
+]
+
+[[package]]
+name = "ic-stable-structures"
+version = "0.14.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.14.x#68800737f188d304afe2ff561008fe4cc76517b4"
 dependencies = [
  "ic-stable-structures 0.6.2",
  "parking_lot 0.12.1",
@@ -6503,7 +6594,7 @@ dependencies = [
  "alloy-rlp",
  "assert_matches",
  "candid",
- "did",
+ "did 0.13.0",
  "ethereum-json-rpc-client",
  "eyre",
  "futures",
@@ -7178,6 +7269,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "derive_more",
+ "ethereum-json-rpc-client",
  "futures",
  "http",
  "http-body",
