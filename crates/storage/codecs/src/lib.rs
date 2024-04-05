@@ -16,7 +16,7 @@ pub use reth_codecs_derive::*;
 use alloy_primitives::{Address, Bloom, Bytes, B256, B512, U256};
 use bytes::Buf;
 
-mod log;
+mod alloy;
 
 /// Trait that implements the `Compact` codec.
 ///
