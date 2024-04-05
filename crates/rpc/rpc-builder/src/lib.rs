@@ -1742,6 +1742,7 @@ impl RpcServerConfig {
                 .ipc_endpoint
                 .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
             let ipc = builder
+                // TODO(mattsse): add metrics middleware for IPC
                 // .set_middleware(metrics)
                 .build(ipc_path.path());
             server.ipc = Some(ipc);

@@ -483,18 +483,6 @@ impl<B> Builder<B> {
         self
     }
 
-    /// Add a logger to the builder.
-    pub fn set_logger(self) -> Builder<B> {
-        todo!()
-
-        // Builder {
-        //     settings: self.settings,
-        //     logger,
-        //     id_provider: self.id_provider,
-        //     service_builder: self.service_builder,
-        // }
-    }
-
     /// Configure a custom [`tokio::runtime::Handle`] to run the server on.
     ///
     /// Default: [`tokio::spawn`]
