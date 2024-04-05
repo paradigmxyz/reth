@@ -178,12 +178,12 @@ pub struct RpcServerArgs {
     pub gas_price_oracle: GasPriceOracleArgs,
 
     /// Enable auth engine api over IPC  
-    #[arg(long, default_value_if("dev", "true", Some("true")))]
+    #[arg(long))]
     pub auth_ipc: bool,
 
     /// Filename for auth IPC socket/pipe within the datadir
     #[arg(long = "auth-ipc.path", default_value = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT)]
-    pub auth_ipc_path: Option<String>,
+    pub auth_ipc_path: String,
 }
 
 impl RpcServerArgs {
