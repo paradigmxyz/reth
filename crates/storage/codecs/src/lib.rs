@@ -22,7 +22,7 @@ impl Compact for LogData {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         let mut buffer = bytes::BytesMut::new();
-        self.topics.specialized_to_compact(&mut buffer);
+        self.topics().to_vec().specialized_to_compact(&mut buffer);
         self.data.to_compact(&mut buffer);
         let total_length = buffer.len();
         buf.put(buffer);
@@ -34,7 +34,7 @@ impl Compact for LogData {
         buf = new_buf;
         let mut data = Bytes::new();
         (data, buf) = Bytes::from_compact(buf, buf.len());
-        let obj = LogData { topics, data };
+        let obj = LogData::new_unchecked(topics, data);
         (obj, buf)
     }
 }
