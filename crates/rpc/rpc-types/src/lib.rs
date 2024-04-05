@@ -8,13 +8,13 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![allow(hidden_glob_reexports)] // TODO rm in followup PR
 
 mod admin;
 pub mod beacon;
 mod eth;
 mod mev;
 mod net;
-mod otterscan;
 mod peer;
 pub mod relay;
 mod rpc;
@@ -24,9 +24,13 @@ pub use alloy_rpc_types::serde_helpers;
 
 // Ethereum specific rpc types coming from alloy.
 pub use alloy_rpc_types::*;
+
+/// Type alias for a transaction receipt with a RPC logs.
+pub type AnyTransactionReceipt = WithOtherFields<TransactionReceipt<AnyReceiptEnvelope<Log>>>;
+
 pub mod trace {
     //! RPC types for trace endpoints and inspectors.
-    pub use alloy_rpc_trace_types::*;
+    pub use alloy_rpc_types_trace::*;
 }
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 pub use eth::{
@@ -40,6 +44,5 @@ pub use eth::{
 pub use admin::*;
 pub use mev::*;
 pub use net::*;
-pub use otterscan::*;
 pub use peer::*;
 pub use rpc::*;

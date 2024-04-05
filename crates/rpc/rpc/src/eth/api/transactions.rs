@@ -9,15 +9,15 @@ use crate::{
     EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
+use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionKind::{Call, Create},
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U128, U256, U64,
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U256, U64,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
@@ -31,14 +31,14 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    Index, Log, Transaction, TransactionInfo, TransactionKind as RpcTransactionKind,
-    TransactionReceipt, TransactionRequest, TypedTransactionRequest,
+    AnyReceiptEnvelope, AnyTransactionReceipt, Index, Log, ReceiptWithBloom, Transaction,
+    TransactionInfo, TransactionKind as RpcTransactionKind, TransactionReceipt, TransactionRequest,
+    TypedTransactionRequest, WithOtherFields,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
-    inspector_handle_register,
     primitives::{
         db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult,
         ResultAndState, SpecId, State,
@@ -261,7 +261,7 @@ pub trait EthTransactions: Send + Sync {
     ///
     /// Returns None if the transaction does not exist or is pending
     /// Note: The tx receipt is not available for pending transactions.
-    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<TransactionReceipt>>;
+    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>>;
 
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
@@ -541,7 +541,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     fn transact<DB>(
         &self,
@@ -552,7 +552,7 @@ where
         DB: Database,
         <DB as Database>::Error: Into<EthApiError>,
     {
-        let mut evm = revm::Evm::builder().with_db(db).with_env_with_handler_cfg(env).build();
+        let mut evm = self.inner.evm_config.evm_with_env(db, env);
         let res = evm.transact()?;
         let (_, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env))
@@ -569,12 +569,7 @@ where
         <DB as Database>::Error: Into<EthApiError>,
         I: GetInspector<DB>,
     {
-        let mut evm = revm::Evm::builder()
-            .with_db(db)
-            .with_external_context(inspector)
-            .with_env_with_handler_cfg(env)
-            .append_handler_register(inspector_handle_register)
-            .build();
+        let mut evm = self.inner.evm_config.evm_with_env_and_inspector(db, env, inspector);
         let res = evm.transact()?;
         let (_, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env))
@@ -591,12 +586,7 @@ where
         <DB as Database>::Error: Into<EthApiError>,
         I: GetInspector<DB>,
     {
-        let mut evm = revm::Evm::builder()
-            .with_external_context(inspector)
-            .with_db(db)
-            .with_env_with_handler_cfg(env)
-            .append_handler_register(inspector_handle_register)
-            .build();
+        let mut evm = self.inner.evm_config.evm_with_env_and_inspector(db, env, inspector);
         let res = evm.transact()?;
         let (db, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env, db))
@@ -616,14 +606,9 @@ where
         I: IntoIterator<Item = Tx>,
         Tx: FillableTransaction,
     {
-        let mut evm = revm::Evm::builder()
-            .with_db(db)
-            .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-                cfg,
-                block_env,
-                Default::default(),
-            ))
-            .build();
+        let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
+
+        let mut evm = self.inner.evm_config.evm_with_env(db, env);
         let mut index = 0;
         for tx in transactions.into_iter() {
             if tx.hash() == target_tx_hash {
@@ -835,7 +820,7 @@ where
         }
     }
 
-    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<TransactionReceipt>> {
+    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>> {
         let result = self
             .on_blocking_task(|this| async move {
                 let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
@@ -1341,7 +1326,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     /// Spawns the given closure on a new blocking tracing task
     async fn spawn_tracing_task_with<F, T>(&self, f: F) -> EthResult<T>
@@ -1364,7 +1349,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     /// Returns the gas price if it is set, otherwise fetches a suggested gas price for legacy
     /// transactions.
@@ -1436,7 +1421,7 @@ where
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> EthResult<TransactionReceipt> {
+    ) -> EthResult<AnyTransactionReceipt> {
         // get all receipts for the block
         let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
             Some(recpts) => recpts,
@@ -1454,7 +1439,7 @@ where
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> EthResult<TransactionReceipt> {
+    ) -> EthResult<AnyTransactionReceipt> {
         let (block, receipts) = self
             .cache()
             .get_block_and_receipts(meta.block_hash)
@@ -1549,7 +1534,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     pub(crate) fn sign_request(
         &self,
@@ -1706,7 +1691,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     receipt: Receipt,
     all_receipts: &[Receipt],
     #[cfg(feature = "optimism")] optimism_tx_meta: OptimismTxMeta,
-) -> EthResult<TransactionReceipt> {
+) -> EthResult<AnyTransactionReceipt> {
     // Note: we assume this transaction is valid, because it's mined (or part of pending block) and
     // we don't need to check for pre EIP-2
     let from =
@@ -1723,34 +1708,60 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
             .unwrap_or_default()
     };
 
-    let blob_gas_used = transaction.transaction.blob_gas_used().map(U128::from);
+    let blob_gas_used = transaction.transaction.blob_gas_used();
     // Blob gas price should only be present if the transaction is a blob transaction
-    let blob_gas_price =
-        blob_gas_used.and_then(|_| meta.excess_blob_gas.map(calc_blob_gasprice).map(U128::from));
+    let blob_gas_price = blob_gas_used.and_then(|_| meta.excess_blob_gas.map(calc_blob_gasprice));
+    let logs_bloom = receipt.bloom_slow();
+
+    // get number of logs in the block
+    let mut num_logs = 0;
+    for prev_receipt in all_receipts.iter().take(meta.index as usize) {
+        num_logs += prev_receipt.logs.len();
+    }
+
+    let mut logs = Vec::with_capacity(receipt.logs.len());
+    for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
+        let rpclog = Log {
+            inner: log.into(),
+            block_hash: Some(meta.block_hash),
+            block_number: Some(meta.block_number),
+            block_timestamp: Some(meta.timestamp),
+            transaction_hash: Some(meta.tx_hash),
+            transaction_index: Some(meta.index),
+            log_index: Some((num_logs + tx_log_idx) as u64),
+            removed: false,
+        };
+        logs.push(rpclog);
+    }
+
+    let rpc_receipt = reth_rpc_types::Receipt {
+        status: receipt.success,
+        cumulative_gas_used: receipt.cumulative_gas_used,
+        logs,
+    };
 
     #[allow(clippy::needless_update)]
-    let mut res_receipt = TransactionReceipt {
+    let res_receipt = TransactionReceipt {
+        inner: AnyReceiptEnvelope {
+            inner: ReceiptWithBloom { receipt: rpc_receipt, logs_bloom },
+            r#type: transaction.transaction.tx_type().into(),
+        },
         transaction_hash: meta.tx_hash,
-        transaction_index: U64::from(meta.index),
+        transaction_index: meta.index,
         block_hash: Some(meta.block_hash),
-        block_number: Some(U256::from(meta.block_number)),
+        block_number: Some(meta.block_number),
         from,
         to: None,
-        cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
-        gas_used: Some(U256::from(gas_used)),
+        gas_used: Some(gas_used),
         contract_address: None,
-        logs: Vec::with_capacity(receipt.logs.len()),
-        effective_gas_price: U128::from(transaction.effective_gas_price(meta.base_fee)),
-        transaction_type: transaction.transaction.tx_type().into(),
+        effective_gas_price: transaction.effective_gas_price(meta.base_fee) as u64,
         // TODO pre-byzantium receipts have a post-transaction state root
         state_root: None,
-        logs_bloom: receipt.bloom_slow(),
-        status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
         // EIP-4844 fields
-        blob_gas_price,
+        blob_gas_price: blob_gas_price.map(|gas| gas as u64),
         blob_gas_used,
-        ..Default::default()
     };
+    let mut res_receipt = WithOtherFields::new(res_receipt);
 
     #[cfg(feature = "optimism")]
     {
@@ -1781,27 +1792,6 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         }
     }
 
-    // get number of logs in the block
-    let mut num_logs = 0;
-    for prev_receipt in all_receipts.iter().take(meta.index as usize) {
-        num_logs += prev_receipt.logs.len();
-    }
-
-    for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
-        let rpclog = Log {
-            address: log.address,
-            topics: log.topics,
-            data: log.data,
-            block_hash: Some(meta.block_hash),
-            block_number: Some(U256::from(meta.block_number)),
-            transaction_hash: Some(meta.tx_hash),
-            transaction_index: Some(U256::from(meta.index)),
-            log_index: Some(U256::from(num_logs + tx_log_idx)),
-            removed: false,
-        };
-        res_receipt.logs.push(rpclog);
-    }
-
     Ok(res_receipt)
 }
 
@@ -1811,8 +1801,8 @@ mod tests {
     use crate::eth::{
         cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig,
     };
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex};
     use reth_provider::test_utils::NoopProvider;
     use reth_tasks::pool::BlockingTaskPool;

@@ -43,12 +43,12 @@ pub struct NetworkConfig<C> {
     pub boot_nodes: HashSet<NodeRecord>,
     /// How to set up discovery over DNS.
     pub dns_discovery_config: Option<DnsDiscoveryConfig>,
+    /// Address to use for discovery v4.
+    pub discovery_v4_addr: SocketAddr,
     /// How to set up discovery.
     pub discovery_v4_config: Option<Discv4Config>,
     /// How to set up discovery version 5.
     pub discovery_v5_config: Option<reth_discv5::Config>,
-    /// Address to use for discovery
-    pub discovery_addr: SocketAddr,
     /// Address to listen for incoming connections
     pub listener_addr: SocketAddr,
     /// How to instantiate peer manager.
@@ -155,10 +155,8 @@ impl<C> NetworkConfig<C> {
     }
 
     /// Sets the config to use for the discovery v5 protocol.
-
     pub fn set_discovery_v5(mut self, discv5_config: reth_discv5::Config) -> Self {
         self.discovery_v5_config = Some(discv5_config);
-        self.discovery_addr = self.discovery_v5_config.as_ref().unwrap().discovery_socket();
         self
     }
 
@@ -567,7 +565,7 @@ impl NetworkConfigBuilder {
             dns_discovery_config,
             discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
             discovery_v5_config: None,
-            discovery_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
+            discovery_v4_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
             listener_addr,
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),

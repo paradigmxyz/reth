@@ -83,7 +83,6 @@ pub struct NetworkStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EthProtocolInfo {
     /// The current difficulty at the head of the chain.
-    #[serde(deserialize_with = "crate::serde_helpers::json_u256::deserialize_json_u256")]
     pub difficulty: U256,
     /// The block hash of the head of the chain.
     pub head: B256,

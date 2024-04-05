@@ -10,6 +10,7 @@ members = [
     "crates/ethereum-forks/",
     "crates/etl/",
     "crates/evm/",
+    "crates/evm-ethereum/",
     "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
@@ -215,6 +216,7 @@ reth-ethereum-forks = { path = "crates/ethereum-forks" }
 reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
+reth-evm-ethereum = { path = "crates/evm-ethereum" }
 reth-optimism-payload-builder = { path = "crates/payload/optimism" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
@@ -250,27 +252,27 @@ reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 
 # revm
-revm = { version = "7.2.0", features = ["std", "secp256k1"], default-features = false }
+revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
 revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "0ad0338" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "0ef5814" }
 
 # eth
 alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
-alloy-primitives = "0.6.4"
-alloy-dyn-abi = "0.6.4"
-alloy-sol-types = "0.6.4"
+alloy-primitives = "0.7.0"
+alloy-dyn-abi = "0.7.0"
+alloy-sol-types = "0.7.0"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.3"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
-alloy-rpc-trace-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
-alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85", features = ["mnemonic"] }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a", features = ["mnemonic"] }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
 
 # TODO: Remove
 ethers-core = { version = "2.0.14", default-features = false }
