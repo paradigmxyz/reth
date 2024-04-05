@@ -11,10 +11,11 @@ reth-node-ethereum.workspace = true
 serde.workspace = true
 serde_json.workspace = true 
 
-reqwest.workspace = true
+
+reqwest = "0.12.3"
 pin-project.workspace = true
 clap.workspace = true
 tracing.workspace = true
 futures-util.workspace = true
 tokio = { workspace = true, features = ["time"] }
-mev-share-sse = {  version = "0.1.6" , default-features = false }
+eyre.workspace = true

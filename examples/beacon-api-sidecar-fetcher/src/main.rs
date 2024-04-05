@@ -4,37 +4,27 @@
 //! cargo run -p beacon-api-sidecar-fetcher -- node
 
 use std::{
+    collections::VecDeque,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 
-use futures_util::{Stream, StreamExt};
-use mev_share_sse::EventClient;
+use futures_util::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use reqwest::Error;
 use reth::{providers::CanonStateNotification, transaction_pool::TransactionPoolExt};
+
 use serde::{self, Deserialize, Serialize};
 use tracing::debug;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    let tasks = TaskManager::current();
-    // create node config
-    let node_config = NodeConfig::test()
-        .dev()
-        .with_rpc(RpcServerArgs::default().with_http())
-        .with_chain(custom_chain());
-
-    let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(tasks.executor())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-
-    let mut notifications = node.provider.canonical_state_stream();
-
     Ok(())
 }
 
+//TODO look at PeersManager.
+//TODO Figure out pending_requests/queued_actions
+//Add Reqwest logic
+//Create custom tests.
 #[derive(Debug)]
 pub struct MinedSidecarStream<St, P>
 where
@@ -43,8 +33,9 @@ where
     events: St,
     pool: P,
     client: reqwest::Client,
-    pending_requests: Vec<Pin<Box<dyn Future<Output = BlobSidecar> + Send>>>,
-    queued_actions: VecDeque<Result<BlobSidecar, reqwest::Error>>, // Buffer for ready items
+    pending_requests:
+        FuturesUnordered<Pin<Box<dyn Future<Output = Result<BlobSidecar, reqwest::Error>> + Send>>>, /* will contant CL queries. */
+    queued_actions: VecDeque<BlobSidecar>, // Buffer for ready items
 }
 
 impl<St, P> Stream for MinedSidecarStream<St, P>
@@ -52,45 +43,41 @@ where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     P: TransactionPoolExt + Unpin + 'static,
 {
-    type Item = BlobSidecar;
+    type Item = Result<BlobSidecar, reqwest::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        loop {
-            // Attempt to drain the buffer first
-            if let Some(item) = this.buffer.pop_front() {
-                return Poll::Ready(Some(Ok(item)));
-            }
 
-            match this.events.as_mut().poll_next(cx) {
-                Poll::Ready(Some(item)) if this.pool.exists(&item) => {
-                    let processed_item = BlobSidecar::default(); // Placeholder for processing logic
-                    this.buffer.push_back(processed_item);
+        // return any buffered result
+        if let Some(blob_sidecar) = this.queued_actions.pop_front() {
+            return Poll::Ready(Some(Ok(blob_sidecar)));
+        }
+
+        // Check if any pending reqwests are ready.
+        while let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx) {
+            match result {
+                Ok(blob_sidecar) => return Poll::Ready(Some(Ok(blob_sidecar))),
+                Err(e) => {
+                    debug!(error = %e, "Error processing a pending consensus layer request.");
                 }
-                Poll::Ready(Some(item)) => {
-                    let future = async move { Ok(BlobSidecar::default()) }.boxed();
-                    this.pending_requests.push_back(future);
+            }
+        }
+
+        // TODO: Add fetching logic here.
+        loop {
+            match this.events.poll_next_unpin(cx) {
+                Poll::Ready(Some(notification)) => {
+                    // Logic goes here to one check if pool exists else query CL\
+                    // Pool logic added to queued actions?
+                    // CL Query request added to pending_requests
+                    //Box::pin(async move { request })
                 }
                 Poll::Ready(None) => return Poll::Ready(None),
-                Poll::Pending => return Poll::Pending,
-            }
-
-            // Try to make progress on any pending requests
-            if let Some(future) = this.pending_requests.pop_front() {
-                let future = future.as_mut();
-                match future.poll(cx) {
-                    Poll::Ready(Ok(blob)) => return Poll::Ready(Some(Ok(blob))),
-                    Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e))),
-                    Poll::Pending => {
-                        this.pending_requests.push_front(future.boxed());
-                        return Poll::Pending;
-                    }
-                }
+                Poll::Pending => continue,
             }
         }
     }
 }
-
 ///TODO Add
 impl<St, P> MinedSidecarStream<St, P>
 where
