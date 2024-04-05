@@ -999,21 +999,18 @@ where
         self.state.block_indices.canonicalize_blocks(new_canon_chain.blocks());
         durations_recorder.record_relative(MakeCanonicalAction::UpdateCanonicalIndex);
 
-        // event about new canonical chain.
-        let chain_notification;
         debug!(
             target: "blockchain_tree",
             "Committing new canonical chain: {}", DisplayBlocksChain(new_canon_chain.blocks())
         );
 
-        // if joins to the tip;
-        if new_canon_chain.fork_block().hash == old_tip.hash {
-            chain_notification =
-                CanonStateNotification::Commit { new: Arc::new(new_canon_chain.clone()) };
-            // append to database
-            self.commit_canonical_to_database(new_canon_chain, &mut durations_recorder)?;
+        // If chain extends the tip
+        let chain_notification = if new_canon_chain.fork_block().hash == old_tip.hash {
+            // Commit new canonical chain to database.
+            self.commit_canonical_to_database(new_canon_chain.clone(), &mut durations_recorder)?;
+            CanonStateNotification::Commit { new: Arc::new(new_canon_chain) }
         } else {
-            // it forks to canonical block that is not the tip.
+            // It forks to canonical block that is not the tip.
             let canon_fork: BlockNumHash = new_canon_chain.fork_block();
             // sanity check
             if self.block_indices().canonical_hash(&canon_fork.number) != Some(canon_fork.hash) {
@@ -1026,53 +1023,40 @@ where
                 unreachable!("all chains should point to canonical chain.");
             }
 
-            let old_canon_chain = self.revert_canonical_from_database(canon_fork.number);
-            durations_recorder
-                .record_relative(MakeCanonicalAction::RevertCanonicalChainFromDatabase);
-
-            let old_canon_chain = match old_canon_chain {
-                val @ Err(_) => {
+            let old_canon_chain =
+                self.revert_canonical_from_database(canon_fork.number).inspect_err(|error| {
                     error!(
                         target: "blockchain_tree",
                         "Reverting canonical chain failed with error: {:?}\n\
                             Old BlockIndices are:{:?}\n\
                             New BlockIndices are: {:?}\n\
                             Old BufferedBlocks are:{:?}",
-                        val, old_block_indices, self.block_indices(), old_buffered_blocks
+                        error, old_block_indices, self.block_indices(), old_buffered_blocks
                     );
-                    val?
-                }
-                Ok(val) => val,
-            };
-            // commit new canonical chain.
+                })?;
+            durations_recorder
+                .record_relative(MakeCanonicalAction::RevertCanonicalChainFromDatabase);
+
+            // Commit new canonical chain.
             self.commit_canonical_to_database(new_canon_chain.clone(), &mut durations_recorder)?;
 
             if let Some(old_canon_chain) = old_canon_chain {
-                // state action
-                chain_notification = CanonStateNotification::Reorg {
-                    old: Arc::new(old_canon_chain.clone()),
-                    new: Arc::new(new_canon_chain.clone()),
-                };
-                let reorg_depth = old_canon_chain.len();
+                self.update_reorg_metrics(old_canon_chain.len() as f64);
 
-                // insert old canon chain
-                self.insert_unwound_chain(AppendableChain::new(old_canon_chain));
+                // Insert old canonical chain back into tree.
+                self.insert_unwound_chain(AppendableChain::new(old_canon_chain.clone()));
                 durations_recorder.record_relative(MakeCanonicalAction::InsertOldCanonicalChain);
 
-                self.update_reorg_metrics(reorg_depth as f64);
+                CanonStateNotification::Reorg {
+                    old: Arc::new(old_canon_chain),
+                    new: Arc::new(new_canon_chain),
+                }
             } else {
                 // error here to confirm that we are reverting nothing from db.
-                error!(target: "blockchain_tree", "Reverting nothing from db on block: #{:?}", block_hash);
-
-                chain_notification =
-                    CanonStateNotification::Commit { new: Arc::new(new_canon_chain) };
+                error!(target: "blockchain_tree", %block_hash, "Nothing was removed from database");
+                CanonStateNotification::Commit { new: Arc::new(new_canon_chain) }
             }
-        }
-
-        let head = chain_notification.tip().header.clone();
-
-        // send notification about new canonical chain.
-        let _ = self.canon_state_notification_sender.send(chain_notification);
+        };
 
         debug!(
             target: "blockchain_tree",
@@ -1080,7 +1064,10 @@ where
             "Canonicalization finished"
         );
 
-        Ok(CanonicalOutcome::Committed { head })
+        // Send notification about new canonical chain and return outcome of canonicalization.
+        let outcome = CanonicalOutcome::Committed { head: chain_notification.tip().header.clone() };
+        let _ = self.canon_state_notification_sender.send(chain_notification);
+        Ok(outcome)
     }
 
     /// Subscribe to new blocks events.
