@@ -1239,7 +1239,7 @@
           "hide": false,
           "includeNullMetadata": false,
           "instant": false,
-          "legendFormat": "Bad transactions",
+          "legendFormat": "Bad Transactions",
           "range": true,
           "refId": "D",
           "useBackend": false
