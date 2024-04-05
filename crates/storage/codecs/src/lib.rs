@@ -29,13 +29,12 @@ impl Compact for LogData {
         total_length
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let (topics, new_buf) = Vec::specialized_from_compact(buf, buf.len());
         buf = new_buf;
-        let mut data = Bytes::new();
-        (data, buf) = Bytes::from_compact(buf, buf.len());
-        let obj = LogData::new_unchecked(topics, data);
-        (obj, buf)
+        let (data, buf) = Bytes::from_compact(buf, buf.len());
+        let log_data = LogData::new_unchecked(topics, data);
+        (log_data, buf)
     }
 }
 
@@ -52,13 +51,13 @@ impl Compact for Log {
         total_length
     }
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let (address, new_buf) = Address::from_compact(buf, buf.len());
         buf = new_buf;
         let (log_data, new_buf) = LogData::from_compact(buf, buf.len());
         buf = new_buf;
-        let obj = Log { address, data: log_data };
-        (obj, buf)
+        let log = Log { address, data: log_data };
+        (log, buf)
     }
 }
 
