@@ -503,7 +503,7 @@ impl Default for RpcServerArgs {
             auth_port: constants::DEFAULT_AUTH_PORT,
             auth_jwtsecret: None,
             auth_ipc: false,
-            auth_ipc_path: None,
+            auth_ipc_path: constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string(),
             rpc_jwtsecret: None,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
