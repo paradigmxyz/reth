@@ -399,7 +399,7 @@ pub struct AuthServerHandle {
     handle: ServerHandle,
     secret: JwtSecret,
     ipc_endpoint: Option<Endpoint>,
-    _ipc_handle: Option<ServerHandle>,
+    ipc_handle: Option<ServerHandle>,
 }
 
 // === impl AuthServerHandle ===
@@ -462,5 +462,11 @@ impl AuthServerHandle {
             .build(*self.ipc_endpoint.clone().expect("Empty IPC endpoint"))
             .await
             .expect("Failed to create ipc client")
+    }
+
+
+    /// Return an ipc handle 
+    pub fn ipc_handle(&self) -> Option<ServerHandle> {
+        self.ipc_handle()
     }
 }
