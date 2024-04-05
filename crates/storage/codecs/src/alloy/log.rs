@@ -50,8 +50,7 @@ impl Compact for Log {
 
 #[cfg(test)]
 mod tests {
-    use super::{Compact, Log, LogData};
-    use alloy_primitives::B256;
+    use super::{Compact, Log};
     use proptest::proptest;
 
     proptest! {
