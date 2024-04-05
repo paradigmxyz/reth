@@ -1,16 +1,19 @@
-use alloy::{
-    consensus::TxEnvelope,
-    network::{eip2718::Encodable2718, EthereumSigner, TransactionBuilder},
-    primitives::{Address, B256},
-    rpc::types::eth::TransactionRequest,
-    signers::wallet::{coins_bip39::English, LocalWallet, MnemonicBuilder},
-};
-use reth_primitives::{Bytes, ChainSpec, Genesis, U256};
+use alloy_consensus::TxEnvelope;
+use alloy_network::{eip2718::Encodable2718, EthereumSigner, TransactionBuilder};
+use alloy_rpc_types::TransactionRequest;
+use alloy_signer_wallet::{coins_bip39::English, LocalWallet, MnemonicBuilder};
+use reth_primitives::{Address, Bytes, ChainSpec, Genesis, B256, U256};
 use std::sync::Arc;
 
 /// Helper struct to customize the chain spec during e2e tests
 pub struct TestSuite {
     test_account: Account,
+}
+
+impl Default for TestSuite {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TestSuite {
@@ -32,7 +35,8 @@ impl TestSuite {
     /// Includes 20 prefunded accounts with 10_000 ETH each derived from mnemonic "test test test
     /// test test test test test test test test junk".
     pub fn chain_spec(&self) -> Arc<ChainSpec> {
-        let genesis: Genesis = serde_json::from_str(include_str!("./genesis.json")).unwrap();
+        let genesis: Genesis =
+            serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
         Arc::new(genesis.into())
     }
 }

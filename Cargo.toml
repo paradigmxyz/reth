@@ -267,6 +267,10 @@ alloy-rpc-engine-types = { git = "https://github.com/alloy-rs/alloy", rev = "7e3
 alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
 alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
 alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85", features = ["mnemonic"] }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "7e39c85" }
 
 # TODO: Remove
 ethers-core = { version = "2.0.14", default-features = false }

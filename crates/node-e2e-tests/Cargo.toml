@@ -19,4 +19,8 @@ tokio.workspace = true
 serde_json.workspace = true
 rand.workspace = true
 secp256k1.workspace = true
-alloy = { git = "https://github.com/alloy-rs/alloy",  features = [ "signers", "signer-mnemonic", "getrandom", "rpc-types-eth","network","consensus"]}
+alloy-signer.workspace = true
+alloy-signer-wallet.workspace = true
+alloy-rpc-types.workspace = true
+alloy-network.workspace = true
+alloy-consensus.workspace = true
