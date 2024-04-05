@@ -19,3 +19,8 @@ tokio.workspace = true
 serde_json.workspace = true
 rand.workspace = true
 secp256k1.workspace = true
+alloy-signer.workspace = true
+alloy-signer-wallet = { workspace = true, features = ["mnemonic"] }
+alloy-rpc-types.workspace = true
+alloy-network.workspace = true
+alloy-consensus.workspace = true

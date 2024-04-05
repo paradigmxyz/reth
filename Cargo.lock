@@ -216,6 +216,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-json-rpc"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/alloy?rev=17633df#17633df04920e07cd7afbd6ee825fcde677fa1d1"
+dependencies = [
+ "alloy-primitives",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "alloy-network"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/alloy?rev=17633df#17633df04920e07cd7afbd6ee825fcde677fa1d1"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-json-rpc",
+ "alloy-primitives",
+ "alloy-rpc-types",
+ "alloy-signer",
+ "async-trait",
+ "futures-utils-wasm",
+ "thiserror",
+]
+
+[[package]]
 name = "alloy-node-bindings"
 version = "0.1.0"
 source = "git+https://github.com/alloy-rs/alloy?rev=17633df#17633df04920e07cd7afbd6ee825fcde677fa1d1"
@@ -339,6 +366,36 @@ dependencies = [
  "alloy-primitives",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "alloy-signer"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/alloy?rev=17633df#17633df04920e07cd7afbd6ee825fcde677fa1d1"
+dependencies = [
+ "alloy-primitives",
+ "async-trait",
+ "auto_impl",
+ "elliptic-curve",
+ "k256",
+ "thiserror",
+]
+
+[[package]]
+name = "alloy-signer-wallet"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/alloy?rev=17633df#17633df04920e07cd7afbd6ee825fcde677fa1d1"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-signer",
+ "async-trait",
+ "coins-bip32",
+ "coins-bip39",
+ "k256",
+ "rand 0.8.5",
+ "thiserror",
 ]
 
 [[package]]
@@ -866,6 +923,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bech32"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
+
+[[package]]
 name = "beef"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1161,6 +1224,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4"
 dependencies = [
+ "sha2 0.10.8",
  "tinyvec",
 ]
 
@@ -1423,6 +1487,58 @@ version = "0.0.0"
 dependencies = [
  "reth",
  "reth-node-ethereum",
+]
+
+[[package]]
+name = "coins-bip32"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b6be4a5df2098cd811f3194f64ddb96c267606bffd9689ac7b0160097b01ad3"
+dependencies = [
+ "bs58",
+ "coins-core",
+ "digest 0.10.7",
+ "hmac 0.12.1",
+ "k256",
+ "serde",
+ "sha2 0.10.8",
+ "thiserror",
+]
+
+[[package]]
+name = "coins-bip39"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3db8fba409ce3dc04f7d804074039eb68b960b0829161f8e06c95fea3f122528"
+dependencies = [
+ "bitvec",
+ "coins-bip32",
+ "hmac 0.12.1",
+ "once_cell",
+ "pbkdf2",
+ "rand 0.8.5",
+ "sha2 0.10.8",
+ "thiserror",
+]
+
+[[package]]
+name = "coins-core"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5286a0843c21f8367f7be734f89df9b822e0321d8bcce8d6e735aadff7d74979"
+dependencies = [
+ "base64 0.21.7",
+ "bech32",
+ "bs58",
+ "digest 0.10.7",
+ "generic-array",
+ "hex",
+ "ripemd",
+ "serde",
+ "serde_derive",
+ "sha2 0.10.8",
+ "sha3",
+ "thiserror",
 ]
 
 [[package]]
@@ -2929,6 +3045,12 @@ dependencies = [
  "pin-utils",
  "slab",
 ]
+
+[[package]]
+name = "futures-utils-wasm"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42012b0f064e01aa58b545fe3727f90f7dd4020f4a3ea735b50344965f5a57e9"
 
 [[package]]
 name = "fxhash"
@@ -4653,6 +4775,11 @@ dependencies = [
 name = "node-e2e-tests"
 version = "0.0.0"
 dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-rpc-types",
+ "alloy-signer",
+ "alloy-signer-wallet",
  "eyre",
  "futures-util",
  "rand 0.8.5",
@@ -5022,6 +5149,16 @@ name = "paste"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
+
+[[package]]
+name = "pbkdf2"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
+dependencies = [
+ "digest 0.10.7",
+ "hmac 0.12.1",
+]
 
 [[package]]
 name = "pem"
