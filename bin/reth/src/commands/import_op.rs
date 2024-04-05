@@ -188,9 +188,9 @@ impl ImportOpCommand {
 
         info!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Loading genesis from file");
         let genesis_json: Genesis = serde_json::from_str(include_str!(
-            "../../../../crates/primitives/res/genesis/goerli_op.json"
+            "../../../../crates/primitives/res/genesis/optimism.json"
         ))
-        .expect("Can't deserialize Optimism Mainnet genesis (i.e. OP Görli genesis) json");
+        .expect("Can't deserialize Optimism Mainnet genesis json");
 
         let chain = ChainSpec::from(genesis_json);
 
@@ -211,8 +211,9 @@ impl ImportOpCommand {
         init_genesis(provider_factory.clone())?;
 
         let provider = provider_factory.provider_rw()?;
-        /* Fill in fake data for all tables up until block 4061223 inclusive */
-        for block_number in 0..=4061223 {
+        // Fill in fake data for all tables with block as key up until block 105235062 inclusive.
+        // Dummy blocks don't have transactions, so there are no receipts to insert.
+        for block_number in 0..=105235062 {
             debug!(target: "reth::cli", "inserting dummy block {}", block_number);
             let sealed_header =
                 Header { number: block_number, ..Default::default() }.seal(Default::default());
@@ -225,17 +226,17 @@ impl ImportOpCommand {
         }
 
         let sealed_header = Header {
-            parent_hash: b256!("31267a44f1422f4cab59b076548c075e79bd59e691a23fbce027f572a2a49dc9"),
+            parent_hash: b256!("21a168dfa5e727926063a28ba16fd5ee84c814e847c81a699c7a0ea551e4ca50"),
             base_fee_per_gas: Some(1000000000),
             difficulty: U256::from(0),
             extra_data: Bytes::from("BEDROCK"),
-            gas_limit: 25000000,
+            gas_limit: 30000000,
             gas_used: 0,
             logs_bloom: bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
             beneficiary: address!("4200000000000000000000000000000000000011"),
             mix_hash: b256!("0000000000000000000000000000000000000000000000000000000000000000"),
             nonce: 0,
-            number: 4061224,
+            number: 105235063,
             receipts_root: b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
             ommers_hash: b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
             state_root: b256!("bfe2b059bc76c33556870c292048f1d28c9d498462a02a3c7aadb6edf1c2d21c"),
@@ -260,7 +261,7 @@ impl ImportOpCommand {
         provider.insert_block(block, None)?;
         let tx = provider.into_tx();
 
-        let stage_checkpoint = StageCheckpoint { block_number: 4061224, stage_checkpoint: None };
+        let stage_checkpoint = StageCheckpoint { block_number: 105235063, stage_checkpoint: None };
 
         info!(target: "reth::cli", "commiting sync stages");
         for stage in StageId::ALL.iter() {

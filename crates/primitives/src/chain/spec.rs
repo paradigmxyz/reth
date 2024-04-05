@@ -249,8 +249,8 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::optimism_mainnet(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_op.json"))
-            .expect("Can't deserialize Optimism Mainnet genesis (i.e. OP Görli genesis) json"),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/optimism.json"))
+            .expect("Can't deserialize Optimism Mainnet genesis json"),
         genesis_hash: Some(b256!(
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
         )),
