@@ -105,7 +105,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
-        raw_transaction_forwarder: Option<Box<dyn RawTransactionForwarder>>,
+        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -135,7 +135,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
-        raw_transaction_forwarder: Option<Box<dyn RawTransactionForwarder>>,
+        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -490,5 +490,5 @@ struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// The type that defines how to configure the EVM
     evm_config: EvmConfig,
     /// Allows forwarding received raw transactions
-    raw_transaction_forwarder: Option<Box<dyn RawTransactionForwarder>>,
+    raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
 }
