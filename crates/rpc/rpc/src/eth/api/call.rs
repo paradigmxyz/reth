@@ -209,7 +209,7 @@ where
 
         // get the highest possible gas limit, either the request's set value or the currently
         // configured gas limit
-        let mut highest_gas_limit = request.gas.unwrap_or(block.gas_limit);
+        let mut highest_gas_limit = request.gas.map(U256::from).unwrap_or(block.gas_limit);
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
