@@ -1,13 +1,14 @@
-use alloy_consensus::TxEnvelope;
-use alloy_network::{eip2718::Encodable2718, EthereumSigner, TransactionBuilder};
-use alloy_rpc_types::TransactionRequest;
-use alloy_signer_wallet::{coins_bip39::English, LocalWallet, MnemonicBuilder};
-use reth_primitives::{Address, Bytes, ChainSpec, Genesis, B256, U256};
+use crate::{chain_spec_builder::ChainSpecBuilder, wallet::Wallet};
+use alloy_network::eip2718::Encodable2718;
+use reth_primitives::{Bytes, ChainSpec, B256};
 use std::sync::Arc;
+
+/// Mnemonic used to derive the test accounts
+const TEST_MNEMONIC: &str = "test test test test test test test test test test test junk";
 
 /// Helper struct to customize the chain spec during e2e tests
 pub struct TestSuite {
-    test_account: Account,
+    wallet: Wallet,
 }
 
 impl Default for TestSuite {
@@ -20,13 +21,13 @@ impl TestSuite {
     /// Creates a new e2e test suite with a test account prefunded with 10_000 ETH from genesis
     /// allocations and the eth mainnet latest chainspec.
     pub fn new() -> Self {
-        let test_account = Account::new();
-        Self { test_account }
+        let wallet = Wallet::new(TEST_MNEMONIC);
+        Self { wallet }
     }
 
     /// Creates a signed transfer tx and returns its hash and raw bytes
     pub async fn transfer_tx(&self) -> (B256, Bytes) {
-        let tx = self.test_account.transfer_tx().await;
+        let tx = self.wallet.transfer_tx().await;
         (tx.trie_hash(), tx.encoded_2718().into())
     }
 
@@ -35,37 +36,6 @@ impl TestSuite {
     /// Includes 20 prefunded accounts with 10_000 ETH each derived from mnemonic "test test test
     /// test test test test test test test test junk".
     pub fn chain_spec(&self) -> Arc<ChainSpec> {
-        let genesis: Genesis =
-            serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-        Arc::new(genesis.into())
-    }
-}
-
-/// One of the accounts of the genesis allocations.
-pub struct Account {
-    wallet: LocalWallet,
-}
-
-impl Account {
-    /// Creates a new account from one of the secret/pubkeys of the genesis allocations (test.json)
-    fn new() -> Self {
-        let phrase = "test test test test test test test test test test test junk";
-        let wallet = MnemonicBuilder::<English>::default().phrase(phrase).build().unwrap();
-        Self { wallet }
-    }
-
-    /// Creates a static transfer and signs it
-    async fn transfer_tx(&self) -> TxEnvelope {
-        let tx = TransactionRequest {
-            nonce: Some(0),
-            value: Some(U256::from(100)),
-            to: Some(Address::random()),
-            gas_price: Some(U256::from(20e9)),
-            gas: Some(U256::from(21000)),
-            chain_id: Some(1),
-            ..Default::default()
-        };
-        let signer = EthereumSigner::from(self.wallet.clone());
-        tx.build(&signer).await.unwrap()
+        ChainSpecBuilder::new().build()
     }
 }
