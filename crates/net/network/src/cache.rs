@@ -1,3 +1,5 @@
+//! Network cache support
+
 use core::hash::BuildHasher;
 use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
