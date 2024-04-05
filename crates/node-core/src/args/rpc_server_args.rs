@@ -183,7 +183,7 @@ pub struct RpcServerArgs {
 
     /// Filename for auth IPC socket/pipe within the datadir
     #[arg(long = "auth-ipc.path", default_value = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT)]
-    pub auth_ipc_path: Option<String>,
+    pub auth_ipc_path: String,
 }
 
 impl RpcServerArgs {
