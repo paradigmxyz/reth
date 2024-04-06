@@ -1,4 +1,5 @@
-use alloy_primitives::{Bytes, B256};
+use crate::beacon::header::BeaconBlockHeader;
+use alloy_primitives::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
@@ -13,19 +14,7 @@ pub struct LightClientOptimisticData {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestedHeader {
-    pub beacon: Beacon,
-}
-
-#[serde_as]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Beacon {
-    #[serde_as(as = "DisplayFromStr")]
-    pub slot: u64,
-    #[serde_as(as = "DisplayFromStr")]
-    pub proposer_index: u64,
-    pub parent_root: B256,
-    pub state_root: B256,
-    pub body_root: B256,
+    pub beacon: BeaconBlockHeader,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
