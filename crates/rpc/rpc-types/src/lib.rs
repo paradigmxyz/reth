@@ -11,6 +11,7 @@
 #![allow(hidden_glob_reexports)] // TODO rm in followup PR
 
 mod admin;
+pub mod anvil;
 pub mod beacon;
 mod eth;
 mod mev;
