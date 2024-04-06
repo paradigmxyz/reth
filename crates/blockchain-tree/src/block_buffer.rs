@@ -73,15 +73,13 @@ impl BlockBuffer {
         self.earliest_blocks.entry(block.number).or_default().insert(hash);
         self.blocks.insert(hash, block);
 
-        if self.lru.insert(hash, ()) {
+        if !self.lru.insert(hash, ()) {
             // Evict the block if limit is hit
             if let Some(evicted_block) = self.remove_block(&hash) {
                 self.remove_from_parent(evicted_block.parent_hash, &hash);
             }
         }
-        self.metrics.blocks.set(self.blocks.len() as f64);
     }
-
     /// Removes the given block from the buffer and also all the children of the block.
     ///
     /// This is used to get all the blocks that are dependent on the block that is included.
