@@ -73,6 +73,7 @@ pub mod clients {
         engine::{EngineApiClient, EngineEthApiClient},
         eth::EthApiClient,
         eth_filter::EthFilterApiClient,
+        ganache::GanacheApiClient,
         mev::MevApiClient,
         net::NetApiClient,
         otterscan::OtterscanClient,
