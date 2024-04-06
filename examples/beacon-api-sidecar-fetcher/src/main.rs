@@ -5,13 +5,18 @@
 
 use std::{
     collections::VecDeque,
+    net::IpAddr,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 
 use futures_util::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use reqwest::Error;
-use reth::{providers::CanonStateNotification, transaction_pool::TransactionPoolExt};
+use reth::{
+    primitives::{BlockHash, BlockNumber, Transaction},
+    providers::CanonStateNotification,
+    transaction_pool::TransactionPoolExt,
+};
 
 use serde::{self, Deserialize, Serialize};
 use tracing::debug;
@@ -43,10 +48,11 @@ where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     P: TransactionPoolExt + Unpin + 'static,
 {
+    //type Item = Result<MinedSidecar, SideCarError<E>>;
     type Item = Result<BlobSidecar, reqwest::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
+        let this: &mut MinedSidecarStream<St, P> = self.get_mut();
 
         // return any buffered result
         if let Some(blob_sidecar) = this.queued_actions.pop_front() {
@@ -67,6 +73,7 @@ where
         loop {
             match this.events.poll_next_unpin(cx) {
                 Poll::Ready(Some(notification)) => {
+
                     // Logic goes here to one check if pool exists else query CL\
                     // Pool logic added to queued actions?
                     // CL Query request added to pending_requests
@@ -91,6 +98,23 @@ where
         BlobSidecar { ..Default::default() }
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MinedSidecar {
+    tx: Transaction,
+    block_hash: BlockHash,
+    block_number: BlockNumber,
+    sidecar: BlobSidecar,
+}
+
+#[derive(Debug, Clone)]
+pub struct SideCarError<E> {
+    error: E,        // Using a simple ErrorDetail struct for demonstration.
+    tx_hash: String, // Including transaction hash in the error as well.
+    block_hash: BlockHash,
+    block_number: BlockNumber,
+}
+
 /// TODO: Import as feature
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlobSidecar {
