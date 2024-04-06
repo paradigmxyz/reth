@@ -13,7 +13,7 @@ use std::{
 use futures_util::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use reqwest::Error;
 use reth::{
-    primitives::{BlockHash, BlockNumber, Transaction},
+    primitives::{BlobTransaction, BlobTransactionSidecar, BlockHash, BlockNumber, Transaction},
     providers::CanonStateNotification,
     transaction_pool::TransactionPoolExt,
 };
@@ -38,9 +38,11 @@ where
     events: St,
     pool: P,
     client: reqwest::Client,
-    pending_requests:
-        FuturesUnordered<Pin<Box<dyn Future<Output = Result<BlobSidecar, reqwest::Error>> + Send>>>, /* will contant CL queries. */
-    queued_actions: VecDeque<BlobSidecar>, // Buffer for ready items
+    pending_requests: FuturesUnordered<
+        Pin<Box<dyn Future<Output = Result<BlobTransactionSidecar, reqwest::Error>> + Send>>,
+    >, /* will contant CL queries. */
+    queued_actions: VecDeque<Result<BlobTransactionSidecar, reqwest::Error>>, /* Buffer for
+                                                                               * ready items */
 }
 
 impl<St, P> Stream for MinedSidecarStream<St, P>
@@ -49,14 +51,14 @@ where
     P: TransactionPoolExt + Unpin + 'static,
 {
     //type Item = Result<MinedSidecar, SideCarError<E>>;
-    type Item = Result<BlobSidecar, reqwest::Error>;
+    type Item = Result<BlobTransactionSidecar, reqwest::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this: &mut MinedSidecarStream<St, P> = self.get_mut();
 
         // return any buffered result
         if let Some(blob_sidecar) = this.queued_actions.pop_front() {
-            return Poll::Ready(Some(Ok(blob_sidecar)));
+            return Poll::Ready(Some(blob_sidecar));
         }
 
         // Check if any pending reqwests are ready.
@@ -73,11 +75,23 @@ where
         loop {
             match this.events.poll_next_unpin(cx) {
                 Poll::Ready(Some(notification)) => {
-
-                    // Logic goes here to one check if pool exists else query CL\
-                    // Pool logic added to queued actions?
-                    // CL Query request added to pending_requests
-                    //Box::pin(async move { request })
+                    for tx in notification.tip().transactions().filter(|tx| tx.is_eip4844()) {
+                        match this.pool.get_blob(tx.hash) {
+                            Ok(Some(blob)) => {
+                                // If get_blob returns Ok(Some(blob)), the blob exists
+                                this.queued_actions.push_back(Ok(blob));
+                            }
+                            Ok(None) => {
+                                // Fetch from CL
+                            }
+                            // change this
+                            Err(e) => {
+                                debug!(
+                                    %e,
+                                );
+                            }
+                        }
+                    }
                 }
                 Poll::Ready(None) => return Poll::Ready(None),
                 Poll::Pending => continue,
