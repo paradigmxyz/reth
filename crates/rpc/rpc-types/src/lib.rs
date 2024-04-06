@@ -12,6 +12,7 @@
 
 mod admin;
 pub mod anvil;
+pub mod ganache;
 pub mod beacon;
 mod eth;
 mod mev;
@@ -33,6 +34,7 @@ pub mod trace {
     //! RPC types for trace endpoints and inspectors.
     pub use alloy_rpc_types_trace::*;
 }
+
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 pub use eth::{
     engine,

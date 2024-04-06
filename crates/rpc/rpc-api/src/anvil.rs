@@ -1,8 +1,11 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 use reth_primitives::{Address, B256, Bytes, U256};
-use reth_rpc_types::{anvil::{Forking, Params}, Block};
-use reth_rpc_types::anvil::{EvmMineOptions, Metadata, NodeInfo};
+use reth_rpc_types::{
+    anvil::{Forking, Metadata, NodeInfo, Params},
+    Block,
+    ganache::MineOptions,
+};
 
 /// Anvil rpc interface.
 /// https://book.getfoundry.sh/reference/anvil/#custom-methods
@@ -103,7 +106,7 @@ pub trait AnvilApi {
     async fn anvil_remove_block_timestamp_interval(&self) -> RpcResult<bool>;
 
     #[method(name = "mine_detailed")] // This method uses snake_case.
-    async fn anvil_mine_detailed(&self, opts: Option<Params<Option<EvmMineOptions>>>) -> RpcResult<Vec<Block>>;
+    async fn anvil_mine_detailed(&self, opts: Option<Params<Option<MineOptions>>>) -> RpcResult<Vec<Block>>;
 
     #[method(name = "enableTraces")]
     async fn anvil_enable_traces(&self) -> RpcResult<()>;

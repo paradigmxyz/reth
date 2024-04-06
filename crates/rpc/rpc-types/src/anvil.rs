@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use alloy_primitives::{B256, TxHash, U256, U64};
 use revm_primitives::SpecId;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 /// Wrapper type that ensures the type is named `params`
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,40 +75,4 @@ pub struct ForkedNetwork {
     pub chain_id: u64,
     pub fork_block_number: u64,
     pub fork_block_hash: TxHash,
-}
-
-/// Additional `evm_mine` options
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum EvmMineOptions {
-    Options {
-        #[serde(deserialize_with = "deserialize_stringified_u64_opt")]
-        timestamp: Option<u64>,
-        // If `blocks` is given, it will mine exactly blocks number of blocks, regardless of any
-        // other blocks mined or reverted during it's operation
-        blocks: Option<u64>,
-    },
-    /// The timestamp the block should be mined with
-    #[serde(deserialize_with = "deserialize_stringified_u64_opt")]
-    Timestamp(Option<u64>),
-}
-
-impl Default for EvmMineOptions {
-    fn default() -> Self {
-        EvmMineOptions::Options { timestamp: None, blocks: None }
-    }
-}
-
-/// Supports parsing u64
-///
-/// See <https://github.com/gakonst/ethers-rs/issues/1507>
-fn deserialize_stringified_u64_opt<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
-    where
-        D: Deserializer<'de>,
-{
-    if let Some(num) = Option::<U256>::deserialize(deserializer)? {
-        num.try_into().map(Some).map_err(serde::de::Error::custom)
-    } else {
-        Ok(None)
-    }
 }
