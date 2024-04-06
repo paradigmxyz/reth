@@ -10,11 +10,12 @@ use crate::{
 use futures_util::{ready, Stream};
 use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{
-    kzg::KzgSettings, AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
-    FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, B256, EIP1559_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, U256,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
+    BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
+    IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionKind,
+    TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxEip4844, TxHash, B256,
+    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -756,7 +757,7 @@ pub trait PoolTransaction:
     + Send
     + Sync
     + FromRecoveredPooledTransaction
-    + FromRecoveredTransaction
+    + TryFromRecoveredTransaction
     + IntoRecoveredTransaction
 {
     /// Hash of the transaction.
@@ -1111,12 +1112,17 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 }
 
-impl FromRecoveredTransaction for EthPooledTransaction {
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
+impl TryFromRecoveredTransaction for EthPooledTransaction {
+    type Error = TryFromRecoveredTransactionError;
+
+    fn try_from_recovered_transaction(
+        tx: TransactionSignedEcRecovered,
+    ) -> Result<Self, Self::Error> {
         // CAUTION: this should not be done for EIP-4844 transactions, as the blob sidecar is
         // missing.
         let encoded_length = tx.length_without_header();
-        EthPooledTransaction::new(tx, encoded_length)
+        let transaction = EthPooledTransaction::new(tx, encoded_length);
+        Ok(transaction)
     }
 }
 
