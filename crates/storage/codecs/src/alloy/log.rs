@@ -9,8 +9,9 @@ impl Compact for LogData {
         B: BufMut + AsMut<[u8]>,
     {
         let mut buffer = bytes::BytesMut::new();
-        self.topics().to_vec().specialized_to_compact(&mut buffer);
-        self.data.to_compact(&mut buffer);
+        let (topics, data) = self.split();
+        topics.specialized_to_compact(&mut buffer);
+        data.to_compact(&mut buffer);
         let total_length = buffer.len();
         buf.put(buffer);
         total_length
