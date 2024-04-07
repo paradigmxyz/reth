@@ -54,7 +54,7 @@ pub trait HardhatApi {
     #[method(name = "setLoggingEnabled")]
     async fn hardhat_set_logging_enabled(&self, enabled: bool) -> RpcResult<()>;
 
-    /// Changes the minimum gas price accepted by the network.
+    /// Changes the minimum gas price accepted by the network (in wei).
     #[method(name = "setMinGasPrice")]
     async fn hardhat_set_min_gas_price(&self, gas_price: U256) -> RpcResult<()>;
 
