@@ -32,6 +32,7 @@ mod trace;
 mod txpool;
 mod validation;
 mod web3;
+mod hardhat;
 
 /// re-export of all server traits
 pub use servers::*;
@@ -74,6 +75,7 @@ pub mod clients {
         eth::EthApiClient,
         eth_filter::EthFilterApiClient,
         ganache::GanacheApiClient,
+        hardhat::HardhatApiClient,
         mev::MevApiClient,
         net::NetApiClient,
         otterscan::OtterscanClient,
