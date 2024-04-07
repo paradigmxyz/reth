@@ -70,7 +70,7 @@ mod tests {
         topics: Vec<B256>,
         address: Address,
         data: Bytes,
-        encoded: Vec<u8>,
+        encoded_bytes: Bytes,
     }
 
     #[test]
@@ -84,9 +84,9 @@ mod tests {
 
             let mut buf = Vec::<u8>::new();
             let len = log.clone().to_compact(&mut buf);
-            assert_eq!(test_vector.encoded, buf);
+            assert_eq!(test_vector.encoded_bytes, buf);
 
-            let (decoded, _) = Log::from_compact(&test_vector.encoded, len);
+            let (decoded, _) = Log::from_compact(&test_vector.encoded_bytes, len);
             assert_eq!(log, decoded);
         }
     }
