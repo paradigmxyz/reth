@@ -11,9 +11,9 @@ use std::{
 
 use crate::ExExEvent;
 use reth_primitives::BlockNumber;
-use reth_provider::{CanonStateNotification, CanonStateNotifications};
+use reth_provider::CanonStateNotification;
 use tokio::sync::{
-    mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender},
+    mpsc::{self, error::SendError, Receiver, Sender, UnboundedReceiver, UnboundedSender},
     watch,
 };
 use tokio_util::sync::{PollSendError, PollSender};
@@ -114,8 +114,6 @@ pub struct ExExManager {
 
     /// [`CanonStateNotification`] channel from the [`ExExManagerHandle`]s.
     handle_rx: UnboundedReceiver<CanonStateNotification>,
-    /// [`CanonStateNotification`] channel from the blockchain tree.
-    tree_rx: CanonStateNotifications,
 
     /// The minimum notification ID currently present in the buffer.
     min_id: usize,
@@ -144,15 +142,12 @@ pub struct ExExManager {
 impl ExExManager {
     /// Create a new [`ExExManager`].
     ///
-    /// You must provide:
-    /// - An [`ExExHandle`] for each ExEx
-    /// - The receiving side of [`CanonStateNotification`]s from the blockchain tree
-    /// - The maximum capacity of the notification buffer in the manager
-    pub fn new(
-        handles: Vec<ExExHandle>,
-        tree_rx: CanonStateNotifications,
-        max_capacity: usize,
-    ) -> Self {
+    /// You must provide an [`ExExHandle`] for each ExEx and the maximum capacity of the
+    /// notification buffer in the manager.
+    ///
+    /// When the capacity is exceeded (which can happen if an ExEx is slow) no one can send
+    /// messages over [`ExExManagerHandle`]s until there is capacity again.
+    pub fn new(handles: Vec<ExExHandle>, max_capacity: usize) -> Self {
         let num_exexs = handles.len();
 
         let (handle_tx, handle_rx) = mpsc::unbounded_channel();
@@ -165,7 +160,6 @@ impl ExExManager {
             exex_handles: handles,
 
             handle_rx,
-            tree_rx,
 
             min_id: 0,
             next_id: 0,
@@ -290,6 +284,28 @@ impl ExExManagerHandle {
         let within_threshold = block_number >= *self.block.borrow_and_update();
 
         has_exexs && within_threshold && self.has_capacity()
+    }
+
+    /// Send a notification over the channel to all execution extensions.
+    ///
+    /// Senders should call [`should_send`] first.
+    pub fn send(
+        &self,
+        notification: CanonStateNotification,
+    ) -> Result<(), SendError<CanonStateNotification>> {
+        self.exex_tx.send(notification)
+    }
+
+    /// Send a notification over the channel to all execution extensions.
+    ///
+    /// The returned future resolves when the notification has been delivered. If there is no
+    /// capacity in the channel, the future will wait.
+    pub async fn send_async(
+        &self,
+        notification: CanonStateNotification,
+    ) -> Result<(), SendError<CanonStateNotification>> {
+        self.ready().await;
+        self.exex_tx.send(notification)
     }
 
     /// Whether there is capacity in the ExEx manager's internal notification buffer.
