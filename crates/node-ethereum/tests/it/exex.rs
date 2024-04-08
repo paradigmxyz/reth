@@ -1,6 +1,7 @@
 use futures::future;
 use reth_db::test_utils::create_test_rw_db;
-use reth_node_builder::{exex::ExExContext, FullNodeTypes, NodeBuilder, NodeConfig};
+use reth_exex::ExExContext;
+use reth_node_builder::{FullNodeTypes, NodeBuilder, NodeConfig};
 use reth_node_ethereum::EthereumNode;
 use std::{
     future::Future,
