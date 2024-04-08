@@ -28,7 +28,7 @@ use reth_db::{
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
-use reth_exex::ExExContext;
+use reth_exex::{ExExContext, ExExHandle};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
@@ -561,7 +561,34 @@ where
         let NodeComponents { transaction_pool, network, payload_builder } =
             components_builder.build_components(&ctx).await?;
 
-        // TODO(alexey): launch ExExs and consume their events
+        // spawn exexs
+        let mut exex_handles = Vec::with_capacity(self.state.exexs.len());
+        for exex in self.state.exexs {
+            // create a new exex handle
+            let (handle, events, notifications) = ExExHandle::new("foo".into());
+            exex_handles.push(handle);
+
+            // create the launch context for the exex
+            let context = ExExContext {
+                head,
+                provider: ctx.provider.clone(),
+                task_executor: ctx.executor.clone(),
+                data_dir: ctx.data_dir.clone(),
+                config: ctx.config.clone(),
+                reth_config: ctx.reth_config.clone(),
+                events,
+                notifications,
+            };
+
+            // init the exex
+            let exex = exex.launch(context).await.unwrap();
+
+            // spawn it as a crit task
+            ctx.executor.spawn_critical("exex", async { exex.await.expect("exex crashed") });
+        }
+
+        // todo spawn exex manager
+        // ctx.executor.spawn_critical("exex manager", todo!());
 
         let BuilderContext {
             provider: blockchain_db,
