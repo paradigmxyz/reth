@@ -32,7 +32,7 @@ struct ExExMetrics;
 
 #[derive(Debug)]
 pub struct ExExHandle {
-    /// The extension extension's ID.
+    /// The execution extension's ID.
     id: String,
     /// Channel to send [`CanonStateNotification`]s to the ExEx.
     sender: PollSender<CanonStateNotification>,
