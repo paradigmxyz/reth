@@ -6465,7 +6465,6 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
