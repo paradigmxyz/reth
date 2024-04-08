@@ -47,7 +47,8 @@ pub trait BlockExecutor {
     ///
     /// The second returned value represents the total gas used by this block of transactions.
     ///
-    /// See [execute](BlockExecutor::execute) for more details.
+    /// See [execute_and_verify_receipt](BlockExecutor::execute_and_verify_receipt) for more
+    /// details.
     fn execute_transactions(
         &mut self,
         block: &BlockWithSenders,
