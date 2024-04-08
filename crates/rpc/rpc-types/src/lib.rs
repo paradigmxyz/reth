@@ -8,9 +8,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![allow(hidden_glob_reexports)] // TODO rm in followup PR
 
-mod admin;
 pub mod beacon;
 mod eth;
 mod mev;
@@ -38,8 +36,19 @@ pub use eth::{
     transaction::{self, TransactionKind, TransactionRequest, TypedTransactionRequest},
 };
 
-pub use admin::*;
 pub use mev::*;
 pub use net::*;
 pub use peer::*;
 pub use rpc::*;
+
+
+/// The status of the network being ran by the local node.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NetworkStatus {
+    /// The local node client version.
+    pub client_version: String,
+    /// The current ethereum protocol version
+    pub protocol_version: u64,
+    /// Information about the Ethereum Wire Protocol.
+    pub eth_protocol_info: alloy_rpc_types::admin::EthProtocolInfo,
+}

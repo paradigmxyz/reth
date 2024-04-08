@@ -4,8 +4,9 @@ use jsonrpsee::core::RpcResult;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
 use reth_primitives::{AnyNode, ChainSpec, NodeRecord};
 use reth_rpc_api::AdminApiServer;
-use reth_rpc_types::{NodeInfo, PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo};
+use reth_rpc_types::{admin::NodeInfo, PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo};
 use std::sync::Arc;
+use reth_rpc_types::admin::{EthProtocolInfo, Ports, ProtocolInfo};
 
 /// `admin` API implementation.
 ///
@@ -87,11 +88,45 @@ where
 
     /// Handler for `admin_nodeInfo`
     async fn node_info(&self) -> RpcResult<NodeInfo> {
-        let enr = self.network.local_node_record();
+        let enode = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
         let config = self.chain_spec.genesis().config.clone();
 
-        Ok(NodeInfo::new(enr, status, config))
+        NodeInfo {
+            id: Default::default(),
+            name: status.client_version,
+            enode: enode.to_string(),
+            enr: "".to_string(),
+            ip: enode.address,
+            ports:  Ports { discovery: enode.udp_port, listener: enode.tcp_port },
+            listen_addr:  enode.tcp_addr().to_string(),
+            protocols: ProtocolInfo {
+                eth: Some(
+                    EthProtocolInfo {
+                        network: 0,
+                        difficulty: Default::default(),
+                        genesis: Default::default(),
+                        config,
+                        head: Default::default(),
+                    }
+                ),
+                snap: None,
+            },
+        };
+        // NodeInfo {
+        //     enode: enr,
+        //     id: enr.id,
+        //     ip: enr.address,
+        //     listen_addr: enr.tcp_addr(),
+        //     ports: Ports { discovery: enr.udp_port, listener: enr.tcp_port },
+        //     name: status.client_version,
+        //     protocols: Protocols {
+        //         eth: EthProtocolInfo::new(status.eth_protocol_info, config),
+        //         other: Default::default(),
+        //     },
+        // }
+
+        Ok(NodeInfo::new(enode, status, config))
     }
 
     /// Handler for `admin_peerEvents`

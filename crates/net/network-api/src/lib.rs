@@ -15,7 +15,6 @@
 
 use reth_eth_wire::{DisconnectReason, EthVersion, Status};
 use reth_primitives::{NodeRecord, PeerId};
-use reth_rpc_types::NetworkStatus;
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 pub use error::NetworkError;
