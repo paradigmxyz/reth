@@ -34,9 +34,10 @@ pub struct HeaderResponse {
     pub data: HeaderData,
 }
 
+/// Container type for a beacon block header.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HeaderData {
-    /// root hash
+    /// root hash of the block
     pub root: B256,
     /// Whether the block is part of the canonical chain
     pub canonical: bool,
@@ -44,6 +45,7 @@ pub struct HeaderData {
     pub header: Header,
 }
 
+/// [BeaconBlockHeader] with a signature.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Header {
     /// The `BeaconBlockHeader` object from the CL spec.
@@ -51,6 +53,7 @@ pub struct Header {
     pub signature: Bytes,
 }
 
+/// The header of a beacon block.
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BeaconBlockHeader {
