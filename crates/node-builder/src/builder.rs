@@ -28,7 +28,7 @@ use reth_db::{
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
-use reth_exex::{ExExContext, ExExHandle};
+use reth_exex::{ExExContext, ExExHandle, ExExManager};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
@@ -44,7 +44,9 @@ use reth_node_core::{
     utils::write_peers_to_file,
 };
 use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, format_ether, ChainSpec};
-use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
+use reth_provider::{
+    providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
+};
 use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
@@ -434,7 +436,11 @@ where
     }
 
     /// Installs an ExEx (Execution Extension) in the node.
-    pub fn install_exex<F, R, E>(mut self, exex: F) -> Self
+    ///
+    /// # Note
+    ///
+    /// The ExEx ID must be unique.
+    pub fn install_exex<F, R, E>(mut self, exex_id: String, exex: F) -> Self
     where
         F: Fn(
                 ExExContext<
@@ -449,7 +455,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.state.exexs.push(Box::new(exex));
+        self.state.exexs.push((exex_id, Box::new(exex)));
         self
     }
 
@@ -563,9 +569,9 @@ where
 
         // spawn exexs
         let mut exex_handles = Vec::with_capacity(self.state.exexs.len());
-        for exex in self.state.exexs {
+        for (id, exex) in self.state.exexs {
             // create a new exex handle
-            let (handle, events, notifications) = ExExHandle::new("foo".into());
+            let (handle, events, notifications) = ExExHandle::new(id.clone());
             exex_handles.push(handle);
 
             // create the launch context for the exex
@@ -584,11 +590,19 @@ where
             let exex = exex.launch(context).await.unwrap();
 
             // spawn it as a crit task
-            ctx.executor.spawn_critical("exex", async { exex.await.expect("exex crashed") });
+            ctx.executor.spawn_critical("exex", async move {
+                exex.await.unwrap_or_else(|_| panic!("exex {id} crashed"))
+            });
         }
 
-        // todo spawn exex manager
-        // ctx.executor.spawn_critical("exex manager", todo!());
+        // spawn exex manager
+        // todo(onbjerg): rm magic number
+        let exex_manager =
+            ExExManager::new(exex_handles, blockchain_tree.subscribe_to_canonical_state(), 1024);
+        let exex_manager_handle = exex_manager.handle();
+        ctx.executor.spawn_critical("exex manager", async move {
+            exex_manager.await.expect("exex manager crashed");
+        });
 
         let BuilderContext {
             provider: blockchain_db,
@@ -1328,7 +1342,7 @@ pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
     /// Additional RPC hooks.
     rpc: RpcHooks<FullNode>,
     /// The ExExs (execution extensions) of the node.
-    exexs: Vec<Box<dyn BoxedLaunchExEx<FullNode>>>,
+    exexs: Vec<(String, Box<dyn BoxedLaunchExEx<FullNode>>)>,
 }
 
 impl<Types, Components, FullNode: FullNodeComponents> std::fmt::Debug
