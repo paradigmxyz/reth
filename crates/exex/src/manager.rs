@@ -10,6 +10,7 @@ use std::{
 };
 
 use crate::ExExEvent;
+use metrics::Gauge;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::BlockNumber;
 use reth_provider::CanonStateNotification;
@@ -102,7 +103,18 @@ impl ExExHandle {
 }
 
 // todo
-pub struct ExExManagerMetrics;
+#[derive(Metrics)]
+#[metrics(scope = "exex_manager")]
+pub struct ExExManagerMetrics {
+    /// Max size of the internal state notifications buffer.
+    max_capacity: Counter,
+    /// Current capacity of the internal state notifications buffer.
+    current_capacity: Gauge,
+    /// Current size of the internal state notifications buffer.
+    ///
+    /// Note that this might be slightly bigger than the maximum capacity in some cases.
+    buffer_size: Gauge,
+}
 
 // todo: if event is sent to exex it is considered delivered
 /// The execution extension manager.
@@ -149,6 +161,8 @@ pub struct ExExManager {
 
     /// tbd
     handle: ExExManagerHandle,
+    /// Metrics for the ExEx manager.
+    metrics: ExExManagerMetrics,
 }
 
 impl ExExManager {
@@ -167,6 +181,9 @@ impl ExExManager {
         let (block_tx, block_rx) = watch::channel(0);
 
         let current_capacity = Arc::new(AtomicUsize::new(max_capacity));
+
+        let metrics = ExExManagerMetrics::default();
+        metrics.max_capacity.absolute(max_capacity as u64);
 
         Self {
             exex_handles: handles,
@@ -189,6 +206,7 @@ impl ExExManager {
                 current_capacity,
                 block: block_rx,
             },
+            metrics,
         }
     }
 
@@ -202,6 +220,8 @@ impl ExExManager {
     fn update_capacity(&mut self) {
         let capacity = self.max_capacity.saturating_sub(self.buffer.len());
         self.current_capacity.store(capacity, Ordering::Relaxed);
+        self.metrics.current_capacity.set(capacity as f64);
+        self.metrics.buffer_size.set(self.buffer.len());
 
         // we can safely ignore if the channel is closed, since the manager always holds it open
         // internally
