@@ -148,15 +148,13 @@ where
     let local_addr = server
         .local_addr()
         .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
-    let ipc_endpoint = Endpoint::new(DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
-    let ipc_handle = IpcServerBuilder::default().build(ipc_endpoint.path())?.start(module).await?;
 
     Ok(AuthServerHandle {
         handle,
         local_addr,
         secret,
-        ipc_endpoint: Some(ipc_endpoint),
-        _ipc_handle: Some(ipc_handle),
+        ipc_endpoint: None,
+        ipc_handle: None,
     })
 }
 
@@ -184,9 +182,6 @@ impl fmt::Debug for AuthServerConfig {
             .field("ipc_endpoint", &self.ipc_endpoint.as_ref().map(|endpoint| endpoint.path()))
             .finish()
     }
-=======
-    pub(crate) server_config: ServerBuilder<Identity, Identity>,
->>>>>>> 9265a539e55e0cac0b6c2488394160e392f90bef
 }
 
 // === impl AuthServerConfig ===
