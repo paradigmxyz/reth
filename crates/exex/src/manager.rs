@@ -250,7 +250,7 @@ impl Future for ExExManager {
         }
 
         // remove processed buffered events
-        self.buffer.retain(|&(id, _)| id < min_id);
+        self.buffer.retain(|&(id, _)| id > min_id);
         self.min_id = min_id;
 
         // update capacity
