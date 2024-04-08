@@ -6,7 +6,7 @@ use reth_node_core::{
 use reth_primitives::Head;
 use reth_provider::CanonStateNotification;
 use reth_tasks::TaskExecutor;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, UnboundedSender};
 
 use crate::ExExEvent;
 
@@ -32,7 +32,7 @@ pub struct ExExContext<Node: FullNodeTypes> {
     /// The exex should emit a `FinishedHeight` whenever a processed block is safe to prune.
     /// Additionally, the exex can pre-emptively emit a `FinishedHeight` event to specify what
     /// blocks to receive notifications for.
-    pub events: Sender<ExExEvent>,
+    pub events: UnboundedSender<ExExEvent>,
     /// Channel to receive [`CanonStateNotification`]s on state transitions.
     ///
     /// # Important

@@ -11,17 +11,17 @@ use reth_provider::{AccountReader, BlockHashReader, StateProvider, StateRootProv
 use reth_trie::updates::TrieUpdates;
 use revm::{
     db::BundleState,
-    inspector_handle_register,
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    GetInspector,
 };
 use std::collections::HashMap;
+
 #[cfg(feature = "optimism")]
 use {
     reth_primitives::revm::env::fill_op_tx_env,
     revm::{
+        inspector_handle_register,
         primitives::{HandlerCfg, SpecId},
-        Database, Evm, EvmBuilder,
+        Database, Evm, EvmBuilder, GetInspector,
     },
 };
 
