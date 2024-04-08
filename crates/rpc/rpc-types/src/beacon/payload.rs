@@ -32,7 +32,7 @@ pub struct GetExecutionPayloadHeaderResponse {
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPayloadHeaderData {
     pub message: ExecutionPayloadHeaderMessage,
-    pub signature: String,
+    pub signature: Bytes,
 }
 
 #[serde_as]
