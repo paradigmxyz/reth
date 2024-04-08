@@ -29,9 +29,16 @@ pub struct ExExContext<Node: FullNodeTypes> {
     ///
     /// # Important
     ///
-    /// The node expects at least one `FinishedHeight` event in order to prune blocks.
+    /// The exex should emit a `FinishedHeight` whenever a processed block is safe to prune.
+    /// Additionally, the exex can pre-emptively emit a `FinishedHeight` event to specify what
+    /// blocks to receive notifications for.
     pub events: Sender<ExExEvent>,
     /// Channel to receive [`CanonStateNotification`]s on state transitions.
+    ///
+    /// # Important
+    ///
+    /// Once a `CanonStateNotification` is sent over the channel, it is considered delivered by the
+    /// node.
     pub notifications: Receiver<CanonStateNotification>,
     // TODO(alexey): add pool, payload builder, anything else?
 }
