@@ -30,6 +30,11 @@ use tokio_util::sync::{PollSendError, PollSender};
 #[derive(Debug)]
 struct ExExMetrics;
 
+/// A handle to an ExEx used by the [`ExExManager`] to communicate with ExEx's.
+///
+/// A handle should be created for each ExEx with a unique ID. The channels returned by
+/// [`ExExHandle::new`] should be given to the ExEx, while the handle itself should be given to the
+/// manager in [`ExExManager::new`].
 #[derive(Debug)]
 pub struct ExExHandle {
     /// The execution extension's ID.
@@ -43,6 +48,26 @@ pub struct ExExHandle {
 }
 
 impl ExExHandle {
+    /// Create a new handle for the given ExEx.
+    ///
+    /// Returns the handle, as well as a [`Sender`] for [`ExExEvent`]s and a
+    /// [`Receiver`] for [`CanonStateNotification`]s that should be given to the ExEx.
+    pub fn new(id: String) -> (Self, Sender<ExExEvent>, Receiver<CanonStateNotification>) {
+        let (canon_tx, canon_rx) = mpsc::channel(1);
+        let (event_tx, event_rx) = mpsc::channel(1);
+
+        (
+            Self {
+                id,
+                sender: PollSender::new(canon_tx),
+                receiver: event_rx,
+                next_notification_id: 0,
+            },
+            event_tx,
+            canon_rx,
+        )
+    }
+
     /// Reserves a slot in the `PollSender` channel and sends the notification if the slot was
     /// successfully reserved.
     ///
