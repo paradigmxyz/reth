@@ -6455,6 +6455,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-exex"
+version = "0.2.0-beta.5"
+dependencies = [
+ "reth-config",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-primitives",
+ "reth-provider",
+ "reth-tasks",
+ "tokio",
+]
+
+[[package]]
 name = "reth-interfaces"
 version = "0.2.0-beta.5"
 dependencies = [
@@ -6690,6 +6703,7 @@ dependencies = [
  "reth-blockchain-tree",
  "reth-config",
  "reth-db",
+ "reth-exex",
  "reth-interfaces",
  "reth-network",
  "reth-node-api",
@@ -6784,6 +6798,7 @@ dependencies = [
  "reth-db",
  "reth-ethereum-payload-builder",
  "reth-evm-ethereum",
+ "reth-exex",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
