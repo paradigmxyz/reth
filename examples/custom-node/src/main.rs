@@ -17,7 +17,6 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_chains::Chain;
 use reth::{
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
@@ -46,7 +45,7 @@ use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::{Address, ChainSpec, Genesis, Header, Withdrawals, B256};
+use reth_primitives::{Address, Chain, ChainSpec, Genesis, Header, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
