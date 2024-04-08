@@ -141,13 +141,13 @@ where
         .set_http_middleware(middleware)
         .build(socket_addr)
         .await
-        .map_err(|err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)))?;
-
-    let handle = server.start(module.clone());
+        .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
 
     let local_addr = server
         .local_addr()
         .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
+
+    let handle = server.start(module.clone());
 
     Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint: None, ipc_handle: None })
 }
@@ -159,7 +159,7 @@ pub struct AuthServerConfig {
     /// The secret for the auth layer of the server.
     pub(crate) secret: JwtSecret,
     /// Configs for JSON-RPC Http.
-    pub(crate) server_config: ServerBuilder,
+    pub(crate) server_config: ServerBuilder<Identity, Identity>,
     /// Configs for IPC server
     pub(crate) ipc_server_config: Option<IpcServerBuilder>,
     /// IPC endpoint
@@ -225,7 +225,7 @@ impl AuthServerConfig {
 pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
-    server_config: Option<ServerBuilder>,
+    server_config: Option<ServerBuilder<Identity, Identity>>,
     ipc_server_config: Option<IpcServerBuilder>,
     ipc_endpoint: Option<Endpoint>,
 }
@@ -411,7 +411,7 @@ impl AuthServerHandle {
         format!("http://{}", self.local_addr)
     }
 
-    /// returns the url to the ws server
+    /// Returns the url to the ws server
     pub fn ws_url(&self) -> String {
         format!("ws://{}", self.local_addr)
     }
