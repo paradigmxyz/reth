@@ -294,24 +294,19 @@ impl Future for ExExManager {
 
         // update watch channel block number
         // todo: clean this up and also is this too expensive
-        let finished_height = self.exex_handles.iter_mut().try_fold(None, |acc, exex| {
+        let finished_height = self.exex_handles.iter_mut().try_fold(u64::MAX, |curr, exex| {
             let height = match exex.finished_height {
                 None => return Err(()),
                 Some(height) => height,
             };
 
-            match acc {
-                Some(curr) => {
-                    if height < curr {
-                        Ok(Some(height))
-                    } else {
-                        Ok(Some(curr))
-                    }
-                }
-                None => Ok(Some(height)),
+            if height < curr {
+                Ok(height)
+            } else {
+                Ok(curr)
             }
         });
-        if let Ok(Some(finished_height)) = finished_height {
+        if let Ok(finished_height) = finished_height {
             let _ = self.block.send(finished_height);
         }
 
