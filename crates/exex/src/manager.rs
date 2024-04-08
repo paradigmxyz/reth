@@ -221,7 +221,7 @@ impl ExExManager {
         let capacity = self.max_capacity.saturating_sub(self.buffer.len());
         self.current_capacity.store(capacity, Ordering::Relaxed);
         self.metrics.current_capacity.set(capacity as f64);
-        self.metrics.buffer_size.set(self.buffer.len());
+        self.metrics.buffer_size.set(self.buffer.len() as f64);
 
         // we can safely ignore if the channel is closed, since the manager always holds it open
         // internally
