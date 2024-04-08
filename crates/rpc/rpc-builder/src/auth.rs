@@ -217,9 +217,10 @@ impl AuthServerConfig {
                 Endpoint::new(constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())
             });
             let ipc_server = ipc_server_config.build(ipc_path.path());
-            ipc_handle = ipc_server.start(module.inner)
+            ipc_handle = ipc_server
+                .start(module.inner)
                 .await
-                .map_err(|err|(RpcError::IpcServerError(err)))?;
+                .map_err(|err| (RpcError::IpcServerError(err)))?;
         }
 
         Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint, ipc_handle })
