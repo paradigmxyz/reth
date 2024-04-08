@@ -206,7 +206,10 @@ impl AuthServerConfig {
             .await
             .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
 
-        let local_addr = server.local_addr()?;
+        let local_addr = server
+            .local_addr()
+            .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
+
         let handle = server.start(module.inner.clone());
         let ipc_handle: Option<ServerHandle> = None;
         if let Some(ipc_server_config) = ipc_server_config {
@@ -214,7 +217,9 @@ impl AuthServerConfig {
                 Endpoint::new(constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())
             });
             let ipc_server = ipc_server_config.build(ipc_path.path());
-            ipc_handle = Some(ipc_server.start(module.inner.clone()).await);
+            ipc_handle = ipc_server.start(module.inner)
+                .await
+                .map_err(|err|(RpcError::IpcServerError(err)))?;
         }
 
         Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint, ipc_handle })

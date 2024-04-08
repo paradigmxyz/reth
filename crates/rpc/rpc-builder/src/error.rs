@@ -1,5 +1,5 @@
 use crate::RethRpcModule;
-use reth_ipc::server::IpcServerStartError;
+use reth_ipc::server::{Endpoint, IpcServerStartError};
 use std::{io, io::ErrorKind, net::SocketAddr};
 
 /// Rpc server kind.
@@ -72,7 +72,7 @@ impl RpcError {
     /// Converts an [io::Error] to a more descriptive `RpcError`.
     pub fn server_error(io_error: io::Error, kind: ServerKind) -> RpcError {
         if io_error.kind() == ErrorKind::AddrInUse {
-            return RpcError::AddressAlreadyInUse { kind, error: io_error }
+            return RpcError::AddressAlreadyInUse { kind, error: io_error };
         }
         RpcError::ServerError { kind, error: io_error }
     }
