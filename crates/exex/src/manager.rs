@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use std::{
     collections::VecDeque,
     future::Future,
@@ -10,7 +9,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use reth_exex::ExExEvent;
+use crate::ExExEvent;
 use reth_primitives::BlockNumber;
 use reth_provider::{CanonStateNotification, CanonStateNotifications};
 use tokio::sync::{
