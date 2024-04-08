@@ -40,12 +40,17 @@ pub struct ExExHandle {
     id: String,
     /// Metrics for an ExEx.
     metrics: ExExMetrics,
+
     /// Channel to send [`CanonStateNotification`]s to the ExEx.
     sender: PollSender<CanonStateNotification>,
     /// Channel to receive [`ExExEvent`]s from the ExEx.
     receiver: UnboundedReceiver<ExExEvent>,
     /// The ID of the next notification to send to this ExEx.
     next_notification_id: usize,
+
+    /// The finished block number of the ExEx.
+    /// tbd describe how this can change, what None means, what this is used for
+    finished_height: Option<BlockNumber>,
 }
 
 impl ExExHandle {
@@ -64,6 +69,7 @@ impl ExExHandle {
                 sender: PollSender::new(canon_tx),
                 receiver: event_rx,
                 next_notification_id: 0,
+                finished_height: None,
             },
             event_tx,
             canon_rx,
@@ -247,6 +253,7 @@ impl Future for ExExManager {
                 }
             }
             min_id = min_id.min(exex.next_notification_id);
+            self.exex_handles.push(exex);
         }
 
         // remove processed buffered events
@@ -256,9 +263,37 @@ impl Future for ExExManager {
         // update capacity
         self.update_capacity();
 
-        // todo: handle incoming exex events
-        // this requires keeping track of exex id -> finished block number, and updating the block
-        // watch channel iff all exex's have sent this event at least once
+        // handle incoming exex events
+        for exex in self.exex_handles.iter_mut() {
+            while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
+                match event {
+                    ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
+                }
+            }
+        }
+
+        // update watch channel block number
+        // todo: clean this up and also is this too expensive
+        let finished_height = self.exex_handles.iter_mut().try_fold(None, |acc, exex| {
+            let height = match exex.finished_height {
+                None => return Err(()),
+                Some(height) => height,
+            };
+
+            match acc {
+                Some(curr) => {
+                    if height < curr {
+                        Ok(Some(height))
+                    } else {
+                        Ok(Some(curr))
+                    }
+                }
+                None => Ok(Some(height)),
+            }
+        });
+        if let Ok(Some(finished_height)) = finished_height {
+            let _ = self.block.send(finished_height);
+        }
 
         Poll::Pending
     }
