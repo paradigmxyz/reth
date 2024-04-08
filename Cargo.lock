@@ -6237,6 +6237,7 @@ dependencies = [
  "proptest-derive",
  "reth-codecs-derive",
  "serde",
+ "serde_json",
  "test-fuzz",
 ]
 
