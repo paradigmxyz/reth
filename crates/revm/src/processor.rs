@@ -408,15 +408,6 @@ where
 {
     type Error = BlockExecutionError;
 
-    fn execute(
-        &mut self,
-        block: &BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError> {
-        let receipts = self.execute_inner(block, total_difficulty)?;
-        self.save_receipts(receipts)
-    }
-
     fn execute_and_verify_receipt(
         &mut self,
         block: &BlockWithSenders,
@@ -660,7 +651,7 @@ mod tests {
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
-            .execute(
+            .execute_and_verify_receipt(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
@@ -854,7 +845,7 @@ mod tests {
         // now try to process the genesis block again, this time ensuring that a system contract
         // call does not occur
         executor
-            .execute(
+            .execute_and_verify_receipt(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
@@ -913,7 +904,7 @@ mod tests {
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
-            .execute(
+            .execute_and_verify_receipt(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
