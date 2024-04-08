@@ -194,8 +194,12 @@ impl AppendableChain {
         // The usage has to be re-evaluated if that was ever to change.
         let consistent_view =
             ConsistentDbView::new_with_latest_tip(externals.provider_factory.clone())?;
-        let state_provider =
-            consistent_view.provider_ro()?.state_provider_by_block_number(canonical_fork.number)?;
+        let state_provider = consistent_view
+            .provider_ro()?
+            // State root calculation can take a while, and we're sure no write transaction
+            // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/7509.
+            .disable_long_read_transaction_safety()
+            .state_provider_by_block_number(canonical_fork.number)?;
 
         let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
 
