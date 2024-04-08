@@ -13,7 +13,7 @@ use jsonrpsee::{
     server::{AlreadyStoppedError, RpcModule, ServerHandle},
     Methods,
 };
-use reth_ipc::client::IpcClientBuilder;
+use reth_ipc::{client::IpcClientBuilder};
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
 use crate::constants::DEFAULT_ENGINE_API_IPC_ENDPOINT;
@@ -153,6 +153,7 @@ where
 }
 
 /// Server configuration for the auth server.
+#[derive(Debug)]
 pub struct AuthServerConfig {
     /// Where the server should listen.
     pub(crate) socket_addr: SocketAddr,
@@ -163,19 +164,7 @@ pub struct AuthServerConfig {
     /// Configs for IPC server
     pub(crate) ipc_server_config: Option<IpcServerBuilder>,
     /// IPC endpoint
-    pub(crate) ipc_endpoint: Option<Endpoint>,
-}
-
-impl fmt::Debug for AuthServerConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AuthServerConfig")
-            .field("socket_addr", &self.socket_addr)
-            .field("secret", &self.secret)
-            .field("server_config", &self.server_config)
-            .field("ipc_server_config", &self.ipc_server_config)
-            .field("ipc_endpoint", &self.ipc_endpoint.as_ref().map(|endpoint| endpoint.path()))
-            .finish()
-    }
+    pub(crate) ipc_endpoint: Option<String>,
 }
 
 // === impl AuthServerConfig ===
@@ -212,18 +201,21 @@ impl AuthServerConfig {
 
         let handle = server.start(module.inner.clone());
         let ipc_handle: Option<ServerHandle> = None;
+
+        let ipc_endpoint_str = self.ipc_endpoint.unwrap_or_else(||constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
+        let ipc_endpoint_str_clone = ipc_endpoint_str.clone(); 
+
         if let Some(ipc_server_config) = ipc_server_config {
-            let ipc_path = self.ipc_endpoint.unwrap_or_else(|| {
-                Endpoint::new(constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())
-            });
+            let ipc_path = Endpoint::new(ipc_endpoint_str_clone);
             let ipc_server = ipc_server_config.build(ipc_path.path());
-            ipc_handle = ipc_server
+            let res = ipc_server
                 .start(module.inner)
                 .await
-                .map_err(|err| (RpcError::IpcServerError(err)))?;
+                .map_err(|err| RpcError::IpcServerError(err))?;
+            ipc_handle = Some(res);
         }
 
-        Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint, ipc_handle })
+        Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint: Some(ipc_endpoint_str), ipc_handle })
     }
 }
 
@@ -395,7 +387,7 @@ pub struct AuthServerHandle {
     local_addr: SocketAddr,
     handle: ServerHandle,
     secret: JwtSecret,
-    ipc_endpoint: Option<Endpoint>,
+    ipc_endpoint: Option<String>,
     ipc_handle: Option<ServerHandle>,
 }
 
