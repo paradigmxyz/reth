@@ -31,12 +31,18 @@ use tokio_util::sync::{PollSendError, PollSender};
 struct ExExMetrics;
 
 #[derive(Debug)]
-struct ExExSender {
+pub struct ExExHandle {
+    /// The extension extension's ID.
+    id: String,
+    /// Channel to send [`CanonStateNotification`]s to the ExEx.
     sender: PollSender<CanonStateNotification>,
+    /// Channel to receive [`ExExEvent`]s from the ExEx.
+    receiver: Receiver<ExExEvent>,
+    /// The ID of the next notification to send to this ExEx.
     next_notification_id: usize,
 }
 
-impl ExExSender {
+impl ExExHandle {
     /// Reserves a slot in the `PollSender` channel and sends the notification if the slot was
     /// successfully reserved.
     ///
@@ -75,14 +81,11 @@ impl ExExSender {
 /// TBD
 #[derive(Debug)]
 pub struct ExExManager {
-    /// Channels from the manager to execution extensions.
+    /// Handles to communicate with the ExEx's.
     // todo(onbjerg): we should document that these notifications can include blocks the exex does
     // not care about if a longer chain segment is sent - filtering is up to the exex. where do
     // we document it, though?
-    exex_tx: Vec<ExExSender>,
-    /// Channels from execution extensions to the manager.
-    // todo(onbjerg): should this be unbounded?
-    exex_rx: Receiver<ExExEvent>,
+    exex_handles: Vec<ExExHandle>,
 
     /// [`CanonStateNotification`] channel from the [`ExExManagerHandle`]s.
     handle_rx: UnboundedReceiver<CanonStateNotification>,
@@ -117,17 +120,15 @@ impl ExExManager {
     /// Create a new [`ExExManager`].
     ///
     /// You must provide:
-    /// - The sending side of a bounded MPSC channel for each ExEx
-    /// - The receiving side of an MPSC channel that receives events from ExEx's
+    /// - An [`ExExHandle`] for each ExEx
     /// - The receiving side of [`CanonStateNotification`]s from the blockchain tree
     /// - The maximum capacity of the notification buffer in the manager
     pub fn new(
-        exex_tx: Vec<Sender<CanonStateNotification>>,
-        exex_rx: Receiver<ExExEvent>,
+        handles: Vec<ExExHandle>,
         tree_rx: CanonStateNotifications,
         max_capacity: usize,
     ) -> Self {
-        let num_exexs = exex_tx.len();
+        let num_exexs = handles.len();
 
         let (handle_tx, handle_rx) = mpsc::unbounded_channel();
         let (is_ready_tx, is_ready_rx) = watch::channel(true);
@@ -136,11 +137,7 @@ impl ExExManager {
         let current_capacity = Arc::new(AtomicUsize::new(max_capacity));
 
         Self {
-            exex_tx: exex_tx
-                .into_iter()
-                .map(|tx| ExExSender { sender: PollSender::new(tx), next_notification_id: 0 })
-                .collect(),
-            exex_rx,
+            exex_handles: handles,
 
             handle_rx,
             tree_rx,
@@ -209,8 +206,8 @@ impl Future for ExExManager {
 
         // advance all poll senders
         let mut min_id = usize::MAX;
-        for idx in (0..self.exex_tx.len()).rev() {
-            let mut exex = self.exex_tx.swap_remove(idx);
+        for idx in (0..self.exex_handles.len()).rev() {
+            let mut exex = self.exex_handles.swap_remove(idx);
 
             // it is a logic error for this to ever underflow since the manager manages the
             // notification IDs
