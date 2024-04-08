@@ -149,13 +149,7 @@ where
         .local_addr()
         .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
 
-    Ok(AuthServerHandle {
-        handle,
-        local_addr,
-        secret,
-        ipc_endpoint: None,
-        ipc_handle: None,
-    })
+    Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint: None, ipc_handle: None })
 }
 
 /// Server configuration for the auth server.
@@ -215,8 +209,10 @@ impl AuthServerConfig {
         let local_addr = server.local_addr()?;
         let handle = server.start(module.inner.clone());
         let ipc_handle: Option<ServerHandle> = None;
-        if let Some(ipc_server_config)  = ipc_server_config {
-            let ipc_path = self.ipc_endpoint.unwrap_or_else(|| Endpoint::new(constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string()));
+        if let Some(ipc_server_config) = ipc_server_config {
+            let ipc_path = self.ipc_endpoint.unwrap_or_else(|| {
+                Endpoint::new(constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())
+            });
             let ipc_server = ipc_server_config.build(ipc_path.path());
             ipc_handle = Some(ipc_server.start(module.inner.clone()).await);
         }
@@ -459,9 +455,13 @@ impl AuthServerHandle {
             .expect("Failed to create ipc client")
     }
 
-
-    /// Return an ipc handle 
+    /// Returns an ipc handle
     pub fn ipc_handle(&self) -> Option<ServerHandle> {
         self.ipc_handle()
+    }
+
+    /// Return an ipc endpoint
+    pub fn ipc_enpodint(&self) -> Option<Endpoint> {
+        self.ipc_endpoint
     }
 }
