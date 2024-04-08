@@ -28,4 +28,3 @@ tokio = { workspace = true, features = ["sync"] }
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
-optimism = []

@@ -13,7 +13,7 @@ pub fn to_primitive_transaction(
     Some(match tx_request {
         TypedTransactionRequest::Legacy(tx) => Transaction::Legacy(TxLegacy {
             chain_id: tx.chain_id,
-            nonce: tx.nonce.to(),
+            nonce: tx.nonce,
             gas_price: tx.gas_price.to(),
             gas_limit: tx.gas_limit.try_into().ok()?,
             to: to_primitive_transaction_kind(tx.kind),
@@ -22,7 +22,7 @@ pub fn to_primitive_transaction(
         }),
         TypedTransactionRequest::EIP2930(tx) => Transaction::Eip2930(TxEip2930 {
             chain_id: tx.chain_id,
-            nonce: tx.nonce.to(),
+            nonce: tx.nonce,
             gas_price: tx.gas_price.to(),
             gas_limit: tx.gas_limit.try_into().ok()?,
             to: to_primitive_transaction_kind(tx.kind),
@@ -32,7 +32,7 @@ pub fn to_primitive_transaction(
         }),
         TypedTransactionRequest::EIP1559(tx) => Transaction::Eip1559(TxEip1559 {
             chain_id: tx.chain_id,
-            nonce: tx.nonce.to(),
+            nonce: tx.nonce,
             max_fee_per_gas: tx.max_fee_per_gas.to(),
             gas_limit: tx.gas_limit.try_into().ok()?,
             to: to_primitive_transaction_kind(tx.kind),
@@ -43,7 +43,7 @@ pub fn to_primitive_transaction(
         }),
         TypedTransactionRequest::EIP4844(tx) => Transaction::Eip4844(TxEip4844 {
             chain_id: tx.chain_id,
-            nonce: tx.nonce.to(),
+            nonce: tx.nonce,
             gas_limit: tx.gas_limit.to(),
             max_fee_per_gas: tx.max_fee_per_gas.to(),
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas.to(),

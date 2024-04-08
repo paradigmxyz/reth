@@ -7,7 +7,7 @@ use crate::{
         ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, LaunchNode,
         NodeComponentsBuilder, PoolBuilder,
     },
-    exex::{BoxedLaunchExEx, ExExContext},
+    exex::BoxedLaunchExEx,
     hooks::NodeHooks,
     node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
@@ -22,7 +22,9 @@ use reth_db::{
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
-use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle};
+use reth_exex::ExExContext;
+use reth_interfaces::p2p::either::EitherDownloader;
+use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},

@@ -27,7 +27,7 @@ use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
     error::RpcError,
-    EthConfig, IpcServerBuilder, RethRpcModule, RpcModuleConfig, RpcModuleSelection,
+    EthConfig, Identity, IpcServerBuilder, RethRpcModule, RpcModuleConfig, RpcModuleSelection,
     RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::EngineApi;
@@ -414,7 +414,7 @@ impl RethRpcConfig for RpcServerArgs {
         config
     }
 
-    fn http_ws_server_builder(&self) -> ServerBuilder {
+    fn http_ws_server_builder(&self) -> ServerBuilder<Identity, Identity> {
         ServerBuilder::new()
             .max_connections(self.rpc_max_connections.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())
