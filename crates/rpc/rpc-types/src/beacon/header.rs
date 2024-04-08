@@ -38,7 +38,7 @@ pub struct HeaderResponse {
 pub struct HeaderData {
     /// root hash
     pub root: B256,
-    /// whether the block is canonical
+    /// Whether the block is part of the canonical chain
     pub canonical: bool,
     /// The `SignedBeaconBlockHeader` object envelope from the CL spec.
     pub header: Header,
