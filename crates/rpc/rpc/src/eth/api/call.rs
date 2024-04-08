@@ -225,15 +225,18 @@ where
                 if let Ok(code) = db.db.account_code(to) {
                     let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
-                        // simple transfer, check if caller has sufficient funds
-                        let available_funds =
-                            db.basic_ref(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
-                        if env.tx.value > available_funds {
-                            return Err(
-                                RpcInvalidTransactionError::InsufficientFundsForTransfer.into()
-                            )
+                        // If the tx is a simple transfer (call to an account with no code) we can
+                        // shortcircuit But simply returning
+                        // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
+                        // field combos that bump the price up, so we try executing the function
+                        // with the minimum gas limit to make sure.
+                        let mut env = env.clone();
+                        env.tx.gas_limit = MIN_TRANSACTION_GAS;
+                        if let Ok((res, _)) = self.transact(&mut db, env) {
+                            if res.result.is_success() {
+                                return Ok(U256::from(MIN_TRANSACTION_GAS))
+                            }
                         }
-                        return Ok(U256::from(MIN_TRANSACTION_GAS))
                     }
                 }
             }
