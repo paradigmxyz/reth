@@ -218,15 +218,14 @@ impl AuthServerConfig {
 
         let local_addr = server.local_addr()?;
         let handle = server.start(module.inner.clone());
-        let mut ipc_handle = None;
-        if let (Some(ipc_server_config), Some(ipc_endpoint)) =
-            (ipc_server_config, ipc_endpoint.clone())
-        {
-            ipc_handle =
-                Some(ipc_server_config.build(ipc_endpoint.path())?.start(module.inner).await?);
+        let ipc_handle: Option<ServerHandle> = None;
+        if let Some(ipc_server_config)  = ipc_server_config {
+            let ipc_path = self.ipc_endpoint.unwrap_or_else(|| Endpoint::new(constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string()));
+            let ipc_server = ipc_server_config.build(ipc_path.path());
+            ipc_handle = Some(ipc_server.start(module.inner.clone()).await);
         }
 
-        Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint, _ipc_handle: ipc_handle })
+        Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint, ipc_handle })
     }
 }
 
