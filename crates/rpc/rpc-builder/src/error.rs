@@ -1,5 +1,5 @@
 use crate::RethRpcModule;
-use reth_ipc::server::{Endpoint, IpcServerStartError};
+use reth_ipc::server::IpcServerStartError;
 use std::{io, io::ErrorKind, net::SocketAddr};
 
 /// Rpc server kind.
