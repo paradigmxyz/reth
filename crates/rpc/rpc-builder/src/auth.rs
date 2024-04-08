@@ -147,7 +147,7 @@ where
         .local_addr()
         .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
 
-    let handle = server.start(module.clone());
+    let handle = server.start(module);
 
     Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint: None, ipc_handle: None })
 }
