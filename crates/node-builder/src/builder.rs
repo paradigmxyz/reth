@@ -1121,7 +1121,7 @@ where
     }
 
     /// Installs an ExEx (Execution Extension) in the node.
-    pub fn install_exex<F, R, E>(mut self, exex: F) -> Self
+    pub fn install_exex<F, R, E>(mut self, exex_id: String, exex: F) -> Self
     where
         F: Fn(
                 ExExContext<
@@ -1136,7 +1136,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.builder.state.exexs.push(Box::new(exex));
+        self.builder.state.exexs.push((exex_id, Box::new(exex)));
         self
     }
 
