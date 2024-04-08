@@ -1577,8 +1577,7 @@ impl Discv4Service {
             }
 
             // re-ping some peers
-            if self.ping_interval.poll_tick(cx).is_ready() {
-                let _ = self.ping_interval.poll_tick(cx);
+            while self.ping_interval.poll_tick(cx).is_ready() {
                 self.re_ping_oldest();
             }
 
