@@ -6488,7 +6488,9 @@ dependencies = [
 name = "reth-exex"
 version = "0.2.0-beta.5"
 dependencies = [
+ "metrics",
  "reth-config",
+ "reth-metrics",
  "reth-node-api",
  "reth-node-core",
  "reth-primitives",

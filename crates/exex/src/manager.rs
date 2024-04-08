@@ -10,25 +10,24 @@ use std::{
 };
 
 use crate::ExExEvent;
+use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::BlockNumber;
 use reth_provider::CanonStateNotification;
 use tokio::sync::{
-    mpsc::{self, error::SendError, Receiver, Sender, UnboundedReceiver, UnboundedSender},
+    mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
     watch,
 };
 use tokio_util::sync::{PollSendError, PollSender};
 
-// todo: we need to figure out how to keep track of some of these things per exex
-// currently, the only path forward seems to be adding an exex id to every event, since we only
-// have one receiver for ExExEvents
-//
-// things to track:
-// - exex height
-// - exex channel size
-// - manager buffer metrics
-// - throughput
-#[derive(Debug)]
-struct ExExMetrics;
+/// Metrics for an ExEx.
+#[derive(Metrics)]
+#[metrics(scope = "exex")]
+struct ExExMetrics {
+    /// The number of canonical state notifications processed by an ExEx.
+    notifications_processed: Counter,
+    /// The number of events an ExEx has sent to the manager.
+    events_sent: Counter,
+}
 
 /// A handle to an ExEx used by the [`ExExManager`] to communicate with ExEx's.
 ///
@@ -39,6 +38,8 @@ struct ExExMetrics;
 pub struct ExExHandle {
     /// The execution extension's ID.
     id: String,
+    /// Metrics for an ExEx.
+    metrics: ExExMetrics,
     /// Channel to send [`CanonStateNotification`]s to the ExEx.
     sender: PollSender<CanonStateNotification>,
     /// Channel to receive [`ExExEvent`]s from the ExEx.
@@ -58,7 +59,8 @@ impl ExExHandle {
 
         (
             Self {
-                id,
+                id: id.clone(),
+                metrics: ExExMetrics::new_with_labels(&[("exex", id)]),
                 sender: PollSender::new(canon_tx),
                 receiver: event_rx,
                 next_notification_id: 0,
@@ -85,12 +87,16 @@ impl ExExHandle {
         match self.sender.send_item(notification.clone()) {
             Ok(()) => {
                 self.next_notification_id = event_id + 1;
+                self.metrics.notifications_processed.increment(1);
                 Poll::Ready(Ok(()))
             }
             Err(err) => Poll::Ready(Err(err)),
         }
     }
 }
+
+// todo
+pub struct ExExManagerMetrics;
 
 // todo: if event is sent to exex it is considered delivered
 /// The execution extension manager.
