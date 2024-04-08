@@ -2002,7 +2002,6 @@ dependencies = [
 name = "custom-evm"
 version = "0.0.0"
 dependencies = [
- "alloy-chains",
  "eyre",
  "reth",
  "reth-node-api",
@@ -2027,7 +2026,6 @@ dependencies = [
 name = "custom-node"
 version = "0.0.0"
 dependencies = [
- "alloy-chains",
  "eyre",
  "reth",
  "reth-basic-payload-builder",
@@ -6050,7 +6048,6 @@ dependencies = [
 name = "reth"
 version = "0.2.0-beta.5"
 dependencies = [
- "alloy-chains",
  "alloy-rlp",
  "aquamarine",
  "assert_matches",
@@ -6368,7 +6365,6 @@ dependencies = [
 name = "reth-dns-discovery"
 version = "0.2.0-beta.5"
 dependencies = [
- "alloy-chains",
  "alloy-rlp",
  "data-encoding",
  "enr",
@@ -6451,7 +6447,6 @@ dependencies = [
 name = "reth-eth-wire"
 version = "0.2.0-beta.5"
 dependencies = [
- "alloy-chains",
  "alloy-rlp",
  "arbitrary",
  "async-stream",
@@ -6486,7 +6481,6 @@ dependencies = [
 name = "reth-eth-wire-types"
 version = "0.2.0-beta.5"
 dependencies = [
- "alloy-chains",
  "alloy-rlp",
  "arbitrary",
  "async-stream",
@@ -6751,7 +6745,6 @@ dependencies = [
 name = "reth-network-api"
 version = "0.2.0-beta.5"
 dependencies = [
- "alloy-chains",
  "reth-discv4",
  "reth-eth-wire",
  "reth-primitives",
@@ -7451,7 +7444,6 @@ dependencies = [
 name = "reth-trie"
 version = "0.2.0-beta.5"
 dependencies = [
- "alloy-chains",
  "alloy-rlp",
  "auto_impl",
  "criterion",

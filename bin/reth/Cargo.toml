@@ -54,7 +54,6 @@ reth-node-builder.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
-alloy-chains.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -127,7 +126,7 @@ optimism = [
     "reth-auto-seal-consensus/optimism",
     "reth-blockchain-tree/optimism",
     "dep:reth-node-optimism",
-    "reth-node-core/optimism"
+    "reth-node-core/optimism",
 ]
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices

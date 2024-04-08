@@ -17,7 +17,6 @@ reth-codecs.workspace = true
 reth-primitives.workspace = true
 reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
-alloy-chains = { workspace = true, features = ["serde", "rlp", "arbitrary"] }
 reth-discv4.workspace = true
 reth-eth-wire-types.workspace = true
 
