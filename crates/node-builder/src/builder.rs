@@ -590,13 +590,21 @@ where
             let exex = exex.launch(context).await.unwrap();
 
             // spawn it as a crit task
-            ctx.executor.spawn_critical("exex", async move {
-                exex.await.unwrap_or_else(|_| panic!("exex {id} crashed"))
-            });
+            debug!(target: "reth::cli", "spawning exex {id}");
+            {
+                let span = reth_tracing::tracing::info_span!("exex {id}");
+                let _enter = span.enter();
+                ctx.executor.spawn_critical("exex", async move {
+                    exex.await.unwrap_or_else(|_| panic!("exex crashed"))
+                });
+            }
+
+            info!(target: "reth::cli", "ExEx started: {id}");
         }
 
         // spawn exex manager
         // todo(onbjerg): rm magic number
+        debug!(target: "reth::cli", "spawning exex manager");
         let exex_manager = ExExManager::new(exex_handles, 1024);
         let exex_manager_handle = exex_manager.handle();
         ctx.executor.spawn_critical("exex manager", async move {
