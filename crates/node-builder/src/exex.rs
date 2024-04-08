@@ -25,7 +25,7 @@
 //! `block_number >= 0`.
 //!
 //! [`Future`]: std::future::Future
-//! [`ExExContext`]: crate::exex::ExExContext
+//! [`ExExContext`]: reth_exex::ExExContext
 //! [`CanonStateNotification`]: reth_provider::CanonStateNotification
 
 use crate::FullNodeTypes;
