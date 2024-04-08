@@ -42,7 +42,7 @@ pub struct ExExHandle {
     /// Channel to send [`CanonStateNotification`]s to the ExEx.
     sender: PollSender<CanonStateNotification>,
     /// Channel to receive [`ExExEvent`]s from the ExEx.
-    receiver: Receiver<ExExEvent>,
+    receiver: UnboundedReceiver<ExExEvent>,
     /// The ID of the next notification to send to this ExEx.
     next_notification_id: usize,
 }
@@ -52,9 +52,9 @@ impl ExExHandle {
     ///
     /// Returns the handle, as well as a [`Sender`] for [`ExExEvent`]s and a
     /// [`Receiver`] for [`CanonStateNotification`]s that should be given to the ExEx.
-    pub fn new(id: String) -> (Self, Sender<ExExEvent>, Receiver<CanonStateNotification>) {
+    pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, Receiver<CanonStateNotification>) {
         let (canon_tx, canon_rx) = mpsc::channel(1);
-        let (event_tx, event_rx) = mpsc::channel(1);
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
 
         (
             Self {
