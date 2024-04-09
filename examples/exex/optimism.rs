@@ -141,15 +141,18 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
 
 fn contract_address_to_name(address: Address) -> Option<&'static str> {
     const BASE: Address = address!("3154Cf16ccdb4C6d922629664174b904d80F2C35");
-    const BLAST: Address = address!("3a05E5d33d7Ab3864D53aaEc93c8301C1Fa49115");
+    const BLAST_1: Address = address!("3a05E5d33d7Ab3864D53aaEc93c8301C1Fa49115");
+    const BLAST_2: Address = address!("697402166Fbf2F22E970df8a6486Ef171dbfc524");
     const OPTIMISM: Address = address!("99C9fc46f92E8a1c0deC1b1747d010903E884bE1");
     const MODE: Address = address!("735aDBbE72226BD52e818E7181953f42E3b0FF21");
+    const MANTA: Address = address!("3B95bC951EE0f553ba487327278cAc44f29715E5");
 
     match address {
         BASE => Some("Base"),
-        BLAST => Some("Blast"),
+        BLAST_1 | BLAST_2 => Some("Blast"),
         OPTIMISM => Some("Optimism"),
         MODE => Some("Mode"),
+        MANTA => Some("Manta"),
         _ => None,
     }
 }
