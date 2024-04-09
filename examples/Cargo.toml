@@ -29,6 +29,7 @@ futures.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
+itertools.workspace = true
 
 [[example]]
 name = "db-access"

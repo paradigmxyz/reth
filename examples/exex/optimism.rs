@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::HashMap,
     future::poll_fn,
     pin::Pin,
     str::FromStr,
@@ -9,6 +9,7 @@ use std::{
 
 use alloy_sol_types::{sol, SolEventInterface};
 use futures::{Future, FutureExt};
+use itertools::Itertools;
 use reth::{
     builder::{FullNodeTypes, FullNodeTypesAdapter, NodeConfig},
     dirs::PlatformPath,
@@ -37,8 +38,8 @@ sol!(
 struct OptimismExEx<Node: FullNodeTypes> {
     ctx: ExExContext<Node>,
     start_height: Option<u64>,
-    deposits: BTreeMap<Address, U256>,
-    withdrawals: BTreeMap<Address, U256>,
+    deposits: HashMap<Address, U256>,
+    withdrawals: HashMap<Address, U256>,
 }
 
 impl<Node: FullNodeTypes> OptimismExEx<Node> {
@@ -96,11 +97,12 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
         println!("Start height: {}", this.start_height.unwrap());
         println!("Finished height: {}", last_block);
         println!("Deposits:");
-        for (address, amount) in &this.deposits {
+        for (address, amount) in this.deposits.iter().sorted_by_key(|(_, amount)| *amount).rev() {
             println!("  {}: {}", address, f64::from(*amount) / ETH_TO_WEI as f64);
         }
         println!("Withdrawals:");
-        for (address, amount) in &this.withdrawals {
+        for (address, amount) in this.withdrawals.iter().sorted_by_key(|(_, amount)| *amount).rev()
+        {
             println!("  {}: {}", address, f64::from(*amount) / ETH_TO_WEI as f64);
         }
 

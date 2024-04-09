@@ -2805,6 +2805,7 @@ dependencies = [
  "async-trait",
  "eyre",
  "futures",
+ "itertools 0.12.1",
  "reth",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
