@@ -211,7 +211,7 @@ impl AuthServerConfig {
             let res = ipc_server
                 .start(module.inner)
                 .await
-                .map_err(|err| RpcError::IpcServerError(err))?;
+                .map_err(reth_ipc::server::IpcServerStartError::from)?;
             ipc_handle = Some(res);
         }
 
