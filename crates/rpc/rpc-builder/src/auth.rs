@@ -446,6 +446,7 @@ impl AuthServerHandle {
     }
 
     /// Returns an ipc client connected to the server.
+    #[cfg(unix)]
     pub async fn ipc_client(&self) -> jsonrpsee::async_client::Client {
         IpcClientBuilder::default()
             .build(*self.ipc_endpoint.clone().expect("Empty IPC endpoint"))
