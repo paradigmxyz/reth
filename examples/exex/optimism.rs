@@ -37,8 +37,6 @@ sol!(
 
 struct OptimismExEx<Node: FullNodeTypes> {
     ctx: ExExContext<Node>,
-    account_deposits: HashMap<Address, U256>,
-    account_withdrawals: HashMap<Address, U256>,
     contract_deposits: HashMap<Address, U256>,
     contract_withdrawals: HashMap<Address, U256>,
 }
@@ -47,8 +45,6 @@ impl<Node: FullNodeTypes> OptimismExEx<Node> {
     fn new(ctx: ExExContext<Node>) -> Self {
         Self {
             ctx,
-            account_deposits: Default::default(),
-            account_withdrawals: Default::default(),
             contract_deposits: Default::default(),
             contract_withdrawals: Default::default(),
         }
@@ -87,19 +83,13 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
         {
             match bridge_event {
                 L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
-                    from,
-                    amount,
-                    ..
+                    amount, ..
                 }) => {
-                    *this.account_deposits.entry(from).or_default() += amount;
                     *this.contract_deposits.entry(log.address).or_default() += amount;
                 }
                 L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
-                    to,
-                    amount,
-                    ..
+                    amount, ..
                 }) => {
-                    *this.account_withdrawals.entry(to).or_default() += amount;
                     *this.contract_withdrawals.entry(log.address).or_default() += amount;
                 }
                 _ => continue,
@@ -109,24 +99,6 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
         // Finished filling the mappings, print the results and clear the mappings
 
         println!("Finished block range: {:?}", chain.first().number..=chain.tip().number);
-
-        if !this.account_deposits.is_empty() {
-            println!("Address Deposits:");
-            for (address, amount) in
-                this.account_deposits.drain().sorted_by_key(|(_, amount)| *amount).rev()
-            {
-                println!("  {}: {}", address, f64::from(amount) / ETH_TO_WEI as f64);
-            }
-        }
-
-        if !this.account_withdrawals.is_empty() {
-            println!("Address Withdrawals:");
-            for (address, amount) in
-                this.account_withdrawals.drain().sorted_by_key(|(_, amount)| *amount).rev()
-            {
-                println!("  {}: {}", address, f64::from(amount) / ETH_TO_WEI as f64);
-            }
-        }
 
         if !this.contract_deposits.is_empty() {
             println!("Contract Deposits:");
