@@ -5,6 +5,7 @@ use crate::{
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
+use reth_node_api::ConfigureEvm;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
     constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
@@ -27,18 +28,20 @@ use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OptimismPayloadBuilder {
+pub struct OptimismPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     compute_pending_block: bool,
     /// The rollup's chain spec.
     chain_spec: Arc<ChainSpec>,
+
+    evm_config: EvmConfig,
 }
 
-impl OptimismPayloadBuilder {
+impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// OptimismPayloadBuilder constructor.
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { compute_pending_block: true, chain_spec }
+    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+        Self { compute_pending_block: true, chain_spec, evm_config }
     }
 
     /// Sets the rollup's compute pending block configuration option.
@@ -65,10 +68,11 @@ impl OptimismPayloadBuilder {
 }
 
 /// Implementation of the [PayloadBuilder] trait for [OptimismPayloadBuilder].
-impl<Pool, Client> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder
+impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,
+    EvmConfig: ConfigureEvm,
 {
     type Attributes = OptimismPayloadBuilderAttributes;
     type BuiltPayload = OptimismBuiltPayload;
@@ -77,7 +81,7 @@ where
         &self,
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
-        optimism_payload_builder(args, self.compute_pending_block)
+        optimism_payload_builder(self.evm_config.clone(), args, self.compute_pending_block)
     }
 
     fn on_missing_payload(
@@ -219,11 +223,13 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub(crate) fn optimism_payload_builder<Pool, Client>(
+pub(crate) fn optimism_payload_builder<EvmConfig, Pool, Client>(
+    evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     _compute_pending_block: bool,
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
+    EvmConfig: ConfigureEvm,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -325,14 +331,13 @@ where
                 ))
             })?;
 
-        let mut evm = revm::Evm::builder()
-            .with_db(&mut db)
-            .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-                initialized_cfg.clone(),
-                initialized_block_env.clone(),
-                tx_env_with_recovered(&sequencer_tx),
-            ))
-            .build();
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            initialized_cfg.clone(),
+            initialized_block_env.clone(),
+            tx_env_with_recovered(&sequencer_tx),
+        );
+
+        let mut evm = evm_config.evm_with_env(&mut db, env);
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
@@ -407,16 +412,14 @@ where
 
             // convert tx to a signed transaction
             let tx = pool_tx.to_recovered_transaction();
+            let env = EnvWithHandlerCfg::new_with_cfg_env(
+                initialized_cfg.clone(),
+                initialized_block_env.clone(),
+                tx_env_with_recovered(&tx),
+            );
 
             // Configure the environment for the block.
-            let mut evm = revm::Evm::builder()
-                .with_db(&mut db)
-                .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-                    initialized_cfg.clone(),
-                    initialized_block_env.clone(),
-                    tx_env_with_recovered(&tx),
-                ))
-                .build();
+            let mut evm = evm_config.evm_with_env(&mut db, env);
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
