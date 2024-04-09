@@ -96,8 +96,14 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
         this.ctx.events.send(ExExEvent::FinishedHeight(last_block))?;
         println!("Start height: {}", this.start_height.unwrap());
         println!("Finished height: {}", last_block);
-        println!("Deposits: {:?}", this.deposits);
-        println!("Withdrawals: {:?}", this.withdrawals);
+        println!("Deposits:");
+        for (address, amount) in &this.deposits {
+            println!("  {}: {}", address, amount);
+        }
+        println!("Withdrawals:");
+        for (address, amount) in &this.withdrawals {
+            println!("  {}: {}", address, amount);
+        }
 
         Poll::Pending
     }
