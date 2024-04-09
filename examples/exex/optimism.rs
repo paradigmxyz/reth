@@ -82,11 +82,13 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
             })
         {
             match bridge_event {
+                // L1 -> L2 deposit
                 L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
                     amount, ..
                 }) => {
                     *this.contract_deposits.entry(log.address).or_default() += amount;
                 }
+                // L2 -> L1 withdrawal
                 L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
                     amount, ..
                 }) => {
@@ -97,9 +99,8 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
         }
 
         // Finished filling the mappings, print the results and clear the mappings
-
         println!("Finished block range: {:?}", chain.first().number..=chain.tip().number);
-
+        // Print the contract deposits, if any
         if !this.contract_deposits.is_empty() {
             println!("Contract Deposits:");
             for (address, amount) in
@@ -113,7 +114,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                 }
             }
         }
-
+        // Print the contract withdrawals, if any
         if !this.contract_withdrawals.is_empty() {
             println!("Contract Withdrawals:");
             for (address, amount) in
@@ -158,6 +159,19 @@ fn contract_address_to_name(address: Address) -> Option<&'static str> {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    // TODO(alexey): uncomment when https://github.com/paradigmxyz/reth/pull/7340 is merged
+    // reth::cli::Cli::parse_args()
+    //     .run(|builder, _| async move {
+    //         let handle = builder
+    //             .node(EthereumNode::default())
+    //             .install_exex(move |ctx| futures::future::ok(OptimismExEx::new(ctx)))
+    //             .launch()
+    //             .await?;
+    //
+    //         handle.wait_for_node_exit().await
+    //     })
+    //     .unwrap();
+
     let n_blocks = std::env::args()
         .nth(1)
         .and_then(|n_blocks| n_blocks.parse::<u64>().ok())
