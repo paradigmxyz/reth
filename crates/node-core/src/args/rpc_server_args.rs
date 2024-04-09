@@ -199,7 +199,7 @@ impl RpcServerArgs {
         self
     }
 
-    /// Enables the Auth IPC 
+    /// Enables the Auth IPC
     pub fn with_auth_ipc(mut self) -> Self {
         self.auth_ipc = true;
         self

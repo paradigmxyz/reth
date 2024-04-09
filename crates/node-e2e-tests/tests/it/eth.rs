@@ -195,7 +195,7 @@ async fn failed_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()>
     if client.is_some() {
         panic!("Expect ipc engine api is none")
     }
-    
+
     Ok(())
 }
 fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
