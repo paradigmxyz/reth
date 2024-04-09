@@ -19,7 +19,7 @@ use reth_config::Config;
 use reth_db::open_db_read_only;
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{constants::ETH_TO_WEI, Address, Receipts, MAINNET, U256};
+use reth_primitives::{address, constants::ETH_TO_WEI, Address, Receipts, MAINNET, U256};
 use reth_provider::{
     providers::BlockchainProvider, BlockNumReader, BlockReader, BundleStateWithReceipts,
     CanonStateNotification, Chain, ProviderFactory, ReceiptProvider,
@@ -112,13 +112,23 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
         println!("Contract Deposits:");
         for (address, amount) in contract_deposits.iter().sorted_by_key(|(_, amount)| *amount).rev()
         {
-            println!("  {}: {}", address, f64::from(*amount) / ETH_TO_WEI as f64);
+            let amount = f64::from(*amount) / ETH_TO_WEI as f64;
+            if let Some(name) = contract_address_to_name(*address) {
+                println!("  {}: {}", name, amount);
+            } else {
+                println!("  {}: {}", address, amount);
+            }
         }
         println!("Contract Withdrawals:");
         for (address, amount) in
             contract_withdrawals.iter().sorted_by_key(|(_, amount)| *amount).rev()
         {
-            println!("  {}: {}", address, f64::from(*amount) / ETH_TO_WEI as f64);
+            let amount = f64::from(*amount) / ETH_TO_WEI as f64;
+            if let Some(name) = contract_address_to_name(*address) {
+                println!("  {}: {}", name, amount);
+            } else {
+                println!("  {}: {}", address, amount);
+            }
         }
 
         println!();
@@ -126,6 +136,21 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
         this.ctx.events.send(ExExEvent::FinishedHeight(last_block))?;
 
         Poll::Pending
+    }
+}
+
+fn contract_address_to_name(address: Address) -> Option<&'static str> {
+    const BASE: Address = address!("3154Cf16ccdb4C6d922629664174b904d80F2C35");
+    const BLAST: Address = address!("3a05E5d33d7Ab3864D53aaEc93c8301C1Fa49115");
+    const OPTIMISM: Address = address!("99C9fc46f92E8a1c0deC1b1747d010903E884bE1");
+    const MODE: Address = address!("735aDBbE72226BD52e818E7181953f42E3b0FF21");
+
+    match address {
+        BASE => Some("Base"),
+        BLAST => Some("Blast"),
+        OPTIMISM => Some("Optimism"),
+        MODE => Some("Mode"),
+        _ => None,
     }
 }
 
