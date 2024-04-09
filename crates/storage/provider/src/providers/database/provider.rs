@@ -217,6 +217,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         block: SealedBlockWithSenders,
         prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
+        tracing::info!(target: "providers::db", block_number=block.number, "insert_historical_block");
+        println!("insert_historical_block");
         let ttd = if block.number == 0 {
             block.difficulty
         } else {
@@ -229,6 +231,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         // Backfill: some tests start at a forward block number, but static files require no gaps.
         let segment_header = writer.user_header();
+        tracing::info!(target: "providers::db", block_end=segment_header.block_end(), expected_block_start=segment_header.expected_block_start(), "insert_historical_block");
         if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
             for block_number in 0..block.number {
                 let mut prev = block.header.clone().unseal();
