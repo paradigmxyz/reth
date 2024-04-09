@@ -13,7 +13,7 @@ use jsonrpsee::{
     server::{AlreadyStoppedError, RpcModule, ServerHandle},
     Methods,
 };
-use reth_ipc::{client::IpcClientBuilder};
+use reth_ipc::client::IpcClientBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
 use crate::constants::DEFAULT_ENGINE_API_IPC_ENDPOINT;
@@ -202,8 +202,10 @@ impl AuthServerConfig {
         let handle = server.start(module.inner.clone());
         let ipc_handle: Option<ServerHandle> = None;
 
-        let ipc_endpoint_str = self.ipc_endpoint.unwrap_or_else(||constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
-        let ipc_endpoint_str_clone = ipc_endpoint_str.clone(); 
+        let ipc_endpoint_str = self
+            .ipc_endpoint
+            .unwrap_or_else(|| constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
+        let ipc_endpoint_str_clone = ipc_endpoint_str.clone();
 
         if let Some(ipc_server_config) = ipc_server_config {
             let ipc_path = Endpoint::new(ipc_endpoint_str_clone);
@@ -215,7 +217,13 @@ impl AuthServerConfig {
             ipc_handle = Some(res);
         }
 
-        Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint: Some(ipc_endpoint_str), ipc_handle })
+        Ok(AuthServerHandle {
+            handle,
+            local_addr,
+            secret,
+            ipc_endpoint: Some(ipc_endpoint_str),
+            ipc_handle,
+        })
     }
 }
 
@@ -447,11 +455,16 @@ impl AuthServerHandle {
 
     /// Returns an ipc client connected to the server.
     #[cfg(unix)]
-    pub async fn ipc_client(&self) -> jsonrpsee::async_client::Client {
-        IpcClientBuilder::default()
-            .build(*self.ipc_endpoint.clone().expect("Empty IPC endpoint"))
-            .await
-            .expect("Failed to create ipc client")
+    pub async fn ipc_client(&self) -> Option<jsonrpsee::async_client::Client> {
+        if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
+            return Some(
+                IpcClientBuilder::default()
+                    .build(Endpoint::new(ipc_endpoint).path())
+                    .await
+                    .expect("Failed to create ipc client"),
+            )
+        }
+        None
     }
 
     /// Returns an ipc handle
@@ -460,7 +473,10 @@ impl AuthServerHandle {
     }
 
     /// Return an ipc endpoint
-    pub fn ipc_enpodint(&self) -> Option<Endpoint> {
-        self.ipc_endpoint
+    pub fn ipc_endpoint(&self) -> Option<Endpoint> {
+        if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
+            return Some(Endpoint::new(ipc_endpoint))
+        }
+        None
     }
 }
