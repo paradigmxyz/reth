@@ -163,7 +163,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn failed_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
+async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyre::Result<()> {
     let tasks = TaskManager::current();
     let test_suite = TestSuite::new();
 
