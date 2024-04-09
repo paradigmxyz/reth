@@ -22,7 +22,7 @@ use crate::{
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
-use reth_primitives::{pk2id, ForkId, NodeRecord};
+use reth_primitives::{pk2id, Bytes, ForkId, NodeRecord};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
@@ -402,8 +402,8 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
     }
     .into_ipv4_mapped();
 
-    let mut maybe_fork_id = enr.get(b"eth")?;
-    let fork_id = ForkId::decode(&mut maybe_fork_id).ok();
+    let maybe_fork_id = enr.get_decodable::<Bytes>(b"eth").map(Result::ok)??;
+    let fork_id = ForkId::decode(&mut &maybe_fork_id[..]).ok();
 
     Some(DnsNodeRecordUpdate { node_record, fork_id, enr: enr.clone() })
 }
