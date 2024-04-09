@@ -1,6 +1,5 @@
 use std::{
-    collections::HashMap,
-    env,
+    collections::BTreeMap,
     future::poll_fn,
     pin::Pin,
     str::FromStr,
@@ -19,7 +18,7 @@ use reth_config::Config;
 use reth_db::open_db_read_only;
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{Address, Receipts, MAINNET, U256};
+use reth_primitives::{constants::ETH_TO_WEI, Address, Receipts, MAINNET, U256};
 use reth_provider::{
     providers::BlockchainProvider, BlockNumReader, BlockReader, BundleStateWithReceipts,
     CanonStateNotification, Chain, ProviderFactory, ReceiptProvider,
@@ -38,8 +37,8 @@ sol!(
 struct OptimismExEx<Node: FullNodeTypes> {
     ctx: ExExContext<Node>,
     start_height: Option<u64>,
-    deposits: HashMap<Address, U256>,
-    withdrawals: HashMap<Address, U256>,
+    deposits: BTreeMap<Address, U256>,
+    withdrawals: BTreeMap<Address, U256>,
 }
 
 impl<Node: FullNodeTypes> OptimismExEx<Node> {
@@ -98,11 +97,11 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
         println!("Finished height: {}", last_block);
         println!("Deposits:");
         for (address, amount) in &this.deposits {
-            println!("  {}: {}", address, amount);
+            println!("  {}: {}", address, f64::from(*amount) / ETH_TO_WEI as f64);
         }
         println!("Withdrawals:");
         for (address, amount) in &this.withdrawals {
-            println!("  {}: {}", address, amount);
+            println!("  {}: {}", address, f64::from(*amount) / ETH_TO_WEI as f64);
         }
 
         Poll::Pending
