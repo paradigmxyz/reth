@@ -37,18 +37,6 @@ sol!(
 
 struct OptimismExEx<Node: FullNodeTypes> {
     ctx: ExExContext<Node>,
-    contract_deposits: HashMap<Address, U256>,
-    contract_withdrawals: HashMap<Address, U256>,
-}
-
-impl<Node: FullNodeTypes> OptimismExEx<Node> {
-    fn new(ctx: ExExContext<Node>) -> Self {
-        Self {
-            ctx,
-            contract_deposits: Default::default(),
-            contract_withdrawals: Default::default(),
-        }
-    }
 }
 
 impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
@@ -66,7 +54,11 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
             CanonStateNotification::Reorg { old: _, new } => new,
         };
 
-        // Fill internal deposit and withdrawal mappings with data from new notification
+        // Initialize mappings for contract deposits and withdrawals
+        let mut contract_deposits = HashMap::<Address, U256>::new();
+        let mut contract_withdrawals = HashMap::<Address, U256>::new();
+
+        // Fill deposit and withdrawal mappings with data from new notification
         for (log, bridge_event) in chain
             // Get all blocks and receipts
             .blocks_and_receipts()
@@ -86,49 +78,26 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                 L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
                     amount, ..
                 }) => {
-                    *this.contract_deposits.entry(log.address).or_default() += amount;
+                    *contract_deposits.entry(log.address).or_default() += amount;
                 }
                 // L2 -> L1 withdrawal
                 L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
                     amount, ..
                 }) => {
-                    *this.contract_withdrawals.entry(log.address).or_default() += amount;
+                    *contract_withdrawals.entry(log.address).or_default() += amount;
                 }
                 _ => continue,
             };
         }
 
-        // Finished filling the mappings, print the results and clear the mappings
+        // Finished filling the mappings, print the results
         println!("Finished block range: {:?}", chain.first().number..=chain.tip().number);
-        // Print the contract deposits, if any
-        if !this.contract_deposits.is_empty() {
-            println!("Contract Deposits:");
-            for (address, amount) in
-                this.contract_deposits.drain().sorted_by_key(|(_, amount)| *amount).rev()
-            {
-                let amount = f64::from(amount) / ETH_TO_WEI as f64;
-                if let Some(name) = contract_address_to_name(address) {
-                    println!("  {}: {}", name, amount);
-                } else {
-                    println!("  {}: {}", address, amount);
-                }
-            }
+        if !contract_deposits.is_empty() {
+            print_amounts("Contract Deposits", contract_deposits);
         }
-        // Print the contract withdrawals, if any
-        if !this.contract_withdrawals.is_empty() {
-            println!("Contract Withdrawals:");
-            for (address, amount) in
-                this.contract_withdrawals.drain().sorted_by_key(|(_, amount)| *amount).rev()
-            {
-                let amount = f64::from(amount) / ETH_TO_WEI as f64;
-                if let Some(name) = contract_address_to_name(address) {
-                    println!("  {}: {}", name, amount);
-                } else {
-                    println!("  {}: {}", address, amount);
-                }
-            }
+        if !contract_withdrawals.is_empty() {
+            print_amounts("Contract Withdrawals", contract_withdrawals);
         }
-
         println!();
 
         // Send a finished height event, signaling the node that we don't need any blocks below this
@@ -136,6 +105,18 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
         this.ctx.events.send(ExExEvent::FinishedHeight(chain.tip().number))?;
 
         Poll::Pending
+    }
+}
+
+fn print_amounts(title: impl AsRef<str>, amounts: HashMap<Address, U256>) {
+    println!("{}:", title.as_ref());
+    for (address, amount) in amounts.into_iter().sorted_by_key(|(_, amount)| *amount).rev() {
+        let amount = f64::from(amount) / ETH_TO_WEI as f64;
+        if let Some(name) = contract_address_to_name(address) {
+            println!("  {}: {}", name, amount);
+        } else {
+            println!("  {}: {}", address, amount);
+        }
     }
 }
 
@@ -164,7 +145,7 @@ async fn main() -> eyre::Result<()> {
     //     .run(|builder, _| async move {
     //         let handle = builder
     //             .node(EthereumNode::default())
-    //             .install_exex(move |ctx| futures::future::ok(OptimismExEx::new(ctx)))
+    //             .install_exex(move |ctx| futures::future::ok(OptimismExEx { ctx }))
     //             .launch()
     //             .await?;
     //
@@ -198,7 +179,7 @@ async fn main() -> eyre::Result<()> {
         events: events_tx,
         notifications: notifications_rx,
     };
-    let mut exex = OptimismExEx::new(ctx);
+    let mut exex = OptimismExEx { ctx };
 
     let provider_ro = factory.provider()?;
     let last_block_number = provider_ro.last_block_number()?;
