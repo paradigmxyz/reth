@@ -2268,12 +2268,27 @@ mod tests {
         let local_addr = service.local_addr();
 
         let mut num_inserted = 0;
-        for _ in 0..MAX_NODES_PING {
+        loop {
             let node = NodeRecord::new(local_addr, PeerId::random());
             if service.add_node(node) {
                 num_inserted += 1;
                 assert!(service.pending_pings.contains_key(&node.id));
                 assert_eq!(service.pending_pings.len(), num_inserted);
+                if num_inserted == MAX_NODES_PING {
+                    break;
+                }
+            }
+        }
+
+        // `pending_pings` is full, insert into `queued_pings`.
+        num_inserted = 0;
+        for _ in 0..MAX_NODES_PING {
+            let node = NodeRecord::new(local_addr, PeerId::random());
+            if service.add_node(node) {
+                num_inserted += 1;
+                assert!(!service.pending_pings.contains_key(&node.id));
+                assert_eq!(service.pending_pings.len(), MAX_NODES_PING);
+                assert_eq!(service.queued_pings.len(), num_inserted);
             }
         }
     }
