@@ -110,39 +110,49 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
 
         println!("Finished block range: {:?}", chain.first().number..=chain.tip().number);
 
-        println!("Address Deposits:");
-        for (address, amount) in
-            this.account_deposits.drain().sorted_by_key(|(_, amount)| *amount).rev()
-        {
-            println!("  {}: {}", address, f64::from(amount) / ETH_TO_WEI as f64);
-        }
-        println!("Address Withdrawals:");
-        for (address, amount) in
-            this.account_withdrawals.drain().sorted_by_key(|(_, amount)| *amount).rev()
-        {
-            println!("  {}: {}", address, f64::from(amount) / ETH_TO_WEI as f64);
-        }
-
-        println!("Contract Deposits:");
-        for (address, amount) in
-            this.contract_deposits.drain().sorted_by_key(|(_, amount)| *amount).rev()
-        {
-            let amount = f64::from(amount) / ETH_TO_WEI as f64;
-            if let Some(name) = contract_address_to_name(address) {
-                println!("  {}: {}", name, amount);
-            } else {
-                println!("  {}: {}", address, amount);
+        if !this.account_deposits.is_empty() {
+            println!("Address Deposits:");
+            for (address, amount) in
+                this.account_deposits.drain().sorted_by_key(|(_, amount)| *amount).rev()
+            {
+                println!("  {}: {}", address, f64::from(amount) / ETH_TO_WEI as f64);
             }
         }
-        println!("Contract Withdrawals:");
-        for (address, amount) in
-            this.contract_withdrawals.drain().sorted_by_key(|(_, amount)| *amount).rev()
-        {
-            let amount = f64::from(amount) / ETH_TO_WEI as f64;
-            if let Some(name) = contract_address_to_name(address) {
-                println!("  {}: {}", name, amount);
-            } else {
-                println!("  {}: {}", address, amount);
+
+        if !this.account_withdrawals.is_empty() {
+            println!("Address Withdrawals:");
+            for (address, amount) in
+                this.account_withdrawals.drain().sorted_by_key(|(_, amount)| *amount).rev()
+            {
+                println!("  {}: {}", address, f64::from(amount) / ETH_TO_WEI as f64);
+            }
+        }
+
+        if !this.contract_deposits.is_empty() {
+            println!("Contract Deposits:");
+            for (address, amount) in
+                this.contract_deposits.drain().sorted_by_key(|(_, amount)| *amount).rev()
+            {
+                let amount = f64::from(amount) / ETH_TO_WEI as f64;
+                if let Some(name) = contract_address_to_name(address) {
+                    println!("  {}: {}", name, amount);
+                } else {
+                    println!("  {}: {}", address, amount);
+                }
+            }
+        }
+
+        if !this.contract_withdrawals.is_empty() {
+            println!("Contract Withdrawals:");
+            for (address, amount) in
+                this.contract_withdrawals.drain().sorted_by_key(|(_, amount)| *amount).rev()
+            {
+                let amount = f64::from(amount) / ETH_TO_WEI as f64;
+                if let Some(name) = contract_address_to_name(address) {
+                    println!("  {}: {}", name, amount);
+                } else {
+                    println!("  {}: {}", address, amount);
+                }
             }
         }
 
