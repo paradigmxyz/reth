@@ -183,7 +183,7 @@ pub struct RpcServerArgs {
 
     /// Filename for auth IPC socket/pipe within the datadir
     #[arg(long = "auth-ipc.path", default_value = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT)]
-    pub auth_ipc_path: String,
+    pub auth_ipc_path: Option<String>,
 }
 
 impl RpcServerArgs {
@@ -196,6 +196,12 @@ impl RpcServerArgs {
     /// Enables the WS-RPC server.
     pub fn with_ws(mut self) -> Self {
         self.ws = true;
+        self
+    }
+
+    /// Enables the Auth IPC 
+    pub fn with_auth_ipc(mut self) -> Self {
+        self.auth_ipc = true;
         self
     }
 
@@ -503,7 +509,7 @@ impl Default for RpcServerArgs {
             auth_port: constants::DEFAULT_AUTH_PORT,
             auth_jwtsecret: None,
             auth_ipc: false,
-            auth_ipc_path: constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string(),
+            auth_ipc_path: None,
             rpc_jwtsecret: None,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),

@@ -124,7 +124,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     // Node setup
     let node_config = NodeConfig::test()
         .with_chain(test_suite.chain_spec().clone())
-        .with_rpc(RpcServerArgs::default().with_http());
+        .with_rpc(RpcServerArgs::default().with_http().with_auth_ipc());
 
     let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
@@ -162,6 +162,42 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn failed_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
+    let tasks = TaskManager::current();
+    let test_suite = TestSuite::new();
+
+    // Node setup
+    let node_config = NodeConfig::test()
+        .with_chain(test_suite.chain_spec().clone())
+        .with_rpc(RpcServerArgs::default().with_http());
+
+    let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(tasks.executor())
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    // setup engine api events and payload service events
+    let _payload_events = node.payload_builder.subscribe().await?;
+
+    // push tx into pool via RPC server
+    let eth_api = node.rpc_registry.eth_api();
+    let (_expected_hash, raw_tx) = test_suite.transfer_tx().await;
+    eth_api.send_raw_transaction(raw_tx).await?;
+
+    // trigger new payload building draining the pool
+    let eth_attr = eth_payload_attributes();
+    let _payload_id = node.payload_builder.new_payload(eth_attr.clone()).await?;
+
+    // resolve best payload via engine api
+    let client = node.engine_ipc_client().await;
+    if client.is_some() {
+        panic!("Expect ipc engine api is none")
+    }
+    
+    Ok(())
+}
 fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
