@@ -16,7 +16,6 @@ use jsonrpsee::{
 use reth_ipc::client::IpcClientBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
-use crate::constants::DEFAULT_ENGINE_API_IPC_ENDPOINT;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_provider::{
@@ -325,9 +324,7 @@ impl AuthServerConfigBuilder {
                     .max_request_body_size(128 * 1024 * 1024)
                     .set_id_provider(EthSubscriptionIdProvider::default())
             })),
-            ipc_endpoint: Some(
-                self.ipc_endpoint.unwrap_or_else(|| DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string()),
-            ),
+            ipc_endpoint: self.ipc_endpoint,
         }
     }
 }
