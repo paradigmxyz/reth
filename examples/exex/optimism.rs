@@ -66,8 +66,8 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
             CanonStateNotification::Reorg { old: _, new } => new,
         };
 
-        let block = chain.first();
-        this.start_height.get_or_insert(block.number);
+        this.start_height.get_or_insert(chain.first().number);
+        let last_block = chain.tip().number;
 
         for (_, receipts) in chain.blocks_and_receipts() {
             for receipt in receipts.iter().flatten() {
@@ -93,9 +93,9 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
             }
         }
 
-        this.ctx.events.send(ExExEvent::FinishedHeight(block.number))?;
+        this.ctx.events.send(ExExEvent::FinishedHeight(last_block))?;
         println!("Start height: {}", this.start_height.unwrap());
-        println!("Finished height: {}", block.number);
+        println!("Finished height: {}", last_block);
         println!("Deposits: {:?}", this.deposits);
         println!("Withdrawals: {:?}", this.withdrawals);
 
