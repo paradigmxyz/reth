@@ -317,13 +317,13 @@ impl AuthServerConfigBuilder {
                     .max_request_body_size(128 * 1024 * 1024)
                     .set_id_provider(EthSubscriptionIdProvider::default())
             }),
-            ipc_server_config: Some(self.ipc_server_config.unwrap_or_else(|| {
-                IpcServerBuilder::default()
+            ipc_server_config: self.ipc_server_config.map(|ipc_server_config| {
+                ipc_server_config
                     .max_response_body_size(750 * 1024 * 1024)
                     .max_connections(500)
                     .max_request_body_size(128 * 1024 * 1024)
                     .set_id_provider(EthSubscriptionIdProvider::default())
-            })),
+            }),
             ipc_endpoint: self.ipc_endpoint,
         }
     }
