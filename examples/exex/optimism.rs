@@ -37,20 +37,6 @@ sol!(
 
 struct OptimismExEx<Node: FullNodeTypes> {
     ctx: ExExContext<Node>,
-    start_height: Option<u64>,
-    deposits: HashMap<Address, U256>,
-    withdrawals: HashMap<Address, U256>,
-}
-
-impl<Node: FullNodeTypes> OptimismExEx<Node> {
-    fn new(ctx: ExExContext<Node>) -> Self {
-        Self {
-            ctx,
-            start_height: Default::default(),
-            deposits: Default::default(),
-            withdrawals: Default::default(),
-        }
-    }
 }
 
 impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
@@ -66,45 +52,78 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
             CanonStateNotification::Reorg { old: _, new } => new,
         };
 
-        this.start_height.get_or_insert(chain.first().number);
         let last_block = chain.tip().number;
 
-        for (_, receipts) in chain.blocks_and_receipts() {
-            for receipt in receipts.iter().flatten() {
-                for log in &receipt.logs {
-                    if let Ok(bridge_event) =
-                        L1StandardBridgeEvents::decode_raw_log(&log.topics, &log.data, true)
-                    {
-                        match bridge_event {
-                            L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
-                                from,
-                                amount,
-                                ..
-                            }) => *this.deposits.entry(from).or_default() += amount,
-                            L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
-                                to,
-                                amount,
-                                ..
-                            }) => *this.withdrawals.entry(to).or_default() += amount,
-                            _ => continue,
-                        };
-                    }
+        let mut account_deposits = HashMap::<Address, U256>::new();
+        let mut account_withdrawals = HashMap::<Address, U256>::new();
+
+        let mut contract_deposits = HashMap::<Address, U256>::new();
+        let mut contract_withdrawals = HashMap::<Address, U256>::new();
+
+        for (log, bridge_event) in chain
+            // Get all blocks and receipts
+            .blocks_and_receipts()
+            // Get all receipts
+            .flat_map(|(_, receipts)| receipts.iter().flatten())
+            // Get all logs
+            .flat_map(|receipt| receipt.logs.iter())
+            // Decode and filter bridge events
+            .filter_map(|log| {
+                L1StandardBridgeEvents::decode_raw_log(&log.topics, &log.data, true)
+                    .ok()
+                    .map(|event| (log, event))
+            })
+        {
+            match bridge_event {
+                L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
+                    from,
+                    amount,
+                    ..
+                }) => {
+                    *account_deposits.entry(from).or_default() += amount;
+                    *contract_deposits.entry(log.address).or_default() += amount;
                 }
-            }
+                L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
+                    to,
+                    amount,
+                    ..
+                }) => {
+                    *account_withdrawals.entry(to).or_default() += amount;
+                    *contract_withdrawals.entry(log.address).or_default() += amount;
+                }
+                _ => continue,
+            };
         }
 
-        this.ctx.events.send(ExExEvent::FinishedHeight(last_block))?;
-        println!("Start height: {}", this.start_height.unwrap());
-        println!("Finished height: {}", last_block);
-        println!("Deposits:");
-        for (address, amount) in this.deposits.iter().sorted_by_key(|(_, amount)| *amount).rev() {
-            println!("  {}: {}", address, f64::from(*amount) / ETH_TO_WEI as f64);
-        }
-        println!("Withdrawals:");
-        for (address, amount) in this.withdrawals.iter().sorted_by_key(|(_, amount)| *amount).rev()
+        println!("Finished block range: {:?}", chain.first().number..=chain.tip().number);
+
+        println!("Address Deposits:");
+        for (address, amount) in account_deposits.iter().sorted_by_key(|(_, amount)| *amount).rev()
         {
             println!("  {}: {}", address, f64::from(*amount) / ETH_TO_WEI as f64);
         }
+        println!("Address Withdrawals:");
+        for (address, amount) in
+            account_withdrawals.iter().sorted_by_key(|(_, amount)| *amount).rev()
+        {
+            println!("  {}: {}", address, f64::from(*amount) / ETH_TO_WEI as f64);
+        }
+
+        println!("Contract Deposits:");
+        for (address, amount) in contract_deposits.iter().sorted_by_key(|(_, amount)| *amount).rev()
+        {
+            println!("  {}: {}", address, f64::from(*amount) / ETH_TO_WEI as f64);
+        }
+        println!("Contract Withdrawals:");
+        for (address, amount) in
+            contract_withdrawals.iter().sorted_by_key(|(_, amount)| *amount).rev()
+        {
+            println!("  {}: {}", address, f64::from(*amount) / ETH_TO_WEI as f64);
+        }
+
+        println!();
+
+        this.ctx.events.send(ExExEvent::FinishedHeight(last_block))?;
 
         Poll::Pending
     }
@@ -138,7 +157,7 @@ async fn main() -> eyre::Result<()> {
         events: events_tx,
         notifications: notifications_rx,
     };
-    let mut exex = OptimismExEx::new(ctx);
+    let mut exex = OptimismExEx { ctx };
 
     let provider_ro = factory.provider()?;
     let last_block_number = provider_ro.last_block_number()?;
