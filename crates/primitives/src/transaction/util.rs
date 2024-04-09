@@ -18,7 +18,7 @@ pub(crate) mod secp256k1 {
         let sig =
             RecoverableSignature::from_compact(&sig[0..64], RecoveryId::from_i32(sig[64] as i32)?)?;
 
-        let public = SECP256K1.recover_ecdsa(&Message::from_slice(&msg[..32])?, &sig)?;
+        let public = SECP256K1.recover_ecdsa(&Message::from_digest(*msg), &sig)?;
         Ok(public_key_to_address(public))
     }
 
@@ -26,7 +26,7 @@ pub(crate) mod secp256k1 {
     /// Returns the corresponding signature.
     pub fn sign_message(secret: B256, message: B256) -> Result<Signature, secp256k1::Error> {
         let sec = SecretKey::from_slice(secret.as_ref())?;
-        let s = SECP256K1.sign_ecdsa_recoverable(&Message::from_slice(&message[..])?, &sec);
+        let s = SECP256K1.sign_ecdsa_recoverable(&Message::from_digest(message.0), &sec);
         let (rec_id, data) = s.serialize_compact();
 
         let signature = Signature {

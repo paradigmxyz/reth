@@ -41,29 +41,24 @@ pub struct EnrCombinedKeyWrapper(pub discv5::Enr);
 
 impl From<Enr<SecretKey>> for EnrCombinedKeyWrapper {
     fn from(value: Enr<SecretKey>) -> Self {
-        let encoded_enr = rlp::encode(&value);
-        let enr = rlp::decode::<discv5::Enr>(&encoded_enr).unwrap();
-
-        Self(enr)
+        let encoded_enr = alloy_rlp::encode(&value);
+        Self(alloy_rlp::Decodable::decode(&mut &encoded_enr[..]).unwrap())
     }
 }
 
 impl From<EnrCombinedKeyWrapper> for Enr<SecretKey> {
     fn from(val: EnrCombinedKeyWrapper) -> Self {
-        let EnrCombinedKeyWrapper(enr) = val;
-        let encoded_enr = rlp::encode(&enr);
-
-        rlp::decode::<Enr<SecretKey>>(&encoded_enr).unwrap()
+        let encoded_enr = alloy_rlp::encode(&val.0);
+        alloy_rlp::Decodable::decode(&mut &encoded_enr[..]).unwrap()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_rlp::Encodable;
     use discv5::enr::{CombinedKey, EnrKey};
     use reth_primitives::{Hardfork, NodeRecord, MAINNET};
-
-    use super::*;
 
     #[test]
     fn discv5_discv4_id_conversion() {

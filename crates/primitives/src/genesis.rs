@@ -13,7 +13,7 @@ mod allocator {
     use alloy_genesis::GenesisAccount;
     use secp256k1::{
         rand::{thread_rng, RngCore},
-        KeyPair, Secp256k1,
+        Keypair, Secp256k1,
     };
     use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
@@ -73,9 +73,9 @@ mod allocator {
         /// Add a funded account to the genesis alloc.
         ///
         /// Returns the key pair for the account and the account's address.
-        pub fn new_funded_account(&mut self, balance: U256) -> (KeyPair, Address) {
+        pub fn new_funded_account(&mut self, balance: U256) -> (Keypair, Address) {
             let secp = Secp256k1::new();
-            let pair = KeyPair::new(&secp, &mut self.rng);
+            let pair = Keypair::new(&secp, &mut self.rng);
             let address = public_key_to_address(pair.public_key());
 
             self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
@@ -90,9 +90,9 @@ mod allocator {
             &mut self,
             balance: U256,
             code: Bytes,
-        ) -> (KeyPair, Address) {
+        ) -> (Keypair, Address) {
             let secp = Secp256k1::new();
-            let pair = KeyPair::new(&secp, &mut self.rng);
+            let pair = Keypair::new(&secp, &mut self.rng);
             let address = public_key_to_address(pair.public_key());
 
             self.alloc.insert(
@@ -110,9 +110,9 @@ mod allocator {
             &mut self,
             balance: U256,
             storage: BTreeMap<B256, B256>,
-        ) -> (KeyPair, Address) {
+        ) -> (Keypair, Address) {
             let secp = Secp256k1::new();
-            let pair = KeyPair::new(&secp, &mut self.rng);
+            let pair = Keypair::new(&secp, &mut self.rng);
             let address = public_key_to_address(pair.public_key());
 
             self.alloc.insert(
@@ -130,9 +130,9 @@ mod allocator {
             &mut self,
             code: Bytes,
             storage: BTreeMap<B256, B256>,
-        ) -> (KeyPair, Address) {
+        ) -> (Keypair, Address) {
             let secp = Secp256k1::new();
-            let pair = KeyPair::new(&secp, &mut self.rng);
+            let pair = Keypair::new(&secp, &mut self.rng);
             let address = public_key_to_address(pair.public_key());
 
             self.alloc.insert(
@@ -146,9 +146,9 @@ mod allocator {
         /// Adds an account with code to the genesis alloc.
         ///
         /// Returns the key pair for the account and the account's address.
-        pub fn new_account_with_code(&mut self, code: Bytes) -> (KeyPair, Address) {
+        pub fn new_account_with_code(&mut self, code: Bytes) -> (Keypair, Address) {
             let secp = Secp256k1::new();
-            let pair = KeyPair::new(&secp, &mut self.rng);
+            let pair = Keypair::new(&secp, &mut self.rng);
             let address = public_key_to_address(pair.public_key());
 
             self.alloc.insert(address, GenesisAccount::default().with_code(Some(code)));
@@ -169,7 +169,7 @@ mod allocator {
         /// Returns the key pair for the account and the account's address.
         pub fn add_account(&mut self, account: GenesisAccount) -> Address {
             let secp = Secp256k1::new();
-            let pair = KeyPair::new(&secp, &mut self.rng);
+            let pair = Keypair::new(&secp, &mut self.rng);
             let address = public_key_to_address(pair.public_key());
 
             self.alloc.insert(address, account);
