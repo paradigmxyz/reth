@@ -19,7 +19,7 @@ use reth_config::Config;
 use reth_db::open_db_read_only;
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{Address, Receipts, HOLESKY, U256};
+use reth_primitives::{Address, Receipts, MAINNET, U256};
 use reth_provider::{
     providers::BlockchainProvider, BlockNumReader, BlockReader, BundleStateWithReceipts,
     CanonStateNotification, Chain, ProviderFactory, ReceiptProvider,
@@ -106,9 +106,9 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     let data_dir = PlatformPath::from_str(&std::env::var("RETH_DATA_PATH")?)?
-        .with_chain(reth_primitives::Chain::holesky());
+        .with_chain(reth_primitives::Chain::mainnet());
     let db = Arc::new(open_db_read_only(data_dir.db_path().as_path(), Default::default())?);
-    let factory = ProviderFactory::new(db, HOLESKY.clone(), data_dir.static_files_path())?;
+    let factory = ProviderFactory::new(db, MAINNET.clone(), data_dir.static_files_path())?;
     let provider = BlockchainProvider::new(factory.clone(), NoopBlockchainTree::default())?;
 
     let task_manager = TaskManager::current();
