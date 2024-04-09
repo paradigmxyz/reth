@@ -112,6 +112,11 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    let n_blocks = std::env::args()
+        .nth(1)
+        .and_then(|n_blocks| n_blocks.parse::<u64>().ok())
+        .expect("n_blocks");
+
     let data_dir = PlatformPath::from_str(&std::env::var("RETH_DATA_PATH")?)?
         .with_chain(reth_primitives::Chain::mainnet());
     let db = Arc::new(open_db_read_only(data_dir.db_path().as_path(), Default::default())?);
@@ -137,7 +142,7 @@ async fn main() -> eyre::Result<()> {
 
     let provider_ro = factory.provider()?;
     let last_block_number = provider_ro.last_block_number()?;
-    let block_range = last_block_number - 1000..=last_block_number;
+    let block_range = last_block_number - n_blocks..=last_block_number;
     let blocks = provider_ro.block_range(block_range.clone())?;
     let receipts = provider_ro.receipts_by_block_range(block_range.clone())?;
     drop(provider_ro);
