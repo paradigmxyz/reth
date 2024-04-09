@@ -300,8 +300,11 @@ where
 
     let launch_auth = auth_module.clone().start_server(auth_config).map_ok(|handle| {
         let addr = handle.local_addr();
-        let ipc_endpoint = handle.ipc_enpodint();
-        info!(target: "reth::cli", url=%addr, ipc_endpoint=%ipc_endpoint,"RPC auth server started");
+        if let Some(ipc_endpoint) = handle.ipc_enpodint() {
+            info!(target: "reth::cli", url=%addr, ipc_endpoint=%ipc_endpoint,"RPC auth server started");
+        } else {
+            info!(target: "reth::cli", url=%addr, "RPC auth server started");
+        }
         handle
     });
 
