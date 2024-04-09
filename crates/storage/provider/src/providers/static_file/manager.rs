@@ -857,6 +857,13 @@ impl ReceiptProvider for StaticFileProvider {
         unreachable!()
     }
 
+    fn receipts_by_block_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Receipt>>> {
+        unreachable!()
+    }
+
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,

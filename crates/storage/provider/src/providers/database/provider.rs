@@ -354,6 +354,23 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             |_| true,
         )
     }
+
+    fn receipts_by_tx_range_with_cursor<C>(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+        cursor: &mut C,
+    ) -> ProviderResult<Vec<Receipt>>
+    where
+        C: DbCursorRO<tables::Receipts>,
+    {
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Receipts,
+            to_range(range),
+            |static_file, range, _| static_file.receipts_by_tx_range(range),
+            |range, _| self.cursor_collect(cursor, range),
+            |_| true,
+        )
+    }
 }
 
 impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
@@ -1726,6 +1743,30 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
             }
         }
         Ok(None)
+    }
+
+    fn receipts_by_block_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Receipt>>> {
+        let mut receipts_cursor = self.tx.cursor_read::<tables::Receipts>()?;
+        let mut results = Vec::new();
+        let mut body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
+        for entry in body_cursor.walk_range(range)? {
+            let (_, body) = entry?;
+            let tx_num_range = body.tx_num_range();
+            if tx_num_range.is_empty() {
+                results.push(Vec::new());
+            } else {
+                results.push(
+                    self.receipts_by_tx_range_with_cursor(tx_num_range, &mut receipts_cursor)?
+                        .into_iter()
+                        .map(Into::into)
+                        .collect(),
+                );
+            }
+        }
+        Ok(results)
     }
 
     fn receipts_by_tx_range(

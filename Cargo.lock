@@ -450,6 +450,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "452d929748ac948a10481fff4123affead32c553cf362841c5103dd508bdfc16"
 dependencies = [
+ "alloy-json-abi",
  "alloy-sol-macro-input",
  "const-hex",
  "heck 0.4.1",
@@ -468,11 +469,13 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df64e094f6d2099339f9e82b5b38440b159757b6920878f28316243f8166c8d1"
 dependencies = [
+ "alloy-json-abi",
  "const-hex",
  "dunce",
  "heck 0.5.0",
  "proc-macro2",
  "quote",
+ "serde_json",
  "syn 2.0.58",
  "syn-solidity",
 ]
@@ -492,6 +495,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43bc2d6dfc2a19fd56644494479510f98b1ee929e04cf0d4aa45e98baa3e545b"
 dependencies = [
+ "alloy-json-abi",
  "alloy-primitives",
  "alloy-sol-macro",
  "const-hex",
@@ -2797,14 +2801,19 @@ dependencies = [
 name = "examples"
 version = "0.0.0"
 dependencies = [
+ "alloy-sol-types",
  "async-trait",
  "eyre",
  "futures",
+ "reth",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
+ "reth-config",
  "reth-db",
+ "reth-exex",
  "reth-network",
  "reth-network-api",
+ "reth-node-ethereum",
  "reth-primitives",
  "reth-provider",
  "reth-revm",

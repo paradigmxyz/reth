@@ -425,6 +425,13 @@ impl<DB: Database> ReceiptProvider for ProviderFactory<DB> {
         self.provider()?.receipts_by_block(block)
     }
 
+    fn receipts_by_block_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Receipt>>> {
+        self.provider()?.receipts_by_block_range(range)
+    }
+
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
