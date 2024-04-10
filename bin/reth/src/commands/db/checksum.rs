@@ -31,7 +31,8 @@ impl<DB: Database> TableViewer<()> for ChecksumViewer<'_, DB> {
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
         warn!("This command should be run without the node running!");
 
-        let provider = self.tool.provider_factory.provider()?.disable_long_read_transaction_safety();
+        let provider =
+            self.tool.provider_factory.provider()?.disable_long_read_transaction_safety();
         let tx = provider.tx_ref();
 
         let mut cursor = tx.cursor_read::<RawTable<T>>()?;
