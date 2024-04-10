@@ -177,11 +177,8 @@ impl From<AccessList> for reth_rpc_types::AccessList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Bytes;
-    use proptest::{prelude::ProptestConfig, proptest};
-    use serde::Serialize;
-    use serde_json::to_writer_pretty;
-    use std::io::Write;
+
+    use proptest::proptest;
 
     proptest!(
         #[test]
@@ -196,7 +193,7 @@ mod tests {
 
             // Create alloy_access_list from access_list and then convert it to buffer and compare
             // compacted_alloy_access_list and compacted_access_list
-            let alloy_access_list = AccessList(access_list.0.clone());
+            let alloy_access_list = AccessList(access_list.0);
             let mut compacted_alloy_access_list = Vec::<u8>::new();
             let _len = alloy_access_list.to_compact(&mut compacted_alloy_access_list);
             assert_eq!(compacted_access_list, compacted_alloy_access_list);

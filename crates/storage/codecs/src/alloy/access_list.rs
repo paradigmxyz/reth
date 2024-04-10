@@ -49,7 +49,7 @@ impl Compact for AccessList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Bytes, B256};
+    use alloy_primitives::Bytes;
     use proptest::proptest;
     use serde::Deserialize;
 
