@@ -77,7 +77,8 @@ mod tests {
     #[test]
     fn test_compact_log_codec() {
         let test_vectors: Vec<CompactLogTestVector> =
-            serde_json::from_str(include_str!("../../testdata/log_compact.json")).unwrap();
+            serde_json::from_str(include_str!("../../testdata/log_compact.json"))
+                .expect("Failed to parse test vectors");
 
         for test_vector in test_vectors {
             let log_data = LogData::new_unchecked(test_vector.topics, test_vector.data);
