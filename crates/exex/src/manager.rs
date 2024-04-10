@@ -14,6 +14,7 @@ use metrics::Gauge;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::BlockNumber;
 use reth_provider::CanonStateNotification;
+use reth_tracing::tracing::debug;
 use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
     watch,
@@ -245,6 +246,7 @@ impl Future for ExExManager {
         // drain handle notifications
         'notifications: while self.buffer.len() < self.max_capacity {
             if let Poll::Ready(Some(notification)) = self.handle_rx.poll_recv(cx) {
+                debug!("received new notification");
                 self.push_notification(notification);
                 continue 'notifications
             }
@@ -267,6 +269,7 @@ impl Future for ExExManager {
                 .checked_sub(self.min_id)
                 .expect("exex expected notification ID outside the manager's range");
             if let Some(notification) = self.buffer.get(notification_id) {
+                debug!(exex.id, notification_id, "sent notification to exex");
                 if let Poll::Ready(Err(_)) = exex.send(cx, notification) {
                     // the channel was closed, which is irrecoverable for the manager
                     return Poll::Ready(Err(()))
@@ -279,6 +282,7 @@ impl Future for ExExManager {
         // remove processed buffered events
         self.buffer.retain(|&(id, _)| id > min_id);
         self.min_id = min_id;
+        debug!("lowest notification id in buffer is {min_id}");
 
         // update capacity
         self.update_capacity();
@@ -286,6 +290,7 @@ impl Future for ExExManager {
         // handle incoming exex events
         for exex in self.exex_handles.iter_mut() {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
+                debug!(?event, "received event from exex {}", exex.id);
                 match event {
                     ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
                 }
