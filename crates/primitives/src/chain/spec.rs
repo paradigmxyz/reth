@@ -252,7 +252,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis: serde_json::from_str(include_str!("../../res/genesis/optimism.json"))
             .expect("Can't deserialize Optimism Mainnet genesis json"),
         genesis_hash: Some(b256!(
-            "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
+            "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
         )),
         fork_timestamps: ForkTimestamps::default()
             .shanghai(1699981200)
@@ -270,20 +270,16 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Petersburg, ForkCondition::Block(0)),
             (Hardfork::Istanbul, ForkCondition::Block(0)),
             (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(3950000)),
+            (Hardfork::London, ForkCondition::Block(3950000)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(3950000)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(3950000)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+                ForkCondition::TTD { fork_block: Some(3950000), total_difficulty: U256::from(0) },
             ),
             (Hardfork::Bedrock, ForkCondition::Block(105235063)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
-            (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1707238800)),
-            (Hardfork::Ecotone, ForkCondition::Timestamp(1707238800)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
