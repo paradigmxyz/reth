@@ -1,7 +1,9 @@
 use crate::{pk_to_id, PeerId};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rpc_types::admin::EthProtocolInfo;
 use enr::Enr;
 use secp256k1::{SecretKey, SECP256K1};
+use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
     fmt,
@@ -12,6 +14,17 @@ use std::{
 };
 use thiserror::Error;
 use url::{Host, Url};
+
+/// The status of the network being ran by the local node.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NetworkStatus {
+    /// The local node client version.
+    pub client_version: String,
+    /// The current ethereum protocol version
+    pub protocol_version: u64,
+    /// Information about the Ethereum Wire Protocol.
+    pub eth_protocol_info: EthProtocolInfo,
+}
 
 /// Represents a ENR in discovery.
 ///

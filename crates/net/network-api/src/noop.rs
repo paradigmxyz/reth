@@ -10,7 +10,7 @@ use crate::{
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
 use reth_primitives::{Chain, NodeRecord, PeerId};
-use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
+use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
 use std::net::{IpAddr, SocketAddr};
 
 /// A type that implements all network trait that does nothing.

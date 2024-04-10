@@ -158,13 +158,13 @@ where
         }
 
         // Crop receipts and transform them into OtsTransactionReceipt
-        let timestamp = Some(u64::try_from(block.header.timestamp).unwrap_or(u64::MAX));
+        let timestamp = Some(block.header.timestamp);
         let receipts = receipts
             .drain(page_start..page_end)
             .map(|receipt| {
                 let receipt = receipt.inner.map_inner(|receipt| OtsReceipt {
                     status: receipt.inner.receipt.status,
-                    cumulative_gas_used: receipt.inner.receipt.cumulative_gas_used,
+                    cumulative_gas_used: receipt.inner.receipt.cumulative_gas_used as u64,
                     logs: None,
                     logs_bloom: None,
                     r#type: receipt.r#type,
