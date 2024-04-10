@@ -37,11 +37,10 @@ jobs:
             tr -d '"'
           )
           cargo binstall iai-callgrind-runner --version $version --no-confirm --no-symlinks
-      - name: Generate test vectors
-        run: cargo run --bin reth --manifest-path main/Cargo.toml -- test-vectors tables
       - name: Run benchmarks
         run: |
           git checkout main
+          cargo run --bin reth -- test-vectors tables
           cargo bench -p reth-db --bench iai --features test-utils -- --save-baseline=main
           git checkout ${{ github.ref }}
           cargo bench -p reth-db --bench iai --features test-utils -- --baseline=main
