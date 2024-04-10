@@ -1290,7 +1290,7 @@ impl<Tx: DbTx> DatabaseProvider<Tx> {
     fn process_block_range<F, R>(
         &self,
         range: RangeInclusive<BlockNumber>,
-        mut process_tx: F,
+        mut assemble_block: F,
     ) -> ProviderResult<Vec<R>>
     where
         F: FnMut(Range<TxNumber>, Header, Vec<Header>, Option<Withdrawals>) -> ProviderResult<R>,
@@ -1338,7 +1338,7 @@ impl<Tx: DbTx> DatabaseProvider<Tx> {
                             .map(|(_, o)| o.ommers)
                             .unwrap_or_default()
                     };
-                if let Ok(b) = process_tx(tx_range, header, ommers, withdrawals) {
+                if let Ok(b) = assemble_block(tx_range, header, ommers, withdrawals) {
                     blocks.push(b);
                 }
             }
