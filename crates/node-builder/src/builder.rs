@@ -592,10 +592,9 @@ where
             // spawn it as a crit task
             debug!(target: "reth::cli", "spawning exex {id}");
             {
-                let span = reth_tracing::tracing::info_span!("exex {id}");
-                let _enter = span.enter();
+                let id = id.clone();
                 ctx.executor.spawn_critical("exex", async move {
-                    exex.await.unwrap_or_else(|_| panic!("exex crashed"))
+                    exex.await.unwrap_or_else(|_| panic!("exex {id} crashed"))
                 });
             }
 
