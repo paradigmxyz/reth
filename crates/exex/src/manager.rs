@@ -400,7 +400,14 @@ impl ExExManagerHandle {
 
     /// Wait until the manager is ready for new notifications.
     pub async fn ready(&mut self) {
+        // note: if this ever returns an error, the manager has died and the node is shutting down,
+        // so we ignore the error.
         let _ = self.is_ready.wait_for(|val| *val).await;
+    }
+
+    /// Wait until the manager is ready for new notifications.
+    pub fn poll_ready(&mut self) -> Poll<()> {
+        Poll::Ready(())
     }
 }
 
