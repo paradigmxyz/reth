@@ -93,6 +93,14 @@ impl<Node: FullNodeComponents> FullNode<Node> {
     pub async fn engine_ws_client(&self) -> impl EngineApiClient<Node::Engine> {
         self.auth_server_handle().ws_client().await
     }
+
+    /// Returns the [EngineApiClient] interface for the authenticated engine API.
+    ///
+    /// This will send not authenticated IPC requests to the node's auth server.
+    #[cfg(unix)]
+    pub async fn engine_ipc_client(&self) -> Option<impl EngineApiClient<Node::Engine>> {
+        self.auth_server_handle().ipc_client().await
+    }
 }
 
 impl<Node: FullNodeComponents> Clone for FullNode<Node> {

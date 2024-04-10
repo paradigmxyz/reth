@@ -38,3 +38,11 @@ pub const DEFAULT_IPC_ENDPOINT: &str = r"\\.\pipe\reth.ipc";
 /// The default IPC endpoint
 #[cfg(not(windows))]
 pub const DEFAULT_IPC_ENDPOINT: &str = "/tmp/reth.ipc";
+
+/// The engine_api IPC endpoint
+#[cfg(windows)]
+pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = r"\\.\pipe\reth_engine_api.ipc";
+
+/// The engine_api IPC endpoint
+#[cfg(not(windows))]
+pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
