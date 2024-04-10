@@ -547,7 +547,15 @@ where
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
 
-        let ctx = BuilderContext::new(head, blockchain_db, executor, data_dir, config, reth_config);
+        let ctx = BuilderContext::new(
+            head,
+            blockchain_db,
+            executor,
+            data_dir,
+            config,
+            reth_config,
+            evm_config.clone(),
+        );
 
         debug!(target: "reth::cli", "creating components");
         let NodeComponents { transaction_pool, network, payload_builder } =
@@ -1061,6 +1069,26 @@ where
         self
     }
 
+    /// Installs an ExEx (Execution Extension) in the node.
+    pub fn install_exex<F, R, E>(mut self, exex: F) -> Self
+    where
+        F: Fn(
+                ExExContext<
+                    FullNodeComponentsAdapter<
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        Components::Pool,
+                    >,
+                >,
+            ) -> R
+            + Send
+            + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<()>> + Send,
+    {
+        self.builder.state.exexs.push(Box::new(exex));
+        self
+    }
+
     /// Launches the node and returns a handle to it.
     pub async fn launch(
         self,
@@ -1099,18 +1127,8 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     config: NodeConfig,
     /// loaded config
     reth_config: reth_config::Config,
-}
-
-impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BuilderContext")
-            .field("head", &self.head)
-            .field("provider", &std::any::type_name::<Node::Provider>())
-            .field("executor", &self.executor)
-            .field("data_dir", &self.data_dir)
-            .field("config", &self.config)
-            .finish()
-    }
+    /// EVM config of the node
+    evm_config: Node::Evm,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -1122,13 +1140,19 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         data_dir: ChainPath<DataDirPath>,
         config: NodeConfig,
         reth_config: reth_config::Config,
+        evm_config: Node::Evm,
     ) -> Self {
-        Self { head, provider, executor, data_dir, config, reth_config }
+        Self { head, provider, executor, data_dir, config, reth_config, evm_config }
     }
 
     /// Returns the configured provider to interact with the blockchain.
     pub fn provider(&self) -> &Node::Provider {
         &self.provider
+    }
+
+    /// Returns the configured evm.
+    pub fn evm_config(&self) -> &Node::Evm {
+        &self.evm_config
     }
 
     /// Returns the current head of the blockchain at launch.
@@ -1231,6 +1255,18 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         );
 
         handle
+    }
+}
+
+impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BuilderContext")
+            .field("head", &self.head)
+            .field("provider", &std::any::type_name::<Node::Provider>())
+            .field("executor", &self.executor)
+            .field("data_dir", &self.data_dir)
+            .field("config", &self.config)
+            .finish()
     }
 }
 
