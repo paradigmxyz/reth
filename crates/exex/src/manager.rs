@@ -90,7 +90,7 @@ impl ExExHandle {
         // check that this notification is above the finished height of the exex if the exex has set
         // one
         if let Some(finished_height) = self.finished_height {
-            if finished_height > notification.tip().number {
+            if finished_height >= notification.tip().number {
                 self.next_notification_id = event_id + 1;
                 return Poll::Ready(Ok(()))
             }
@@ -289,7 +289,7 @@ impl Future for ExExManager {
         }
 
         // remove processed buffered events
-        self.buffer.retain(|&(id, _)| id > min_id);
+        self.buffer.retain(|&(id, _)| id >= min_id);
         self.min_id = min_id;
         debug!("lowest notification id in buffer is {min_id}");
 
@@ -352,9 +352,8 @@ impl ExExManagerHandle {
     /// chain.
     pub fn should_send(&mut self, block_number: BlockNumber) -> bool {
         let has_exexs = self.num_exexs > 0;
-        let within_threshold = block_number >= *self.block.borrow_and_update();
 
-        has_exexs && within_threshold && self.has_capacity()
+        has_exexs && self.has_capacity()
     }
 
     /// Send a notification over the channel to all execution extensions.
