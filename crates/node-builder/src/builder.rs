@@ -612,7 +612,7 @@ where
             let exex = exex.launch(context).await.unwrap();
 
             // spawn it as a crit task
-            debug!(target: "reth::cli", "spawning exex {id}");
+            debug!(target: "reth::cli", id, "spawning exex");
             {
                 let span = reth_tracing::tracing::info_span!("exex", id);
                 let _enter = span.enter();
@@ -621,7 +621,7 @@ where
                 });
             }
 
-            info!(target: "reth::cli", "ExEx started: {id}");
+            info!(target: "reth::cli", id, "ExEx started");
         }
 
         // spawn exex manager
@@ -644,6 +644,8 @@ where
                         .expect("blockchain tree notification could not be sent to exex manager");
                 }
             });
+
+            info!(target: "reth::cli", "ExEx Manager started");
         }
 
         // create pipeline
