@@ -165,9 +165,15 @@ pub struct ExExManager {
     /// Whether the manager is ready to receive new notifications.
     is_ready: watch::Sender<bool>,
 
-    /// block number for pruner/exec stage (tbd)
-    /// todo(onbjerg): this is inclusive, note that in exex too, maybe rename FinishedHeight
-    block: watch::Sender<BlockNumber>,
+    /// The finished height of all ExEx's.
+    ///
+    /// This is the lowest common denominator between all ExEx's. If an ExEx has not emitted a
+    /// `FinishedHeight` event, it will be `None`.
+    ///
+    /// This block is used to (amongst other things) determine what blocks are safe to prune.
+    ///
+    /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
+    finished_height: watch::Sender<Option<BlockNumber>>,
 
     /// tbd
     handle: ExExManagerHandle,
@@ -188,7 +194,7 @@ impl ExExManager {
 
         let (handle_tx, handle_rx) = mpsc::unbounded_channel();
         let (is_ready_tx, is_ready_rx) = watch::channel(true);
-        let (block_tx, block_rx) = watch::channel(0);
+        let (finished_height_tx, finished_height_rx) = watch::channel(None);
 
         let current_capacity = Arc::new(AtomicUsize::new(max_capacity));
 
@@ -207,14 +213,14 @@ impl ExExManager {
             current_capacity: Arc::clone(&current_capacity),
 
             is_ready: is_ready_tx,
-            block: block_tx,
+            finished_height: finished_height_tx,
 
             handle: ExExManagerHandle {
                 exex_tx: handle_tx,
                 num_exexs,
                 is_ready: is_ready_rx,
                 current_capacity,
-                block: block_rx,
+                finished_height: finished_height_rx,
             },
             metrics,
         }
@@ -322,43 +328,27 @@ impl Future for ExExManager {
             }
         });
         if let Ok(finished_height) = finished_height {
-            let _ = self.block.send(finished_height);
+            let _ = self.finished_height.send(Some(finished_height));
         }
 
         Poll::Pending
     }
 }
 
-/// TBD
+/// A handle to communicate with the [`ExExManager`].
 #[derive(Debug, Clone)]
 pub struct ExExManagerHandle {
     exex_tx: UnboundedSender<CanonStateNotification>,
     num_exexs: usize,
     is_ready: watch::Receiver<bool>,
     current_capacity: Arc<AtomicUsize>,
-    block: watch::Receiver<BlockNumber>,
+    finished_height: watch::Receiver<Option<BlockNumber>>,
 }
 
 impl ExExManagerHandle {
-    /// Whether we should send a notification for a given block number.
-    ///
-    /// This checks that:
-    ///
-    /// - The block number is interesting to at least one ExEx.
-    /// - That the manager has capacity in its internal buffer for the notification
-    /// - That there are any ExEx's currently running
-    ///
-    /// For [`CanonStateNotification`]s with more than one block, pass the highest block in the
-    /// chain.
-    pub fn should_send(&mut self, block_number: BlockNumber) -> bool {
-        let has_exexs = self.num_exexs > 0;
-
-        has_exexs && self.has_capacity()
-    }
-
     /// Send a notification over the channel to all execution extensions.
     ///
-    /// Senders should call [`should_send`] first.
+    /// Senders should call [`Self::has_capacity`] first.
     pub fn send(
         &self,
         notification: CanonStateNotification,
@@ -384,6 +374,23 @@ impl ExExManagerHandle {
     /// the channel until the manager is ready again, as this can lead to unbounded memory growth.
     pub fn has_capacity(&self) -> bool {
         self.current_capacity.load(Ordering::Relaxed) > 0
+    }
+
+    /// Returns `true` if there are ExEx's installed in the node.
+    pub fn has_exexs(&self) -> bool {
+        self.num_exexs > 0
+    }
+
+    /// The finished height of all ExEx's.
+    ///
+    /// This is the lowest common denominator between all ExEx's. If an ExEx has not emitted a
+    /// `FinishedHeight` event, it will be `None`.
+    ///
+    /// This block is used to (amongst other things) determine what blocks are safe to prune.
+    ///
+    /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
+    pub fn finished_height(&mut self) -> Option<BlockNumber> {
+        *self.finished_height.borrow_and_update()
     }
 
     /// Wait until the manager is ready for new notifications.
