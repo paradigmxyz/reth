@@ -6454,6 +6454,8 @@ dependencies = [
 name = "reth-exex"
 version = "0.2.0-beta.5"
 dependencies = [
+ "eyre",
+ "futures",
  "metrics",
  "reth-config",
  "reth-metrics",
@@ -6464,6 +6466,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "tokio",
+ "tokio-stream",
  "tokio-util",
 ]
 

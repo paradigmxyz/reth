@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    future::Future,
+    future::{poll_fn, Future},
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -10,6 +10,7 @@ use std::{
 };
 
 use crate::ExExEvent;
+use futures::StreamExt;
 use metrics::Gauge;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::BlockNumber;
@@ -19,16 +20,17 @@ use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
     watch,
 };
+use tokio_stream::wrappers::WatchStream;
 use tokio_util::sync::{PollSendError, PollSender};
 
 /// Metrics for an ExEx.
 #[derive(Metrics)]
 #[metrics(scope = "exex")]
 struct ExExMetrics {
-    /// The number of canonical state notifications processed by an ExEx.
-    notifications_processed: Counter,
-    /// The number of events an ExEx has sent to the manager.
-    events_sent: Counter,
+    /// The total number of canonical state notifications sent to an ExEx.
+    notifications_sent_total: Counter,
+    /// The total number of events an ExEx has sent to the manager.
+    events_sent_total: Counter,
 }
 
 /// A handle to an ExEx used by the [`ExExManager`] to communicate with ExEx's.
@@ -51,14 +53,15 @@ pub struct ExExHandle {
     next_notification_id: usize,
 
     /// The finished block number of the ExEx.
-    /// tbd describe how this can change, what None means, what this is used for
+    ///
+    /// If this is `None`, the ExEx has not emitted a `FinishedHeight` event.
     finished_height: Option<BlockNumber>,
 }
 
 impl ExExHandle {
     /// Create a new handle for the given ExEx.
     ///
-    /// Returns the handle, as well as a [`Sender`] for [`ExExEvent`]s and a
+    /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
     /// [`Receiver`] for [`CanonStateNotification`]s that should be given to the ExEx.
     pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, Receiver<CanonStateNotification>) {
         let (canon_tx, canon_rx) = mpsc::channel(1);
@@ -87,6 +90,15 @@ impl ExExHandle {
         cx: &mut Context<'_>,
         (event_id, notification): &(usize, CanonStateNotification),
     ) -> Poll<Result<(), PollSendError<CanonStateNotification>>> {
+        // check that this notification is above the finished height of the exex if the exex has set
+        // one
+        if let Some(finished_height) = self.finished_height {
+            if finished_height >= notification.tip().number {
+                self.next_notification_id = event_id + 1;
+                return Poll::Ready(Ok(()))
+            }
+        }
+
         match self.sender.poll_reserve(cx) {
             Poll::Ready(Ok(())) => (),
             other => return other,
@@ -95,7 +107,7 @@ impl ExExHandle {
         match self.sender.send_item(notification.clone()) {
             Ok(()) => {
                 self.next_notification_id = event_id + 1;
-                self.metrics.notifications_processed.increment(1);
+                self.metrics.notifications_sent_total.increment(1);
                 Poll::Ready(Ok(()))
             }
             Err(err) => Poll::Ready(Err(err)),
@@ -103,7 +115,7 @@ impl ExExHandle {
     }
 }
 
-// todo
+/// Metrics for the ExEx manager.
 #[derive(Metrics)]
 #[metrics(scope = "exex_manager")]
 pub struct ExExManagerMetrics {
@@ -117,7 +129,6 @@ pub struct ExExManagerMetrics {
     buffer_size: Gauge,
 }
 
-// todo: if event is sent to exex it is considered delivered
 /// The execution extension manager.
 ///
 /// The manager is responsible for:
@@ -127,14 +138,9 @@ pub struct ExExManagerMetrics {
 /// - Backpressure
 /// - Error handling
 /// - Monitoring
-///
-/// TBD
 #[derive(Debug)]
 pub struct ExExManager {
     /// Handles to communicate with the ExEx's.
-    // todo(onbjerg): we should document that these notifications can include blocks the exex does
-    // not care about if a longer chain segment is sent - filtering is up to the exex. where do
-    // we document it, though?
     exex_handles: Vec<ExExHandle>,
 
     /// [`CanonStateNotification`] channel from the [`ExExManagerHandle`]s.
@@ -156,11 +162,17 @@ pub struct ExExManager {
     /// Whether the manager is ready to receive new notifications.
     is_ready: watch::Sender<bool>,
 
-    /// block number for pruner/exec stage (tbd)
-    /// todo(onbjerg): this is inclusive, note that in exex too, maybe rename FinishedHeight
-    block: watch::Sender<BlockNumber>,
+    /// The finished height of all ExEx's.
+    ///
+    /// This is the lowest common denominator between all ExEx's. If an ExEx has not emitted a
+    /// `FinishedHeight` event, it will be `None`.
+    ///
+    /// This block is used to (amongst other things) determine what blocks are safe to prune.
+    ///
+    /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
+    finished_height: watch::Sender<Option<BlockNumber>>,
 
-    /// tbd
+    /// A handle to the ExEx manager.
     handle: ExExManagerHandle,
     /// Metrics for the ExEx manager.
     metrics: ExExManagerMetrics,
@@ -179,7 +191,7 @@ impl ExExManager {
 
         let (handle_tx, handle_rx) = mpsc::unbounded_channel();
         let (is_ready_tx, is_ready_rx) = watch::channel(true);
-        let (block_tx, block_rx) = watch::channel(0);
+        let (finished_height_tx, finished_height_rx) = watch::channel(None);
 
         let current_capacity = Arc::new(AtomicUsize::new(max_capacity));
 
@@ -198,14 +210,15 @@ impl ExExManager {
             current_capacity: Arc::clone(&current_capacity),
 
             is_ready: is_ready_tx,
-            block: block_tx,
+            finished_height: finished_height_tx,
 
             handle: ExExManagerHandle {
                 exex_tx: handle_tx,
                 num_exexs,
-                is_ready: is_ready_rx,
+                is_ready_receiver: is_ready_rx.clone(),
+                is_ready: WatchStream::new(is_ready_rx),
                 current_capacity,
-                block: block_rx,
+                finished_height: finished_height_rx,
             },
             metrics,
         }
@@ -239,8 +252,7 @@ impl ExExManager {
 }
 
 impl Future for ExExManager {
-    // todo
-    type Output = Result<(), ()>;
+    type Output = eyre::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // drain handle notifications
@@ -253,7 +265,6 @@ impl Future for ExExManager {
             break
         }
 
-        // todo: drain blockchain tree notifications
         // update capacity
         self.update_capacity();
 
@@ -270,9 +281,9 @@ impl Future for ExExManager {
                 .expect("exex expected notification ID outside the manager's range");
             if let Some(notification) = self.buffer.get(notification_id) {
                 debug!(exex.id, notification_id, "sent notification to exex");
-                if let Poll::Ready(Err(_)) = exex.send(cx, notification) {
+                if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
                     // the channel was closed, which is irrecoverable for the manager
-                    return Poll::Ready(Err(()))
+                    return Poll::Ready(Err(err.into()))
                 }
             }
             min_id = min_id.min(exex.next_notification_id);
@@ -280,7 +291,7 @@ impl Future for ExExManager {
         }
 
         // remove processed buffered events
-        self.buffer.retain(|&(id, _)| id > min_id);
+        self.buffer.retain(|&(id, _)| id >= min_id);
         self.min_id = min_id;
         debug!("lowest notification id in buffer is {min_id}");
 
@@ -291,6 +302,7 @@ impl Future for ExExManager {
         for exex in self.exex_handles.iter_mut() {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
                 debug!(?event, "received event from exex {}", exex.id);
+                exex.metrics.events_sent_total.increment(1);
                 match event {
                     ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
                 }
@@ -298,7 +310,6 @@ impl Future for ExExManager {
         }
 
         // update watch channel block number
-        // todo: clean this up and also is this too expensive
         let finished_height = self.exex_handles.iter_mut().try_fold(u64::MAX, |curr, exex| {
             let height = match exex.finished_height {
                 None => return Err(()),
@@ -312,44 +323,28 @@ impl Future for ExExManager {
             }
         });
         if let Ok(finished_height) = finished_height {
-            let _ = self.block.send(finished_height);
+            let _ = self.finished_height.send(Some(finished_height));
         }
 
         Poll::Pending
     }
 }
 
-/// TBD
-#[derive(Debug, Clone)]
+/// A handle to communicate with the [`ExExManager`].
+#[derive(Debug)]
 pub struct ExExManagerHandle {
     exex_tx: UnboundedSender<CanonStateNotification>,
     num_exexs: usize,
-    is_ready: watch::Receiver<bool>,
+    is_ready_receiver: watch::Receiver<bool>,
+    is_ready: WatchStream<bool>,
     current_capacity: Arc<AtomicUsize>,
-    block: watch::Receiver<BlockNumber>,
+    finished_height: watch::Receiver<Option<BlockNumber>>,
 }
 
 impl ExExManagerHandle {
-    /// Whether we should send a notification for a given block number.
+    /// Synchronously send a notification over the channel to all execution extensions.
     ///
-    /// This checks that:
-    ///
-    /// - The block number is interesting to at least one ExEx.
-    /// - That the manager has capacity in its internal buffer for the notification
-    /// - That there are any ExEx's currently running
-    ///
-    /// For [`CanonStateNotification`]s with more than one block, pass the highest block in the
-    /// chain.
-    pub fn should_send(&mut self, block_number: BlockNumber) -> bool {
-        let has_exexs = self.num_exexs > 0;
-        let within_threshold = block_number >= *self.block.borrow_and_update();
-
-        has_exexs && within_threshold && self.has_capacity()
-    }
-
-    /// Send a notification over the channel to all execution extensions.
-    ///
-    /// Senders should call [`should_send`] first.
+    /// Senders should call [`Self::has_capacity`] first.
     pub fn send(
         &self,
         notification: CanonStateNotification,
@@ -357,7 +352,7 @@ impl ExExManagerHandle {
         self.exex_tx.send(notification)
     }
 
-    /// Send a notification over the channel to all execution extensions.
+    /// Asynchronously send a notification over the channel to all execution extensions.
     ///
     /// The returned future resolves when the notification has been delivered. If there is no
     /// capacity in the channel, the future will wait.
@@ -369,6 +364,11 @@ impl ExExManagerHandle {
         self.exex_tx.send(notification)
     }
 
+    /// Get the current capacity of the ExEx manager's internal notification buffer.
+    pub fn capacity(&self) -> usize {
+        self.current_capacity.load(Ordering::Relaxed)
+    }
+
     /// Whether there is capacity in the ExEx manager's internal notification buffer.
     ///
     /// If this returns `false`, the owner of the handle should **NOT** send new notifications over
@@ -377,9 +377,53 @@ impl ExExManagerHandle {
         self.current_capacity.load(Ordering::Relaxed) > 0
     }
 
+    /// Returns `true` if there are ExEx's installed in the node.
+    pub fn has_exexs(&self) -> bool {
+        self.num_exexs > 0
+    }
+
+    /// The finished height of all ExEx's.
+    ///
+    /// This is the lowest common denominator between all ExEx's. If an ExEx has not emitted a
+    /// `FinishedHeight` event, it will be `None`.
+    ///
+    /// This block is used to (amongst other things) determine what blocks are safe to prune.
+    ///
+    /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
+    pub fn finished_height(&mut self) -> Option<BlockNumber> {
+        *self.finished_height.borrow_and_update()
+    }
+
     /// Wait until the manager is ready for new notifications.
     pub async fn ready(&mut self) {
-        let _ = self.is_ready.wait_for(|val| *val).await;
+        poll_fn(|cx| self.poll_ready(cx)).await
+    }
+
+    /// Wait until the manager is ready for new notifications.
+    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        // if this returns `Poll::Ready(None)` the stream is exhausted, which means the underlying
+        // channel is closed.
+        //
+        // this can only happen if the manager died, and the node is shutting down, so we ignore it
+        let mut pinned = std::pin::pin!(&mut self.is_ready);
+        if pinned.poll_next_unpin(cx) == Poll::Ready(Some(true)) {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+impl Clone for ExExManagerHandle {
+    fn clone(&self) -> Self {
+        Self {
+            exex_tx: self.exex_tx.clone(),
+            num_exexs: self.num_exexs,
+            is_ready_receiver: self.is_ready_receiver.clone(),
+            is_ready: WatchStream::new(self.is_ready_receiver.clone()),
+            current_capacity: self.current_capacity.clone(),
+            finished_height: self.finished_height.clone(),
+        }
     }
 }
 
