@@ -94,9 +94,16 @@ impl Signature {
         let v = u64::decode(buf)?;
         let r = Decodable::decode(buf)?;
         let s = Decodable::decode(buf)?;
+
         if v < 35 {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
             if v != 27 && v != 28 {
+                #[cfg(feature = "optimism")]
+                if std::env::var("OP_RETH_IMPORT_BELOW_BEDROCK") == Ok("1".to_string()) {
+                    if v == 0 {
+                        return Ok((Signature { r, s, odd_y_parity: false }, None))
+                    }
+                }
                 return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
             }
             let odd_y_parity = v == 28;

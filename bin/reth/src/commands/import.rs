@@ -65,6 +65,11 @@ pub struct ImportCommand {
     #[arg(long, value_name = "DISABLE_EXECUTION", verbatim_doc_comment)]
     disable_execution: bool,
 
+    /// Import OP Mainnet chain below bedrock.
+    #[cfg(feature = "optimism")]
+    #[arg(long, value_name = "OP_MAINNET_BELOW_BEDROCK", verbatim_doc_comment)]
+    op_mainnet_below_bedrock: bool,
+
     #[command(flatten)]
     db: DatabaseArgs,
 
@@ -110,6 +115,12 @@ impl ImportCommand {
         // override the tip
         let tip = file_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
+
+        #[cfg(feature = "optimism")]
+        if self.op_mainnet_below_bedrock {
+            self.disable_execution = true;
+            std::env::set_var("OP_RETH_IMPORT_BELOW_BEDROCK", "1");
+        }
 
         let (mut pipeline, events) = self
             .build_import_pipeline(
