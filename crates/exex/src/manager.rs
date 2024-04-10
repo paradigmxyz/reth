@@ -58,7 +58,7 @@ pub struct ExExHandle {
 impl ExExHandle {
     /// Create a new handle for the given ExEx.
     ///
-    /// Returns the handle, as well as a [`Sender`] for [`ExExEvent`]s and a
+    /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
     /// [`Receiver`] for [`CanonStateNotification`]s that should be given to the ExEx.
     pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, Receiver<CanonStateNotification>) {
         let (canon_tx, canon_rx) = mpsc::channel(1);
