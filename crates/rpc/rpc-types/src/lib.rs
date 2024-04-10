@@ -40,15 +40,3 @@ pub use mev::*;
 pub use net::*;
 pub use peer::*;
 pub use rpc::*;
-
-
-/// The status of the network being ran by the local node.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct NetworkStatus {
-    /// The local node client version.
-    pub client_version: String,
-    /// The current ethereum protocol version
-    pub protocol_version: u64,
-    /// Information about the Ethereum Wire Protocol.
-    pub eth_protocol_info: alloy_rpc_types::admin::EthProtocolInfo,
-}

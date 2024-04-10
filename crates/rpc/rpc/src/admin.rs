@@ -1,3 +1,4 @@
+use std::os::macos::raw::stat;
 use crate::result::ToRpcResult;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -89,25 +90,26 @@ where
     /// Handler for `admin_nodeInfo`
     async fn node_info(&self) -> RpcResult<NodeInfo> {
         let enode = self.network.local_node_record();
+        let enode = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
         let config = self.chain_spec.genesis().config.clone();
 
-        NodeInfo {
+        let node_info = NodeInfo {
             id: Default::default(),
             name: status.client_version,
             enode: enode.to_string(),
             enr: "".to_string(),
             ip: enode.address,
             ports:  Ports { discovery: enode.udp_port, listener: enode.tcp_port },
-            listen_addr:  enode.tcp_addr().to_string(),
+            listen_addr:  enode.tcp_addr(),
             protocols: ProtocolInfo {
                 eth: Some(
                     EthProtocolInfo {
-                        network: 0,
-                        difficulty: Default::default(),
-                        genesis: Default::default(),
+                        network: status.eth_protocol_info.network,
+                        difficulty: status.eth_protocol_info.difficulty,
+                        genesis: status.eth_protocol_info.genesis,
                         config,
-                        head: Default::default(),
+                        head: status.eth_protocol_info.head,
                     }
                 ),
                 snap: None,
