@@ -80,7 +80,6 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
             if !contract_withdrawals.is_empty() {
                 print_amounts("Contract Withdrawals", contract_withdrawals);
             }
-            println!();
 
             // Send a finished height event, signaling the node that we don't need any blocks below
             // this height anymore
@@ -96,9 +95,9 @@ fn print_amounts(title: impl AsRef<str>, amounts: HashMap<Address, U256>) {
     for (address, amount) in amounts.into_iter().sorted_by_key(|(_, amount)| *amount).rev() {
         let amount = f64::from(amount) / ETH_TO_WEI as f64;
         if let Some(name) = contract_address_to_name(address) {
-            println!("  {}: {}", name, amount);
+            println!("  {}: {} ETH", name, amount);
         } else {
-            println!("  {}: {}", address, amount);
+            println!("  {}: {} ETH", address, amount);
         }
     }
 }
