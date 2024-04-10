@@ -357,7 +357,7 @@ impl ExExManagerHandle {
     /// The returned future resolves when the notification has been delivered. If there is no
     /// capacity in the channel, the future will wait.
     pub async fn send_async(
-        &self,
+        &mut self,
         notification: CanonStateNotification,
     ) -> Result<(), SendError<CanonStateNotification>> {
         self.ready().await;
@@ -372,8 +372,9 @@ impl ExExManagerHandle {
         self.current_capacity.load(Ordering::Relaxed) > 0
     }
 
-    pub async fn ready(&self) {
-        todo!()
+    /// Wait until the manager is ready for new notifications.
+    pub async fn ready(&mut self) {
+        let _ = self.is_ready.wait_for(|val| *val).await;
     }
 }
 
