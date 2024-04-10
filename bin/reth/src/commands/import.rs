@@ -83,7 +83,7 @@ pub struct ImportCommand {
 
 impl ImportCommand {
     /// Execute `import` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(mut self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         // add network name to data dir
