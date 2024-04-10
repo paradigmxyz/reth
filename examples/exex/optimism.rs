@@ -40,6 +40,8 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
+        println!("Polling OptimismExEx");
+
         // Wait for a new chain state notification to arrive
         let notification = ready!(this.ctx.notifications.poll_recv(cx)).expect("channel closed");
 
@@ -133,80 +135,79 @@ fn contract_address_to_name(address: Address) -> Option<&'static str> {
     }
 }
 
-#[tokio::main]
-async fn main() -> eyre::Result<()> {
+fn main() -> eyre::Result<()> {
     // TODO(alexey): uncomment when https://github.com/paradigmxyz/reth/pull/7340 is merged
-    // reth::cli::Cli::parse_args()
-    //     .run(|builder, _| async move {
-    //         let handle = builder
-    //             .node(EthereumNode::default())
-    //             .install_exex(move |ctx| futures::future::ok(OptimismExEx { ctx }))
-    //             .launch()
-    //             .await?;
+    reth::cli::Cli::parse_args().run(|builder, _| async move {
+        let handle = builder
+            .node(EthereumNode::default())
+            .install_exex("Optimism".to_string(), move |ctx| {
+                futures::future::ok(OptimismExEx { ctx })
+            })
+            .launch()
+            .await?;
+
+        handle.wait_for_node_exit().await
+    })
+
+    // let n_blocks = std::env::args()
+    //     .nth(1)
+    //     .and_then(|n_blocks| n_blocks.parse::<u64>().ok())
+    //     .expect("n_blocks");
     //
-    //         handle.wait_for_node_exit().await
-    //     })
-    //     .unwrap();
-
-    let n_blocks = std::env::args()
-        .nth(1)
-        .and_then(|n_blocks| n_blocks.parse::<u64>().ok())
-        .expect("n_blocks");
-
-    let data_dir = PlatformPath::from_str(&std::env::var("RETH_DATA_PATH")?)?
-        .with_chain(reth_primitives::Chain::mainnet());
-    let db = Arc::new(open_db_read_only(data_dir.db_path().as_path(), Default::default())?);
-    let factory = ProviderFactory::new(db, MAINNET.clone(), data_dir.static_files_path())?;
-    let provider = BlockchainProvider::new(factory.clone(), NoopBlockchainTree::default())?;
-
-    let task_manager = TaskManager::current();
-
-    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
-    let (notifications_tx, notifications_rx) = tokio::sync::mpsc::channel(1);
-
-    let ctx = ExExContext::<FullNodeTypesAdapter<EthereumNode, _, _>> {
-        head: Default::default(),
-        provider,
-        task_executor: task_manager.executor(),
-        data_dir,
-        config: NodeConfig::test(),
-        reth_config: Config::default(),
-        events: events_tx,
-        notifications: notifications_rx,
-    };
-    let mut exex = OptimismExEx { ctx };
-
-    let provider_ro = factory.provider()?;
-    let last_block_number = provider_ro.last_block_number()?;
-    let block_range = last_block_number - n_blocks..=last_block_number;
-    let blocks = provider_ro.block_range(block_range.clone())?;
-    let receipts = provider_ro.receipts_by_block_range(block_range.clone())?;
-    drop(provider_ro);
-
-    let blocks = blocks
-        .into_iter()
-        .map(|block| block.seal_slow().seal_with_senders().expect("recover senders"))
-        .collect::<Vec<_>>();
-
-    let bundle_state = BundleStateWithReceipts::new(
-        BundleBuilder::new(block_range.clone()).build(),
-        Receipts::from_vec(
-            receipts
-                .into_iter()
-                .map(|block_receipts| block_receipts.into_iter().map(Some).collect())
-                .collect(),
-        ),
-        *block_range.start(),
-    );
-    let chain = Chain::new(blocks, bundle_state, None);
-
-    let notification = CanonStateNotification::Commit { new: Arc::new(chain) };
-    notifications_tx.send(notification).await?;
-
-    let result = poll_fn(|cx| Poll::Ready(exex.poll_unpin(cx))).await?;
-    assert_eq!(result, Poll::Pending);
-
-    assert_eq!(events_rx.try_recv()?, reth_exex::ExExEvent::FinishedHeight(*block_range.end()));
-
-    Ok(())
+    // let data_dir = PlatformPath::from_str(&std::env::var("RETH_DATA_PATH")?)?
+    //     .with_chain(reth_primitives::Chain::mainnet());
+    // let db = Arc::new(open_db_read_only(data_dir.db_path().as_path(), Default::default())?);
+    // let factory = ProviderFactory::new(db, MAINNET.clone(), data_dir.static_files_path())?;
+    // let provider = BlockchainProvider::new(factory.clone(), NoopBlockchainTree::default())?;
+    //
+    // let task_manager = TaskManager::current();
+    //
+    // let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+    // let (notifications_tx, notifications_rx) = tokio::sync::mpsc::channel(1);
+    //
+    // let ctx = ExExContext::<FullNodeTypesAdapter<EthereumNode, _, _>> {
+    //     head: Default::default(),
+    //     provider,
+    //     task_executor: task_manager.executor(),
+    //     data_dir,
+    //     config: NodeConfig::test(),
+    //     reth_config: Config::default(),
+    //     events: events_tx,
+    //     notifications: notifications_rx,
+    // };
+    // let mut exex = OptimismExEx { ctx };
+    //
+    // let provider_ro = factory.provider()?;
+    // let last_block_number = provider_ro.last_block_number()?;
+    // let block_range = last_block_number - n_blocks..=last_block_number;
+    // let blocks = provider_ro.block_range(block_range.clone())?;
+    // let receipts = provider_ro.receipts_by_block_range(block_range.clone())?;
+    // drop(provider_ro);
+    //
+    // let blocks = blocks
+    //     .into_iter()
+    //     .map(|block| block.seal_slow().seal_with_senders().expect("recover senders"))
+    //     .collect::<Vec<_>>();
+    //
+    // let bundle_state = BundleStateWithReceipts::new(
+    //     BundleBuilder::new(block_range.clone()).build(),
+    //     Receipts::from_vec(
+    //         receipts
+    //             .into_iter()
+    //             .map(|block_receipts| block_receipts.into_iter().map(Some).collect())
+    //             .collect(),
+    //     ),
+    //     *block_range.start(),
+    // );
+    // let chain = Chain::new(blocks, bundle_state, None);
+    //
+    // let notification = CanonStateNotification::Commit { new: Arc::new(chain) };
+    // notifications_tx.send(notification).await?;
+    //
+    // let result = poll_fn(|cx| Poll::Ready(exex.poll_unpin(cx))).await?;
+    // assert_eq!(result, Poll::Pending);
+    //
+    // assert_eq!(events_rx.try_recv()?, reth_exex::ExExEvent::FinishedHeight(*block_range.end()));
+    //
+    // Ok(())
 }

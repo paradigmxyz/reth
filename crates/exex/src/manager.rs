@@ -16,7 +16,7 @@ use reth_primitives::BlockNumber;
 use reth_provider::CanonStateNotification;
 use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
-    watch,
+    watch::{self, error::RecvError},
 };
 use tokio_util::sync::{PollSendError, PollSender};
 
@@ -357,11 +357,12 @@ impl ExExManagerHandle {
     /// The returned future resolves when the notification has been delivered. If there is no
     /// capacity in the channel, the future will wait.
     pub async fn send_async(
-        &self,
+        &mut self,
         notification: CanonStateNotification,
-    ) -> Result<(), SendError<CanonStateNotification>> {
-        self.ready().await;
-        self.exex_tx.send(notification)
+    ) -> Result<(), ExExManagerHandleError> {
+        self.ready().await?;
+        self.exex_tx.send(notification)?;
+        Ok(())
     }
 
     /// Whether there is capacity in the ExEx manager's internal notification buffer.
@@ -372,9 +373,18 @@ impl ExExManagerHandle {
         self.current_capacity.load(Ordering::Relaxed) > 0
     }
 
-    pub async fn ready(&self) {
-        todo!()
+    pub async fn ready(&mut self) -> Result<(), RecvError> {
+        self.is_ready.wait_for(|ready| *ready).await?;
+        Ok(())
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ExExManagerHandleError {
+    #[error(transparent)]
+    SendError(#[from] SendError<CanonStateNotification>),
+    #[error(transparent)]
+    RecvError(#[from] RecvError),
 }
 
 #[cfg(test)]

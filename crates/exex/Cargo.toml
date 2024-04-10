@@ -20,5 +20,7 @@ reth-node-core.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-tasks.workspace = true
+
 tokio.workspace = true
 tokio-util.workspace = true
+thiserror.workspace = true
