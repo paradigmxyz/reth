@@ -20,7 +20,7 @@ jobs:
   iai:
     runs-on:
       group: Reth
-    # Only run benchmarks in merge groups
+    # Only run benchmarks in merge groups and on main
     #if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
