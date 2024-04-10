@@ -3,6 +3,7 @@ bin/                        @onbjerg
 crates/blockchain-tree      @rakita @rkrasiuk
 crates/consensus/auto-seal  @mattsse
 crates/consensus/beacon     @rkrasiuk @mattsse @Rjected
+crates/exex                 @onbjerg @shekhirin
 crates/metrics              @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk
