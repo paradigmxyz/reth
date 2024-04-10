@@ -75,10 +75,10 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
             // Finished filling the mappings, print the results
             println!("Finished block range: {:?}", chain.first().number..=chain.tip().number);
             if !contract_deposits.is_empty() {
-                print_amounts("Contract Deposits", contract_deposits);
+                print_amounts("OP Stack Deposits", contract_deposits);
             }
             if !contract_withdrawals.is_empty() {
-                print_amounts("Contract Withdrawals", contract_withdrawals);
+                print_amounts("OP Stack Withdrawals", contract_withdrawals);
             }
 
             // Send a finished height event, signaling the node that we don't need any blocks below
