@@ -3,7 +3,7 @@
 //!
 //! An execution extension is a task that derives its state from Reth's state.
 //!
-//! Some examples of state such state derives are rollups, bridges, and indexers.
+//! Some examples of such state derives are rollups, bridges, and indexers.
 //!
 //! An ExEx is a [`Future`] resolving to a `Result<()>` that is run indefinitely alongside Reth.
 //!
@@ -19,9 +19,9 @@
 //! ExEx's **SHOULD** emit an `ExExEvent::FinishedHeight` event to signify what blocks have been
 //! processed. This event is used by Reth to determine what state can be pruned.
 //!
-//! An ExEx will not receive notifications for blocks less than the block emitted in the event. To
+//! An ExEx will only receive notifications for blocks greater than the block emitted in the event. To
 //! clarify: if the ExEx emits `ExExEvent::FinishedHeight(0)` it will receive notifications for any
-//! `block_number >= 0`.
+//! `block_number > 0`.
 //!
 //! [`Future`]: std::future::Future
 //! [`ExExContext`]: crate::ExExContext
