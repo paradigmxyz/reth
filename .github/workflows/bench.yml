@@ -39,7 +39,7 @@ jobs:
           cargo binstall iai-callgrind-runner --version $version --no-confirm --no-symlinks
       - name: Run benchmarks
         run: |
-          git checkout main
+          git checkout origin/main
           cargo run --bin reth -- test-vectors tables
           cargo bench -p reth-db --bench iai --features test-utils -- --save-baseline=main
           git checkout ${{ github.ref }}
