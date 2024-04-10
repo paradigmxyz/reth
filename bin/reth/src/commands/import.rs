@@ -61,6 +61,10 @@ pub struct ImportCommand {
     )]
     chain: Arc<ChainSpec>,
 
+    /// Disables execution stage.
+    #[arg(long, value_name = "DISABLE_EXECUTION", verbatim_doc_comment)]
+    disable_execution: bool,
+
     #[command(flatten)]
     db: DatabaseArgs,
 
@@ -70,10 +74,6 @@ pub struct ImportCommand {
     /// remaining stages are executed.
     #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
     path: PathBuf,
-
-    /// Disables execution stage.
-    #[arg(value_name = "DISABLE_EXEC_STAGE", verbatim_doc_comment)]
-    disable_execution: bool,
 }
 
 impl ImportCommand {
