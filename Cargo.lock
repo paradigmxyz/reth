@@ -6569,6 +6569,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-tasks",
+ "reth-tracing",
  "tokio",
  "tokio-util",
 ]
