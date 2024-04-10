@@ -19,7 +19,7 @@ jobs:
     runs-on:
       group: Reth
     # Only run benchmarks in merge groups
-    if: github.event_name != 'pull_request'
+    # if: github.event_name != 'pull_request'
     steps:
       - name: Checkout main sources
         uses: actions/checkout@v4
@@ -47,6 +47,7 @@ jobs:
             tr -d '"'
           )
           cargo install iai-callgrind-runner --version $version
+        working-directory: pr
       - name: Generate test vectors
         run: |
           cargo run --bin reth --manifest-path main/Cargo.toml -- test-vectors tables
