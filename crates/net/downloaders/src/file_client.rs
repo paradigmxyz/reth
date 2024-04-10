@@ -81,8 +81,13 @@ impl FileClient {
 
         while let Some(block_res) = stream.next().await {
             let block = block_res?;
-            let block_hash = block.header.hash_slow();
             let block_number = block.header.number;
+            let block_hash = block.header.hash_slow();
+
+            if headers.contains_key(&block_number) && bodies.contains_key(&block.header.hash_slow())
+            {
+                continue
+            }
 
             // add to the internal maps
             headers.insert(block.header.number, block.header.clone());
