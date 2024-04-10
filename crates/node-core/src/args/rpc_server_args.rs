@@ -202,7 +202,6 @@ impl RpcServerArgs {
     /// Enables the Auth IPC
     pub fn with_auth_ipc(mut self) -> Self {
         self.auth_ipc = true;
-        self.auth_ipc_path = Some(constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
         self
     }
 
