@@ -1,6 +1,5 @@
 //! Optimism helpers.
 
-use reth_primitives::U256;
 use revm::L1BlockInfo;
 
 /// Optimism Transaction Metadata

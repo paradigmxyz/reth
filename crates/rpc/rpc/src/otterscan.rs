@@ -158,7 +158,7 @@ where
         }
 
         // Crop receipts and transform them into OtsTransactionReceipt
-        let timestamp = Some(u64::try_from(block.header.timestamp).unwrap_or(u64::MAX));
+        let timestamp = Some(block.header.timestamp);
         let receipts = receipts
             .drain(page_start..page_end)
             .map(|receipt| {
