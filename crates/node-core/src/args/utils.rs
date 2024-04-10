@@ -10,14 +10,14 @@ use std::{
 };
 
 #[cfg(feature = "optimism")]
-use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_SEPOLIA};
+use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
 #[cfg(not(feature = "optimism"))]
 use reth_primitives::{DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};
 
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
-pub const SUPPORTED_CHAINS: &[&str] = &["base", "base-sepolia", "optimism-sepolia"];
+pub const SUPPORTED_CHAINS: &[&str] = &["base", "base-sepolia", "optimism", "optimism-sepolia"];
 #[cfg(not(feature = "optimism"))]
 /// Chains supported by reth. First value should be used as the default.
 pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "goerli", "holesky", "dev"];
@@ -43,11 +43,13 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
+        "optimism" => OP_MAINNET.clone(),
+        #[cfg(feature = "optimism")]
         "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
         #[cfg(feature = "optimism")]
-        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
-        #[cfg(feature = "optimism")]
         "base" => BASE_MAINNET.clone(),
+        #[cfg(feature = "optimism")]
+        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             serde_json::from_str(&raw)?
@@ -78,11 +80,13 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
+        "optimism" => OP_MAINNET.clone(),
+        #[cfg(feature = "optimism")]
         "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
         #[cfg(feature = "optimism")]
-        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
-        #[cfg(feature = "optimism")]
         "base" => BASE_MAINNET.clone(),
+        #[cfg(feature = "optimism")]
+        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
         _ => {
             // try to read json from path first
             let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {

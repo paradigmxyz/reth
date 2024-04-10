@@ -21,7 +21,7 @@ use reth_downloaders::{
 use reth_interfaces::consensus::Consensus;
 use reth_node_core::{events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
-use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
+use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256, OP_RETH_MAINNET_BELOW_BEDROCK};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
@@ -61,6 +61,10 @@ pub struct ImportCommand {
     )]
     chain: Arc<ChainSpec>,
 
+    /// Disables execution stage.
+    #[arg(long, value_name = "DISABLE_EXECUTION", verbatim_doc_comment)]
+    disable_execution: bool,
+
     #[command(flatten)]
     db: DatabaseArgs,
 
@@ -74,8 +78,12 @@ pub struct ImportCommand {
 
 impl ImportCommand {
     /// Execute `import` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(mut self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
+
+        if std::env::var(OP_RETH_MAINNET_BELOW_BEDROCK) == Ok("1".to_string()) {
+            self.disable_execution = true;
+        }
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
@@ -118,6 +126,7 @@ impl ImportCommand {
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
+                self.disable_execution,
             )
             .await?;
 
@@ -154,6 +163,7 @@ impl ImportCommand {
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
         static_file_producer: StaticFileProducer<DB>,
+        disable_execution: bool,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,
@@ -177,40 +187,43 @@ impl ImportCommand {
 
         let max_block = file_client.max_block().unwrap_or(0);
 
+        let mut stages = DefaultStages::new(
+            provider_factory.clone(),
+            HeaderSyncMode::Tip(tip_rx),
+            consensus.clone(),
+            header_downloader,
+            body_downloader,
+            factory.clone(),
+            config.stages.etl,
+        )
+        .set(SenderRecoveryStage {
+            commit_threshold: config.stages.sender_recovery.commit_threshold,
+        });
+
+        if !disable_execution {
+            stages = stages.set(ExecutionStage::new(
+                factory,
+                ExecutionStageThresholds {
+                    max_blocks: config.stages.execution.max_blocks,
+                    max_changes: config.stages.execution.max_changes,
+                    max_cumulative_gas: config.stages.execution.max_cumulative_gas,
+                    max_duration: config.stages.execution.max_duration,
+                },
+                config
+                    .stages
+                    .merkle
+                    .clean_threshold
+                    .max(config.stages.account_hashing.clean_threshold)
+                    .max(config.stages.storage_hashing.clean_threshold),
+                config.prune.map(|prune| prune.segments).unwrap_or_default(),
+            ));
+        }
+
         let mut pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty
             .with_max_block(max_block)
-            .add_stages(
-                DefaultStages::new(
-                    provider_factory.clone(),
-                    HeaderSyncMode::Tip(tip_rx),
-                    consensus.clone(),
-                    header_downloader,
-                    body_downloader,
-                    factory.clone(),
-                    config.stages.etl,
-                )
-                .set(SenderRecoveryStage {
-                    commit_threshold: config.stages.sender_recovery.commit_threshold,
-                })
-                .set(ExecutionStage::new(
-                    factory,
-                    ExecutionStageThresholds {
-                        max_blocks: config.stages.execution.max_blocks,
-                        max_changes: config.stages.execution.max_changes,
-                        max_cumulative_gas: config.stages.execution.max_cumulative_gas,
-                        max_duration: config.stages.execution.max_duration,
-                    },
-                    config
-                        .stages
-                        .merkle
-                        .clean_threshold
-                        .max(config.stages.account_hashing.clean_threshold)
-                        .max(config.stages.storage_hashing.clean_threshold),
-                    config.prune.map(|prune| prune.segments).unwrap_or_default(),
-                )),
-            )
+            .add_stages(stages)
             .build(provider_factory, static_file_producer);
 
         let events = pipeline.events().map(Into::into);

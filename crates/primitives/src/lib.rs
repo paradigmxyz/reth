@@ -98,8 +98,9 @@ pub use transaction::{
     InvalidTransactionError, Signature, Transaction, TransactionKind, TransactionMeta,
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
     TxEip4844, TxHashOrNumber, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, OP_RETH_MAINNET_BELOW_BEDROCK,
 };
+
 pub use withdrawal::{Withdrawal, Withdrawals};
 
 // Re-exports
@@ -141,7 +142,7 @@ pub use c_kzg as kzg;
 #[cfg(feature = "optimism")]
 mod optimism {
     pub use crate::{
-        chain::{BASE_MAINNET, BASE_SEPOLIA, OP_SEPOLIA},
+        chain::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA},
         transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
     };
 }
