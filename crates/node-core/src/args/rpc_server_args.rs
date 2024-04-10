@@ -182,8 +182,8 @@ pub struct RpcServerArgs {
     pub auth_ipc: bool,
 
     /// Filename for auth IPC socket/pipe within the datadir
-    #[arg(long = "auth-ipc.path")]
-    pub auth_ipc_path: Option<String>,
+    #[arg(long = "auth-ipc.path", default_value_t = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())]
+    pub auth_ipc_path: String,
 }
 
 impl RpcServerArgs {
@@ -474,11 +474,7 @@ impl RethRpcConfig for RpcServerArgs {
 
         let mut builder = AuthServerConfig::builder(jwt_secret).socket_addr(address);
         if self.auth_ipc {
-            builder = builder.ipc_endpoint(
-                self.auth_ipc_path
-                    .clone()
-                    .unwrap_or_else(|| constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string()),
-            );
+            builder = builder.ipc_endpoint(self.auth_ipc_path.clone());
         }
         Ok(builder.build())
     }
@@ -517,7 +513,7 @@ impl Default for RpcServerArgs {
             auth_port: constants::DEFAULT_AUTH_PORT,
             auth_jwtsecret: None,
             auth_ipc: false,
-            auth_ipc_path: None,
+            auth_ipc_path: constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string(),
             rpc_jwtsecret: None,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
