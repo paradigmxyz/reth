@@ -112,7 +112,7 @@ impl ExExHandle {
     }
 }
 
-// todo
+/// Metrics for the ExEx manager.
 #[derive(Metrics)]
 #[metrics(scope = "exex_manager")]
 pub struct ExExManagerMetrics {
@@ -300,6 +300,7 @@ impl Future for ExExManager {
         for exex in self.exex_handles.iter_mut() {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
                 debug!(?event, "received event from exex {}", exex.id);
+                exex.metrics.events_sent.increment(1);
                 match event {
                     ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
                 }
