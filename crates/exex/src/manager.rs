@@ -53,7 +53,8 @@ pub struct ExExHandle {
     next_notification_id: usize,
 
     /// The finished block number of the ExEx.
-    /// tbd describe how this can change, what None means, what this is used for
+    ///
+    /// If this is `None`, the ExEx has not emitted a `FinishedHeight` event.
     finished_height: Option<BlockNumber>,
 }
 
@@ -128,7 +129,6 @@ pub struct ExExManagerMetrics {
     buffer_size: Gauge,
 }
 
-// todo: if event is sent to exex it is considered delivered
 /// The execution extension manager.
 ///
 /// The manager is responsible for:
@@ -138,14 +138,9 @@ pub struct ExExManagerMetrics {
 /// - Backpressure
 /// - Error handling
 /// - Monitoring
-///
-/// TBD
 #[derive(Debug)]
 pub struct ExExManager {
     /// Handles to communicate with the ExEx's.
-    // todo(onbjerg): we should document that these notifications can include blocks the exex does
-    // not care about if a longer chain segment is sent - filtering is up to the exex. where do
-    // we document it, though?
     exex_handles: Vec<ExExHandle>,
 
     /// [`CanonStateNotification`] channel from the [`ExExManagerHandle`]s.
@@ -177,7 +172,7 @@ pub struct ExExManager {
     /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
     finished_height: watch::Sender<Option<BlockNumber>>,
 
-    /// tbd
+    /// A handle to the ExEx manager.
     handle: ExExManagerHandle,
     /// Metrics for the ExEx manager.
     metrics: ExExManagerMetrics,
@@ -257,8 +252,7 @@ impl ExExManager {
 }
 
 impl Future for ExExManager {
-    // todo
-    type Output = Result<(), ()>;
+    type Output = eyre::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // drain handle notifications
@@ -271,7 +265,6 @@ impl Future for ExExManager {
             break
         }
 
-        // todo: drain blockchain tree notifications
         // update capacity
         self.update_capacity();
 
@@ -288,9 +281,9 @@ impl Future for ExExManager {
                 .expect("exex expected notification ID outside the manager's range");
             if let Some(notification) = self.buffer.get(notification_id) {
                 debug!(exex.id, notification_id, "sent notification to exex");
-                if let Poll::Ready(Err(_)) = exex.send(cx, notification) {
+                if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
                     // the channel was closed, which is irrecoverable for the manager
-                    return Poll::Ready(Err(()))
+                    return Poll::Ready(Err(err.into()))
                 }
             }
             min_id = min_id.min(exex.next_notification_id);
@@ -317,7 +310,6 @@ impl Future for ExExManager {
         }
 
         // update watch channel block number
-        // todo: clean this up and also is this too expensive
         let finished_height = self.exex_handles.iter_mut().try_fold(u64::MAX, |curr, exex| {
             let height = match exex.finished_height {
                 None => return Err(()),
