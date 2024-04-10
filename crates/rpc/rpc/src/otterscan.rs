@@ -164,7 +164,7 @@ where
             .map(|receipt| {
                 let receipt = receipt.inner.map_inner(|receipt| OtsReceipt {
                     status: receipt.inner.receipt.status,
-                    cumulative_gas_used: receipt.inner.receipt.cumulative_gas_used,
+                    cumulative_gas_used: receipt.inner.receipt.cumulative_gas_used as u64,
                     logs: None,
                     logs_bloom: None,
                     r#type: receipt.r#type,

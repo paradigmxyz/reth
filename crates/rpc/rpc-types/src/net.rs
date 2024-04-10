@@ -1,7 +1,9 @@
 use crate::{pk_to_id, PeerId};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rpc_types::admin::EthProtocolInfo;
 use enr::Enr;
 use secp256k1::{SecretKey, SECP256K1};
+use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
     fmt,
@@ -10,8 +12,6 @@ use std::{
     num::ParseIntError,
     str::FromStr,
 };
-use alloy_rpc_types::admin::EthProtocolInfo;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::{Host, Url};
 
