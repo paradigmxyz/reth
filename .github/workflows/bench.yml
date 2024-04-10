@@ -40,6 +40,13 @@ jobs:
             main -> target
             pr -> target
           cache-on-failure: true
+      - name: Install iai-callgrind-runner
+        run: |
+          version=$(cargo metadata --format-version=1 |\
+            jq '.packages[] | select(.name == "iai-callgrind").version' |\
+            tr -d '"'
+          )
+          cargo install iai-callgrind-runner --version $version
       - name: Generate test vectors
         run: |
           cargo run --bin reth --manifest-path main/Cargo.toml -- test-vectors tables
