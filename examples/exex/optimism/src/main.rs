@@ -124,9 +124,7 @@ fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("Optimism".to_string(), move |ctx| {
-                futures::future::ok(OptimismExEx { ctx })
-            })
+            .install_exex("Optimism", move |ctx| futures::future::ok(OptimismExEx { ctx }))
             .launch()
             .await?;
 
