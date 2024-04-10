@@ -84,11 +84,6 @@ impl FileClient {
             let block_number = block.header.number;
             let block_hash = block.header.hash_slow();
 
-            if headers.contains_key(&block_number) && bodies.contains_key(&block.header.hash_slow())
-            {
-                continue
-            }
-
             // add to the internal maps
             headers.insert(block.header.number, block.header.clone());
             hash_to_number.insert(block_hash, block.header.number);
