@@ -48,5 +48,7 @@ jobs:
         run: cargo bench -p reth-db --bench iai --features test-utils -- --save-baseline=$BASELINE
       - name: Checkout PR
         uses: actions/checkout@v4
+        with:
+          clean: false
       - name: Compare PR benchmarks
         run: cargo bench -p reth-db --bench iai --features test-utils -- --baseline=$BASELINE
