@@ -350,13 +350,6 @@ impl ReceiptProvider for MockEthProvider {
         Ok(None)
     }
 
-    fn receipts_by_block_range(
-        &self,
-        _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<Receipt>>> {
-        Ok(vec![])
-    }
-
     fn receipts_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,

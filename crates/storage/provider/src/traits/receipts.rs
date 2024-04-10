@@ -1,9 +1,7 @@
 use std::ops::RangeBounds;
 
 use reth_interfaces::provider::ProviderResult;
-use reth_primitives::{
-    BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, Receipt, TxHash, TxNumber,
-};
+use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, Receipt, TxHash, TxNumber};
 
 use crate::BlockIdReader;
 
@@ -24,12 +22,6 @@ pub trait ReceiptProvider: Send + Sync {
     ///
     /// Returns `None` if the block is not found.
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>>;
-
-    /// Get receipts by block range.
-    fn receipts_by_block_range(
-        &self,
-        range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<Receipt>>>;
 
     /// Get receipts by tx range.
     fn receipts_by_tx_range(

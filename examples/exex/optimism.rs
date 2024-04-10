@@ -122,7 +122,6 @@ fn contract_address_to_name(address: Address) -> Option<&'static str> {
 }
 
 fn main() -> eyre::Result<()> {
-    // TODO(alexey): uncomment when https://github.com/paradigmxyz/reth/pull/7340 is merged
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())

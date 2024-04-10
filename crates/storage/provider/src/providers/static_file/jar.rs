@@ -310,13 +310,6 @@ impl<'a> ReceiptProvider for StaticFileJarProvider<'a> {
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn receipts_by_block_range(
-        &self,
-        _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<Receipt>>> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
