@@ -25,10 +25,10 @@ use tokio_util::sync::{PollSendError, PollSender};
 #[derive(Metrics)]
 #[metrics(scope = "exex")]
 struct ExExMetrics {
-    /// The number of canonical state notifications processed by an ExEx.
-    notifications_processed: Counter,
-    /// The number of events an ExEx has sent to the manager.
-    events_sent: Counter,
+    /// The total number of canonical state notifications sent to an ExEx.
+    notifications_sent_total: Counter,
+    /// The total number of events an ExEx has sent to the manager.
+    events_sent_total: Counter,
 }
 
 /// A handle to an ExEx used by the [`ExExManager`] to communicate with ExEx's.
@@ -104,7 +104,7 @@ impl ExExHandle {
         match self.sender.send_item(notification.clone()) {
             Ok(()) => {
                 self.next_notification_id = event_id + 1;
-                self.metrics.notifications_processed.increment(1);
+                self.metrics.notifications_sent_total.increment(1);
                 Poll::Ready(Ok(()))
             }
             Err(err) => Poll::Ready(Err(err)),
@@ -300,7 +300,7 @@ impl Future for ExExManager {
         for exex in self.exex_handles.iter_mut() {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
                 debug!(?event, "received event from exex {}", exex.id);
-                exex.metrics.events_sent.increment(1);
+                exex.metrics.events_sent_total.increment(1);
                 match event {
                     ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
                 }
