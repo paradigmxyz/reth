@@ -21,7 +21,7 @@ use reth_downloaders::{
 use reth_interfaces::consensus::Consensus;
 use reth_node_core::{events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
-use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
+use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256, OP_RETH_MAINNET_BELOW_BEDROCK};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
@@ -65,11 +65,6 @@ pub struct ImportCommand {
     #[arg(long, value_name = "DISABLE_EXECUTION", verbatim_doc_comment)]
     disable_execution: bool,
 
-    /// Import OP Mainnet chain below bedrock.
-    #[cfg(feature = "optimism")]
-    #[arg(long, value_name = "OP_MAINNET_BELOW_BEDROCK", verbatim_doc_comment)]
-    op_mainnet_below_bedrock: bool,
-
     #[command(flatten)]
     db: DatabaseArgs,
 
@@ -85,6 +80,10 @@ impl ImportCommand {
     /// Execute `import` command
     pub async fn execute(mut self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
+
+        if std::env::var(OP_RETH_MAINNET_BELOW_BEDROCK) == Ok("1".to_string()) {
+            self.disable_execution = true;
+        }
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
@@ -115,12 +114,6 @@ impl ImportCommand {
         // override the tip
         let tip = file_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
-
-        #[cfg(feature = "optimism")]
-        if self.op_mainnet_below_bedrock {
-            self.disable_execution = true;
-            std::env::set_var(reth_primitives::OP_RETH_MAINNET_BELOW_BEDROCK, "1");
-        }
 
         let (mut pipeline, events) = self
             .build_import_pipeline(
