@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   BASELINE: base
+  IAI_CALLGRIND_RUNNER: iai-callgrind-runner
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
