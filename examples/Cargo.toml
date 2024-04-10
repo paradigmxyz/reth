@@ -6,15 +6,12 @@ edition.workspace = true
 license.workspace = true
 
 [dev-dependencies]
-reth.workspace = true
-reth-node-ethereum.workspace = true
 reth-primitives.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
-reth-exex.workspace = true
 reth-revm.workspace = true
 reth-blockchain-tree.workspace = true
 reth-beacon-consensus.workspace = true
@@ -22,14 +19,11 @@ reth-network-api.workspace = true
 reth-network.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
-reth-config.workspace = true
 
 eyre.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
-alloy-sol-types = { workspace = true, features = ["json"] }
-itertools.workspace = true
 
 [[example]]
 name = "db-access"
@@ -43,6 +37,3 @@ path = "network.rs"
 name = "network-txpool"
 path = "network-txpool.rs"
 
-[[example]]
-name = "exex-optimism"
-path = "exex/optimism.rs"

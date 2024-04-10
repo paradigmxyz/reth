@@ -13,7 +13,7 @@ use reth_node_ethereum::EthereumNode;
 use reth_primitives::{address, constants::ETH_TO_WEI, Address, U256};
 use reth_provider::CanonStateNotification;
 
-sol!(L1StandardBridge, "exex/optimism_l1_standard_bridge_abi.json");
+sol!(L1StandardBridge, "l1_standard_bridge_abi.json");
 use crate::L1StandardBridge::{ETHBridgeFinalized, ETHBridgeInitiated, L1StandardBridgeEvents};
 
 struct OptimismExEx<Node: FullNodeTypes> {

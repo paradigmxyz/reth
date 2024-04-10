@@ -2721,20 +2721,14 @@ checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 name = "examples"
 version = "0.0.0"
 dependencies = [
- "alloy-sol-types",
  "async-trait",
  "eyre",
  "futures",
- "itertools 0.12.1",
- "reth",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
- "reth-config",
  "reth-db",
- "reth-exex",
  "reth-network",
  "reth-network-api",
- "reth-node-ethereum",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -2743,6 +2737,24 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-tasks",
  "reth-transaction-pool",
+ "tokio",
+]
+
+[[package]]
+name = "exex-optimism"
+version = "0.0.0"
+dependencies = [
+ "alloy-sol-types",
+ "eyre",
+ "futures",
+ "itertools 0.12.1",
+ "reth",
+ "reth-exex",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-provider",
  "tokio",
 ]
 
