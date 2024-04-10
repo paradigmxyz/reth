@@ -21,41 +21,27 @@ jobs:
     # Only run benchmarks in merge groups
     # if: github.event_name != 'pull_request'
     steps:
-      - name: Checkout main sources
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          path: main
-      - name: Checkout PR sources
-        uses: actions/checkout@v4
-        with:
-          clean: false
-          path: pr
+      - uses: actions/checkout@v4
       - name: Install Valgrind
         run: sudo apt update && sudo apt install valgrind
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            main -> target
-            pr -> target
           cache-on-failure: true
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@cargo-binstall
       - name: Install iai-callgrind-runner
         run: |
           version=$(cargo metadata --format-version=1 |\
             jq '.packages[] | select(.name == "iai-callgrind").version' |\
             tr -d '"'
           )
-          cargo install iai-callgrind-runner --version $version
-        working-directory: pr
+          cargo binstall iai-callgrind-runner --version $version
       - name: Generate test vectors
+        run: cargo run --bin reth --manifest-path main/Cargo.toml -- test-vectors tables
+      - name: Run benchmarks
         run: |
-          cargo run --bin reth --manifest-path main/Cargo.toml -- test-vectors tables
-          cp -r testdata main
-          mv testdata pr
-      - name: Set main baseline
-        run: cargo bench --package reth-db --bench iai --features test-utils --manifest-path main/Cargo.toml
-      - name: Compare PR benchmark
-        shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
-        run: .github/scripts/compare_iai.sh
-        working-directory: pr
+          git checkout main
+          cargo bench -p reth-db --bench iai --features test-utils -- --save-baseline=main
+          git checkout ${{ github.ref }}
+          cargo bench -p reth-db --bench iai --features test-utils -- --baseline=main
