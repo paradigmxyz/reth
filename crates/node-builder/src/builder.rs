@@ -607,7 +607,7 @@ where
             debug!(target: "reth::cli", "spawning exex manager");
             // todo(onbjerg): rm magic number
             let exex_manager = ExExManager::new(exex_handles, 1024);
-            let exex_manager_handle = exex_manager.handle();
+            let mut exex_manager_handle = exex_manager.handle();
             ctx.executor.spawn_critical("exex manager", async move {
                 exex_manager.await.expect("exex manager crashed");
             });
