@@ -87,6 +87,15 @@ impl ExExHandle {
         cx: &mut Context<'_>,
         (event_id, notification): &(usize, CanonStateNotification),
     ) -> Poll<Result<(), PollSendError<CanonStateNotification>>> {
+        // check that this notification is above the finished height of the exex if the exex has set
+        // one
+        if let Some(finished_height) = self.finished_height {
+            if finished_height > notification.tip().number {
+                self.next_notification_id = event_id + 1;
+                return Poll::Ready(Ok(()))
+            }
+        }
+
         match self.sender.poll_reserve(cx) {
             Poll::Ready(Ok(())) => (),
             other => return other,
