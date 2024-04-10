@@ -103,7 +103,7 @@ impl FileClient {
 
             if log_interval == 0 {
                 log_interval_start_block = block_number;
-            } else if log_interval % 10 == 0 {
+            } else if log_interval % 100000 == 0 {
                 trace!(target: "downloaders::file",
                     blocks=?log_interval_start_block..=block_number,
                     "inserted blocks into db"
