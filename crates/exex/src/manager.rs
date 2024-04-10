@@ -346,7 +346,7 @@ pub struct ExExManagerHandle {
 }
 
 impl ExExManagerHandle {
-    /// Send a notification over the channel to all execution extensions.
+    /// Synchronously send a notification over the channel to all execution extensions.
     ///
     /// Senders should call [`Self::has_capacity`] first.
     pub fn send(
@@ -356,7 +356,7 @@ impl ExExManagerHandle {
         self.exex_tx.send(notification)
     }
 
-    /// Send a notification over the channel to all execution extensions.
+    /// Asynchronously send a notification over the channel to all execution extensions.
     ///
     /// The returned future resolves when the notification has been delivered. If there is no
     /// capacity in the channel, the future will wait.
@@ -366,6 +366,11 @@ impl ExExManagerHandle {
     ) -> Result<(), SendError<CanonStateNotification>> {
         self.ready().await;
         self.exex_tx.send(notification)
+    }
+
+    /// Get the current capacity of the ExEx manager's internal notification buffer.
+    pub fn capacity(&self) -> usize {
+        self.current_capacity.load(Ordering::Relaxed)
     }
 
     /// Whether there is capacity in the ExEx manager's internal notification buffer.
