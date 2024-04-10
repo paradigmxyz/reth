@@ -595,9 +595,7 @@ where
                 let span = reth_tracing::tracing::info_span!("exex {id}");
                 let _enter = span.enter();
                 ctx.executor.spawn_critical("exex", async move {
-                    debug!(target: "reth::cli", "exex started");
-                    exex.await.unwrap_or_else(|_| panic!("exex crashed"));
-                    debug!(target: "reth::cli", "exex exited");
+                    exex.await.unwrap_or_else(|_| panic!("exex crashed"))
                 });
             }
 
@@ -609,7 +607,7 @@ where
             debug!(target: "reth::cli", "spawning exex manager");
             // todo(onbjerg): rm magic number
             let exex_manager = ExExManager::new(exex_handles, 1024);
-            let mut exex_manager_handle = exex_manager.handle();
+            let exex_manager_handle = exex_manager.handle();
             ctx.executor.spawn_critical("exex manager", async move {
                 exex_manager.await.expect("exex manager crashed");
             });

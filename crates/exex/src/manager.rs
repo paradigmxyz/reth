@@ -17,7 +17,7 @@ use reth_provider::CanonStateNotification;
 use reth_tracing::tracing::debug;
 use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
-    watch::{self},
+    watch,
 };
 use tokio_util::sync::{PollSendError, PollSender};
 
@@ -366,8 +366,7 @@ impl ExExManagerHandle {
         notification: CanonStateNotification,
     ) -> Result<(), SendError<CanonStateNotification>> {
         self.ready().await;
-        self.exex_tx.send(notification)?;
-        Ok(())
+        self.exex_tx.send(notification)
     }
 
     /// Whether there is capacity in the ExEx manager's internal notification buffer.
