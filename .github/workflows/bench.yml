@@ -20,7 +20,7 @@ jobs:
     runs-on:
       group: Reth
     # Only run benchmarks in merge groups
-    # if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
       - name: Install Valgrind
