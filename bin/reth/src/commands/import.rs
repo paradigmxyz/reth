@@ -119,7 +119,7 @@ impl ImportCommand {
         #[cfg(feature = "optimism")]
         if self.op_mainnet_below_bedrock {
             self.disable_execution = true;
-            std::env::set_var("OP_RETH_IMPORT_BELOW_BEDROCK", "1");
+            std::env::set_var(reth_primitives::OP_RETH_MAINNET_BELOW_BEDROCK, "1");
         }
 
         let (mut pipeline, events) = self
