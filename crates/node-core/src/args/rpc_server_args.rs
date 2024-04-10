@@ -473,7 +473,15 @@ impl RethRpcConfig for RpcServerArgs {
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError> {
         let address = SocketAddr::new(self.auth_addr, self.auth_port);
 
-        Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
+        let mut builder = AuthServerConfig::builder(jwt_secret).socket_addr(address);
+        if self.auth_ipc {
+            builder = builder.ipc_endpoint(
+                self.auth_ipc_path
+                    .clone()
+                    .unwrap_or_else(|| constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string()),
+            );
+        }
+        Ok(builder.build())
     }
 
     fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
