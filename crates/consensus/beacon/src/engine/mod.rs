@@ -677,6 +677,10 @@ where
                             // threshold
                             return Some(state.finalized_block_hash)
                         }
+                        #[cfg(feature = "optimism")]
+                        {
+                            return Some(state.head_block_hash)
+                        }
                     }
                     Ok(Some(_)) => {
                         // we're fully synced to the finalized block
