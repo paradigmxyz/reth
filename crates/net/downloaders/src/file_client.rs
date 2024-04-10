@@ -76,9 +76,13 @@ impl FileClient {
         // use with_capacity to make sure the internal buffer contains the entire file
         let mut stream = FramedRead::with_capacity(&reader[..], BlockFileCodec, file_len as usize);
 
+        let mut log_interval = 0;
+        let mut log_interval_start_block = 0;
+
         while let Some(block_res) = stream.next().await {
             let block = block_res?;
             let block_hash = block.header.hash_slow();
+            let block_number = block.header.number;
 
             // add to the internal maps
             headers.insert(block.header.number, block.header.clone());
@@ -91,6 +95,17 @@ impl FileClient {
                     withdrawals: block.withdrawals,
                 },
             );
+
+            if log_interval == 0 {
+                log_interval_start_block = block_number;
+            } else if log_interval % 10 == 0 {
+                trace!(target: "downloaders::file",
+                    blocks=?log_interval_start_block..block_number,
+                    "inserted blocks into db"
+                );
+                log_interval_start_block = block_number + 1;
+            }
+            log_interval += 1;
         }
 
         trace!(blocks = headers.len(), "Initialized file client");
