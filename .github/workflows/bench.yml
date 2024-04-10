@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  BASELINE: base
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -37,10 +38,15 @@ jobs:
             tr -d '"'
           )
           cargo binstall iai-callgrind-runner --version $version --no-confirm --no-symlinks
-      - name: Run benchmarks
-        run: |
-          git checkout refs/heads/main
-          cargo run --bin reth -- test-vectors tables
-          cargo bench -p reth-db --bench iai --features test-utils -- --save-baseline=base
-          git checkout ${{ github.ref }}
-          cargo bench -p reth-db --bench iai --features test-utils -- --baseline=base
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref || 'main' }}
+      - name: Generate test vectors
+        run: cargo run --bin reth -- test-vectors tables
+      - name: Save baseline
+        run: cargo bench -p reth-db --bench iai --features test-utils -- --save-baseline=$BASELINE
+      - name: Checkout PR
+        uses: actions/checkout@v4
+      - name: Compare PR benchmarks
+        run: cargo bench -p reth-db --bench iai --features test-utils -- --baseline=$BASELINE
