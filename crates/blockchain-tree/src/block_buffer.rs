@@ -1,7 +1,10 @@
 use crate::metrics::BlockBufferMetrics;
-use reth_network::cache::LruMap;
+use reth_network::cache::LruCache;
 use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
-use std::collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet};
+use std::{
+    collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet},
+    num::NonZeroUsize,
+};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
 /// It allows to store unconnected blocks for potential future inclusion.
@@ -29,7 +32,7 @@ pub struct BlockBuffer {
     /// first in line for evicting if `max_blocks` limit is hit.
     ///
     /// Used as counter of amount of blocks inside buffer.
-    pub(crate) lru: LruMap<BlockHash, ()>,
+    pub(crate) lru: LruCache<BlockHash>,
     /// Various metrics for the block buffer.
     pub(crate) metrics: BlockBufferMetrics,
 }
@@ -41,7 +44,7 @@ impl BlockBuffer {
             blocks: Default::default(),
             parent_to_child: Default::default(),
             earliest_blocks: Default::default(),
-            lru: LruMap::new(limit as u32),
+            lru: LruCache::new(NonZeroUsize::new(limit).unwrap()),
             metrics: Default::default(),
         }
     }
@@ -73,12 +76,14 @@ impl BlockBuffer {
         self.earliest_blocks.entry(block.number).or_default().insert(hash);
         self.blocks.insert(hash, block);
 
-        if !self.lru.insert(hash, ()) {
-            // Evict the block if limit is hit
-            if let Some(evicted_block) = self.remove_block(&hash) {
-                self.remove_from_parent(evicted_block.parent_hash, &hash);
+        if let (_, Some(evicted_hash)) = self.lru.insert_and_get_evicted(hash) {
+            // evict the block if limit is hit
+            if let Some(evicted_block) = self.remove_block(&evicted_hash) {
+                // evict the block if limit is hit
+                self.remove_from_parent(evicted_block.parent_hash, &evicted_hash);
             }
         }
+        self.metrics.blocks.set(self.blocks.len() as f64);
     }
     /// Removes the given block from the buffer and also all the children of the block.
     ///
