@@ -3,7 +3,6 @@
 use core::hash::BuildHasher;
 use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
-use linked_hash_set::LinkedHashSet;
 use schnellru::{ByLength, Limiter, RandomState, Unlimited};
 use std::{borrow::Borrow, fmt, hash::Hash, num::NonZeroUsize};
 
@@ -12,15 +11,15 @@ use std::{borrow::Borrow, fmt, hash::Hash, num::NonZeroUsize};
 /// If the length exceeds the set capacity, the oldest element will be removed
 /// In the limit, for each element inserted the oldest existing element will be removed.
 #[derive(Clone)]
-pub struct LruCache<T: Hash + Eq> {
+pub struct LruCache<T: Hash + Eq + Clone> {
     limit: NonZeroUsize,
-    inner: LinkedHashSet<T>,
+    inner: LruMap<T, ()>,
 }
 
-impl<T: Hash + Eq> LruCache<T> {
+impl<T: Hash + Eq + Clone> LruCache<T> {
     /// Creates a new [`LruCache`] using the given limit
     pub fn new(limit: NonZeroUsize) -> Self {
-        Self { inner: LinkedHashSet::new(), limit }
+        Self { inner: LruMap::new(limit), limit }
     }
 
     /// Insert an element into the set.
@@ -74,7 +73,7 @@ impl<T: Hash + Eq> LruCache<T> {
 
     /// Returns an iterator over all cached entries in lru order
     pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.inner.iter().rev()
+        self.inner.iter().rev().map(|(item, _)| item)
     }
 
     /// Returns number of elements currently in cache.
@@ -92,7 +91,7 @@ impl<T: Hash + Eq> LruCache<T> {
 
 impl<T> Extend<T> for LruCache<T>
 where
-    T: Eq + Hash,
+    T: Eq + Hash + Clone,
 {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for item in iter.into_iter() {
@@ -103,7 +102,7 @@ where
 
 impl<T> fmt::Debug for LruCache<T>
 where
-    T: fmt::Debug + Hash + Eq,
+    T: fmt::Debug + Hash + Eq + Clone,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("LruCache");
@@ -120,19 +119,19 @@ where
 }
 
 /// Wrapper of [`schnellru::LruMap`] that implements [`fmt::Debug`].
-#[derive(Deref, DerefMut, Default)]
+#[derive(Deref, DerefMut, Default, Clone)]
 pub struct LruMap<K, V, L = ByLength, S = RandomState>(schnellru::LruMap<K, V, L, S>)
 where
-    K: Hash + PartialEq,
+    K: Hash + PartialEq + Clone,
     L: Limiter<K, V>,
     S: BuildHasher;
 
 impl<K, V, L, S> fmt::Debug for LruMap<K, V, L, S>
 where
-    K: Hash + PartialEq + fmt::Display,
+    K: Hash + PartialEq + fmt::Display + Clone,
     V: fmt::Debug,
     L: Limiter<K, V> + fmt::Debug,
-    S: BuildHasher,
+    S: BuildHasher + Clone,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("LruMap");
@@ -151,9 +150,21 @@ where
     }
 }
 
+impl<K, V, L, S> PartialEq for LruMap<K, V, L, S>
+where
+    K: Hash + PartialEq + Clone,
+    V: PartialEq,
+    L: Limiter<K, V>,
+    S: BuildHasher,
+{    
+    fn eq(&self, other: &Self) -> bool {
+        self.0.iter().eq(other.0.iter())
+    }
+}
+
 impl<K, V> LruMap<K, V>
 where
-    K: Hash + PartialEq,
+    K: Hash + PartialEq + Clone,
 {
     /// Returns a new cache with default limiter and hash builder.
     pub fn new(max_length: u32) -> Self {
@@ -163,7 +174,7 @@ where
 
 impl<K, V> LruMap<K, V, Unlimited>
 where
-    K: Hash + PartialEq,
+    K: Hash + PartialEq + Clone,
 {
     /// Returns a new cache with [`Unlimited`] limiter and default hash builder.
     pub fn new_unlimited() -> Self {
