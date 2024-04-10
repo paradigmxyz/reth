@@ -1,10 +1,11 @@
 use crate::utils::DbTool;
-use blake3::Hasher;
+use ahash::AHasher;
 use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, DatabaseEnv, RawKey,
     RawTable, RawValue, TableViewer, Tables,
 };
+use std::{hash::Hasher, time::Instant};
 use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
@@ -38,7 +39,8 @@ impl<DB: Database> TableViewer<()> for ChecksumViewer<'_, DB> {
         let mut cursor = tx.cursor_read::<RawTable<T>>()?;
         let walker = cursor.walk(None)?;
 
-        let mut hasher = Hasher::new();
+        let start_time = Instant::now();
+        let mut hasher = AHasher::default();
         for (index, entry) in walker.enumerate() {
             let (k, v): (RawKey<T::Key>, RawValue<T::Value>) = entry?;
 
@@ -46,11 +48,12 @@ impl<DB: Database> TableViewer<()> for ChecksumViewer<'_, DB> {
                 info!("Hashed {index} entries.");
             }
 
-            hasher.update(k.raw_key());
-            hasher.update(v.raw_value());
+            hasher.write(k.raw_key());
+            hasher.write(v.raw_value());
         }
 
-        info!("{:#}", hasher.finalize());
+        let elapsed = start_time.elapsed();
+        info!("{} checksum: {:x}, took {:?}", T::NAME, hasher.finish(), elapsed);
 
         Ok(())
     }
