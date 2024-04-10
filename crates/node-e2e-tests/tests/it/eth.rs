@@ -116,6 +116,71 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+#[cfg(unix)]
+async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let tasks = TaskManager::current();
+    let test_suite = TestSuite::new();
+
+    // Node setup
+    let node_config = NodeConfig::test()
+        .with_chain(test_suite.chain_spec())
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http().with_auth_ipc());
+
+    let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(tasks.executor())
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    // setup engine api events and payload service events
+    let _notifications = node.provider.canonical_state_stream();
+    let payload_events = node.payload_builder.subscribe().await?;
+    let mut payload_event_stream = payload_events.into_stream();
+
+    // push tx into pool via RPC server
+    let eth_api = node.rpc_registry.eth_api();
+    let (_expected_hash, raw_tx) = test_suite.transfer_tx().await;
+
+    eth_api.send_raw_transaction(raw_tx).await?;
+
+    // trigger new payload building draining the pool
+    let eth_attr = eth_payload_attributes();
+    let _payload_id = node.payload_builder.new_payload(eth_attr.clone()).await?;
+
+    // first event is the payload attributes
+    let first_event = payload_event_stream.next().await.unwrap()?;
+    if let reth::payload::Events::Attributes(attr) = first_event {
+        assert_eq!(eth_attr.timestamp, attr.timestamp);
+    } else {
+        panic!("Expect first event as payload attributes.")
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let tasks = TaskManager::current();
+    let test_suite = TestSuite::new();
+
+    // Node setup
+    let node_config = NodeConfig::test().with_chain(test_suite.chain_spec());
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(tasks.executor())
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    let client = node.engine_ipc_client().await;
+    assert!(client.is_none(), "ipc auth should be disabled by default");
+
+    Ok(())
+}
 fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
