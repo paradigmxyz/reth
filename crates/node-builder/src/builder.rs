@@ -455,7 +455,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.state.exexs.push((exex_id, Box::new(exex)));
+        self.state.exexs.push((exex_id.as_ref().to_string(), Box::new(exex)));
         self
     }
 
@@ -1146,7 +1146,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.builder.state.exexs.push((exex_id, Box::new(exex)));
+        self.builder.state.exexs.push((exex_id.as_ref().to_string(), Box::new(exex)));
         self
     }
 
