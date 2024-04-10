@@ -567,63 +567,6 @@ where
         let NodeComponents { transaction_pool, network, payload_builder } =
             components_builder.build_components(&ctx).await?;
 
-        // spawn exexs
-        let mut exex_handles = Vec::with_capacity(self.state.exexs.len());
-        for (id, exex) in self.state.exexs {
-            // create a new exex handle
-            let (handle, events, notifications) = ExExHandle::new(id.clone());
-            exex_handles.push(handle);
-
-            // create the launch context for the exex
-            let context = ExExContext {
-                head,
-                provider: ctx.provider.clone(),
-                task_executor: ctx.executor.clone(),
-                data_dir: ctx.data_dir.clone(),
-                config: ctx.config.clone(),
-                reth_config: ctx.reth_config.clone(),
-                events,
-                notifications,
-            };
-
-            // init the exex
-            let exex = exex.launch(context).await.unwrap();
-
-            // spawn it as a crit task
-            debug!(target: "reth::cli", "spawning exex {id}");
-            {
-                let span = reth_tracing::tracing::info_span!("exex", id);
-                let _enter = span.enter();
-                ctx.executor.spawn_critical("exex", async move {
-                    exex.await.unwrap_or_else(|_| panic!("exex crashed"))
-                });
-            }
-
-            info!(target: "reth::cli", "ExEx started: {id}");
-        }
-
-        // spawn exex manager
-        if !exex_handles.is_empty() {
-            debug!(target: "reth::cli", "spawning exex manager");
-            // todo(onbjerg): rm magic number
-            let exex_manager = ExExManager::new(exex_handles, 1024);
-            let mut exex_manager_handle = exex_manager.handle();
-            ctx.executor.spawn_critical("exex manager", async move {
-                exex_manager.await.expect("exex manager crashed");
-            });
-
-            // send notifications from the blockchain tree to exex manager
-            let mut canon_state_notifications = blockchain_tree.subscribe_to_canonical_state();
-            ctx.executor.spawn_critical("exex manager blockchain tree notifications", async move {
-                while let Ok(notification) = canon_state_notifications.recv().await {
-                    exex_manager_handle
-                        .send_async(notification)
-                        .await
-                        .expect("blockchain tree notification could not be sent to exex manager");
-                }
-            });
-        }
-
         let BuilderContext {
             provider: blockchain_db,
             executor,
@@ -645,6 +588,63 @@ where
         };
         debug!(target: "reth::cli", "calling on_component_initialized hook");
         on_component_initialized.on_event(node_components.clone())?;
+
+        // spawn exexs
+        let mut exex_handles = Vec::with_capacity(self.state.exexs.len());
+        for (id, exex) in self.state.exexs {
+            // create a new exex handle
+            let (handle, events, notifications) = ExExHandle::new(id.clone());
+            exex_handles.push(handle);
+
+            // create the launch context for the exex
+            let context = ExExContext {
+                head,
+                provider: blockchain_db.clone(),
+                task_executor: executor.clone(),
+                data_dir: data_dir.clone(),
+                config: config.clone(),
+                reth_config: reth_config.clone(),
+                events,
+                notifications,
+            };
+
+            // init the exex
+            let exex = exex.launch(context).await.unwrap();
+
+            // spawn it as a crit task
+            debug!(target: "reth::cli", "spawning exex {id}");
+            {
+                let span = reth_tracing::tracing::info_span!("exex", id);
+                let _enter = span.enter();
+                executor.spawn_critical("exex", async move {
+                    exex.await.unwrap_or_else(|_| panic!("exex crashed"))
+                });
+            }
+
+            info!(target: "reth::cli", "ExEx started: {id}");
+        }
+
+        // spawn exex manager
+        if !exex_handles.is_empty() {
+            debug!(target: "reth::cli", "spawning exex manager");
+            // todo(onbjerg): rm magic number
+            let exex_manager = ExExManager::new(exex_handles, 1024);
+            let mut exex_manager_handle = exex_manager.handle();
+            executor.spawn_critical("exex manager", async move {
+                exex_manager.await.expect("exex manager crashed");
+            });
+
+            // send notifications from the blockchain tree to exex manager
+            let mut canon_state_notifications = blockchain_tree.subscribe_to_canonical_state();
+            executor.spawn_critical("exex manager blockchain tree notifications", async move {
+                while let Ok(notification) = canon_state_notifications.recv().await {
+                    exex_manager_handle
+                        .send_async(notification)
+                        .await
+                        .expect("blockchain tree notification could not be sent to exex manager");
+                }
+            });
+        }
 
         // create pipeline
         let network_client = network.fetch_client().await?;
