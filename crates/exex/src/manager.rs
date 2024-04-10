@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    future::Future,
+    future::{poll_fn, Future},
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -10,6 +10,7 @@ use std::{
 };
 
 use crate::ExExEvent;
+use futures::StreamExt;
 use metrics::Gauge;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::BlockNumber;
@@ -19,6 +20,7 @@ use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
     watch,
 };
+use tokio_stream::wrappers::WatchStream;
 use tokio_util::sync::{PollSendError, PollSender};
 
 /// Metrics for an ExEx.
@@ -218,7 +220,8 @@ impl ExExManager {
             handle: ExExManagerHandle {
                 exex_tx: handle_tx,
                 num_exexs,
-                is_ready: is_ready_rx,
+                is_ready_receiver: is_ready_rx.clone(),
+                is_ready: WatchStream::new(is_ready_rx),
                 current_capacity,
                 finished_height: finished_height_rx,
             },
@@ -336,11 +339,12 @@ impl Future for ExExManager {
 }
 
 /// A handle to communicate with the [`ExExManager`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ExExManagerHandle {
     exex_tx: UnboundedSender<CanonStateNotification>,
     num_exexs: usize,
-    is_ready: watch::Receiver<bool>,
+    is_ready_receiver: watch::Receiver<bool>,
+    is_ready: WatchStream<bool>,
     current_capacity: Arc<AtomicUsize>,
     finished_height: watch::Receiver<Option<BlockNumber>>,
 }
@@ -400,14 +404,34 @@ impl ExExManagerHandle {
 
     /// Wait until the manager is ready for new notifications.
     pub async fn ready(&mut self) {
-        // note: if this ever returns an error, the manager has died and the node is shutting down,
-        // so we ignore the error.
-        let _ = self.is_ready.wait_for(|val| *val).await;
+        poll_fn(|cx| self.poll_ready(cx)).await
     }
 
     /// Wait until the manager is ready for new notifications.
-    pub fn poll_ready(&mut self) -> Poll<()> {
-        Poll::Ready(())
+    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        // if this returns `Poll::Ready(None)` the stream is exhausted, which means the underlying
+        // channel is closed.
+        //
+        // this can only happen if the manager died, and the node is shutting down, so we ignore it
+        let mut pinned = std::pin::pin!(&mut self.is_ready);
+        if pinned.poll_next_unpin(cx) == Poll::Ready(Some(true)) {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+impl Clone for ExExManagerHandle {
+    fn clone(&self) -> Self {
+        Self {
+            exex_tx: self.exex_tx.clone(),
+            num_exexs: self.num_exexs,
+            is_ready_receiver: self.is_ready_receiver.clone(),
+            is_ready: WatchStream::new(self.is_ready_receiver.clone()),
+            current_capacity: self.current_capacity.clone(),
+            finished_height: self.finished_height.clone(),
+        }
     }
 }
 

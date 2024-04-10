@@ -12,6 +12,7 @@ description = "Execution extensions for Reth"
 workspace = true
 
 [dependencies]
+futures.workspace = true
 metrics.workspace = true
 reth-config.workspace = true
 reth-metrics.workspace = true
@@ -22,4 +23,5 @@ reth-provider.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 tokio-util.workspace = true
