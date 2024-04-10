@@ -46,7 +46,7 @@ use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
 use reth_primitives::{ForkId, NodeRecord, PeerId};
 use reth_provider::{BlockNumReader, BlockReader};
-use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
+use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
 use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventListeners;
 use secp256k1::SecretKey;

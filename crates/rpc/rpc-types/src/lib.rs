@@ -8,9 +8,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![allow(hidden_glob_reexports)] // TODO rm in followup PR
 
-mod admin;
 pub mod beacon;
 mod eth;
 mod mev;
@@ -38,7 +36,6 @@ pub use eth::{
     transaction::{self, TransactionKind, TransactionRequest, TypedTransactionRequest},
 };
 
-pub use admin::*;
 pub use mev::*;
 pub use net::*;
 pub use peer::*;
