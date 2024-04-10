@@ -21,7 +21,7 @@ jobs:
     runs-on:
       group: Reth
     # Only run benchmarks in merge groups and on main
-    #if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
       - name: Install Valgrind
@@ -35,7 +35,6 @@ jobs:
       - name: Install iai-callgrind-runner
         run: |
           echo "::group::Install"
-          echo "Inside group"
           version=$(cargo metadata --format-version=1 |\
             jq '.packages[] | select(.name == "iai-callgrind").version' |\
             tr -d '"'
