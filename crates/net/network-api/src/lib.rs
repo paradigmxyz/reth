@@ -57,6 +57,9 @@ pub trait PeersInfo: Send + Sync {
 
     /// Returns the Ethereum Node Record of the node.
     fn local_node_record(&self) -> NodeRecord;
+
+    /// Returns the local ENR of the node.
+    fn local_enr(&self) -> enr::Enr<enr::secp256k1::SecretKey>;
 }
 
 /// Provides an API for managing the peers of the network.
