@@ -2,6 +2,7 @@
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
 use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256};
 
+use alloy_eips::eip2718::Eip2718Error;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -55,6 +56,7 @@ mod optimism;
 
 #[cfg(feature = "optimism")]
 pub use optimism::TxDeposit;
+use reth_rpc_types::ConversionError;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 
@@ -609,6 +611,93 @@ impl From<TxEip1559> for Transaction {
 impl From<TxEip4844> for Transaction {
     fn from(tx: TxEip4844) -> Self {
         Transaction::Eip4844(tx)
+    }
+}
+
+impl TryFrom<reth_rpc_types::Transaction> for Transaction {
+    type Error = ConversionError;
+
+    fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
+        match tx.transaction_type {
+            None => {
+                // legacy
+                Ok(Transaction::Legacy(TxLegacy {
+                    chain_id: tx.chain_id,
+                    nonce: tx.nonce,
+                    gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
+                    value: tx.value,
+                    input: tx.input,
+                }))
+            }
+            Some(1u8) => {
+                // eip2930
+                Ok(Transaction::Eip2930(TxEip2930 {
+                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
+                    nonce: tx.nonce,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
+                    value: tx.value,
+                    input: tx.input,
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
+                }))
+            }
+            Some(2u8) => {
+                // EIP-1559
+                Ok(Transaction::Eip1559(TxEip1559 {
+                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
+                    nonce: tx.nonce,
+                    max_priority_fee_per_gas: tx
+                        .max_priority_fee_per_gas
+                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
+                    max_fee_per_gas: tx
+                        .max_fee_per_gas
+                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
+                    value: tx.value,
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    input: tx.input,
+                }))
+            }
+            Some(3u8) => {
+                // EIP-4844
+                Ok(Transaction::Eip4844(TxEip4844 {
+                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
+                    nonce: tx.nonce,
+                    max_priority_fee_per_gas: tx
+                        .max_priority_fee_per_gas
+                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
+                    max_fee_per_gas: tx
+                        .max_fee_per_gas
+                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
+                    value: tx.value,
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    input: tx.input,
+                    blob_versioned_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
+                    max_fee_per_blob_gas: tx
+                        .max_fee_per_blob_gas
+                        .ok_or(ConversionError::MissingMaxFeePerBlobGas)?,
+                }))
+            }
+            Some(tx_type) => Err(Eip2718Error::UnexpectedType(tx_type).into()),
+        }
     }
 }
 
