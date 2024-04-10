@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   BASELINE: base
+  IAI_CALLGRIND_RUNNER: iai-callgrind-runner
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -19,7 +20,7 @@ jobs:
   iai:
     runs-on:
       group: Reth
-    # Only run benchmarks in merge groups
+    # Only run benchmarks in merge groups and on main
     if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -33,11 +34,16 @@ jobs:
         uses: taiki-e/install-action@cargo-binstall
       - name: Install iai-callgrind-runner
         run: |
+          echo "::group::Install"
           version=$(cargo metadata --format-version=1 |\
             jq '.packages[] | select(.name == "iai-callgrind").version' |\
             tr -d '"'
           )
-          cargo binstall iai-callgrind-runner --version $version --no-confirm --no-symlinks
+          cargo binstall iai-callgrind-runner --version $version --no-confirm --no-symlinks --force
+          echo "::endgroup::"
+          echo "::group::Verification"
+          which iai-callgrind-runner
+          echo "::endgroup::"
       - name: Checkout base
         uses: actions/checkout@v4
         with:
