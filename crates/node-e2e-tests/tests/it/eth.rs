@@ -17,6 +17,7 @@ use reth_primitives::{Address, BlockNumberOrTag, B256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[tokio::test]
+#[cfg(unix)]
 async fn can_run_eth_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let tasks = TaskManager::current();
@@ -160,6 +161,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+#[cfg(unix)]
 async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let tasks = TaskManager::current();
