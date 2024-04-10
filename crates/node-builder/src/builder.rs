@@ -440,7 +440,7 @@ where
     /// # Note
     ///
     /// The ExEx ID must be unique.
-    pub fn install_exex<F, R, E>(mut self, exex_id: String, exex: F) -> Self
+    pub fn install_exex<F, R, E>(mut self, exex_id: impl AsRef<str>, exex: F) -> Self
     where
         F: Fn(
                 ExExContext<
@@ -1131,7 +1131,7 @@ where
     }
 
     /// Installs an ExEx (Execution Extension) in the node.
-    pub fn install_exex<F, R, E>(mut self, exex_id: AsRef<str>, exex: F) -> Self
+    pub fn install_exex<F, R, E>(mut self, exex_id: impl AsRef<str>, exex: F) -> Self
     where
         F: Fn(
                 ExExContext<
