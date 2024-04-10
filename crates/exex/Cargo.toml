@@ -12,6 +12,7 @@ description = "Execution extensions for Reth"
 workspace = true
 
 [dependencies]
+eyre.workspace = true
 futures.workspace = true
 metrics.workspace = true
 reth-config.workspace = true
