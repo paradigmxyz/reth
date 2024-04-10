@@ -6631,6 +6631,7 @@ dependencies = [
 name = "reth-network-api"
 version = "0.2.0-beta.5"
 dependencies = [
+ "enr",
  "reth-discv4",
  "reth-eth-wire",
  "reth-primitives",
