@@ -28,7 +28,7 @@ use reth_db::{
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
-use reth_exex::ExExContext;
+use reth_exex::{ExExContext, ExExHandle, ExExManager};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
@@ -44,7 +44,9 @@ use reth_node_core::{
     utils::write_peers_to_file,
 };
 use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, format_ether, ChainSpec};
-use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
+use reth_provider::{
+    providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
+};
 use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
@@ -434,7 +436,11 @@ where
     }
 
     /// Installs an ExEx (Execution Extension) in the node.
-    pub fn install_exex<F, R, E>(mut self, exex: F) -> Self
+    ///
+    /// # Note
+    ///
+    /// The ExEx ID must be unique.
+    pub fn install_exex<F, R, E>(mut self, exex_id: String, exex: F) -> Self
     where
         F: Fn(
                 ExExContext<
@@ -449,7 +455,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.state.exexs.push(Box::new(exex));
+        self.state.exexs.push((exex_id, Box::new(exex)));
         self
     }
 
@@ -561,7 +567,62 @@ where
         let NodeComponents { transaction_pool, network, payload_builder } =
             components_builder.build_components(&ctx).await?;
 
-        // TODO(alexey): launch ExExs and consume their events
+        // spawn exexs
+        let mut exex_handles = Vec::with_capacity(self.state.exexs.len());
+        for (id, exex) in self.state.exexs {
+            // create a new exex handle
+            let (handle, events, notifications) = ExExHandle::new(id.clone());
+            exex_handles.push(handle);
+
+            // create the launch context for the exex
+            let context = ExExContext {
+                head,
+                provider: ctx.provider.clone(),
+                task_executor: ctx.executor.clone(),
+                data_dir: ctx.data_dir.clone(),
+                config: ctx.config.clone(),
+                reth_config: ctx.reth_config.clone(),
+                events,
+                notifications,
+            };
+
+            // init the exex
+            let exex = exex.launch(context).await.unwrap();
+
+            // spawn it as a crit task
+            debug!(target: "reth::cli", "spawning exex {id}");
+            {
+                let span = reth_tracing::tracing::info_span!("exex {id}");
+                let _enter = span.enter();
+                ctx.executor.spawn_critical("exex", async move {
+                    exex.await.unwrap_or_else(|_| panic!("exex crashed"))
+                });
+            }
+
+            info!(target: "reth::cli", "ExEx started: {id}");
+        }
+
+        // spawn exex manager
+        if !exex_handles.is_empty() {
+            debug!(target: "reth::cli", "spawning exex manager");
+            // todo(onbjerg): rm magic number
+            let exex_manager = ExExManager::new(exex_handles, 1024);
+            let exex_manager_handle = exex_manager.handle();
+            ctx.executor.spawn_critical("exex manager", async move {
+                exex_manager.await.expect("exex manager crashed");
+            });
+
+            // send notifications from the blockchain tree to exex manager
+            let mut canon_state_notifications = blockchain_tree.subscribe_to_canonical_state();
+            ctx.executor.spawn_critical("exex manager blockchain tree notifications", async move {
+                while let Ok(notification) = canon_state_notifications.recv().await {
+                    exex_manager_handle
+                        .send_async(notification)
+                        .await
+                        .expect("blockchain tree notification could not be sent to exex manager");
+                }
+            });
+        }
 
         let BuilderContext {
             provider: blockchain_db,
@@ -1070,7 +1131,7 @@ where
     }
 
     /// Installs an ExEx (Execution Extension) in the node.
-    pub fn install_exex<F, R, E>(mut self, exex: F) -> Self
+    pub fn install_exex<F, R, E>(mut self, exex_id: String, exex: F) -> Self
     where
         F: Fn(
                 ExExContext<
@@ -1085,7 +1146,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.builder.state.exexs.push(Box::new(exex));
+        self.builder.state.exexs.push((exex_id, Box::new(exex)));
         self
     }
 
@@ -1301,7 +1362,7 @@ pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
     /// Additional RPC hooks.
     rpc: RpcHooks<FullNode>,
     /// The ExExs (execution extensions) of the node.
-    exexs: Vec<Box<dyn BoxedLaunchExEx<FullNode>>>,
+    exexs: Vec<(String, Box<dyn BoxedLaunchExEx<FullNode>>)>,
 }
 
 impl<Types, Components, FullNode: FullNodeComponents> std::fmt::Debug

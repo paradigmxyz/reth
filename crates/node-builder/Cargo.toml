@@ -36,7 +36,6 @@ reth-prune.workspace = true
 reth-stages.workspace = true
 reth-config.workspace = true
 
-
 ## async
 futures.workspace = true
 tokio = { workspace = true, features = [
