@@ -78,35 +78,29 @@ impl Discovery {
     ) -> Result<Self, NetworkError> {
         // setup discv4
         let local_enr = NodeRecord::from_secret_key(discovery_v4_addr, &sk);
-        let (discv4, discv4_updates, _discv4_service) = match discv4_config {
-            Some(disc_config) => {
-                let (discv4, mut discv4_service) =
-                    Discv4::bind(discovery_v4_addr, local_enr, sk, disc_config).await.map_err(
-                        |err| {
-                            NetworkError::from_io_error(
-                                err,
-                                ServiceKind::Discovery(discovery_v4_addr),
-                            )
-                        },
-                    )?;
-                let discv4_updates = discv4_service.update_stream();
-                // spawn the service
-                let _discv4_service = discv4_service.spawn();
+        let discv4_future = async {
+            let Some(disc_config) = discv4_config else { return Ok((None, None, None)) };
+            let (discv4, mut discv4_service) =
+                Discv4::bind(discovery_v4_addr, local_enr, sk, disc_config).await.map_err(
+                    |err| {
+                        NetworkError::from_io_error(err, ServiceKind::Discovery(discovery_v4_addr))
+                    },
+                )?;
+            let discv4_updates = discv4_service.update_stream();
+            // spawn the service
+            let discv4_service = discv4_service.spawn();
 
-                (Some(discv4), Some(discv4_updates), Some(_discv4_service))
-            }
-            None => (None, None, None),
+            Ok((Some(discv4), Some(discv4_updates), Some(discv4_service)))
         };
 
-        let (discv5, discv5_updates) = match discv5_config {
-            Some(config) => {
-                let (discv5, discv5_updates, _local_enr_discv5) =
-                    Discv5::start(&sk, config).await?;
-
-                (Some(discv5), Some(discv5_updates.into()))
-            }
-            None => (None, None),
+        let discv5_future = async {
+            let Some(config) = discv5_config else { return Ok::<_, NetworkError>((None, None)) };
+            let (discv5, discv5_updates, _local_enr_discv5) = Discv5::start(&sk, config).await?;
+            Ok((Some(discv5), Some(discv5_updates.into())))
         };
+
+        let ((discv4, discv4_updates, _discv4_service), (discv5, discv5_updates)) =
+            tokio::try_join!(discv4_future, discv5_future)?;
 
         // setup DNS discovery
         let (_dns_discovery, dns_discovery_updates, _dns_disc_service) =
