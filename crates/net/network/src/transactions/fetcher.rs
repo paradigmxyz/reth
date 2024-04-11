@@ -668,11 +668,14 @@ impl TransactionFetcher {
         {
             for hash in new_announced_hashes.iter() {
                 if self.hashes_pending_fetch.contains(hash) {
-                    debug!(target: "net::tx", "`%new_announced_hashes` should been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and
-`@inflight_requests`,
-`@hashes_fetch_inflight_and_pending_fetch` for `%new_announced_hashes`: {:?}",
-                        new_announced_hashes.iter().map(|hash|
-                            (*hash, self.hashes_fetch_inflight_and_pending_fetch.get(hash).cloned())).collect::<Vec<(TxHash, Option<TxFetchMetadata>)>>())
+                    debug!(target: "net::tx", "`{}` should have been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and `@inflight_requests`, `@hashes_fetch_inflight_and_pending_fetch` for `{}`: {:?}",
+                        format!("{:?}", new_announced_hashes), // Assuming new_announced_hashes can be debug-printed directly
+                        format!("{:?}", new_announced_hashes), 
+                        new_announced_hashes.iter().map(|hash| {
+                            let metadata = self.hashes_fetch_inflight_and_pending_fetch.get(hash);
+                            // Assuming you only need `retries` and `tx_encoded_length` for debugging
+                            (*hash, metadata.map(|m| (m.retries, m.tx_encoded_length)))
+                        }).collect::<Vec<(TxHash, Option<(u8, Option<usize>)>)>>())
                 }
             }
         }
@@ -907,12 +910,14 @@ impl TransactionFetcher {
 
         debug_assert!(
             self.active_peers.get(&peer_id).is_some(),
-            "`%peer_id` has been removed from `@active_peers` before inflight request(s) resolved, broken invariant `@active_peers` and `@inflight_requests`,
-`%peer_id`: {},
-`@hashes_fetch_inflight_and_pending_fetch` for `%requested_hashes`: {:?}",
-            peer_id, requested_hashes.iter().map(|hash|
-                (*hash, self.hashes_fetch_inflight_and_pending_fetch.get(hash).cloned())
-            ).collect::<Vec<(TxHash, Option<TxFetchMetadata>)>>());
+            "`{}` has been removed from `@active_peers` before inflight request(s) resolved, broken invariant `@active_peers` and `@inflight_requests`, `%peer_id`: {}, `@hashes_fetch_inflight_and_pending_fetch` for `%requested_hashes`: {:?}",
+            peer_id,
+            peer_id,
+            requested_hashes.iter().map(|hash| {
+                let metadata = self.hashes_fetch_inflight_and_pending_fetch.get(hash);
+                (*hash, metadata.map(|m| (m.retries, m.tx_encoded_length)))
+            }).collect::<Vec<(TxHash, Option<(u8, Option<usize>)>)>>()
+        );
 
         self.decrement_inflight_request_count_for(&peer_id);
 
@@ -1073,7 +1078,7 @@ impl Default for TransactionFetcher {
 }
 
 /// Metadata of a transaction hash that is yet to be fetched.
-#[derive(Debug, Constructor, Clone)]
+#[derive(Debug, Constructor)]
 pub struct TxFetchMetadata {
     /// The number of times a request attempt has been made for the hash.
     retries: u8,
@@ -1338,7 +1343,7 @@ struct TxFetcherSearchDurations {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashSet, str::FromStr};
+    use std::{collections::HashSet, rc::Rc, str::FromStr};
 
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
@@ -1469,10 +1474,10 @@ mod test {
         backups.insert(peer_2);
         // insert seen_hashes into tx fetcher
         for i in 0..3 {
-            let meta = TxFetchMetadata::new(0, backups.clone(), Some(seen_eth68_hashes_sizes[i]));
+            let meta = TxFetchMetadata::new(0, backups, Some(seen_eth68_hashes_sizes[i]));
             tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[i], meta);
         }
-        let meta = TxFetchMetadata::new(0, backups.clone(), None);
+        let meta = TxFetchMetadata::new(0, backups, None);
         tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[3], meta);
         //
         // insert pending hash without peer_1 as fallback peer, only with peer_2 as fallback peer
