@@ -25,7 +25,6 @@ mod clear;
 mod diff;
 mod get;
 mod list;
-mod report;
 mod static_files;
 mod stats;
 /// DB List TUI
@@ -71,9 +70,6 @@ pub enum Subcommands {
     Stats(stats::Command),
     /// Lists the contents of a table
     List(list::Command),
-    /// Calculates the content checksum of all tables and returns other information useful for
-    /// debugging a corrupt node
-    Report(report::Command),
     /// Calculates the content checksum of a table
     Checksum(checksum::Command),
     /// Create a diff between two database tables or two entire databases.
@@ -124,11 +120,6 @@ impl Command {
                 });
             }
             Subcommands::List(command) => {
-                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
-                    command.execute(&tool)?;
-                });
-            }
-            Subcommands::Report(command) => {
                 db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
                     command.execute(&tool)?;
                 });
