@@ -14,7 +14,7 @@ use crate::{
     Node, NodeHandle,
 };
 use eyre::Context;
-use futures::{future::Either, stream, stream_select, Future, StreamExt};
+use futures::{future, future::Either, stream, stream_select, Future, StreamExt};
 use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
@@ -440,7 +440,7 @@ where
     /// # Note
     ///
     /// The ExEx ID must be unique.
-    pub fn install_exex<F, R, E>(mut self, exex_id: impl AsRef<str>, exex: F) -> Self
+    pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
         F: Fn(
                 ExExContext<
@@ -455,7 +455,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.state.exexs.push((exex_id.as_ref().to_string(), Box::new(exex)));
+        self.state.exexs.push((exex_id.into(), Box::new(exex)));
         self
     }
 
@@ -591,6 +591,7 @@ where
 
         // spawn exexs
         let mut exex_handles = Vec::with_capacity(self.state.exexs.len());
+        let mut exexs = Vec::with_capacity(self.state.exexs.len());
         for (id, exex) in self.state.exexs {
             // create a new exex handle
             let (handle, events, notifications) = ExExHandle::new(id.clone());
@@ -608,21 +609,24 @@ where
                 notifications,
             };
 
-            // init the exex
-            let exex = exex.launch(context).await.unwrap();
-
-            // spawn it as a crit task
-            debug!(target: "reth::cli", id, "spawning exex");
-            {
+            let executor = executor.clone();
+            exexs.push(async move {
+                debug!(target: "reth::cli", id, "spawning exex");
                 let span = reth_tracing::tracing::info_span!("exex", id);
                 let _enter = span.enter();
-                executor.spawn_critical("exex", async move {
-                    exex.await.unwrap_or_else(|_| panic!("exex crashed"))
-                });
-            }
 
-            info!(target: "reth::cli", id, "ExEx started");
+                // init the exex
+                let exex = exex.launch(context).await.unwrap();
+
+                // spawn it as a crit task
+                executor.spawn_critical("exex", async move {
+                    info!(target: "reth::cli", id, "ExEx started");
+                    exex.await.unwrap_or_else(|_| panic!("exex {} crashed", id))
+                });
+            });
         }
+
+        future::join_all(exexs).await;
 
         // spawn exex manager
         if !exex_handles.is_empty() {
@@ -1133,7 +1137,7 @@ where
     }
 
     /// Installs an ExEx (Execution Extension) in the node.
-    pub fn install_exex<F, R, E>(mut self, exex_id: impl AsRef<str>, exex: F) -> Self
+    pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
         F: Fn(
                 ExExContext<
@@ -1148,7 +1152,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.builder.state.exexs.push((exex_id.as_ref().to_string(), Box::new(exex)));
+        self.builder.state.exexs.push((exex_id.into(), Box::new(exex)));
         self
     }
 
