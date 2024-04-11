@@ -440,7 +440,7 @@ where
     /// # Note
     ///
     /// The ExEx ID must be unique.
-    pub fn install_exex<F, R, E>(mut self, exex_id: impl AsRef<str>, exex: F) -> Self
+    pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
         F: Fn(
                 ExExContext<
@@ -455,7 +455,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.state.exexs.push((exex_id.as_ref().to_string(), Box::new(exex)));
+        self.state.exexs.push((exex_id.into(), Box::new(exex)));
         self
     }
 
@@ -1133,7 +1133,7 @@ where
     }
 
     /// Installs an ExEx (Execution Extension) in the node.
-    pub fn install_exex<F, R, E>(mut self, exex_id: impl AsRef<str>, exex: F) -> Self
+    pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
         F: Fn(
                 ExExContext<
@@ -1148,7 +1148,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.builder.state.exexs.push((exex_id.as_ref().to_string(), Box::new(exex)));
+        self.builder.state.exexs.push((exex_id.into(), Box::new(exex)));
         self
     }
 
