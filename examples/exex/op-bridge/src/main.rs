@@ -93,6 +93,7 @@ impl<Node: FullNodeTypes> Future for OPBridgeExEx<Node> {
 
         // Process all new chain state notifications until there are no more
         while let Some(notification) = ready!(this.ctx.notifications.poll_recv(cx)) {
+            // If there was a reorg, delete all deposits and withdrawals that were reverted
             if let Some(reverted_chain) = notification.reverted() {
                 let events = decode_chain_into_events(&reverted_chain);
 
@@ -101,44 +102,50 @@ impl<Node: FullNodeTypes> Future for OPBridgeExEx<Node> {
 
                 for (_, tx, _, event) in events {
                     match event {
+                        // L1 -> L2 deposit
                         L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
                             ..
                         }) => {
-                            deposits += this.connection.execute(
+                            let deleted = this.connection.execute(
                                 "DELETE FROM deposits WHERE tx_hash = ?;",
                                 (tx.hash().to_string(),),
                             )?;
+                            deposits += deleted;
                         }
+                        // L2 -> L1 withdrawal
                         L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
                             ..
                         }) => {
-                            withdrawals += this.connection.execute(
+                            let deleted = this.connection.execute(
                                 "DELETE FROM withdrawals WHERE tx_hash = ?;",
                                 (tx.hash().to_string(),),
                             )?;
+                            withdrawals += deleted;
                         }
                         _ => continue,
                     };
                 }
 
-                info!(%deposits, %withdrawals, "Reverted chain events");
+                info!(blocks = %reverted_chain.len(), %deposits, %withdrawals, "Reverted chain events");
             }
 
-            let committed = notification.committed();
-            let events = decode_chain_into_events(&committed);
+            // Insert all new deposits and withdrawals
+            let committed_chain = notification.committed();
+            let events = decode_chain_into_events(&committed_chain);
 
             let mut deposits = 0;
             let mut withdrawals = 0;
 
             for (block, tx, log, event) in events {
                 match event {
+                    // L1 -> L2 deposit
                     L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
                         amount,
                         from,
                         to,
                         ..
                     }) => {
-                        deposits += this.connection.execute(
+                        let inserted = this.connection.execute(
                                 r#"
                                 INSERT INTO deposits (block_number, tx_hash, contract_address, "from", "to", amount)
                                 VALUES (?, ?, ?, ?, ?, ?)
@@ -152,14 +159,16 @@ impl<Node: FullNodeTypes> Future for OPBridgeExEx<Node> {
                                     amount.to_string(),
                                 ),
                             )?;
+                        deposits += inserted;
                     }
+                    // L2 -> L1 withdrawal
                     L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
                         amount,
                         from,
                         to,
                         ..
                     }) => {
-                        withdrawals += this.connection.execute(
+                        let inserted = this.connection.execute(
                                 r#"
                                 INSERT INTO withdrawals (block_number, tx_hash, contract_address, "from", "to", amount)
                                 VALUES (?, ?, ?, ?, ?, ?)
@@ -173,12 +182,13 @@ impl<Node: FullNodeTypes> Future for OPBridgeExEx<Node> {
                                     amount.to_string(),
                                 ),
                             )?;
+                        withdrawals += inserted;
                     }
                     _ => continue,
                 };
             }
 
-            info!(%deposits, %withdrawals, "Committed chain events");
+            info!(blocks = %committed_chain.len(), %deposits, %withdrawals, "Committed chain events");
 
             // Send a finished height event, signaling the node that we don't need any blocks below
             // this height anymore
