@@ -16,6 +16,8 @@ use rusqlite::Connection;
 sol!(L1StandardBridge, "l1_standard_bridge_abi.json");
 use crate::L1StandardBridge::{ETHBridgeFinalized, ETHBridgeInitiated, L1StandardBridgeEvents};
 
+/// An example of ExEx that listens to ETH bridging events from OP Stack chains
+/// and stores deposits and withdrawals in a SQLite database.
 struct OPBridgeExEx<Node: FullNodeTypes> {
     ctx: ExExContext<Node>,
     connection: Connection,
