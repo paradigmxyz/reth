@@ -187,43 +187,41 @@ impl ImportCommand {
 
         let max_block = file_client.max_block().unwrap_or(0);
 
-        let mut stages = DefaultStages::new(
-            provider_factory.clone(),
-            HeaderSyncMode::Tip(tip_rx),
-            consensus.clone(),
-            header_downloader,
-            body_downloader,
-            factory.clone(),
-            config.stages.etl,
-        )
-        .set(SenderRecoveryStage {
-            commit_threshold: config.stages.sender_recovery.commit_threshold,
-        });
-
-        if !disable_execution {
-            stages = stages.set(ExecutionStage::new(
-                factory,
-                ExecutionStageThresholds {
-                    max_blocks: config.stages.execution.max_blocks,
-                    max_changes: config.stages.execution.max_changes,
-                    max_cumulative_gas: config.stages.execution.max_cumulative_gas,
-                    max_duration: config.stages.execution.max_duration,
-                },
-                config
-                    .stages
-                    .merkle
-                    .clean_threshold
-                    .max(config.stages.account_hashing.clean_threshold)
-                    .max(config.stages.storage_hashing.clean_threshold),
-                config.prune.map(|prune| prune.segments).unwrap_or_default(),
-            ));
-        }
-
         let mut pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty
             .with_max_block(max_block)
-            .add_stages(stages)
+            .add_stages(
+                DefaultStages::new(
+                    provider_factory.clone(),
+                    HeaderSyncMode::Tip(tip_rx),
+                    consensus.clone(),
+                    header_downloader,
+                    body_downloader,
+                    factory.clone(),
+                    config.stages.etl,
+                )
+                .set(SenderRecoveryStage {
+                    commit_threshold: config.stages.sender_recovery.commit_threshold,
+                })
+                .set(ExecutionStage::new(
+                    factory,
+                    ExecutionStageThresholds {
+                        max_blocks: config.stages.execution.max_blocks,
+                        max_changes: config.stages.execution.max_changes,
+                        max_cumulative_gas: config.stages.execution.max_cumulative_gas,
+                        max_duration: config.stages.execution.max_duration,
+                    },
+                    config
+                        .stages
+                        .merkle
+                        .clean_threshold
+                        .max(config.stages.account_hashing.clean_threshold)
+                        .max(config.stages.storage_hashing.clean_threshold),
+                    config.prune.map(|prune| prune.segments).unwrap_or_default(),
+                )),
+            )
+            .disable_if(StageId::Execution, || disable_execution)
             .build(provider_factory, static_file_producer);
 
         let events = pipeline.events().map(Into::into);
