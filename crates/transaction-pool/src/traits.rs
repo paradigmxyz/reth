@@ -15,7 +15,7 @@ use reth_primitives::{
     IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionKind,
     TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxEip4844, TxHash, B256,
-    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
+    DEPOSIT_TX_TYPE_ID, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -840,6 +840,11 @@ pub trait PoolTransaction:
         self.tx_type() == EIP4844_TX_TYPE_ID
     }
 
+    /// Returns true if the transaction is an OP deposit transaction.
+    fn is_op_deposit(&self) -> bool {
+        self.tx_type() == DEPOSIT_TX_TYPE_ID
+    }
+
     /// Returns the length of the rlp encoded transaction object
     ///
     /// Note: Implementations should cache this value.
@@ -1122,6 +1127,10 @@ impl TryFromRecoveredTransaction for EthPooledTransaction {
         // missing.
         let encoded_length = tx.length_without_header();
         let transaction = EthPooledTransaction::new(tx, encoded_length);
+
+        if transaction.is_op_deposit() {
+            return Err(TryFromRecoveredTransactionError::BlobSidecarMissing);
+        }
         Ok(transaction)
     }
 }
