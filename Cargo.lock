@@ -6857,7 +6857,6 @@ dependencies = [
  "rand 0.8.5",
  "reth-auto-seal-consensus",
  "reth-beacon-consensus",
- "reth-blockchain-tree",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
