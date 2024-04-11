@@ -297,14 +297,12 @@ impl ChunkedFileReader {
     /// Calculates the number of bytes to read from the chain file. Returns a tuple of the chunk
     /// length and the remaining file length.
     fn chunk_len(&self) -> u64 {
-        let chunk_len = if BYTE_LEN_CHUNK_CHAIN_FILE > self.file_len {
+        if BYTE_LEN_CHUNK_CHAIN_FILE > self.file_len {
             // last chunk
             self.file_len
         } else {
             BYTE_LEN_CHUNK_CHAIN_FILE
-        };
-
-        chunk_len
+        }
     }
 
     /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
