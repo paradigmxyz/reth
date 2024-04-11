@@ -22,17 +22,15 @@ struct OptimismExEx<Node: FullNodeTypes> {
 }
 
 impl<Node: FullNodeTypes> OptimismExEx<Node> {
-    fn new(ctx: ExExContext<Node>, db_path: impl AsRef<Path>) -> eyre::Result<Self> {
-        let connection = Connection::open(db_path)?;
-
+    fn new(ctx: ExExContext<Node>, connection: Connection) -> eyre::Result<Self> {
         connection.execute(
-            "
+            r#"
             CREATE TABLE IF NOT EXISTS deposits (
                 id               INTEGER PRIMARY KEY,
                 tx_hash          BLOB NOT NULL,
                 contract_address BLOB NOT NULL,
-                from             BLOB NOT NULL,
-                to               BLOB NOT NULL,
+                "from"           BLOB NOT NULL,
+                "to"             BLOB NOT NULL,
                 amount           TEXT NOT NULL
             );
 
@@ -40,11 +38,11 @@ impl<Node: FullNodeTypes> OptimismExEx<Node> {
                 id               INTEGER PRIMARY KEY,
                 tx_hash          BLOB NOT NULL,
                 contract_address BLOB NOT NULL,
-                from             BLOB NOT NULL,
-                to               BLOB NOT NULL,
+                "from            BLOB NOT NULL,
+                "to"             BLOB NOT NULL,
                 amount           TEXT NOT NULL
             );
-            ",
+            "#,
             (),
         )?;
 
@@ -98,7 +96,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                             ..
                         }) => {
                             this.connection.execute(
-                                "INSERT INTO deposits (tx_hash, contract_address, from, to, amount) VALUES (?, ?, ?, ?, ?)",
+                                r#"INSERT INTO deposits (tx_hash, contract_address, "from", "to", amount) VALUES (?, ?, ?, ?, ?)"#,
                                 (
                                     tx_hash.as_slice(),
                                     log.address.as_slice(),
@@ -115,7 +113,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                             ..
                         }) => {
                             this.connection.execute(
-                                "INSERT INTO withdrawals (tx_hash, contract_address, from, to, amount) VALUES (?, ?, ?, ?, ?)",
+                                r#"INSERT INTO withdrawals (tx_hash, contract_address, "from", "to", amount) VALUES (?, ?, ?, ?, ?)"#,
                                 (
                                     tx_hash.as_slice(),
                                     log.address.as_slice(),
@@ -181,7 +179,10 @@ fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("Optimism", move |ctx| async { OptimismExEx::new(ctx, "optimism.db") })
+            .install_exex("Optimism", move |ctx| async {
+                let connection = Connection::open("optimism.db")?;
+                OptimismExEx::new(ctx, connection)
+            })
             .launch()
             .await?;
 
