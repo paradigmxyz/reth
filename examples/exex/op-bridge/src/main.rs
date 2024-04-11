@@ -16,12 +16,12 @@ use rusqlite::Connection;
 sol!(L1StandardBridge, "l1_standard_bridge_abi.json");
 use crate::L1StandardBridge::{ETHBridgeFinalized, ETHBridgeInitiated, L1StandardBridgeEvents};
 
-struct OptimismExEx<Node: FullNodeTypes> {
+struct OPBridgeExEx<Node: FullNodeTypes> {
     ctx: ExExContext<Node>,
     connection: Connection,
 }
 
-impl<Node: FullNodeTypes> OptimismExEx<Node> {
+impl<Node: FullNodeTypes> OPBridgeExEx<Node> {
     fn new(ctx: ExExContext<Node>, connection: Connection) -> eyre::Result<Self> {
         // Create deposits and withdrawals tables
         connection.execute(
@@ -85,7 +85,7 @@ impl<Node: FullNodeTypes> OptimismExEx<Node> {
     }
 }
 
-impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
+impl<Node: FullNodeTypes> Future for OPBridgeExEx<Node> {
     type Output = eyre::Result<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -189,6 +189,8 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
     }
 }
 
+/// Decode chain of blocks into a flattened list of receipt logs, and filter only
+/// [L1StandardBridgeEvents].
 fn decode_chain_into_events(
     chain: &Chain,
 ) -> impl Iterator<Item = (&SealedBlockWithSenders, &TransactionSigned, &Log, L1StandardBridgeEvents)>
@@ -218,9 +220,9 @@ fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("Optimism", move |ctx| async {
-                let connection = Connection::open("optimism.db")?;
-                OptimismExEx::new(ctx, connection)
+            .install_exex("OPBridge", move |ctx| async {
+                let connection = Connection::open("op_bridge.db")?;
+                OPBridgeExEx::new(ctx, connection)
             })
             .launch()
             .await?;
