@@ -1,23 +1,55 @@
 use std::{
-    collections::HashMap,
+    path::Path,
     pin::Pin,
     task::{Context, Poll},
 };
 
 use alloy_sol_types::{sol, SolEventInterface};
 use futures::Future;
-use itertools::Itertools;
 use reth::builder::FullNodeTypes;
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{address, constants::ETH_TO_WEI, Address, U256};
-use reth_provider::CanonStateNotification;
+use reth_primitives::{address, Address, Log, TxHash};
+use reth_provider::Chain;
+use rusqlite::Connection;
 
 sol!(L1StandardBridge, "l1_standard_bridge_abi.json");
 use crate::L1StandardBridge::{ETHBridgeFinalized, ETHBridgeInitiated, L1StandardBridgeEvents};
 
 struct OptimismExEx<Node: FullNodeTypes> {
     ctx: ExExContext<Node>,
+    connection: Connection,
+}
+
+impl<Node: FullNodeTypes> OptimismExEx<Node> {
+    fn new(ctx: ExExContext<Node>, db_path: impl AsRef<Path>) -> eyre::Result<Self> {
+        let connection = Connection::open(db_path)?;
+
+        connection.execute(
+            "
+            CREATE TABLE IF NOT EXISTS deposits (
+                id               INTEGER PRIMARY KEY,
+                tx_hash          BLOB NOT NULL,
+                contract_address BLOB NOT NULL,
+                from             BLOB NOT NULL,
+                to               BLOB NOT NULL,
+                amount           TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS withdrawals (
+                id               INTEGER PRIMARY KEY,
+                tx_hash          BLOB NOT NULL,
+                contract_address BLOB NOT NULL,
+                from             BLOB NOT NULL,
+                to               BLOB NOT NULL,
+                amount           TEXT NOT NULL
+            );
+            ",
+            (),
+        )?;
+
+        Ok(Self { ctx, connection })
+    }
 }
 
 impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
@@ -28,78 +60,103 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
 
         // Process all new chain state notifications until there are no more
         while let Poll::Ready(Some(notification)) = this.ctx.notifications.poll_recv(cx) {
-            // Grab only new chain from both commit and reorg notifications
-            let chain = match notification {
-                CanonStateNotification::Commit { new } => new,
-                CanonStateNotification::Reorg { old: _, new } => new,
-            };
+            if let Some(reverted_chain) = notification.reverted() {
+                let events = decode_chain_into_events(&reverted_chain);
 
-            // Initialize mappings for contract deposits and withdrawals
-            let mut contract_deposits = HashMap::<Address, U256>::new();
-            let mut contract_withdrawals = HashMap::<Address, U256>::new();
-
-            // Fill deposit and withdrawal mappings with data from new notification
-            for (log, bridge_event) in chain
-                // Get all blocks and receipts
-                .blocks_and_receipts()
-                // Get all receipts
-                .flat_map(|(_, receipts)| receipts.iter().flatten())
-                // Get all logs
-                .flat_map(|receipt| receipt.logs.iter())
-                // Decode and filter bridge events
-                .filter_map(|log| {
-                    L1StandardBridgeEvents::decode_raw_log(&log.topics, &log.data, true)
-                        .ok()
-                        .map(|event| (log, event))
-                })
-            {
-                match bridge_event {
-                    // L1 -> L2 deposit
-                    L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
-                        amount,
-                        ..
-                    }) => {
-                        *contract_deposits.entry(log.address).or_default() += amount;
-                    }
-                    // L2 -> L1 withdrawal
-                    L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
-                        amount,
-                        ..
-                    }) => {
-                        *contract_withdrawals.entry(log.address).or_default() += amount;
-                    }
-                    _ => continue,
-                };
+                for (tx_hash, _, event) in events {
+                    match event {
+                        L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
+                            ..
+                        }) => {
+                            this.connection.execute(
+                                "DELETE FROM deposits WHERE tx_hash = ?",
+                                (tx_hash.as_slice(),),
+                            )?;
+                        }
+                        L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
+                            ..
+                        }) => {
+                            this.connection.execute(
+                                "DELETE FROM withdrawals WHERE tx_hash = ?",
+                                (tx_hash.as_slice(),),
+                            )?;
+                        }
+                        _ => continue,
+                    };
+                }
             }
 
-            // Finished filling the mappings, print the results
-            println!("Finished block range: {:?}", chain.first().number..=chain.tip().number);
-            if !contract_deposits.is_empty() {
-                print_amounts("OP Stack Deposits", contract_deposits);
-            }
-            if !contract_withdrawals.is_empty() {
-                print_amounts("OP Stack Withdrawals", contract_withdrawals);
+            if let Some(committed) = notification.committed() {
+                let events = decode_chain_into_events(&committed);
+
+                for (tx_hash, log, event) in events {
+                    match event {
+                        L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
+                            amount,
+                            from,
+                            to,
+                            ..
+                        }) => {
+                            this.connection.execute(
+                                "INSERT INTO deposits (tx_hash, contract_address, from, to, amount) VALUES (?, ?, ?, ?, ?)",
+                                (
+                                    tx_hash.as_slice(),
+                                    log.address.as_slice(),
+                                    from.as_slice(),
+                                    to.as_slice(),
+                                    amount.to_string(),
+                                ),
+                            )?;
+                        }
+                        L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
+                            amount,
+                            from,
+                            to,
+                            ..
+                        }) => {
+                            this.connection.execute(
+                                "INSERT INTO withdrawals (tx_hash, contract_address, from, to, amount) VALUES (?, ?, ?, ?, ?)",
+                                (
+                                    tx_hash.as_slice(),
+                                    log.address.as_slice(),
+                                    from.as_slice(),
+                                    to.as_slice(),
+                                    amount.to_string(),
+                                ),
+                            )?;
+                        }
+                        _ => continue,
+                    };
+                }
             }
 
             // Send a finished height event, signaling the node that we don't need any blocks below
             // this height anymore
-            this.ctx.events.send(ExExEvent::FinishedHeight(chain.tip().number))?;
+            this.ctx.events.send(ExExEvent::FinishedHeight(notification.tip().number))?;
         }
 
         Poll::Pending
     }
 }
 
-fn print_amounts(title: impl AsRef<str>, amounts: HashMap<Address, U256>) {
-    println!("{}:", title.as_ref());
-    for (address, amount) in amounts.into_iter().sorted_by_key(|(_, amount)| *amount).rev() {
-        let amount = f64::from(amount) / ETH_TO_WEI as f64;
-        if let Some(name) = contract_address_to_name(address) {
-            println!("  {}: {} ETH", name, amount);
-        } else {
-            println!("  {}: {} ETH", address, amount);
-        }
-    }
+fn decode_chain_into_events(
+    chain: &Chain,
+) -> impl Iterator<Item = (TxHash, &Log, L1StandardBridgeEvents)> {
+    chain
+        // Get all blocks and receipts
+        .blocks_and_receipts()
+        // Get all receipts
+        .flat_map(|(block, receipts)| {
+            block.body.iter().map(|transaction| transaction.hash()).zip(receipts.iter().flatten())
+        })
+        // Get all logs
+        .flat_map(|(tx_hash, receipt)| receipt.logs.iter().map(move |log| (tx_hash, log)))
+        // Decode and filter bridge events
+        .filter_map(|(tx_hash, log)| {
+            L1StandardBridgeEvents::decode_raw_log(&log.topics, &log.data, true)
+                .ok()
+                .map(|event| (tx_hash, log, event))
+        })
 }
 
 fn contract_address_to_name(address: Address) -> Option<&'static str> {
@@ -124,7 +181,11 @@ fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("Optimism", move |ctx| futures::future::ok(OptimismExEx { ctx }))
+            .install_exex("Optimism", move |ctx| {
+                futures::future::ok(
+                    OptimismExEx::new(ctx, "optimism.db").expect("failed to create OptimismExEx"),
+                )
+            })
             .launch()
             .await?;
 

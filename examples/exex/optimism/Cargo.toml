@@ -19,3 +19,4 @@ tokio.workspace = true
 futures.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 itertools.workspace = true
+rusqlite = { version = "0.31.0", features = ["bundled"] }
