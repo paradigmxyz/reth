@@ -18,6 +18,11 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use tracing::{trace, warn};
 
+/// Byte length of chunk to read from chain file. Equivalent to one static file, full of max
+/// size blocks (500k headers = one static file, transactions from 500k blocks = one static
+/// file).
+const BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 500_000 * 12 * 1_000_000;
+
 /// Front-end API for fetching chain data from a file.
 ///
 /// Blocks are assumed to be written one after another in a file, as rlp bytes.
@@ -118,7 +123,7 @@ impl FileClient {
 
             if log_interval == 0 {
                 log_interval_start_block = block_number;
-            } else if log_interval % 100000 == 0 {
+            } else if log_interval % 100_000 == 0 {
                 trace!(target: "downloaders::file",
                     blocks=?log_interval_start_block..=block_number,
                     "read blocks from file"
@@ -275,11 +280,6 @@ pub struct ChunkedFileReader {
 }
 
 impl ChunkedFileReader {
-    /// Byte length of chunk to read from chain file. Equivalent to one static file, full of max
-    /// size blocks (500k headers = one static file, transactions from 500k blocks = one static
-    /// file).
-    const BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 500_000 * 12 * 1_000_000;
-
     /// Opens the file to import from given path. Returns a new instance.
     pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, FileClientError> {
         let file = File::open(path).await?;
@@ -293,11 +293,11 @@ impl ChunkedFileReader {
     /// Calculates the number of bytes to read from the chain file. Returns a tuple of the chunk
     /// length and the remaining file length.
     fn chunk_len(&self) -> u64 {
-        let chunk_len = if Self::BYTE_LEN_CHUNK_CHAIN_FILE > self.file_len {
+        let chunk_len = if BYTE_LEN_CHUNK_CHAIN_FILE > self.file_len {
             // last chunk
             self.file_len
         } else {
-            Self::BYTE_LEN_CHUNK_CHAIN_FILE
+            BYTE_LEN_CHUNK_CHAIN_FILE
         };
 
         chunk_len
@@ -310,16 +310,16 @@ impl ChunkedFileReader {
             return Ok(None)
         }
 
-        let new_chunk_len = self.chunk_len();
-        let chunk_len = self.chunk.len() as u64;
+        let chunk_len = self.chunk_len();
+        let old_bytes_len = self.chunk.len() as u64;
 
         // calculate reserved space in chunk
-        let new_bytes_len = if new_chunk_len + chunk_len > Self::BYTE_LEN_CHUNK_CHAIN_FILE {
+        let new_bytes_len = if chunk_len + old_bytes_len > BYTE_LEN_CHUNK_CHAIN_FILE {
             // make space for already read bytes in chunk
-            new_chunk_len - chunk_len
+            chunk_len - old_bytes_len
         } else {
             // new bytes from file can fill whole chunk
-            new_chunk_len
+            chunk_len
         };
 
         // read new bytes from file
@@ -333,7 +333,7 @@ impl ChunkedFileReader {
         self.chunk.extend_from_slice(&reader[..]);
 
         // make new file client from chunk
-        let (file_client, bytes) = FileClient::from_reader(&self.chunk[..], new_chunk_len).await?;
+        let (file_client, bytes) = FileClient::from_reader(&self.chunk[..], chunk_len).await?;
 
         // save left over bytes
         self.chunk = bytes;
