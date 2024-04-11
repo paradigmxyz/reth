@@ -181,11 +181,7 @@ fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("Optimism", move |ctx| {
-                futures::future::ok(
-                    OptimismExEx::new(ctx, "optimism.db").expect("failed to create OptimismExEx"),
-                )
-            })
+            .install_exex("Optimism", move |ctx| async { OptimismExEx::new(ctx, "optimism.db") })
             .launch()
             .await?;
 
