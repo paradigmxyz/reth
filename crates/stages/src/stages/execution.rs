@@ -16,8 +16,9 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, CanonStateNotification, DatabaseProviderRW, ExecutorFactory, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
+    BlockReader, CanonStateNotification, Chain, DatabaseProviderRW, ExecutorFactory,
+    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader,
+    TransactionVariant,
 };
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
@@ -26,6 +27,7 @@ use reth_stages_api::{
 use std::{
     cmp::Ordering,
     ops::RangeInclusive,
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -165,6 +167,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut cumulative_gas = 0;
         let batch_start = Instant::now();
 
+        let mut blocks = Vec::new();
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -200,8 +203,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             }
 
             stage_progress = block_number;
-
             stage_checkpoint.progress.processed += block.gas_used;
+
+            // If we have ExEx's we need to save the block in memory for later
+            if self.exex_manager_handle.as_ref().is_some_and(|handle| handle.has_exexs()) {
+                blocks.push(block);
+            }
 
             // Check if we should commit now
             let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
@@ -217,6 +224,26 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let time = Instant::now();
         let state = executor.take_output_state();
         let write_preparation_duration = time.elapsed();
+
+        // Check if we should send a [`CanonStateNotification`] to execution extensions.
+        //
+        // Note: Since we only write to `blocks` if there are any ExEx's (and thus a handle), we can
+        // safely unwrap if there are any blocks in the Vec.
+        if !blocks.is_empty() {
+            let handle = self.exex_manager_handle.as_ref().unwrap();
+            let chain = Arc::new(Chain::new(
+                blocks.into_iter().map(|block| {
+                    let hash = block.header.hash_slow();
+                    block.seal(hash)
+                }),
+                state.clone(),
+                None,
+            ));
+
+            // NOTE: We can ignore the error here, since an error means that the channel is closed,
+            // which means the manager has died, which then in turn means the node is shutting down.
+            let _ = handle.send(CanonStateNotification::Commit { new: chain });
+        }
 
         let time = Instant::now();
         // write output
@@ -404,6 +431,20 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::Execution
+    }
+
+    fn poll_execute_ready(
+        &mut self,
+        cx: &mut Context<'_>,
+        _: ExecInput,
+    ) -> Poll<Result<(), StageError>> {
+        if let Some(handle) = self.exex_manager_handle.as_mut() {
+            if handle.poll_ready(cx) == Poll::Pending {
+                return Poll::Pending
+            }
+        }
+
+        Poll::Ready(Ok(()))
     }
 
     /// Execute the stage
