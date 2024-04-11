@@ -3,7 +3,7 @@
 use core::hash::BuildHasher;
 use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
-use linked_hash_set::LinkedHashSet;
+// use linked_hash_set::LinkedHashSet;
 use schnellru::{ByLength, Limiter, RandomState, Unlimited};
 use std::{borrow::Borrow, fmt, hash::Hash, num::NonZeroUsize};
 
@@ -11,16 +11,15 @@ use std::{borrow::Borrow, fmt, hash::Hash, num::NonZeroUsize};
 ///
 /// If the length exceeds the set capacity, the oldest element will be removed
 /// In the limit, for each element inserted the oldest existing element will be removed.
-#[derive(Clone)]
 pub struct LruCache<T: Hash + Eq> {
     limit: NonZeroUsize,
-    inner: LinkedHashSet<T>,
+    inner: LruMap<T, ()>,
 }
 
 impl<T: Hash + Eq> LruCache<T> {
     /// Creates a new [`LruCache`] using the given limit
     pub fn new(limit: NonZeroUsize) -> Self {
-        Self { inner: LinkedHashSet::new(), limit }
+        Self { inner: LruMap::new(limit.get().try_into().unwrap()), limit }
     }
 
     /// Insert an element into the set.
@@ -39,12 +38,12 @@ impl<T: Hash + Eq> LruCache<T> {
     /// Same as [`Self::insert`] but returns a tuple, where the second index is the evicted value,
     /// if one was evicted.
     pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
-        if self.inner.insert(entry) {
+        if self.inner.insert(entry, ()) {
             if self.limit.get() < self.inner.len() {
                 // remove the oldest element in the set
-                return (true, self.remove_lru())
+                return (true, self.remove_lru());
             }
-            return (true, None)
+            return (true, None);
         }
         (false, None)
     }
@@ -55,12 +54,12 @@ impl<T: Hash + Eq> LruCache<T> {
     /// configured, this will return None.
     #[inline]
     fn remove_lru(&mut self) -> Option<T> {
-        self.inner.pop_front()
+        self.inner.pop_oldest().map(|(k, _v)| k)
     }
 
     /// Expels the given value. Returns true if the value existed.
     pub fn remove(&mut self, value: &T) -> bool {
-        self.inner.remove(value)
+        self.inner.remove(value).is_some()
     }
 
     /// Returns `true` if the set contains a value.
@@ -69,12 +68,12 @@ impl<T: Hash + Eq> LruCache<T> {
         T: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.inner.contains(value)
+        self.inner.iter().any(|(k, _v)| k.borrow() == value)
     }
 
     /// Returns an iterator over all cached entries in lru order
     pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.inner.iter().rev()
+        self.inner.iter().rev().map(|(k, _v)| k)
     }
 
     /// Returns number of elements currently in cache.
