@@ -15,12 +15,12 @@
 
 use reth_eth_wire::{DisconnectReason, EthVersion, Status};
 use reth_primitives::{NodeRecord, PeerId};
-use reth_rpc_types::NetworkStatus;
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
 use reth_eth_wire::capability::Capabilities;
+use reth_rpc_types::NetworkStatus;
 
 /// Network Error
 pub mod error;
@@ -57,6 +57,9 @@ pub trait PeersInfo: Send + Sync {
 
     /// Returns the Ethereum Node Record of the node.
     fn local_node_record(&self) -> NodeRecord;
+
+    /// Returns the local ENR of the node.
+    fn local_enr(&self) -> enr::Enr<enr::secp256k1::SecretKey>;
 }
 
 /// Provides an API for managing the peers of the network.

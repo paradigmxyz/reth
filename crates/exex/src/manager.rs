@@ -120,7 +120,7 @@ impl ExExHandle {
 #[metrics(scope = "exex_manager")]
 pub struct ExExManagerMetrics {
     /// Max size of the internal state notifications buffer.
-    max_capacity: Counter,
+    max_capacity: Gauge,
     /// Current capacity of the internal state notifications buffer.
     current_capacity: Gauge,
     /// Current size of the internal state notifications buffer.
@@ -151,6 +151,9 @@ pub struct ExExManager {
     /// Monotonically increasing ID for [`CanonStateNotification`]s.
     next_id: usize,
     /// Internal buffer of [`CanonStateNotification`]s.
+    ///
+    /// The first element of the tuple is a monotonically increasing ID unique to the notification
+    /// (the second element of the tuple).
     buffer: VecDeque<(usize, CanonStateNotification)>,
     /// Max size of the internal state notifications buffer.
     max_capacity: usize,
@@ -185,7 +188,7 @@ impl ExExManager {
     /// notification buffer in the manager.
     ///
     /// When the capacity is exceeded (which can happen if an ExEx is slow) no one can send
-    /// messages over [`ExExManagerHandle`]s until there is capacity again.
+    /// notifications over [`ExExManagerHandle`]s until there is capacity again.
     pub fn new(handles: Vec<ExExHandle>, max_capacity: usize) -> Self {
         let num_exexs = handles.len();
 
@@ -196,7 +199,7 @@ impl ExExManager {
         let current_capacity = Arc::new(AtomicUsize::new(max_capacity));
 
         let metrics = ExExManagerMetrics::default();
-        metrics.max_capacity.absolute(max_capacity as u64);
+        metrics.max_capacity.set(max_capacity as f64);
 
         Self {
             exex_handles: handles,
@@ -256,11 +259,11 @@ impl Future for ExExManager {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // drain handle notifications
-        'notifications: while self.buffer.len() < self.max_capacity {
+        while self.buffer.len() < self.max_capacity {
             if let Poll::Ready(Some(notification)) = self.handle_rx.poll_recv(cx) {
                 debug!("received new notification");
                 self.push_notification(notification);
-                continue 'notifications
+                continue
             }
             break
         }
@@ -290,10 +293,10 @@ impl Future for ExExManager {
             self.exex_handles.push(exex);
         }
 
-        // remove processed buffered events
+        // remove processed buffered notifications
         self.buffer.retain(|&(id, _)| id >= min_id);
         self.min_id = min_id;
-        debug!("lowest notification id in buffer is {min_id}");
+        debug!(min_id, "lowest notification id in buffer updated");
 
         // update capacity
         self.update_capacity();
@@ -301,7 +304,7 @@ impl Future for ExExManager {
         // handle incoming exex events
         for exex in self.exex_handles.iter_mut() {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
-                debug!(?event, "received event from exex {}", exex.id);
+                debug!(?event, id = exex.id, "received event from exex");
                 exex.metrics.events_sent_total.increment(1);
                 match event {
                     ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
@@ -333,11 +336,28 @@ impl Future for ExExManager {
 /// A handle to communicate with the [`ExExManager`].
 #[derive(Debug)]
 pub struct ExExManagerHandle {
+    /// Channel to send notifications to the ExEx manager.
     exex_tx: UnboundedSender<CanonStateNotification>,
+    /// The number of ExEx's running on the node.
     num_exexs: usize,
+    /// A watch channel denoting whether the manager is ready for new notifications or not.
+    ///
+    /// This is stored internally alongside a `WatchStream` representation of the same value. This
+    /// field is only used to create a new `WatchStream` when the handle is cloned, but is
+    /// otherwise unused.
     is_ready_receiver: watch::Receiver<bool>,
+    /// A stream of bools denoting whether the manager is ready for new notifications.
     is_ready: WatchStream<bool>,
+    /// The current capacity of the manager's internal notification buffer.
     current_capacity: Arc<AtomicUsize>,
+    /// The finished height of all ExEx's.
+    ///
+    /// This is the lowest common denominator between all ExEx's. If an ExEx has not emitted a
+    /// `FinishedHeight` event, it will be `None`.
+    ///
+    /// This block is used to (amongst other things) determine what blocks are safe to prune.
+    ///
+    /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
     finished_height: watch::Receiver<Option<BlockNumber>>,
 }
 

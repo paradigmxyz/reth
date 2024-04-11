@@ -92,6 +92,7 @@ similar-asserts.workspace = true
 itertools.workspace = true
 rayon.workspace = true
 boyer-moore-magiclen = "0.2.16"
+ahash = "0.8"
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
