@@ -4665,6 +4665,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "minimal"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "reth",
+ "reth-exex",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-provider",
+ "tokio",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
