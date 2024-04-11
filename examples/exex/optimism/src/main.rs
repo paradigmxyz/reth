@@ -63,12 +63,15 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
             if let Some(reverted_chain) = notification.reverted() {
                 let events = decode_chain_into_events(&reverted_chain);
 
+                let mut deposits = 0;
+                let mut withdrawals = 0;
+
                 for (tx_hash, _, event) in events {
                     match event {
                         L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
                             ..
                         }) => {
-                            this.connection.execute(
+                            deposits += this.connection.execute(
                                 "DELETE FROM deposits WHERE tx_hash = ?",
                                 (tx_hash.to_string(),),
                             )?;
@@ -76,7 +79,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                         L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
                             ..
                         }) => {
-                            this.connection.execute(
+                            withdrawals += this.connection.execute(
                                 "DELETE FROM withdrawals WHERE tx_hash = ?",
                                 (tx_hash.to_string(),),
                             )?;
@@ -85,11 +88,14 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                     };
                 }
 
-                info!("Reverted chain events");
+                info!(%deposits, %withdrawals, "Reverted chain events");
             }
 
             if let Some(committed) = notification.committed() {
                 let events = decode_chain_into_events(&committed);
+
+                let mut deposits = 0;
+                let mut withdrawals = 0;
 
                 for (tx_hash, log, event) in events {
                     match event {
@@ -99,7 +105,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                             to,
                             ..
                         }) => {
-                            this.connection.execute(
+                            deposits += this.connection.execute(
                                 r#"INSERT INTO deposits (tx_hash, contract_address, "from", "to", amount) VALUES (?, ?, ?, ?, ?)"#,
                                 (
                                     tx_hash.to_string(),
@@ -116,7 +122,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                             to,
                             ..
                         }) => {
-                            this.connection.execute(
+                            withdrawals += this.connection.execute(
                                 r#"INSERT INTO withdrawals (tx_hash, contract_address, "from", "to", amount) VALUES (?, ?, ?, ?, ?)"#,
                                 (
                                     tx_hash.to_string(),
@@ -131,7 +137,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                     };
                 }
 
-                info!("Committed chain events");
+                info!(%deposits, %withdrawals, "Committed chain events");
             }
 
             // Send a finished height event, signaling the node that we don't need any blocks below
