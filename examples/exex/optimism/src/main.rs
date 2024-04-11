@@ -124,21 +124,21 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                 info!(%deposits, %withdrawals, "Reverted chain events");
             }
 
-            if let Some(committed) = notification.committed() {
-                let events = decode_chain_into_events(&committed);
+            let committed = notification.committed();
+            let events = decode_chain_into_events(&committed);
 
-                let mut deposits = 0;
-                let mut withdrawals = 0;
+            let mut deposits = 0;
+            let mut withdrawals = 0;
 
-                for (block, tx, log, event) in events {
-                    match event {
-                        L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
-                            amount,
-                            from,
-                            to,
-                            ..
-                        }) => {
-                            deposits += this.connection.execute(
+            for (block, tx, log, event) in events {
+                match event {
+                    L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
+                        amount,
+                        from,
+                        to,
+                        ..
+                    }) => {
+                        deposits += this.connection.execute(
                                 r#"
                                 INSERT INTO deposits (block_number, tx_hash, contract_address, "from", "to", amount)
                                 VALUES (?, ?, ?, ?, ?, ?)
@@ -152,14 +152,14 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                                     amount.to_string(),
                                 ),
                             )?;
-                        }
-                        L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
-                            amount,
-                            from,
-                            to,
-                            ..
-                        }) => {
-                            withdrawals += this.connection.execute(
+                    }
+                    L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
+                        amount,
+                        from,
+                        to,
+                        ..
+                    }) => {
+                        withdrawals += this.connection.execute(
                                 r#"
                                 INSERT INTO withdrawals (block_number, tx_hash, contract_address, "from", "to", amount)
                                 VALUES (?, ?, ?, ?, ?, ?)
@@ -173,13 +173,12 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                                     amount.to_string(),
                                 ),
                             )?;
-                        }
-                        _ => continue,
-                    };
-                }
-
-                info!(%deposits, %withdrawals, "Committed chain events");
+                    }
+                    _ => continue,
+                };
             }
+
+            info!(%deposits, %withdrawals, "Committed chain events");
 
             // Send a finished height event, signaling the node that we don't need any blocks below
             // this height anymore
