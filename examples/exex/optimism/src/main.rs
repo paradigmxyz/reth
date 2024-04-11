@@ -8,7 +8,7 @@ use futures::Future;
 use reth::builder::FullNodeTypes;
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{address, Address, Log, TxHash};
+use reth_primitives::{Log, SealedBlockWithSenders, TransactionSigned};
 use reth_provider::Chain;
 use reth_tracing::tracing::info;
 use rusqlite::Connection;
@@ -23,10 +23,12 @@ struct OptimismExEx<Node: FullNodeTypes> {
 
 impl<Node: FullNodeTypes> OptimismExEx<Node> {
     fn new(ctx: ExExContext<Node>, connection: Connection) -> eyre::Result<Self> {
+        // Create deposits and withdrawals tables
         connection.execute(
             r#"
             CREATE TABLE IF NOT EXISTS deposits (
                 id               INTEGER PRIMARY KEY,
+                block_number     INTEGER NOT NULL,
                 tx_hash          TEXT NOT NULL UNIQUE,
                 contract_address TEXT NOT NULL,
                 "from"           TEXT NOT NULL,
@@ -40,6 +42,7 @@ impl<Node: FullNodeTypes> OptimismExEx<Node> {
             r#"
             CREATE TABLE IF NOT EXISTS withdrawals (
                 id               INTEGER PRIMARY KEY,
+                block_number     INTEGER NOT NULL,
                 tx_hash          TEXT NOT NULL UNIQUE,
                 contract_address TEXT NOT NULL,
                 "from"           TEXT NOT NULL,
@@ -50,10 +53,11 @@ impl<Node: FullNodeTypes> OptimismExEx<Node> {
             (),
         )?;
 
-        // Insert known bridge contract addresses with their respective names
+        // Create a bridge contract addresses table and insert known ones with their respective
+        // names
         connection.execute(
             r#"
-            CREATE INDEX IF NOT EXISTS contracts (
+            CREATE TABLE IF NOT EXISTS contracts (
                 id              INTEGER PRIMARY KEY,
                 address         TEXT NOT NULL UNIQUE,
                 name            TEXT NOT NULL
@@ -95,14 +99,14 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                 let mut deposits = 0;
                 let mut withdrawals = 0;
 
-                for (tx_hash, _, event) in events {
+                for (_, tx, _, event) in events {
                     match event {
                         L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
                             ..
                         }) => {
                             deposits += this.connection.execute(
                                 "DELETE FROM deposits WHERE tx_hash = ?;",
-                                (tx_hash.to_string(),),
+                                (tx.hash().to_string(),),
                             )?;
                         }
                         L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
@@ -110,7 +114,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                         }) => {
                             withdrawals += this.connection.execute(
                                 "DELETE FROM withdrawals WHERE tx_hash = ?;",
-                                (tx_hash.to_string(),),
+                                (tx.hash().to_string(),),
                             )?;
                         }
                         _ => continue,
@@ -126,7 +130,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                 let mut deposits = 0;
                 let mut withdrawals = 0;
 
-                for (tx_hash, log, event) in events {
+                for (block, tx, log, event) in events {
                     match event {
                         L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
                             amount,
@@ -136,11 +140,12 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                         }) => {
                             deposits += this.connection.execute(
                                 r#"
-                                INSERT OR IGNORE INTO deposits (tx_hash, contract_address, "from", "to", amount)
-                                VALUES (?, ?, ?, ?, ?)
+                                INSERT INTO deposits (block_number, tx_hash, contract_address, "from", "to", amount)
+                                VALUES (?, ?, ?, ?, ?, ?)
                                 "#,
                                 (
-                                    tx_hash.to_string(),
+                                    block.number,
+                                    tx.hash().to_string(),
                                     log.address.to_string(),
                                     from.to_string(),
                                     to.to_string(),
@@ -156,11 +161,12 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                         }) => {
                             withdrawals += this.connection.execute(
                                 r#"
-                                INSERT OR IGNORE INTO withdrawals (tx_hash, contract_address, "from", "to", amount)
-                                VALUES (?, ?, ?, ?, ?)
+                                INSERT INTO withdrawals (block_number, tx_hash, contract_address, "from", "to", amount)
+                                VALUES (?, ?, ?, ?, ?, ?)
                                 "#,
                                 (
-                                    tx_hash.to_string(),
+                                    block.number,
+                                    tx.hash().to_string(),
                                     log.address.to_string(),
                                     from.to_string(),
                                     to.to_string(),
@@ -186,40 +192,27 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
 
 fn decode_chain_into_events(
     chain: &Chain,
-) -> impl Iterator<Item = (TxHash, &Log, L1StandardBridgeEvents)> {
+) -> impl Iterator<Item = (&SealedBlockWithSenders, &TransactionSigned, &Log, L1StandardBridgeEvents)>
+{
     chain
         // Get all blocks and receipts
         .blocks_and_receipts()
         // Get all receipts
         .flat_map(|(block, receipts)| {
-            block.body.iter().map(|transaction| transaction.hash()).zip(receipts.iter().flatten())
+            block
+                .body
+                .iter()
+                .zip(receipts.iter().flatten())
+                .map(move |(tx, receipt)| (block, tx, receipt))
         })
         // Get all logs
-        .flat_map(|(tx_hash, receipt)| receipt.logs.iter().map(move |log| (tx_hash, log)))
+        .flat_map(|(block, tx, receipt)| receipt.logs.iter().map(move |log| (block, tx, log)))
         // Decode and filter bridge events
-        .filter_map(|(tx_hash, log)| {
+        .filter_map(|(block, tx, log)| {
             L1StandardBridgeEvents::decode_raw_log(&log.topics, &log.data, true)
                 .ok()
-                .map(|event| (tx_hash, log, event))
+                .map(|event| (block, tx, log, event))
         })
-}
-
-fn contract_address_to_name(address: Address) -> Option<&'static str> {
-    const BASE: Address = address!("3154Cf16ccdb4C6d922629664174b904d80F2C35");
-    const BLAST_1: Address = address!("3a05E5d33d7Ab3864D53aaEc93c8301C1Fa49115");
-    const BLAST_2: Address = address!("697402166Fbf2F22E970df8a6486Ef171dbfc524");
-    const OPTIMISM: Address = address!("99C9fc46f92E8a1c0deC1b1747d010903E884bE1");
-    const MODE: Address = address!("735aDBbE72226BD52e818E7181953f42E3b0FF21");
-    const MANTA: Address = address!("3B95bC951EE0f553ba487327278cAc44f29715E5");
-
-    match address {
-        BASE => Some("Base"),
-        BLAST_1 | BLAST_2 => Some("Blast"),
-        OPTIMISM => Some("Optimism"),
-        MODE => Some("Mode"),
-        MANTA => Some("Manta"),
-        _ => None,
-    }
 }
 
 fn main() -> eyre::Result<()> {
