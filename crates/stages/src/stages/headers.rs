@@ -325,6 +325,13 @@ where
         let highest_block = static_file_provider
             .get_highest_static_file_block(StaticFileSegment::Headers)
             .unwrap_or_default();
+
+        provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
+            input.unwind_to + 1,
+        )?;
+        provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
+        let unfinalized_headers = provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+
         let unwound_headers = highest_block - input.unwind_to;
 
         for block in (input.unwind_to + 1)..=highest_block {
@@ -342,7 +349,7 @@ where
             input.checkpoint.headers_stage_checkpoint().map(|stage_checkpoint| HeadersCheckpoint {
                 block_range: stage_checkpoint.block_range,
                 progress: EntitiesCheckpoint {
-                    processed: stage_checkpoint.progress.processed.saturating_sub(unwound_headers),
+                    processed: stage_checkpoint.progress.processed.saturating_sub(unwound_headers + unfinalized_headers as u64),
                     total: stage_checkpoint.progress.total,
                 },
             });
