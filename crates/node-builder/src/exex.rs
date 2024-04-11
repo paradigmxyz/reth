@@ -2,39 +2,43 @@
 use crate::FullNodeTypes;
 use futures::{future::BoxFuture, FutureExt};
 use reth_exex::ExExContext;
+use reth_transaction_pool::TransactionPool;
 use std::future::Future;
 
 /// A trait for launching an ExEx.
-trait LaunchExEx<Node: FullNodeTypes>: Send {
+trait LaunchExEx<Node: FullNodeTypes, Pool: TransactionPool>: Send {
     /// Launches the ExEx.
     ///
     /// The ExEx should be able to run independently and emit events on the channels provided in
     /// the [`ExExContext`].
     fn launch(
         self,
-        ctx: ExExContext<Node>,
+        ctx: ExExContext<Node, Pool>,
     ) -> impl Future<Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>> + Send;
 }
 
 type BoxExEx = BoxFuture<'static, eyre::Result<()>>;
 
 /// A version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
-pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
-    fn launch(self: Box<Self>, ctx: ExExContext<Node>)
-        -> BoxFuture<'static, eyre::Result<BoxExEx>>;
+pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes, Pool: TransactionPool>: Send {
+    fn launch(
+        self: Box<Self>,
+        ctx: ExExContext<Node, Pool>,
+    ) -> BoxFuture<'static, eyre::Result<BoxExEx>>;
 }
 
 /// Implements [BoxedLaunchExEx] for any [LaunchExEx] that is [Send] and `'static`.
 ///
 /// Returns a [BoxFuture] that resolves to a [BoxExEx].
-impl<E, Node> BoxedLaunchExEx<Node> for E
+impl<E, Node, Pool> BoxedLaunchExEx<Node, Pool> for E
 where
-    E: LaunchExEx<Node> + Send + 'static,
+    E: LaunchExEx<Node, Pool> + Send + 'static,
     Node: FullNodeTypes,
+    Pool: TransactionPool + 'static,
 {
     fn launch(
         self: Box<Self>,
-        ctx: ExExContext<Node>,
+        ctx: ExExContext<Node, Pool>,
     ) -> BoxFuture<'static, eyre::Result<BoxExEx>> {
         async move {
             let exex = LaunchExEx::launch(*self, ctx).await?;
@@ -46,16 +50,17 @@ where
 
 /// Implements `LaunchExEx` for any closure that takes an [ExExContext] and returns a future
 /// resolving to an ExEx.
-impl<Node, F, Fut, E> LaunchExEx<Node> for F
+impl<Node, Pool, F, Fut, E> LaunchExEx<Node, Pool> for F
 where
     Node: FullNodeTypes,
-    F: FnOnce(ExExContext<Node>) -> Fut + Send,
+    Pool: TransactionPool,
+    F: FnOnce(ExExContext<Node, Pool>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<E>> + Send,
     E: Future<Output = eyre::Result<()>> + Send,
 {
     fn launch(
         self,
-        ctx: ExExContext<Node>,
+        ctx: ExExContext<Node, Pool>,
     ) -> impl Future<Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>> + Send
     {
         self(ctx)

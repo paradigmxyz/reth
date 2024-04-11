@@ -5,7 +5,7 @@ use std::{
 
 use alloy_sol_types::{sol, SolEventInterface};
 use futures::Future;
-use reth::builder::FullNodeTypes;
+use reth::{builder::FullNodeTypes, transaction_pool::TransactionPool};
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{Log, SealedBlockWithSenders, TransactionSigned};
@@ -18,12 +18,12 @@ use crate::L1StandardBridge::{ETHBridgeFinalized, ETHBridgeInitiated, L1Standard
 
 /// An example of ExEx that listens to ETH bridging events from OP Stack chains
 /// and stores deposits and withdrawals in a SQLite database.
-struct OPBridgeExEx<Node: FullNodeTypes> {
-    ctx: ExExContext<Node>,
+struct OPBridgeExEx<Node: FullNodeTypes, Pool: TransactionPool> {
+    ctx: ExExContext<Node, Pool>,
     connection: Connection,
 }
 
-impl<Node: FullNodeTypes> OPBridgeExEx<Node> {
+impl<Node: FullNodeTypes, Pool: TransactionPool> OPBridgeExEx<Node, Pool> {
     fn new(ctx: ExExContext<Node>, connection: Connection) -> eyre::Result<Self> {
         // Create deposits and withdrawals tables
         connection.execute(
@@ -87,7 +87,7 @@ impl<Node: FullNodeTypes> OPBridgeExEx<Node> {
     }
 }
 
-impl<Node: FullNodeTypes> Future for OPBridgeExEx<Node> {
+impl<Node: FullNodeTypes, Pool: TransactionPool> Future for OPBridgeExEx<Node, Pool> {
     type Output = eyre::Result<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
