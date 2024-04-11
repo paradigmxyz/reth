@@ -8,7 +8,7 @@ use reth_primitives::{
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
-use std::{borrow::Cow, collections::BTreeMap, fmt};
+use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive};
 
 /// A chain of blocks and their final state.
 ///
@@ -175,6 +175,11 @@ impl Chain {
     /// Returns length of the chain.
     pub fn len(&self) -> usize {
         self.blocks.len()
+    }
+
+    /// Returns the range of block numbers in the chain.
+    pub fn range(&self) -> RangeInclusive<BlockNumber> {
+        self.first().number..=self.tip().number
     }
 
     /// Get all receipts for the given block.

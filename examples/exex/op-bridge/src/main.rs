@@ -126,7 +126,7 @@ impl<Node: FullNodeTypes> Future for OPBridgeExEx<Node> {
                     };
                 }
 
-                info!(blocks = %reverted_chain.len(), %deposits, %withdrawals, "Reverted chain events");
+                info!(block_range = ?reverted_chain.range(), %deposits, %withdrawals, "Reverted chain events");
             }
 
             // Insert all new deposits and withdrawals
@@ -188,7 +188,7 @@ impl<Node: FullNodeTypes> Future for OPBridgeExEx<Node> {
                 };
             }
 
-            info!(blocks = %committed_chain.len(), %deposits, %withdrawals, "Committed chain events");
+            info!(block_range = ?committed_chain.range(), %deposits, %withdrawals, "Committed chain events");
 
             // Send a finished height event, signaling the node that we don't need any blocks below
             // this height anymore
