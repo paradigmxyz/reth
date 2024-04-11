@@ -27,19 +27,19 @@ impl<Node: FullNodeTypes> OptimismExEx<Node> {
             r#"
             CREATE TABLE IF NOT EXISTS deposits (
                 id               INTEGER PRIMARY KEY,
-                tx_hash          BLOB NOT NULL,
-                contract_address BLOB NOT NULL,
-                "from"           BLOB NOT NULL,
-                "to"             BLOB NOT NULL,
+                tx_hash          TEXT NOT NULL,
+                contract_address TEXT NOT NULL,
+                "from"           TEXT NOT NULL,
+                "to"             TEXT NOT NULL,
                 amount           TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS withdrawals (
                 id               INTEGER PRIMARY KEY,
-                tx_hash          BLOB NOT NULL,
-                contract_address BLOB NOT NULL,
-                "from            BLOB NOT NULL,
-                "to"             BLOB NOT NULL,
+                tx_hash          TEXT NOT NULL,
+                contract_address TEXT NOT NULL,
+                "from            TEXT NOT NULL,
+                "to"             TEXT NOT NULL,
                 amount           TEXT NOT NULL
             );
             "#,
@@ -70,7 +70,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                         }) => {
                             this.connection.execute(
                                 "DELETE FROM deposits WHERE tx_hash = ?",
-                                (tx_hash.as_slice(),),
+                                (tx_hash.to_string(),),
                             )?;
                         }
                         L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
@@ -78,7 +78,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                         }) => {
                             this.connection.execute(
                                 "DELETE FROM withdrawals WHERE tx_hash = ?",
-                                (tx_hash.as_slice(),),
+                                (tx_hash.to_string(),),
                             )?;
                         }
                         _ => continue,
@@ -102,10 +102,10 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                             this.connection.execute(
                                 r#"INSERT INTO deposits (tx_hash, contract_address, "from", "to", amount) VALUES (?, ?, ?, ?, ?)"#,
                                 (
-                                    tx_hash.as_slice(),
-                                    log.address.as_slice(),
-                                    from.as_slice(),
-                                    to.as_slice(),
+                                    tx_hash.to_string(),
+                                    log.address.to_string(),
+                                    from.to_string(),
+                                    to.to_string(),
                                     amount.to_string(),
                                 ),
                             )?;
@@ -119,10 +119,10 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                             this.connection.execute(
                                 r#"INSERT INTO withdrawals (tx_hash, contract_address, "from", "to", amount) VALUES (?, ?, ?, ?, ?)"#,
                                 (
-                                    tx_hash.as_slice(),
-                                    log.address.as_slice(),
-                                    from.as_slice(),
-                                    to.as_slice(),
+                                    tx_hash.to_string(),
+                                    log.address.to_string(),
+                                    from.to_string(),
+                                    to.to_string(),
                                     amount.to_string(),
                                 ),
                             )?;
