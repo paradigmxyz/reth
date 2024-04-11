@@ -97,18 +97,18 @@ impl CanonStateNotification {
     /// Get old chain if any.
     pub fn reverted(&self) -> Option<Arc<Chain>> {
         match self {
-            Self::Reorg { old, .. } => Some(old.clone()),
             Self::Commit { .. } => None,
+            Self::Reorg { old, .. } => Some(old.clone()),
         }
     }
 
     /// Get the new chain if any.
     ///
     /// Returns the new committed [Chain] for [Self::Reorg] and [Self::Commit] variants.
-    pub fn committed(&self) -> Option<Arc<Chain>> {
+    pub fn committed(&self) -> Arc<Chain> {
         match self {
-            Self::Reorg { new, .. } => Some(new.clone()),
-            Self::Commit { new } => Some(new.clone()),
+            Self::Commit { new } => new.clone(),
+            Self::Reorg { new, .. } => new.clone(),
         }
     }
 
@@ -118,8 +118,8 @@ impl CanonStateNotification {
     /// new block.
     pub fn tip(&self) -> &SealedBlockWithSenders {
         match self {
-            Self::Reorg { new, .. } => new.tip(),
             Self::Commit { new } => new.tip(),
+            Self::Reorg { new, .. } => new.tip(),
         }
     }
 
@@ -135,10 +135,9 @@ impl CanonStateNotification {
                 .extend(old.receipts_with_attachment().into_iter().map(|receipt| (receipt, true)));
         }
         // get new receipts
-        if let Some(new) = self.committed() {
-            receipts
-                .extend(new.receipts_with_attachment().into_iter().map(|receipt| (receipt, false)));
-        }
+        receipts.extend(
+            self.committed().receipts_with_attachment().into_iter().map(|receipt| (receipt, false)),
+        );
         receipts
     }
 }

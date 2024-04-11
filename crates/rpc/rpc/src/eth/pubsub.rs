@@ -314,10 +314,7 @@ where
     /// Returns a stream that yields all new RPC blocks.
     fn new_headers_stream(&self) -> impl Stream<Item = Header> {
         self.chain_events.canonical_state_stream().flat_map(|new_chain| {
-            let headers = new_chain
-                .committed()
-                .map(|chain| chain.headers().collect::<Vec<_>>())
-                .unwrap_or_default();
+            let headers = new_chain.committed().headers().collect::<Vec<_>>();
             futures::stream::iter(
                 headers.into_iter().map(reth_rpc_types_compat::block::from_primitive_with_hash),
             )
