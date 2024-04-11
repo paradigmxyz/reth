@@ -310,9 +310,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 ///
 /// TODO(onbjerg): Remove this as soon as possible
 pub trait TempManagerHandle: Send + Sync + 'static {
-    /// Synchronously send a notification over the channel to all execution extensions.
-    ///
-    /// Senders should call [`Self::has_capacity`] first.
+    /// Synchronously send a notification over the channel to all execution extensions.t.
     fn send(
         &self,
         notification: CanonStateNotification,
