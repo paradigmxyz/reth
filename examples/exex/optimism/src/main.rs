@@ -1,5 +1,4 @@
 use std::{
-    path::Path,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -11,6 +10,7 @@ use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{address, Address, Log, TxHash};
 use reth_provider::Chain;
+use reth_tracing::tracing::info;
 use rusqlite::Connection;
 
 sol!(L1StandardBridge, "l1_standard_bridge_abi.json");
@@ -23,7 +23,7 @@ struct OptimismExEx<Node: FullNodeTypes> {
 
 impl<Node: FullNodeTypes> OptimismExEx<Node> {
     fn new(ctx: ExExContext<Node>, connection: Connection) -> eyre::Result<Self> {
-        connection.execute(
+        let result = connection.execute(
             r#"
             CREATE TABLE IF NOT EXISTS deposits (
                 id               INTEGER PRIMARY KEY,
@@ -45,6 +45,8 @@ impl<Node: FullNodeTypes> OptimismExEx<Node> {
             "#,
             (),
         )?;
+
+        info!(?result, "Initialized database tables");
 
         Ok(Self { ctx, connection })
     }
@@ -82,6 +84,8 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                         _ => continue,
                     };
                 }
+
+                info!("Reverted chain events");
             }
 
             if let Some(committed) = notification.committed() {
@@ -126,6 +130,8 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                         _ => continue,
                     };
                 }
+
+                info!("Committed chain events");
             }
 
             // Send a finished height event, signaling the node that we don't need any blocks below
