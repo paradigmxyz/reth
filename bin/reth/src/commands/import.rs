@@ -15,7 +15,8 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::Config;
 use reth_db::{database::Database, init_db};
 use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
+    bodies::bodies::BodiesDownloaderBuilder,
+    file_client::{ChunkedFileReader, FileClient},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
@@ -29,12 +30,8 @@ use reth_stages::{
 };
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
-use tokio::{fs::File, sync::watch};
+use tokio::sync::watch;
 use tracing::{debug, info};
-
-/// Byte length of chunk to read from chain file. Equivalent to one static file, full of max size
-/// blocks (500k headers = one static file, transactions from 500k blocks = one static file).
-const BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 500_000 * 12 * 1_000_000;
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
@@ -116,22 +113,13 @@ impl ImportCommand {
         info!(target: "reth::cli", "Consensus engine initialized");
 
         // open file
-        let (mut file, file_len) = self.open_chain_file().await?;
+        let mut reader = ChunkedFileReader::new(&self.path).await?;
 
         loop {
-            if file_len == 0 {
-                // eof
-                break
-            }
-            let (chunk_len, file_len) = self.chunk_len(file_len);
-
             // create a new FileClient from chunk read from file
-            info!(target: "reth::cli",
-                bytes=chunk_len,
-                remaining_file_len=file_len,
-                "Importing chain file chunk"
-            );
-            let file_client = Arc::new(FileClient::new_from_chunk(&mut file, chunk_len).await?);
+            info!(target: "reth::cli", "Importing chain file chunk");
+
+            let Some(file_client) = reader.next_chunk().await? else { break };
 
             // override the tip
             let tip = file_client.tip().expect("file client has no tip");
@@ -142,7 +130,7 @@ impl ImportCommand {
                     &config,
                     provider_factory.clone(),
                     &consensus,
-                    file_client,
+                    Arc::new(file_client),
                     StaticFileProducer::new(
                         provider_factory.clone(),
                         provider_factory.static_file_provider(),
@@ -256,34 +244,6 @@ impl ImportCommand {
     fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
         confy::load_path::<Config>(config_path.clone())
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))
-    }
-
-    /// Calculates the number of bytes to read from the chain file. Returns a tuple of the chunk
-    /// length and the remaining file length.
-    fn chunk_len(&self, mut file_len: u64) -> (u64, u64) {
-        let chunk_len = || -> u64 {
-            if self.chunk {
-                if BYTE_LEN_CHUNK_CHAIN_FILE > file_len {
-                    // last chunk
-                    return file_len
-                }
-            }
-            BYTE_LEN_CHUNK_CHAIN_FILE
-        }();
-
-        // update remaining file length (file len is always at least chunk len)
-        file_len -= chunk_len;
-
-        (chunk_len, file_len)
-    }
-
-    /// Opens the chain file to import.
-    async fn open_chain_file(&self) -> eyre::Result<(File, u64)> {
-        let file = File::open(&self.path).await?;
-        // get file len from metadata before reading
-        let metadata = file.metadata().await?;
-
-        Ok((file, metadata.len()))
     }
 }
 
