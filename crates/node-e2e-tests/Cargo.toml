@@ -12,7 +12,11 @@ reth-node-core.workspace = true
 reth-primitives.workspace = true
 reth-node-ethereum.workspace = true
 reth-tracing.workspace = true
+reth-db.workspace = true
 reth-rpc.workspace = true
+reth-payload-builder = { workspace = true, features = ["test-utils"] }
+
+jsonrpsee.workspace = true
 
 futures-util.workspace = true
 eyre.workspace = true
