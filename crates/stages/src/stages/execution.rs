@@ -207,6 +207,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             // If we have ExEx's we need to save the block in memory for later
             if self.exex_manager_handle.as_ref().is_some_and(|handle| handle.has_exexs()) {
+                // todo: only push if > finished_height
                 blocks.push(block);
             }
 
