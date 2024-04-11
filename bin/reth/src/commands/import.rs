@@ -62,7 +62,7 @@ pub struct ImportCommand {
     chain: Arc<ChainSpec>,
 
     /// Disables execution stage.
-    #[arg(long, value_name = "DISABLE_EXECUTION", verbatim_doc_comment)]
+    #[arg(long, verbatim_doc_comment)]
     disable_execution: bool,
 
     #[command(flatten)]
