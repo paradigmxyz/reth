@@ -3,17 +3,22 @@ use reth_db::test_utils::create_test_rw_db;
 use reth_exex::ExExContext;
 use reth_node_builder::{FullNodeTypes, NodeBuilder, NodeConfig};
 use reth_node_ethereum::EthereumNode;
+use reth_transaction_pool::TransactionPool;
 use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
 
-struct DummyExEx<Node: FullNodeTypes> {
-    _ctx: ExExContext<Node>,
+struct DummyExEx<Node: FullNodeTypes, Pool: TransactionPool> {
+    _ctx: ExExContext<Node, Pool>,
 }
 
-impl<Node: FullNodeTypes> Future for DummyExEx<Node> {
+impl<Node, Pool> Future for DummyExEx<Node, Pool>
+where
+    Node: FullNodeTypes,
+    Pool: TransactionPool + Unpin + 'static,
+{
     type Output = eyre::Result<()>;
 
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
