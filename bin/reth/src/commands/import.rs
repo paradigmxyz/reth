@@ -29,8 +29,12 @@ use reth_stages::{
 };
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
-use tokio::sync::watch;
+use tokio::{fs::File, sync::watch};
 use tracing::{debug, info};
+
+/// Byte length of chunk to read from chain file. Equivalent to one static file, full of max size
+/// blocks (500k headers = one static file, transactions from 500k blocks = one static file).
+const BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 500_000 * 12 * 1_000_000;
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
@@ -64,6 +68,10 @@ pub struct ImportCommand {
     /// Disables execution stage.
     #[arg(long, verbatim_doc_comment)]
     disable_execution: bool,
+
+    /// Chunk import.
+    #[arg(long, verbatim_doc_comment)]
+    chunk: bool,
 
     #[command(flatten)]
     db: DatabaseArgs,
@@ -107,49 +115,64 @@ impl ImportCommand {
         let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");
 
-        // create a new FileClient
-        info!(target: "reth::cli", "Importing chain file");
-        let file_client = Arc::new(FileClient::new(&self.path).await?);
+        // open file
+        let (mut file, file_len) = self.open_chain_file().await?;
 
-        // override the tip
-        let tip = file_client.tip().expect("file client has no tip");
-        info!(target: "reth::cli", "Chain file imported");
+        loop {
+            if file_len == 0 {
+                // eof
+                break
+            }
+            let (chunk_len, file_len) = self.chunk_len(file_len);
 
-        let (mut pipeline, events) = self
-            .build_import_pipeline(
-                config,
-                provider_factory.clone(),
-                &consensus,
-                file_client,
-                StaticFileProducer::new(
+            // create a new FileClient from chunk read from file
+            info!(target: "reth::cli",
+                bytes=chunk_len,
+                remaining_file_len=file_len,
+                "Importing chain file chunk"
+            );
+            let file_client = Arc::new(FileClient::new_from_chunk(&mut file, chunk_len).await?);
+
+            // override the tip
+            let tip = file_client.tip().expect("file client has no tip");
+            info!(target: "reth::cli", "Chain file imported");
+
+            let (mut pipeline, events) = self
+                .build_import_pipeline(
+                    &config,
                     provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
-                self.disable_execution,
-            )
-            .await?;
+                    &consensus,
+                    file_client,
+                    StaticFileProducer::new(
+                        provider_factory.clone(),
+                        provider_factory.static_file_provider(),
+                        PruneModes::default(),
+                    ),
+                    self.disable_execution,
+                )
+                .await?;
 
-        // override the tip
-        pipeline.set_tip(tip);
-        debug!(target: "reth::cli", ?tip, "Tip manually set");
+            // override the tip
+            pipeline.set_tip(tip);
+            debug!(target: "reth::cli", ?tip, "Tip manually set");
 
-        let provider = provider_factory.provider()?;
+            let provider = provider_factory.provider()?;
 
-        let latest_block_number =
-            provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-        tokio::spawn(reth_node_core::events::node::handle_events(
-            None,
-            latest_block_number,
-            events,
-            db.clone(),
-        ));
+            let latest_block_number =
+                provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
+            tokio::spawn(reth_node_core::events::node::handle_events(
+                None,
+                latest_block_number,
+                events,
+                db.clone(),
+            ));
 
-        // Run pipeline
-        info!(target: "reth::cli", "Starting sync pipeline");
-        tokio::select! {
-            res = pipeline.run() => res?,
-            _ = tokio::signal::ctrl_c() => {},
+            // Run pipeline
+            info!(target: "reth::cli", "Starting sync pipeline");
+            tokio::select! {
+                res = pipeline.run() => res?,
+                _ = tokio::signal::ctrl_c() => {},
+            }
         }
 
         info!(target: "reth::cli", "Finishing up");
@@ -158,7 +181,7 @@ impl ImportCommand {
 
     async fn build_import_pipeline<DB, C>(
         &self,
-        config: Config,
+        config: &Config,
         provider_factory: ProviderFactory<DB>,
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
@@ -199,7 +222,7 @@ impl ImportCommand {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                    config.stages.etl,
+                    config.stages.etl.clone(),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
@@ -218,7 +241,7 @@ impl ImportCommand {
                         .clean_threshold
                         .max(config.stages.account_hashing.clean_threshold)
                         .max(config.stages.storage_hashing.clean_threshold),
-                    config.prune.map(|prune| prune.segments).unwrap_or_default(),
+                    config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
                 ))
                 .disable_if(StageId::Execution, || disable_execution),
             )
@@ -233,6 +256,34 @@ impl ImportCommand {
     fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
         confy::load_path::<Config>(config_path.clone())
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))
+    }
+
+    /// Calculates the number of bytes to read from the chain file. Returns a tuple of the chunk
+    /// length and the remaining file length.
+    fn chunk_len(&self, mut file_len: u64) -> (u64, u64) {
+        let chunk_len = || -> u64 {
+            if self.chunk {
+                if BYTE_LEN_CHUNK_CHAIN_FILE > file_len {
+                    // last chunk
+                    return file_len
+                }
+            }
+            BYTE_LEN_CHUNK_CHAIN_FILE
+        }();
+
+        // update remaining file length (file len is always at least chunk len)
+        file_len -= chunk_len;
+
+        (chunk_len, file_len)
+    }
+
+    /// Opens the chain file to import.
+    async fn open_chain_file(&self) -> eyre::Result<(File, u64)> {
+        let file = File::open(&self.path).await?;
+        // get file len from metadata before reading
+        let metadata = file.metadata().await?;
+
+        Ok((file, metadata.len()))
     }
 }
 

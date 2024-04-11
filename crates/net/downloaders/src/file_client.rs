@@ -8,7 +8,8 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BytesMut, Header, HeadersDirection,
+    PeerId, B256,
 };
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;
@@ -65,17 +66,23 @@ impl FileClient {
         let metadata = file.metadata().await?;
         let file_len = metadata.len();
 
-        // todo: read chunks into memory. for op mainnet 1/8 th of blocks below bedrock can be
-        // decoded at once
         let mut reader = vec![];
-        file.read_to_end(&mut reader).await.unwrap();
+        file.read_buf(&mut reader).await.unwrap();
 
+        Self::from_reader(&vec![][..], file_len).await
+    }
+
+    /// Initialize the [`FileClient`] from bytes that have been read from file.
+    pub(crate) async fn from_reader<B>(reader: B, num_bytes: u64) -> Result<Self, FileClientError>
+    where
+        B: AsyncReadExt + Unpin,
+    {
         let mut headers = HashMap::new();
         let mut hash_to_number = HashMap::new();
         let mut bodies = HashMap::new();
 
         // use with_capacity to make sure the internal buffer contains the entire file
-        let mut stream = FramedRead::with_capacity(&reader[..], BlockFileCodec, file_len as usize);
+        let mut stream = FramedRead::with_capacity(reader, BlockFileCodec, num_bytes as usize);
 
         let mut log_interval = 0;
         let mut log_interval_start_block = 0;
@@ -102,7 +109,7 @@ impl FileClient {
             } else if log_interval % 100000 == 0 {
                 trace!(target: "downloaders::file",
                     blocks=?log_interval_start_block..=block_number,
-                    "inserted blocks into db"
+                    "read blocks from file"
                 );
                 log_interval_start_block = block_number + 1;
             }
@@ -112,6 +119,15 @@ impl FileClient {
         trace!(blocks = headers.len(), "Initialized file client");
 
         Ok(Self { headers, hash_to_number, bodies })
+    }
+
+    /// Create a new file client from a chunk of a file.
+    pub async fn new_from_chunk(file: &mut File, chunk_len: u64) -> Result<Self, FileClientError> {
+        let mut reader = BytesMut::with_capacity(chunk_len as usize);
+
+        file.read_buf(&mut reader).await.unwrap();
+
+        FileClient::from_reader(&reader[..], chunk_len).await
     }
 
     /// Get the tip hash of the chain.
