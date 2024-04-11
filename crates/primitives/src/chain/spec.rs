@@ -243,7 +243,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     .into()
 });
 
-/// The Optimism Goerli spec
+/// The Optimism Mainnet spec
 #[cfg(feature = "optimism")]
 pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
