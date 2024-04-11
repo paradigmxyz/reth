@@ -1343,7 +1343,7 @@ struct TxFetcherSearchDurations {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashSet, rc::Rc, str::FromStr};
+    use std::{collections::HashSet, str::FromStr};
 
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
@@ -1469,17 +1469,21 @@ mod test {
         peers.insert(peer_1, peer_1_data);
         peers.insert(peer_2, peer_2_data);
 
-        // insert peer_2 as fallback peer for seen_hashes
         let mut backups = default_cache();
         backups.insert(peer_2);
         // insert seen_hashes into tx fetcher
         for i in 0..3 {
+            // insert peer_2 as fallback peer for seen_hashes
+            let mut backups = default_cache();
+            backups.insert(peer_2);
             let meta = TxFetchMetadata::new(0, backups, Some(seen_eth68_hashes_sizes[i]));
             tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[i], meta);
         }
         let meta = TxFetchMetadata::new(0, backups, None);
         tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[3], meta);
-        //
+
+        let mut backups = default_cache();
+        backups.insert(peer_2);
         // insert pending hash without peer_1 as fallback peer, only with peer_2 as fallback peer
         let hash_other = B256::from_slice(&[5; 32]);
         tx_fetcher

@@ -2055,12 +2055,15 @@ mod tests {
         let retries = 1;
         let mut backups = default_cache();
         backups.insert(peer_id_1);
+
+        let mut backups1 = default_cache();
+        backups1.insert(peer_id_1);
         tx_fetcher
             .hashes_fetch_inflight_and_pending_fetch
             .insert(seen_hashes[1], TxFetchMetadata::new(retries, backups, None));
         tx_fetcher
             .hashes_fetch_inflight_and_pending_fetch
-            .insert(seen_hashes[0], TxFetchMetadata::new(retries, backups, None));
+            .insert(seen_hashes[0], TxFetchMetadata::new(retries, backups1, None));
         tx_fetcher.hashes_pending_fetch.insert(seen_hashes[1]);
         tx_fetcher.hashes_pending_fetch.insert(seen_hashes[0]);
 
