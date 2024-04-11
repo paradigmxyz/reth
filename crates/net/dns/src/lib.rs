@@ -417,6 +417,31 @@ mod tests {
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
 
+    #[test]
+    fn test_convert_enr_node_record() {
+        // Create a sample ENR
+        let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let enr = Enr::builder()
+            .ip("127.0.0.1".parse().unwrap())
+            .udp4(9000)
+            .tcp4(30303)
+            .add_value(b"eth", &MAINNET.latest_fork_id())
+            .build(&secret_key)
+            .unwrap();
+
+        // Call the function under test
+        let result = convert_enr_node_record(&enr);
+
+        // Assert the expected output
+        assert!(result.is_some());
+        let node_record_update = result.unwrap();
+        assert_eq!(node_record_update.node_record.address, "127.0.0.1".parse::<IpAddr>().unwrap());
+        assert_eq!(node_record_update.node_record.tcp_port, 30303);
+        assert_eq!(node_record_update.node_record.udp_port, 9000);
+        assert_eq!(node_record_update.fork_id, Some(MAINNET.latest_fork_id()));
+        assert_eq!(node_record_update.enr, enr);
+    }
+
     #[tokio::test]
     async fn test_start_root_sync() {
         reth_tracing::init_test_tracing();
