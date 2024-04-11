@@ -38,7 +38,6 @@ reth-downloaders.workspace = true
 reth-revm.workspace = true
 reth-stages.workspace = true
 reth-prune.workspace = true
-reth-blockchain-tree.workspace = true
 reth-static-file.workspace = true
 
 # ethereum
@@ -106,7 +105,6 @@ optimism = [
     "reth-rpc-types-compat/optimism",
     "reth-auto-seal-consensus/optimism",
     "reth-consensus-common/optimism",
-    "reth-blockchain-tree/optimism",
     "reth-beacon-consensus/optimism",
 ]
 

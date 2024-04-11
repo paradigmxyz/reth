@@ -80,7 +80,26 @@ where
     DB: Database + Clone,
     EVM: ExecutorFactory,
 {
-    /// Create a new blockchain tree.
+    /// Builds the blockchain tree for the node.
+    ///
+    /// This method configures the blockchain tree, which is a critical component of the node,
+    /// responsible for managing the blockchain state, including blocks, transactions, and receipts.
+    /// It integrates with the consensus mechanism and the EVM for executing transactions.
+    ///
+    /// # Parameters
+    /// - `externals`: External components required by the blockchain tree:
+    ///     - `provider_factory`: A factory for creating various blockchain-related providers, such
+    ///       as for accessing the database or static files.
+    ///     - `consensus`: The consensus configuration, which defines how the node reaches agreement
+    ///       on the blockchain state with other nodes.
+    ///     - `evm_config`: The EVM (Ethereum Virtual Machine) configuration, which affects how
+    ///       smart contracts and transactions are executed. Proper validation of this configuration
+    ///       is crucial for the correct execution of transactions.
+    /// - `tree_config`: Configuration for the blockchain tree, including any parameters that affect
+    ///   its structure or performance.
+    /// - `prune_modes`: Configuration for pruning old blockchain data. This helps in managing the
+    ///   storage space efficiently. It's important to validate this configuration to ensure it does
+    ///   not lead to unintended data loss.
     pub fn new(
         externals: TreeExternals<DB, EVM>,
         config: BlockchainTreeConfig,
@@ -124,6 +143,9 @@ where
     }
 
     /// Set the sync metric events sender.
+    ///
+    /// A transmitter for sending synchronization metrics. This is used for monitoring the node's
+    /// synchronization process with the blockchain network.
     pub fn with_sync_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
         self.sync_metrics_tx = Some(metrics_tx);
         self
