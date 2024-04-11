@@ -239,18 +239,17 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
                      // the stream ended, we are done
                     break;
                 };
-                if let Some(committed) = event.committed() {
-                    let (blocks, receipts): (Vec<_>, Vec<_>) = committed
-                        .blocks_and_receipts()
-                        .map(|(block, receipts)| {
-                            (block.block.clone(), Arc::new(receipts.iter().flatten().cloned().collect::<Vec<_>>()))
-                        })
-                        .unzip();
-                    fee_history_cache.insert_blocks(blocks.into_iter().zip(receipts)).await;
+                let (blocks, receipts): (Vec<_>, Vec<_>) = event
+                    .committed()
+                    .blocks_and_receipts()
+                    .map(|(block, receipts)| {
+                        (block.block.clone(), Arc::new(receipts.iter().flatten().cloned().collect::<Vec<_>>()))
+                    })
+                    .unzip();
+                fee_history_cache.insert_blocks(blocks.into_iter().zip(receipts)).await;
 
-                    // keep track of missing blocks
-                    missing_blocks = fee_history_cache.missing_consecutive_blocks().await;
-                }
+                // keep track of missing blocks
+                missing_blocks = fee_history_cache.missing_consecutive_blocks().await;
             }
         }
     }
