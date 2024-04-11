@@ -717,7 +717,7 @@ mod tests {
     };
     use reth_provider::{test_utils::create_test_provider_factory, AccountReader, ReceiptProvider};
     use reth_revm::EvmProcessorFactory;
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EvmProcessorFactory<EthEvmConfig>> {
         let executor_factory = EvmProcessorFactory::new(
