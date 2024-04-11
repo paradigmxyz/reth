@@ -16,8 +16,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
+    BlockReader, CanonStateNotification, DatabaseProviderRW, ExecutorFactory, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
 };
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
@@ -26,8 +26,10 @@ use reth_stages_api::{
 use std::{
     cmp::Ordering,
     ops::RangeInclusive,
+    task::{Context, Poll},
     time::{Duration, Instant},
 };
+use tokio::sync::mpsc::error::SendError;
 use tracing::*;
 
 /// The execution stage executes all transactions and
@@ -74,6 +76,10 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     external_clean_threshold: u64,
     /// Pruning configuration.
     prune_modes: PruneModes,
+    /// Handle to communicate with ExEx manager.
+    ///
+    /// TODO(onbjerg): Unbox this when we can remove the temporary trait
+    exex_manager_handle: Option<Box<dyn TempManagerHandle>>,
 }
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
@@ -83,6 +89,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         prune_modes: PruneModes,
+        exex_manager_handle: Option<Box<dyn TempManagerHandle>>,
     ) -> Self {
         Self {
             metrics_tx: None,
@@ -90,6 +97,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             executor_factory,
             thresholds,
             prune_modes,
+            exex_manager_handle,
         }
     }
 
@@ -102,6 +110,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
+            None,
         )
     }
 
@@ -262,6 +271,43 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         }
         Ok(prune_modes)
     }
+}
+
+/// Temporary workaround trait for ExExManagerHandle not being importable in this crate due to a
+/// circular dependency.
+///
+/// The circular dependency is:
+///     reth-exex depends on reth-node-core for some config types which depends on reth-stages
+///     reth-stages depends on reth-exex for the handle
+///
+/// TODO(onbjerg): Remove this as soon as possible
+pub trait TempManagerHandle: Send + Sync + 'static {
+    /// Synchronously send a notification over the channel to all execution extensions.
+    ///
+    /// Senders should call [`Self::has_capacity`] first.
+    fn send(
+        &self,
+        notification: CanonStateNotification,
+    ) -> Result<(), SendError<CanonStateNotification>>;
+
+    /// Get the current capacity of the ExEx manager's internal notification buffer.
+    fn capacity(&self) -> usize;
+
+    /// Returns `true` if there are ExEx's installed in the node.
+    fn has_exexs(&self) -> bool;
+
+    /// The finished height of all ExEx's.
+    ///
+    /// This is the lowest common denominator between all ExEx's. If an ExEx has not emitted a
+    /// `FinishedHeight` event, it will be `None`.
+    ///
+    /// This block is used to (amongst other things) determine what blocks are safe to prune.
+    ///
+    /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
+    fn finished_height(&mut self) -> Option<BlockNumber>;
+
+    /// Wait until the manager is ready for new notifications.
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()>;
 }
 
 fn execution_checkpoint(
@@ -648,6 +694,7 @@ mod tests {
             },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
+            None,
         )
     }
 

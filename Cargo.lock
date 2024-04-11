@@ -6632,6 +6632,7 @@ dependencies = [
  "reth-node-core",
  "reth-primitives",
  "reth-provider",
+ "reth-stages",
  "reth-tasks",
  "reth-tracing",
  "tokio",

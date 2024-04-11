@@ -211,6 +211,7 @@ impl Command {
                         .max(stage_conf.account_hashing.clean_threshold)
                         .max(stage_conf.storage_hashing.clean_threshold),
                     config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
+                    None,
                 ))
                 .set(AccountHashingStage::default())
                 .set(StorageHashingStage::default())

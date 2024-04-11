@@ -151,6 +151,7 @@ mod tests {
                 },
                 MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
                 prune_modes.clone(),
+                None,
             );
 
             execution_stage.execute(&provider, input).unwrap();

@@ -95,6 +95,7 @@ async fn unwind_and_copy<DB: Database>(
         },
         MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
         PruneModes::all(),
+        None,
     );
 
     exec_stage.unwind(

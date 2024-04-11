@@ -211,6 +211,7 @@ impl Command {
             },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::all(),
+            None,
         );
 
         let mut account_hashing_stage = AccountHashingStage::default();

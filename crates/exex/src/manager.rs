@@ -15,6 +15,7 @@ use metrics::Gauge;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::{BlockNumber, FinishedExExHeight};
 use reth_provider::CanonStateNotification;
+use reth_stages::stages::TempManagerHandle;
 use reth_tracing::tracing::debug;
 use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
@@ -430,6 +431,31 @@ impl Clone for ExExManagerHandle {
             current_capacity: self.current_capacity.clone(),
             finished_height: self.finished_height.clone(),
         }
+    }
+}
+
+impl TempManagerHandle for ExExManagerHandle {
+    fn send(
+        &self,
+        notification: CanonStateNotification,
+    ) -> Result<(), SendError<CanonStateNotification>> {
+        self.send(notification)
+    }
+
+    fn capacity(&self) -> usize {
+        self.capacity()
+    }
+
+    fn has_exexs(&self) -> bool {
+        self.has_exexs()
+    }
+
+    fn finished_height(&mut self) -> Option<BlockNumber> {
+        self.finished_height()
+    }
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        self.poll_ready(cx)
     }
 }
 

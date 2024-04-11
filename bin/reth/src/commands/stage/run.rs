@@ -239,6 +239,7 @@ impl Command {
                             },
                             config.stages.merkle.clean_threshold,
                             config.prune.map(|prune| prune.segments).unwrap_or_default(),
+                            None,
                         )),
                         None,
                     )
