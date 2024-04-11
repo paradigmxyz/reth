@@ -1,6 +1,6 @@
 use std::{
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 use alloy_sol_types::{sol, SolEventInterface};
@@ -92,7 +92,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
         let this = self.get_mut();
 
         // Process all new chain state notifications until there are no more
-        while let Poll::Ready(Some(notification)) = this.ctx.notifications.poll_recv(cx) {
+        while let Some(notification) = ready!(this.ctx.notifications.poll_recv(cx)) {
             if let Some(reverted_chain) = notification.reverted() {
                 let events = decode_chain_into_events(&reverted_chain);
 
