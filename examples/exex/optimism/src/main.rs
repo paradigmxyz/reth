@@ -23,7 +23,7 @@ struct OptimismExEx<Node: FullNodeTypes> {
 
 impl<Node: FullNodeTypes> OptimismExEx<Node> {
     fn new(ctx: ExExContext<Node>, connection: Connection) -> eyre::Result<Self> {
-        let result = connection.execute(
+        connection.execute(
             r#"
             CREATE TABLE IF NOT EXISTS deposits (
                 id               INTEGER PRIMARY KEY,
@@ -33,12 +33,16 @@ impl<Node: FullNodeTypes> OptimismExEx<Node> {
                 "to"             TEXT NOT NULL,
                 amount           TEXT NOT NULL
             );
-
+            "#,
+            (),
+        )?;
+        connection.execute(
+            r#"
             CREATE TABLE IF NOT EXISTS withdrawals (
                 id               INTEGER PRIMARY KEY,
                 tx_hash          TEXT NOT NULL,
                 contract_address TEXT NOT NULL,
-                "from            TEXT NOT NULL,
+                "from"           TEXT NOT NULL,
                 "to"             TEXT NOT NULL,
                 amount           TEXT NOT NULL
             );
@@ -46,7 +50,7 @@ impl<Node: FullNodeTypes> OptimismExEx<Node> {
             (),
         )?;
 
-        info!(?result, "Initialized database tables");
+        info!("Initialized database tables");
 
         Ok(Self { ctx, connection })
     }
