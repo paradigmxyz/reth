@@ -219,9 +219,9 @@ impl ImportCommand {
                         .max(config.stages.account_hashing.clean_threshold)
                         .max(config.stages.storage_hashing.clean_threshold),
                     config.prune.map(|prune| prune.segments).unwrap_or_default(),
-                )),
+                ))
+                .disable_if(StageId::Execution, || disable_execution),
             )
-            .disable_if(StageId::Execution, || disable_execution)
             .build(provider_factory, static_file_producer);
 
         let events = pipeline.events().map(Into::into);
