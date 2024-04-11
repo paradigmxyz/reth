@@ -27,7 +27,7 @@ impl<Node: FullNodeTypes> OptimismExEx<Node> {
             r#"
             CREATE TABLE IF NOT EXISTS deposits (
                 id               INTEGER PRIMARY KEY,
-                tx_hash          TEXT NOT NULL,
+                tx_hash          TEXT NOT NULL UNIQUE,
                 contract_address TEXT NOT NULL,
                 "from"           TEXT NOT NULL,
                 "to"             TEXT NOT NULL,
@@ -40,12 +40,37 @@ impl<Node: FullNodeTypes> OptimismExEx<Node> {
             r#"
             CREATE TABLE IF NOT EXISTS withdrawals (
                 id               INTEGER PRIMARY KEY,
-                tx_hash          TEXT NOT NULL,
+                tx_hash          TEXT NOT NULL UNIQUE,
                 contract_address TEXT NOT NULL,
                 "from"           TEXT NOT NULL,
                 "to"             TEXT NOT NULL,
                 amount           TEXT NOT NULL
             );
+            "#,
+            (),
+        )?;
+
+        // Insert known bridge contract addresses with their respective names
+        connection.execute(
+            r#"
+            CREATE INDEX IF NOT EXISTS contracts (
+                id              INTEGER PRIMARY KEY,
+                address         TEXT NOT NULL UNIQUE,
+                name            TEXT NOT NULL
+            );
+            "#,
+            (),
+        )?;
+        connection.execute(
+            r#"
+            INSERT OR IGNORE INTO contracts (address, name)
+            VALUES
+                ('0x3154Cf16ccdb4C6d922629664174b904d80F2C35', 'Base'),
+                ('0x3a05E5d33d7Ab3864D53aaEc93c8301C1Fa49115', 'Blast'),
+                ('0x697402166Fbf2F22E970df8a6486Ef171dbfc524', 'Blast'),
+                ('0x99C9fc46f92E8a1c0deC1b1747d010903E884bE1', 'Optimism'),
+                ('0x735aDBbE72226BD52e818E7181953f42E3b0FF21', 'Mode'),
+                ('0x3B95bC951EE0f553ba487327278cAc44f29715E5', 'Manta');
             "#,
             (),
         )?;
@@ -76,7 +101,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                             ..
                         }) => {
                             deposits += this.connection.execute(
-                                "DELETE FROM deposits WHERE tx_hash = ?",
+                                "DELETE FROM deposits WHERE tx_hash = ?;",
                                 (tx_hash.to_string(),),
                             )?;
                         }
@@ -84,7 +109,7 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                             ..
                         }) => {
                             withdrawals += this.connection.execute(
-                                "DELETE FROM withdrawals WHERE tx_hash = ?",
+                                "DELETE FROM withdrawals WHERE tx_hash = ?;",
                                 (tx_hash.to_string(),),
                             )?;
                         }
@@ -110,7 +135,10 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                             ..
                         }) => {
                             deposits += this.connection.execute(
-                                r#"INSERT INTO deposits (tx_hash, contract_address, "from", "to", amount) VALUES (?, ?, ?, ?, ?)"#,
+                                r#"
+                                INSERT OR IGNORE INTO deposits (tx_hash, contract_address, "from", "to", amount)
+                                VALUES (?, ?, ?, ?, ?)
+                                "#,
                                 (
                                     tx_hash.to_string(),
                                     log.address.to_string(),
@@ -127,7 +155,10 @@ impl<Node: FullNodeTypes> Future for OptimismExEx<Node> {
                             ..
                         }) => {
                             withdrawals += this.connection.execute(
-                                r#"INSERT INTO withdrawals (tx_hash, contract_address, "from", "to", amount) VALUES (?, ?, ?, ?, ?)"#,
+                                r#"
+                                INSERT OR IGNORE INTO withdrawals (tx_hash, contract_address, "from", "to", amount)
+                                VALUES (?, ?, ?, ?, ?)
+                                "#,
                                 (
                                     tx_hash.to_string(),
                                     log.address.to_string(),
