@@ -1,6 +1,6 @@
 use std::{
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 use futures::Future;
@@ -9,6 +9,7 @@ use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::CanonStateNotification;
 
+/// A minimal example of an ExEx that simply prints out commit and reorg notifications.
 struct MinimalExEx<Node: FullNodeTypes> {
     ctx: ExExContext<Node>,
 }
@@ -20,7 +21,7 @@ impl<Node: FullNodeTypes> Future for MinimalExEx<Node> {
         let this = self.get_mut();
 
         // Process all new chain state notifications until there are no more
-        while let Poll::Ready(Some(notification)) = this.ctx.notifications.poll_recv(cx) {
+        while let Some(notification) = ready!(this.ctx.notifications.poll_recv(cx)) {
             // Process one notification
             match &notification {
                 CanonStateNotification::Commit { new } => {
@@ -48,7 +49,7 @@ fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("Minimal", move |ctx| futures::future::ok(MinimalExEx { ctx }))
+            .install_exex("Minimal", move |ctx| async { Ok(MinimalExEx { ctx }) })
             .launch()
             .await?;
 
