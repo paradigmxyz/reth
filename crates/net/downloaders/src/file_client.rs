@@ -65,7 +65,7 @@ impl FileClient {
         let metadata = file.metadata().await?;
         let file_len = metadata.len();
 
-        // todo: read chunks into memory. for op mainnet 1/8 th of blocks below bedrock can be 
+        // todo: read chunks into memory. for op mainnet 1/8 th of blocks below bedrock can be
         // decoded at once
         let mut reader = vec![];
         file.read_to_end(&mut reader).await.unwrap();
