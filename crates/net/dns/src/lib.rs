@@ -412,7 +412,6 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
 mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
-    use alloy_rlp::Encodable;
     use enr::EnrKey;
     use reth_primitives::{Chain, Hardfork, MAINNET};
     use secp256k1::rand::thread_rng;
