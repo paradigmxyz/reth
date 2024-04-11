@@ -15,9 +15,6 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::BeaconConsensus;
-use reth_blockchain_tree::{
-    config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
-};
 use reth_config::{
     config::{PruneConfig, StageConfig},
     Config,
@@ -51,10 +48,7 @@ use reth_provider::{
     CanonStateSubscriptions, HeaderProvider, HeaderSyncMode, ProviderFactory,
     StageCheckpointReader,
 };
-use reth_revm::{
-    stack::{Hook, InspectorStackConfig},
-    EvmProcessorFactory,
-};
+use reth_revm::stack::{Hook, InspectorStackConfig};
 use reth_stages::{
     prelude::*,
     stages::{
@@ -62,7 +56,6 @@ use reth_stages::{
         IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
         TransactionLookupStage,
     },
-    MetricEvent,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
@@ -72,10 +65,7 @@ use reth_transaction_pool::{
 };
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
-use tokio::sync::{
-    mpsc::{Receiver, UnboundedSender},
-    watch,
-};
+use tokio::sync::{mpsc::Receiver, watch};
 use tracing::*;
 
 /// The default prometheus recorder handle. We use a global static to ensure that it is only
@@ -381,77 +371,6 @@ impl NodeConfig {
         let network_config = self.network_config(config, client, executor, head, data_dir)?;
         let builder = NetworkManager::builder(network_config).await?;
         Ok(builder)
-    }
-
-    /// Builds the blockchain tree for the node.
-    ///
-    /// This method configures the blockchain tree, which is a critical component of the node,
-    /// responsible for managing the blockchain state, including blocks, transactions, and receipts.
-    /// It integrates with the consensus mechanism and the EVM for executing transactions.
-    ///
-    /// # Parameters
-    /// - `provider_factory`: A factory for creating various blockchain-related providers, such as
-    ///   for accessing the database or static files.
-    /// - `consensus`: The consensus configuration, which defines how the node reaches agreement on
-    ///   the blockchain state with other nodes.
-    /// - `prune_config`: Configuration for pruning old blockchain data. This helps in managing the
-    ///   storage space efficiently. It's important to validate this configuration to ensure it does
-    ///   not lead to unintended data loss.
-    /// - `sync_metrics_tx`: A transmitter for sending synchronization metrics. This is used for
-    ///   monitoring the node's synchronization process with the blockchain network.
-    /// - `tree_config`: Configuration for the blockchain tree, including any parameters that affect
-    ///   its structure or performance.
-    /// - `evm_config`: The EVM (Ethereum Virtual Machine) configuration, which affects how smart
-    ///   contracts and transactions are executed. Proper validation of this configuration is
-    ///   crucial for the correct execution of transactions.
-    ///
-    /// # Returns
-    /// A `ShareableBlockchainTree` instance, which provides access to the blockchain state and
-    /// supports operations like block insertion, state reversion, and transaction execution.
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// let tree = config.build_blockchain_tree(
-    ///     provider_factory,
-    ///     consensus,
-    ///     prune_config,
-    ///     sync_metrics_tx,
-    ///     BlockchainTreeConfig::default(),
-    ///     evm_config,
-    /// )?;
-    /// ```
-    ///
-    /// # Note
-    /// Ensure that all configurations passed to this method are validated beforehand to prevent
-    /// runtime errors. Specifically, `prune_config` and `evm_config` should be checked to ensure
-    /// they meet the node's operational requirements.
-    pub fn build_blockchain_tree<DB, EvmConfig>(
-        &self,
-        provider_factory: ProviderFactory<DB>,
-        consensus: Arc<dyn Consensus>,
-        prune_config: Option<PruneConfig>,
-        sync_metrics_tx: UnboundedSender<MetricEvent>,
-        tree_config: BlockchainTreeConfig,
-        evm_config: EvmConfig,
-    ) -> eyre::Result<BlockchainTree<DB, EvmProcessorFactory<EvmConfig>>>
-    where
-        DB: Database + Unpin + Clone + 'static,
-        EvmConfig: ConfigureEvm + Clone + 'static,
-    {
-        // configure blockchain tree
-        let tree_externals = TreeExternals::new(
-            provider_factory,
-            consensus.clone(),
-            EvmProcessorFactory::new(self.chain.clone(), evm_config),
-        );
-        let tree = BlockchainTree::new(
-            tree_externals,
-            tree_config,
-            prune_config.map(|config| config.segments),
-        )?
-        .with_sync_metrics_tx(sync_metrics_tx);
-
-        Ok(tree)
     }
 
     /// Build a transaction pool and spawn the transaction pool maintenance task
