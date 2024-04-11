@@ -330,7 +330,7 @@ where
             input.unwind_to + 1,
         )?;
         provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        let unfinalized_headers =
+        let _unfinalized_headers =
             provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         let unwound_headers = highest_block - input.unwind_to;
@@ -350,10 +350,7 @@ where
             input.checkpoint.headers_stage_checkpoint().map(|stage_checkpoint| HeadersCheckpoint {
                 block_range: stage_checkpoint.block_range,
                 progress: EntitiesCheckpoint {
-                    processed: stage_checkpoint
-                        .progress
-                        .processed
-                        .saturating_sub(unwound_headers + unfinalized_headers as u64),
+                    processed: stage_checkpoint.progress.processed.saturating_sub(unwound_headers),
                     total: stage_checkpoint.progress.total,
                 },
             });
@@ -374,9 +371,12 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::random_header;
-    use reth_primitives::{stage::StageUnitCheckpoint, B256};
-    use reth_provider::ProviderFactory;
+    use reth_interfaces::test_utils::generators::{self, random_header, random_header_range};
+    use reth_primitives::{
+        stage::StageUnitCheckpoint, BlockBody, SealedBlock, SealedBlockWithSenders, B256,
+    };
+    use reth_provider::{BlockWriter, BundleStateWithReceipts, ProviderFactory};
+    use reth_trie::{updates::TrieUpdates, HashedPostState};
     use test_runner::HeadersTestRunner;
 
     mod test_runner {
@@ -387,9 +387,7 @@ mod tests {
         use reth_downloaders::headers::reverse_headers::{
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
-        use reth_interfaces::test_utils::{
-            generators, generators::random_header_range, TestHeaderDownloader, TestHeadersClient,
-        };
+        use reth_interfaces::test_utils::{TestHeaderDownloader, TestHeadersClient};
         use reth_provider::BlockNumReader;
         use tokio::sync::watch;
 
@@ -561,6 +559,93 @@ mod tests {
     }
 
     stage_test_suite!(HeadersTestRunner, headers);
+
+    /// Execute the stage with linear downloader, unwinds, and ensures that the database tables
+    /// along with the static files are cleaned up.
+    #[tokio::test]
+    async fn execute_with_linear_downloader_unwind() {
+        let mut runner = HeadersTestRunner::with_linear_downloader();
+        let (checkpoint, previous_stage) = (1000, 1200);
+        let input = ExecInput {
+            target: Some(previous_stage),
+            checkpoint: Some(StageCheckpoint::new(checkpoint)),
+        };
+        let headers = runner.seed_execution(input).expect("failed to seed execution");
+        let rx = runner.execute(input);
+
+        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
+
+        // skip `after_execution` hook for linear downloader
+        let tip = headers.last().unwrap();
+        runner.send_tip(tip.hash());
+
+        let result = rx.await.unwrap();
+        runner.db().factory.static_file_provider().commit().unwrap();
+        assert_matches!(result, Ok(ExecOutput { checkpoint: StageCheckpoint {
+            block_number,
+            stage_checkpoint: Some(StageUnitCheckpoint::Headers(HeadersCheckpoint {
+                block_range: CheckpointBlockRange {
+                    from,
+                    to
+                },
+                progress: EntitiesCheckpoint {
+                    processed,
+                    total,
+                }
+            }))
+        }, done: true }) if block_number == tip.number &&
+            from == checkpoint && to == previous_stage &&
+            // -1 because we don't need to download the local head
+            processed == checkpoint + headers.len() as u64 - 1 && total == tip.number
+        );
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+        assert!(runner.stage().hash_collector.is_empty());
+        assert!(runner.stage().header_collector.is_empty());
+
+        // let's insert some blocks using append_blocks_with_state
+        let sealed_headers =
+            random_header_range(&mut generators::rng(), tip.number..tip.number + 10, tip.hash());
+        println!("sealed_headers: {:?}", sealed_headers);
+        println!("tip num: {:?}", tip.number);
+
+        // make them sealed blocks with senders by converting them to empty blocks
+        let sealed_blocks = sealed_headers
+            .iter()
+            .map(|header| {
+                SealedBlockWithSenders::new(
+                    SealedBlock::new(header.clone(), BlockBody::default()),
+                    vec![],
+                )
+                .unwrap()
+            })
+            .collect();
+
+        // append the blocks
+        let provider = runner.db().factory.provider_rw().unwrap();
+        provider
+            .append_blocks_with_state(
+                sealed_blocks,
+                BundleStateWithReceipts::default(),
+                HashedPostState::default(),
+                TrieUpdates::default(),
+                None,
+            )
+            .unwrap();
+        provider.commit().unwrap();
+
+        // now we can unwind 10 blocks
+        let unwind_input = UnwindInput {
+            checkpoint: StageCheckpoint::new(tip.number + 10),
+            unwind_to: tip.number,
+            bad_block: None,
+        };
+
+        let unwind_output = runner.unwind(unwind_input).await.unwrap();
+        assert_eq!(unwind_output.checkpoint.block_number, tip.number);
+
+        // validate the unwind, ensure that the tables are cleaned up
+        assert!(runner.validate_unwind(unwind_input).is_ok());
+    }
 
     /// Execute the stage with linear downloader
     #[tokio::test]
