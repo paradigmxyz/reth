@@ -24,7 +24,7 @@ struct OPBridgeExEx<Node: FullNodeTypes, Pool: TransactionPool> {
 }
 
 impl<Node: FullNodeTypes, Pool: TransactionPool> OPBridgeExEx<Node, Pool> {
-    fn new(ctx: ExExContext<Node>, connection: Connection) -> eyre::Result<Self> {
+    fn new(ctx: ExExContext<Node, Pool>, connection: Connection) -> eyre::Result<Self> {
         // Create deposits and withdrawals tables
         connection.execute(
             r#"
@@ -87,7 +87,11 @@ impl<Node: FullNodeTypes, Pool: TransactionPool> OPBridgeExEx<Node, Pool> {
     }
 }
 
-impl<Node: FullNodeTypes, Pool: TransactionPool> Future for OPBridgeExEx<Node, Pool> {
+impl<Node, Pool> Future for OPBridgeExEx<Node, Pool>
+where
+    Node: FullNodeTypes,
+    Pool: TransactionPool + Unpin + 'static,
+{
     type Output = eyre::Result<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
