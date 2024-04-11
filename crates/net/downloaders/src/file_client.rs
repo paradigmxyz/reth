@@ -122,6 +122,10 @@ impl FileClient {
             );
 
             if log_interval == 0 {
+                trace!(target: "downloaders::file",
+                    block_number,
+                    "read first block"
+                );
                 log_interval_start_block = block_number;
             } else if log_interval % 100_000 == 0 {
                 trace!(target: "downloaders::file",
