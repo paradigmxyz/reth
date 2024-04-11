@@ -344,7 +344,7 @@ where
             };
 
             env.tx.gas_limit = mid_gas_limit;
-            let ethres = self.transact(&mut db, env);
+            let ethres = self.transact(&mut db, env.clone());
 
             // Exceptional case: init used too much gas, we need to increase the gas limit and try
             // again
@@ -354,20 +354,15 @@ where
             ) {
                 // increase the lowest gas limit
                 lowest_gas_limit = mid_gas_limit;
-
-                // new midpoint
-                mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
-                (_, env) = ethres?;
-                continue
+            } else {
+                (res, env) = ethres?;
+                update_estimated_gas_range(
+                    res.result,
+                    mid_gas_limit,
+                    &mut highest_gas_limit,
+                    &mut lowest_gas_limit,
+                )?;
             }
-
-            (res, env) = ethres?;
-            update_estimated_gas_range(
-                res.result,
-                mid_gas_limit,
-                &mut highest_gas_limit,
-                &mut lowest_gas_limit,
-            )?;
 
             // new midpoint
             mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;

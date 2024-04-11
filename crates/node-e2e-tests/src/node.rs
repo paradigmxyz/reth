@@ -264,7 +264,7 @@ impl NodeHelper {
 }
 
 /// Helper function to create a new eth payload attributes
-fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
+pub fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     let attributes = PayloadAttributes {

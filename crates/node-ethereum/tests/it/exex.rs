@@ -29,6 +29,6 @@ fn basic_exex() {
         .with_database(db)
         .with_types(EthereumNode::default())
         .with_components(EthereumNode::components())
-        .install_exex(move |ctx| future::ok(DummyExEx { _ctx: ctx }))
+        .install_exex("dummy", move |ctx| future::ok(DummyExEx { _ctx: ctx }))
         .check_launch();
 }

@@ -206,7 +206,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 if index > 0 && index % interval == 0 {
                     info!(
                         target: "sync::stages::hashing_account",
-                        progress = format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                        progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
                         "Inserting hashes"
                     );
                 }

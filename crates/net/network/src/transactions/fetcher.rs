@@ -488,7 +488,7 @@ impl TransactionFetcher {
         if let Some(failed_to_request_hashes) =
             self.request_transactions_from_peer(hashes_to_request, peer)
         {
-            debug!(target: "net::tx",
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 ?failed_to_request_hashes,
                 %conn_eth_version,

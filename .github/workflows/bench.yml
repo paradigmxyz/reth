@@ -8,6 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  BASELINE: base
+  IAI_CALLGRIND_RUNNER: iai-callgrind-runner
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -18,36 +20,41 @@ jobs:
   iai:
     runs-on:
       group: Reth
-    # Only run benchmarks in merge groups
+    # Only run benchmarks in merge groups and on main
     if: github.event_name != 'pull_request'
     steps:
-      - name: Checkout main sources
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          path: main
-      - name: Checkout PR sources
-        uses: actions/checkout@v4
-        with:
-          clean: false
-          path: pr
+      - uses: actions/checkout@v4
       - name: Install Valgrind
         run: sudo apt update && sudo apt install valgrind
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            main -> target
-            pr -> target
           cache-on-failure: true
-      - name: Generate test vectors
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@cargo-binstall
+      - name: Install iai-callgrind-runner
         run: |
-          cargo run --bin reth --manifest-path main/Cargo.toml -- test-vectors tables
-          cp -r testdata main
-          mv testdata pr
-      - name: Set main baseline
-        run: cargo bench --package reth-db --bench iai --features test-utils --manifest-path main/Cargo.toml
-      - name: Compare PR benchmark
-        shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
-        run: .github/scripts/compare_iai.sh
-        working-directory: pr
+          echo "::group::Install"
+          version=$(cargo metadata --format-version=1 |\
+            jq '.packages[] | select(.name == "iai-callgrind").version' |\
+            tr -d '"'
+          )
+          cargo binstall iai-callgrind-runner --version $version --no-confirm --no-symlinks --force
+          echo "::endgroup::"
+          echo "::group::Verification"
+          which iai-callgrind-runner
+          echo "::endgroup::"
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref || 'main' }}
+      - name: Generate test vectors
+        run: cargo run --bin reth -- test-vectors tables
+      - name: Save baseline
+        run: cargo bench -p reth-db --bench iai --features test-utils -- --save-baseline=$BASELINE
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          clean: false
+      - name: Compare PR benchmarks
+        run: cargo bench -p reth-db --bench iai --features test-utils -- --baseline=$BASELINE
