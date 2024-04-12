@@ -654,7 +654,8 @@ impl SealedHeader {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
         let parent_gas_limit =
             if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
-                parent.gas_limit * chain_spec.base_fee_params(self.timestamp).elasticity_multiplier
+                parent.gas_limit *
+                    chain_spec.base_fee_params(self.timestamp).elasticity_multiplier as u64
             } else {
                 parent.gas_limit
             };

@@ -1,8 +1,5 @@
 use crate::{
-    constants::{
-        EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-        EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS,
-    },
+    constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS},
     holesky_nodes,
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     proofs::state_root_ref_unhashed,
@@ -17,6 +14,8 @@ use std::{
     fmt::{Display, Formatter},
     sync::Arc,
 };
+
+pub use alloy_eips::eip1559::BaseFeeParams;
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -440,27 +439,19 @@ impl From<Vec<(Hardfork, BaseFeeParams)>> for ForkBaseFeeParams {
     }
 }
 
-/// BaseFeeParams contains the config parameters that control block base fee computation
-#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
-pub struct BaseFeeParams {
-    /// The base_fee_max_change_denominator from EIP-1559
-    pub max_change_denominator: u64,
-    /// The elasticity multiplier from EIP-1559
-    pub elasticity_multiplier: u64,
+#[cfg(feature = "optimism")]
+pub trait OptimismBaseFeeParams {
+    fn optimism_sepolia() -> BaseFeeParams;
+    fn optimism_sepolia_canyon() -> BaseFeeParams;
+    fn optimism() -> BaseFeeParams;
+    fn optimism_canyon() -> BaseFeeParams;
 }
 
-impl BaseFeeParams {
-    /// Get the base fee parameters for Ethereum mainnet
-    pub const fn ethereum() -> BaseFeeParams {
-        BaseFeeParams {
-            max_change_denominator: EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
-            elasticity_multiplier: EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-        }
-    }
-
+#[cfg(feature = "optimism")]
+impl OptimismBaseFeeParams for BaseFeeParams {
     /// Get the base fee parameters for optimism sepolia
     #[cfg(feature = "optimism")]
-    pub const fn optimism_sepolia() -> BaseFeeParams {
+    fn optimism_sepolia() -> BaseFeeParams {
         BaseFeeParams {
             max_change_denominator:
                 crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
@@ -471,7 +462,7 @@ impl BaseFeeParams {
 
     /// Get the base fee parameters for optimism goerli (post Canyon)
     #[cfg(feature = "optimism")]
-    pub const fn optimism_sepolia_canyon() -> BaseFeeParams {
+    fn optimism_sepolia_canyon() -> BaseFeeParams {
         BaseFeeParams {
             max_change_denominator:
                 crate::constants::OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
@@ -482,7 +473,7 @@ impl BaseFeeParams {
 
     /// Get the base fee parameters for optimism mainnet
     #[cfg(feature = "optimism")]
-    pub const fn optimism() -> BaseFeeParams {
+    fn optimism() -> BaseFeeParams {
         BaseFeeParams {
             max_change_denominator:
                 crate::constants::OP_MAINNET_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
@@ -493,7 +484,7 @@ impl BaseFeeParams {
 
     /// Get the base fee parameters for optimism mainnet (post Canyon)
     #[cfg(feature = "optimism")]
-    pub const fn optimism_canyon() -> BaseFeeParams {
+    fn optimism_canyon() -> BaseFeeParams {
         BaseFeeParams {
             max_change_denominator:
                 crate::constants::OP_MAINNET_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
