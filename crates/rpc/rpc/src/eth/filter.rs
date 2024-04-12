@@ -355,6 +355,13 @@ where
                     .block_number_for_id(block_hash.into())?
                     .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
+                // get the block timestamp
+                let block_timestamp = self
+                    .provider
+                    .header_by_number(block_number)?
+                    .ok_or(ProviderError::HeaderNotFound(block_number.into()))?
+                    .timestamp;
+
                 // we also need to ensure that the receipts are available and return an error if
                 // not, in case the block hash been reorged
                 let receipts = self
@@ -372,6 +379,7 @@ where
                     (block_hash, block_number).into(),
                     &receipts,
                     false,
+                    block_timestamp,
                 )?;
 
                 Ok(all_logs)
@@ -448,6 +456,7 @@ where
                     chain_info.into(),
                     &receipts,
                     false,
+                    0,
                 )?;
             }
             return Ok(all_logs)
@@ -487,6 +496,7 @@ where
                             BlockNumHash::new(header.number, block_hash),
                             &receipts,
                             false,
+                            0,
                         )?;
 
                         // size check but only if range is multiple blocks, so we always return all
