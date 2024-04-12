@@ -86,6 +86,11 @@ impl ImportCommand {
 
         if self.op_mainnet_below_bedrock {
             self.disable_execution = true;
+            debug!(target: "reth::cli", "Importing OP mainnet below bedrock");
+        }
+
+        if self.disable_execution {
+            debug!(target: "reth::cli", "Execution stage disabled");
         }
 
         // add network name to data dir
