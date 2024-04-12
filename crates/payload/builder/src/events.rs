@@ -1,4 +1,4 @@
-use reth_node_api::EngineTypes;
+use reth_engine_primitives::EngineTypes;
 use tokio::sync::broadcast;
 use tokio_stream::{
     wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},

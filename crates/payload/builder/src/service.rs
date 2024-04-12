@@ -11,7 +11,7 @@ use crate::{
     KeepPayloadJobAlive, PayloadJob,
 };
 use futures_util::{future::FutureExt, Stream, StreamExt};
-use reth_node_api::{BuiltPayload, EngineTypes, PayloadBuilderAttributes};
+use reth_engine_primitives::{BuiltPayload, EngineTypes, PayloadBuilderAttributes};
 use reth_provider::CanonStateNotification;
 use reth_rpc_types::engine::PayloadId;
 use std::{

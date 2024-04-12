@@ -711,20 +711,20 @@ where
             )
             .build();
 
-            let mut pipeline = config
-                .build_networked_pipeline(
-                    &reth_config.stages,
-                    client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory.clone(),
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                    static_file_producer,
-                    evm_config,
-                )
-                .await?;
+            let mut pipeline = crate::setup::build_networked_pipeline(
+                &config,
+                &reth_config.stages,
+                client.clone(),
+                Arc::clone(&consensus),
+                provider_factory.clone(),
+                &executor,
+                sync_metrics_tx,
+                prune_config.clone(),
+                max_block,
+                static_file_producer,
+                evm_config,
+            )
+            .await?;
 
             let pipeline_events = pipeline.events();
             task.set_pipeline_events(pipeline_events);
@@ -733,20 +733,20 @@ where
 
             (pipeline, EitherDownloader::Left(client))
         } else {
-            let pipeline = config
-                .build_networked_pipeline(
-                    &reth_config.stages,
-                    network_client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory.clone(),
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                    static_file_producer,
-                    evm_config,
-                )
-                .await?;
+            let pipeline = crate::setup::build_networked_pipeline(
+                &config,
+                &reth_config.stages,
+                network_client.clone(),
+                Arc::clone(&consensus),
+                provider_factory.clone(),
+                &executor,
+                sync_metrics_tx,
+                prune_config.clone(),
+                max_block,
+                static_file_producer,
+                evm_config,
+            )
+            .await?;
 
             (pipeline, EitherDownloader::Right(network_client))
         };
