@@ -4,7 +4,6 @@ use std::{
 };
 
 use futures::Future;
-use reth::{builder::FullNodeTypes, transaction_pool::TransactionPool};
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
