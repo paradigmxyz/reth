@@ -2,7 +2,7 @@
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
 use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256};
 
-use alloy_eips::eip2718::Eip2718Error;
+use alloy_eips::eip2718::{Eip2718Error, Eip2718Error::RlpError};
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -619,8 +619,13 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
 
     fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
         match tx.transaction_type {
-            None => {
+            None | Some(0) => {
                 // legacy
+                if tx.max_fee_per_gas.is_some() || tx.max_priority_fee_per_gas.is_some() {
+                    return Err(RlpError::Custom(
+                        "EIP-1559 fields are present in a legacy transaction",
+                    ))
+                }
                 Ok(Transaction::Legacy(TxLegacy {
                     chain_id: tx.chain_id,
                     nonce: tx.nonce,
@@ -690,7 +695,9 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                     value: tx.value,
                     access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
                     input: tx.input,
-                    blob_versioned_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
+                    blob_versioned_hashes: tx
+                        .blob_versioned_hashes
+                        .ok_or(ConversionError::MissingBlobVersionedHashes)?,
                     max_fee_per_blob_gas: tx
                         .max_fee_per_blob_gas
                         .ok_or(ConversionError::MissingMaxFeePerBlobGas)?,
