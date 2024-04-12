@@ -1,6 +1,7 @@
 use futures::future;
 use reth_db::test_utils::create_test_rw_db;
 use reth_exex::ExExContext;
+use reth_node_api::FullNodeComponents;
 use reth_node_builder::{FullNodeTypes, NodeBuilder, NodeConfig};
 use reth_node_ethereum::EthereumNode;
 use reth_transaction_pool::TransactionPool;
@@ -10,14 +11,13 @@ use std::{
     task::{Context, Poll},
 };
 
-struct DummyExEx<Node: FullNodeTypes, Pool: TransactionPool> {
-    _ctx: ExExContext<Node, Pool>,
+struct DummyExEx<Node: FullNodeComponents> {
+    _ctx: ExExContext<Node>,
 }
 
-impl<Node, Pool> Future for DummyExEx<Node, Pool>
+impl<Node> Future for DummyExEx<Node>
 where
-    Node: FullNodeTypes,
-    Pool: TransactionPool + Unpin + 'static,
+    Node: FullNodeComponents,
 {
     type Output = eyre::Result<()>;
 

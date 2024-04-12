@@ -6,18 +6,18 @@ use std::{
 use futures::Future;
 use reth::{builder::FullNodeTypes, transaction_pool::TransactionPool};
 use reth_exex::{ExExContext, ExExEvent};
+use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::CanonStateNotification;
 
 /// A minimal example of an ExEx that simply prints out commit and reorg notifications.
-struct MinimalExEx<Node: FullNodeTypes, Pool: TransactionPool> {
-    ctx: ExExContext<Node, Pool>,
+struct MinimalExEx<Node: FullNodeComponents> {
+    ctx: ExExContext<Node>,
 }
 
-impl<Node, Pool> Future for MinimalExEx<Node, Pool>
+impl<Node> Future for MinimalExEx<Node>
 where
-    Node: FullNodeTypes,
-    Pool: TransactionPool + Unpin + 'static,
+    Node: FullNodeComponents,
 {
     type Output = eyre::Result<()>;
 
