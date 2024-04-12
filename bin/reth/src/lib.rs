@@ -39,6 +39,11 @@ pub mod payload {
     pub use reth_payload_validator::ExecutionPayloadValidator;
 }
 
+/// Re-exported from `reth_node_api`.
+pub mod api {
+    pub use reth_node_api::*;
+}
+
 /// Re-exported from `reth_node_core`.
 pub mod core {
     pub use reth_node_core::*;

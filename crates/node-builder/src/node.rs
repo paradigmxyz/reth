@@ -1,8 +1,9 @@
 use crate::{
-    components::{ComponentsBuilder, FullNodeComponents},
+    components::ComponentsBuilder,
     rpc::{RethRpcServerHandles, RpcRegistry},
 };
 use reth_network::NetworkHandle;
+use reth_node_api::FullNodeComponents;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
