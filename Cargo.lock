@@ -6934,6 +6934,7 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-exex",
  "reth-network",
+ "reth-node-api",
  "reth-node-builder",
  "reth-payload-builder",
  "reth-provider",
