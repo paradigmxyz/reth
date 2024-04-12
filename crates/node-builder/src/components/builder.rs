@@ -1,11 +1,10 @@
 //! A generic [NodeComponentsBuilder]
 
 use crate::{
-    components::{
-        NetworkBuilder, NodeComponents, NodeComponentsBuilder, PayloadServiceBuilder, PoolBuilder,
-    },
+    components::{NetworkBuilder, NodeComponents, PayloadServiceBuilder, PoolBuilder},
     BuilderContext, FullNodeTypes,
 };
+use reth_transaction_pool::TransactionPool;
 use std::marker::PhantomData;
 
 /// A generic, customizable [`NodeComponentsBuilder`].
@@ -160,5 +159,42 @@ impl Default for ComponentsBuilder<(), (), (), ()> {
             network_builder: (),
             _marker: Default::default(),
         }
+    }
+}
+
+/// A type that configures all the customizable components of the node and knows how to build them.
+///
+/// Implementors of this trait are responsible for building all the components of the node: See
+/// [NodeComponents].
+///
+/// The [ComponentsBuilder] is a generic implementation of this trait that can be used to customize
+/// certain components of the node using the builder pattern and defaults, e.g. Ethereum and
+/// Optimism.
+pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
+    /// The transaction pool to use.
+    type Pool: TransactionPool + Unpin + 'static;
+
+    /// Builds the components of the node.
+    fn build_components(
+        self,
+        context: &BuilderContext<Node>,
+    ) -> impl std::future::Future<Output = eyre::Result<NodeComponents<Node, Self::Pool>>> + Send;
+}
+
+impl<Node, F, Fut, Pool> NodeComponentsBuilder<Node> for F
+where
+    Node: FullNodeTypes,
+    F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
+    Fut: std::future::Future<Output = eyre::Result<NodeComponents<Node, Pool>>> + Send,
+    Pool: TransactionPool + Unpin + 'static,
+{
+    type Pool = Pool;
+
+    fn build_components(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> impl std::future::Future<Output = eyre::Result<NodeComponents<Node, Self::Pool>>> + Send
+    {
+        self(ctx)
     }
 }

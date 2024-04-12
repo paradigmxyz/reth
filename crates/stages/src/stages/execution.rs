@@ -166,7 +166,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             // we need the block's transactions but we don't need the transaction hashes
             let block = provider
                 .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
-                .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?;
+                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
             fetch_block_duration += fetch_block_start.elapsed();
 
@@ -456,7 +456,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
                 for block_number in range {
                     stage_checkpoint.progress.processed -= provider
                         .block_by_number(block_number)?
-                        .ok_or_else(|| ProviderError::BlockNotFound(block_number.into()))?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
                         .gas_used;
                 }
             }

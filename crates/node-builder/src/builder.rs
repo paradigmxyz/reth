@@ -3,10 +3,7 @@
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
 use crate::{
-    components::{
-        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, NodeComponents,
-        NodeComponentsBuilder, PoolBuilder,
-    },
+    components::{ComponentsBuilder, NodeComponents, NodeComponentsBuilder, PoolBuilder},
     exex::BoxedLaunchExEx,
     hooks::NodeHooks,
     node::FullNode,
@@ -20,7 +17,9 @@ use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
-use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
+use reth_blockchain_tree::{
+    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+};
 use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database,
@@ -31,7 +30,9 @@ use reth_db::{
 use reth_exex::{ExExContext, ExExHandle, ExExManager};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
+use reth_node_api::{
+    FullNodeComponents, FullNodeComponentsAdapter, FullNodeTypes, FullNodeTypesAdapter, NodeTypes,
+};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
@@ -531,16 +532,20 @@ where
 
         let prune_config = config.prune_config()?.or_else(|| reth_config.prune.clone());
 
+        // Configure the blockchain tree for the node
         let evm_config = types.evm_config();
         let tree_config = BlockchainTreeConfig::default();
-        let tree = config.build_blockchain_tree(
+        let tree_externals = TreeExternals::new(
             provider_factory.clone(),
             consensus.clone(),
-            prune_config.clone(),
-            sync_metrics_tx.clone(),
+            EvmProcessorFactory::new(config.chain.clone(), evm_config.clone()),
+        );
+        let tree = BlockchainTree::new(
+            tree_externals,
             tree_config,
-            evm_config.clone(),
-        )?;
+            prune_config.as_ref().map(|config| config.segments.clone()),
+        )?
+        .with_sync_metrics_tx(sync_metrics_tx.clone());
 
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = ShareableBlockchainTree::new(tree);
@@ -707,20 +712,20 @@ where
             )
             .build();
 
-            let mut pipeline = config
-                .build_networked_pipeline(
-                    &reth_config.stages,
-                    client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory.clone(),
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                    static_file_producer,
-                    evm_config,
-                )
-                .await?;
+            let mut pipeline = crate::setup::build_networked_pipeline(
+                &config,
+                &reth_config.stages,
+                client.clone(),
+                Arc::clone(&consensus),
+                provider_factory.clone(),
+                &executor,
+                sync_metrics_tx,
+                prune_config.clone(),
+                max_block,
+                static_file_producer,
+                evm_config,
+            )
+            .await?;
 
             let pipeline_events = pipeline.events();
             task.set_pipeline_events(pipeline_events);
@@ -729,20 +734,20 @@ where
 
             (pipeline, EitherDownloader::Left(client))
         } else {
-            let pipeline = config
-                .build_networked_pipeline(
-                    &reth_config.stages,
-                    network_client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory.clone(),
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                    static_file_producer,
-                    evm_config,
-                )
-                .await?;
+            let pipeline = crate::setup::build_networked_pipeline(
+                &config,
+                &reth_config.stages,
+                network_client.clone(),
+                Arc::clone(&consensus),
+                provider_factory.clone(),
+                &executor,
+                sync_metrics_tx,
+                prune_config.clone(),
+                max_block,
+                static_file_producer,
+                evm_config,
+            )
+            .await?;
 
             (pipeline, EitherDownloader::Right(network_client))
         };
