@@ -11,6 +11,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# Reth
 reth-evm.workspace = true
 reth-primitives.workspace = true
+reth-revm.workspace = true
 
+# Ethereum
+revm-primitives.workspace = true

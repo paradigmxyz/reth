@@ -6554,6 +6554,8 @@ version = "0.2.0-beta.5"
 dependencies = [
  "reth-evm",
  "reth-primitives",
+ "reth-revm",
+ "revm-primitives",
 ]
 
 [[package]]
