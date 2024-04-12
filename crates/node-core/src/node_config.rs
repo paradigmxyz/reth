@@ -5,10 +5,9 @@ use crate::{
         get_secret_key, DatabaseArgs, DebugArgs, DevArgs, DiscoveryArgs, NetworkArgs,
         PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
-    cli::config::RethTransactionPoolConfig,
     dirs::{ChainPath, DataDirPath},
     metrics::prometheus_exporter,
-    utils::{get_single_header, write_peers_to_file},
+    utils::get_single_header,
 };
 use discv5::ListenConfig;
 use metrics_exporter_prometheus::PrometheusHandle;
@@ -25,7 +24,6 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::{
-    blockchain_tree::BlockchainTreeEngine,
     consensus::Consensus,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
@@ -33,20 +31,15 @@ use reth_interfaces::{
     },
     RethResult,
 };
-use reth_network::{
-    transactions::{TransactionFetcherConfig, TransactionsManagerConfig},
-    NetworkBuilder, NetworkConfig, NetworkHandle, NetworkManager,
-};
+use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};
 use reth_node_api::ConfigureEvm;
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
     BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256, MAINNET,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, BlockReader, BlockchainTreePendingStateProvider,
-    CanonStateSubscriptions, HeaderProvider, HeaderSyncMode, ProviderFactory,
-    StageCheckpointReader,
+    providers::StaticFileProvider, BlockHashReader, BlockNumReader, HeaderProvider, HeaderSyncMode,
+    ProviderFactory, StageCheckpointReader,
 };
 use reth_revm::stack::{Hook, InspectorStackConfig};
 use reth_stages::{
@@ -59,10 +52,6 @@ use reth_stages::{
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_transaction_pool::{
-    blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
-    EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
-};
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{mpsc::Receiver, watch};
@@ -373,77 +362,6 @@ impl NodeConfig {
         Ok(builder)
     }
 
-    /// Build a transaction pool and spawn the transaction pool maintenance task
-    pub fn build_and_spawn_txpool<DB, Tree>(
-        &self,
-        blockchain_db: &BlockchainProvider<DB, Tree>,
-        head: Head,
-        executor: &TaskExecutor,
-        data_dir: &ChainPath<DataDirPath>,
-    ) -> eyre::Result<EthTransactionPool<BlockchainProvider<DB, Tree>, DiskFileBlobStore>>
-    where
-        DB: Database + Unpin + Clone + 'static,
-        Tree: BlockchainTreeEngine
-            + BlockchainTreePendingStateProvider
-            + CanonStateSubscriptions
-            + Clone
-            + 'static,
-    {
-        let blob_store = DiskFileBlobStore::open(
-            data_dir.blobstore_path(),
-            DiskFileBlobStoreConfig::default()
-                .with_max_cached_entries(self.txpool.max_cached_entries),
-        )?;
-        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
-            .with_head_timestamp(head.timestamp)
-            .kzg_settings(self.kzg_settings()?)
-            // use an additional validation task so we can validate transactions in parallel
-            .with_additional_tasks(1)
-            // set the max tx size in bytes allowed to enter the pool
-            .with_max_tx_input_bytes(self.txpool.max_tx_input_bytes)
-            .build_with_tasks(blockchain_db.clone(), executor.clone(), blob_store.clone());
-
-        let transaction_pool =
-            reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
-        info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions_path();
-
-        // spawn txpool maintenance task
-        {
-            let pool = transaction_pool.clone();
-            let chain_events = blockchain_db.canonical_state_stream();
-            let client = blockchain_db.clone();
-            let transactions_backup_config =
-                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
-
-            executor.spawn_critical_with_graceful_shutdown_signal(
-                "local transactions backup task",
-                |shutdown| {
-                    reth_transaction_pool::maintain::backup_local_transactions_task(
-                        shutdown,
-                        pool.clone(),
-                        transactions_backup_config,
-                    )
-                },
-            );
-
-            // spawn the maintenance task
-            executor.spawn_critical(
-                "txpool maintenance task",
-                reth_transaction_pool::maintain::maintain_transaction_pool_future(
-                    client,
-                    pool,
-                    chain_events,
-                    executor.clone(),
-                    Default::default(),
-                ),
-            );
-            debug!(target: "reth::cli", "Spawned txpool maintenance task");
-        }
-
-        Ok(transaction_pool)
-    }
-
     /// Returns the [Consensus] instance to use.
     ///
     /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
@@ -537,51 +455,6 @@ impl NodeConfig {
         }
 
         Ok(())
-    }
-
-    /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
-    /// to that network.
-    pub fn start_network<C, Pool>(
-        &self,
-        builder: NetworkBuilder<C, (), ()>,
-        task_executor: &TaskExecutor,
-        pool: Pool,
-        client: C,
-        data_dir: &ChainPath<DataDirPath>,
-    ) -> NetworkHandle
-    where
-        C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
-        Pool: TransactionPool + Unpin + 'static,
-    {
-        let (handle, network, txpool, eth) = builder
-            .transactions(
-                pool, // Configure transactions manager
-                TransactionsManagerConfig {
-                    transaction_fetcher_config: TransactionFetcherConfig::new(
-                        self.network.soft_limit_byte_size_pooled_transactions_response,
-                        self.network
-                            .soft_limit_byte_size_pooled_transactions_response_on_pack_request,
-                    ),
-                },
-            )
-            .request_handler(client)
-            .split_with_handle();
-
-        task_executor.spawn_critical("p2p txpool", txpool);
-        task_executor.spawn_critical("p2p eth request handler", eth);
-
-        let default_peers_path = data_dir.known_peers_path();
-        let known_peers_file = self.network.persistent_peers_file(default_peers_path);
-        task_executor.spawn_critical_with_graceful_shutdown_signal(
-            "p2p network task",
-            |shutdown| {
-                network.run_until_graceful_shutdown(shutdown, |network| {
-                    write_peers_to_file(network, known_peers_file)
-                })
-            },
-        );
-
-        handle
     }
 
     /// Fetches the head block from the database.
