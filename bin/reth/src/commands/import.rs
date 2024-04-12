@@ -65,6 +65,9 @@ pub struct ImportCommand {
     #[arg(long, verbatim_doc_comment)]
     disable_execution: bool,
 
+    #[arg(long, verbatim_doc_comment, env = "OP_RETH_MAINNET_BELOW_BEDROCK")]
+    op_mainnet_below_bedrock: bool,
+
     #[command(flatten)]
     db: DatabaseArgs,
 
@@ -81,7 +84,7 @@ impl ImportCommand {
     pub async fn execute(mut self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
-        if std::env::var(OP_RETH_MAINNET_BELOW_BEDROCK) == Ok("1".to_string()) {
+        if self.op_mainnet_below_bedrock {
             self.disable_execution = true;
         }
 
