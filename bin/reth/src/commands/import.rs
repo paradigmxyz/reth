@@ -123,7 +123,7 @@ impl ImportCommand {
 
         // override the tip
         let tip = file_client.tip().expect("file client has no tip");
-        info!(target: "reth::cli", "Chain file imported");
+        info!(target: "reth::cli", "Chain file read");
 
         let (mut pipeline, events) = self
             .build_import_pipeline(
@@ -162,7 +162,7 @@ impl ImportCommand {
             _ = tokio::signal::ctrl_c() => {},
         }
 
-        info!(target: "reth::cli", "Finishing up");
+        info!(target: "reth::cli", "Chain file imported");
         Ok(())
     }
 
