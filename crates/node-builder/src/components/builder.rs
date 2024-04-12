@@ -1,11 +1,10 @@
 //! A generic [NodeComponentsBuilder]
 
-use reth_transaction_pool::TransactionPool;
-
 use crate::{
     components::{NetworkBuilder, NodeComponents, PayloadServiceBuilder, PoolBuilder},
     BuilderContext, FullNodeTypes,
 };
+use reth_transaction_pool::TransactionPool;
 use std::marker::PhantomData;
 
 /// A generic, customizable [`NodeComponentsBuilder`].
