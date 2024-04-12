@@ -476,7 +476,7 @@ where
                         None => self
                             .provider
                             .block_hash(header.number)?
-                            .ok_or(ProviderError::BlockNotFound(header.number.into()))?,
+                            .ok_or(ProviderError::HeaderNotFound(header.number.into()))?,
                     };
 
                     if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {

@@ -20,7 +20,9 @@ use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
-use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
+use reth_blockchain_tree::{
+    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+};
 use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database,
@@ -530,16 +532,20 @@ where
 
         let prune_config = config.prune_config()?.or_else(|| reth_config.prune.clone());
 
+        // Configure the blockchain tree for the node
         let evm_config = types.evm_config();
         let tree_config = BlockchainTreeConfig::default();
-        let tree = config.build_blockchain_tree(
+        let tree_externals = TreeExternals::new(
             provider_factory.clone(),
             consensus.clone(),
-            prune_config.clone(),
-            sync_metrics_tx.clone(),
+            EvmProcessorFactory::new(config.chain.clone(), evm_config.clone()),
+        );
+        let tree = BlockchainTree::new(
+            tree_externals,
             tree_config,
-            evm_config.clone(),
-        )?;
+            prune_config.as_ref().map(|config| config.segments.clone()),
+        )?
+        .with_sync_metrics_tx(sync_metrics_tx.clone());
 
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = ShareableBlockchainTree::new(tree);
