@@ -2,7 +2,11 @@
 
 use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
 use reth_db::database::Database;
+use reth_network::NetworkHandle;
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
+use reth_tasks::TaskExecutor;
+use reth_transaction_pool::TransactionPool;
 use std::marker::PhantomData;
 
 /// The type that configures the essential types of an ethereum like node.
@@ -71,4 +75,109 @@ where
 {
     type DB = DB;
     type Provider = Provider;
+}
+
+/// Encapsulates all types and components of the node.
+pub trait FullNodeComponents: FullNodeTypes + 'static {
+    /// The transaction pool of the node.
+    type Pool: TransactionPool;
+
+    /// Returns the transaction pool of the node.
+    fn pool(&self) -> &Self::Pool;
+
+    /// Returns the provider of the node.
+    fn provider(&self) -> &Self::Provider;
+
+    /// Returns the handle to the network
+    fn network(&self) -> &NetworkHandle;
+
+    /// Returns the handle to the payload builder service.
+    fn payload_builder(&self) -> &PayloadBuilderHandle<Self::Engine>;
+
+    /// Returns the task executor.
+    fn task_executor(&self) -> &TaskExecutor;
+}
+
+/// A type that encapsulates all the components of the node.
+#[derive(Debug)]
+pub struct FullNodeComponentsAdapter<Node: FullNodeTypes, Pool> {
+    /// The EVM configuration of the node.
+    pub evm_config: Node::Evm,
+    /// The transaction pool of the node.
+    pub pool: Pool,
+    /// The network handle of the node.
+    pub network: NetworkHandle,
+    /// The provider of the node.
+    pub provider: Node::Provider,
+    /// The payload builder service handle of the node.
+    pub payload_builder: PayloadBuilderHandle<Node::Engine>,
+    /// The task executor of the node.
+    pub executor: TaskExecutor,
+}
+
+impl<Node, Pool> FullNodeTypes for FullNodeComponentsAdapter<Node, Pool>
+where
+    Node: FullNodeTypes,
+    Pool: TransactionPool + 'static,
+{
+    type DB = Node::DB;
+    type Provider = Node::Provider;
+}
+
+impl<Node, Pool> NodeTypes for FullNodeComponentsAdapter<Node, Pool>
+where
+    Node: FullNodeTypes,
+    Pool: TransactionPool + 'static,
+{
+    type Primitives = Node::Primitives;
+    type Engine = Node::Engine;
+    type Evm = Node::Evm;
+
+    fn evm_config(&self) -> Self::Evm {
+        self.evm_config.clone()
+    }
+}
+
+impl<Node, Pool> FullNodeComponents for FullNodeComponentsAdapter<Node, Pool>
+where
+    Node: FullNodeTypes,
+    Pool: TransactionPool + 'static,
+{
+    type Pool = Pool;
+
+    fn pool(&self) -> &Self::Pool {
+        &self.pool
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        &self.provider
+    }
+
+    fn network(&self) -> &NetworkHandle {
+        &self.network
+    }
+
+    fn payload_builder(&self) -> &PayloadBuilderHandle<Self::Engine> {
+        &self.payload_builder
+    }
+
+    fn task_executor(&self) -> &TaskExecutor {
+        &self.executor
+    }
+}
+
+impl<Node: FullNodeTypes, Pool> Clone for FullNodeComponentsAdapter<Node, Pool>
+where
+    Pool: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            evm_config: self.evm_config.clone(),
+            pool: self.pool.clone(),
+            network: self.network.clone(),
+            provider: self.provider.clone(),
+            payload_builder: self.payload_builder.clone(),
+            executor: self.executor.clone(),
+        }
+    }
 }
