@@ -11,8 +11,8 @@ use std::{sync::Arc, time::Instant};
 #[cfg(not(feature = "optimism"))]
 use tracing::{debug, trace};
 
+use reth_evm::ConfigureEvm;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
-use reth_node_api::ConfigureEvm;
 #[cfg(feature = "optimism")]
 use reth_primitives::revm::env::fill_op_tx_env;
 #[cfg(not(feature = "optimism"))]
