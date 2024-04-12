@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use node_e2e_tests::{node::NodeHelper, wallet::Wallet};
-use reth::tasks::TaskManager;
+use reth::{
+    args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
+    builder::NodeConfig,
+    tasks::TaskManager,
+};
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 
 #[tokio::test]
@@ -20,25 +24,36 @@ async fn can_sync() -> eyre::Result<()> {
             .build(),
     );
 
+    let network_config = NetworkArgs {
+        discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
+        ..NetworkArgs::default()
+    };
+
+    let node_config = NodeConfig::test()
+        .with_chain(chain_spec)
+        .with_network(network_config)
+        .with_unused_ports()
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+
+    let mut first_node = NodeHelper::new(node_config.clone(), exec.clone()).await?;
+    let mut second_node = NodeHelper::new(node_config, exec).await?;
+
     let wallet = Wallet::default();
     let raw_tx = wallet.transfer_tx().await;
 
-    let mut first_node = NodeHelper::new(chain_spec.clone(), exec.clone()).await?;
-    let mut second_node = NodeHelper::new(chain_spec, exec).await?;
-
     // Make them peer
-    first_node.add_peer(second_node.record()).await;
-    second_node.add_peer(first_node.record()).await;
+    first_node.network.add_peer(second_node.network.record()).await;
+    second_node.network.add_peer(first_node.network.record()).await;
 
     // Make sure they establish a new session
-    first_node.expect_session().await;
-    second_node.expect_session().await;
+    first_node.network.expect_session().await;
+    second_node.network.expect_session().await;
 
     // Make the first node advance
     let (block_hash, tx_hash) = first_node.advance(raw_tx.clone()).await?;
 
     // only send forkchoice update to second node
-    second_node.update_forkchoice(block_hash).await?;
+    second_node.engine_api.update_forkchoice(block_hash).await?;
 
     // expect second node advanced via p2p gossip
     second_node.assert_new_block(tx_hash, block_hash).await?;
