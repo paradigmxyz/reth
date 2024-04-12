@@ -6597,7 +6597,6 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "reth-tracing",
- "reth-transaction-pool",
  "tokio",
  "tokio-stream",
  "tokio-util",

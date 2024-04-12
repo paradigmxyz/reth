@@ -449,7 +449,6 @@ where
                         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
                         Components::Pool,
                     >,
-                    Components::Pool,
                 >,
             ) -> R
             + Send
@@ -1152,7 +1151,6 @@ where
                         FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
                         Components::Pool,
                     >,
-                    Components::Pool,
                 >,
             ) -> R
             + Send
@@ -1376,7 +1374,7 @@ pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
     /// Additional RPC hooks.
     rpc: RpcHooks<FullNode>,
     /// The ExExs (execution extensions) of the node.
-    exexs: Vec<(String, Box<dyn BoxedLaunchExEx<FullNode, FullNode::Pool>>)>,
+    exexs: Vec<(String, Box<dyn BoxedLaunchExEx<FullNode>>)>,
 }
 
 impl<Types, Components, FullNode: FullNodeComponents> std::fmt::Debug

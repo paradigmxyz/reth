@@ -1,4 +1,4 @@
-use reth_node_api::FullNodeTypes;
+use reth_node_api::FullNodeComponents;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
@@ -6,14 +6,13 @@ use reth_node_core::{
 use reth_primitives::Head;
 use reth_provider::CanonStateNotification;
 use reth_tasks::TaskExecutor;
-use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
 
 use crate::ExExEvent;
 
 /// Captures the context that an ExEx has access to.
 #[derive(Debug)]
-pub struct ExExContext<Node: FullNodeTypes, Pool: TransactionPool> {
+pub struct ExExContext<Node: FullNodeComponents> {
     /// The current head of the blockchain at launch.
     pub head: Head,
     /// The configured provider to interact with the blockchain.
@@ -27,7 +26,7 @@ pub struct ExExContext<Node: FullNodeTypes, Pool: TransactionPool> {
     /// The loaded node config
     pub reth_config: reth_config::Config,
     /// The transaction pool of the node.
-    pub pool: Pool,
+    pub pool: Node::Pool,
     /// Channel used to send [`ExExEvent`]s to the rest of the node.
     ///
     /// # Important

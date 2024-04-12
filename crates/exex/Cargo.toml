@@ -21,7 +21,6 @@ reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
-reth-transaction-pool.workspace = true
 
 ## async
 futures.workspace = true
