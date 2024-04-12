@@ -21,7 +21,7 @@ use reth_downloaders::{
 use reth_interfaces::consensus::Consensus;
 use reth_node_core::{events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
-use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
+use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256, OP_RETH_MAINNET_BELOW_BEDROCK};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
@@ -61,6 +61,15 @@ pub struct ImportCommand {
     )]
     chain: Arc<ChainSpec>,
 
+    /// Disables execution stage.
+    #[arg(long, verbatim_doc_comment)]
+    disable_execution: bool,
+
+    /// Import OP Mainnet chain below Bedrock. Caution! Flag must be set as env var, since the env
+    /// var is read by another process too, in order to make below Bedrock import work.
+    #[arg(long, verbatim_doc_comment, env = OP_RETH_MAINNET_BELOW_BEDROCK)]
+    op_mainnet_below_bedrock: bool,
+
     #[command(flatten)]
     db: DatabaseArgs,
 
@@ -74,8 +83,17 @@ pub struct ImportCommand {
 
 impl ImportCommand {
     /// Execute `import` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(mut self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
+
+        if self.op_mainnet_below_bedrock {
+            self.disable_execution = true;
+            debug!(target: "reth::cli", "Importing OP mainnet below bedrock");
+        }
+
+        if self.disable_execution {
+            debug!(target: "reth::cli", "Execution stage disabled");
+        }
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
@@ -118,6 +136,7 @@ impl ImportCommand {
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
+                self.disable_execution,
             )
             .await?;
 
@@ -154,6 +173,7 @@ impl ImportCommand {
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
         static_file_producer: StaticFileProducer<DB>,
+        disable_execution: bool,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,
@@ -209,7 +229,8 @@ impl ImportCommand {
                         .max(config.stages.account_hashing.clean_threshold)
                         .max(config.stages.storage_hashing.clean_threshold),
                     config.prune.map(|prune| prune.segments).unwrap_or_default(),
-                )),
+                ))
+                .disable_if(StageId::Execution, || disable_execution),
             )
             .build(provider_factory, static_file_producer);
 

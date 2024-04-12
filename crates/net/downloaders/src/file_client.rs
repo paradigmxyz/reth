@@ -65,7 +65,8 @@ impl FileClient {
         let metadata = file.metadata().await?;
         let file_len = metadata.len();
 
-        // read the entire file into memory
+        // todo: read chunks into memory. for op mainnet 1/8 th of blocks below bedrock can be
+        // decoded at once
         let mut reader = vec![];
         file.read_to_end(&mut reader).await.unwrap();
 
@@ -76,8 +77,12 @@ impl FileClient {
         // use with_capacity to make sure the internal buffer contains the entire file
         let mut stream = FramedRead::with_capacity(&reader[..], BlockFileCodec, file_len as usize);
 
+        let mut log_interval = 0;
+        let mut log_interval_start_block = 0;
+
         while let Some(block_res) = stream.next().await {
             let block = block_res?;
+            let block_number = block.header.number;
             let block_hash = block.header.hash_slow();
 
             // add to the internal maps
@@ -91,6 +96,17 @@ impl FileClient {
                     withdrawals: block.withdrawals,
                 },
             );
+
+            if log_interval == 0 {
+                log_interval_start_block = block_number;
+            } else if log_interval % 100000 == 0 {
+                trace!(target: "downloaders::file",
+                    blocks=?log_interval_start_block..=block_number,
+                    "inserted blocks into db"
+                );
+                log_interval_start_block = block_number + 1;
+            }
+            log_interval += 1;
         }
 
         trace!(blocks = headers.len(), "Initialized file client");
