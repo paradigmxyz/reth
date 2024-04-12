@@ -2,7 +2,7 @@
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
 use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256};
 
-use alloy_eips::eip2718::{Eip2718Error, Eip2718Error::RlpError};
+use alloy_eips::eip2718::Eip2718Error;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -30,7 +30,7 @@ pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
 
-pub use signature::Signature;
+pub use signature::{Signature, OP_RETH_MAINNET_BELOW_BEDROCK};
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
@@ -622,8 +622,9 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
             None | Some(0) => {
                 // legacy
                 if tx.max_fee_per_gas.is_some() || tx.max_priority_fee_per_gas.is_some() {
-                    return Err(RlpError::Custom(
-                        "EIP-1559 fields are present in a legacy transaction",
+                    return Err(ConversionError::Eip2718Error(
+                        RlpError::Custom("EIP-1559 fields are present in a legacy transaction")
+                            .into(),
                     ))
                 }
                 Ok(Transaction::Legacy(TxLegacy {
@@ -1054,7 +1055,7 @@ impl Compact for TransactionSignedNoHash {
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
             TRANSACTION_DECOMPRESSOR.with(|decompressor| {
-                let decompressor = &mut decompressor.borrow_mut();
+                let mut decompressor = decompressor.borrow_mut();
 
                 // TODO: enforce that zstd is only present at a "top" level type
 

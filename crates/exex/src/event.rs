@@ -1,7 +1,7 @@
 use reth_primitives::BlockNumber;
 
 /// Events emitted by an ExEx.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExExEvent {
     /// Highest block processed by the ExEx.
     ///
