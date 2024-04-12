@@ -16,8 +16,8 @@ use crate::L1StandardBridge::{ETHBridgeFinalized, ETHBridgeInitiated, L1Standard
 /// Opens up a SQLite database and creates the tables (if they don't exist).
 async fn init<Node: FullNodeTypes>(
     ctx: ExExContext<Node>,
+    mut connection: Connection,
 ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
-    let mut connection = Connection::open("op_bridge.db")?;
     create_tables(&mut connection)?;
 
     Ok(op_bridge_exex(ctx, connection))
@@ -223,8 +223,14 @@ fn decode_chain_into_events(
 
 fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
-        let handle =
-            builder.node(EthereumNode::default()).install_exex("OPBridge", init).launch().await?;
+        let handle = builder
+            .node(EthereumNode::default())
+            .install_exex("OPBridge", |ctx| async move {
+                let connection = Connection::open("op_bridge.db")?;
+                init(ctx, connection).await
+            })
+            .launch()
+            .await?;
 
         handle.wait_for_node_exit().await
     })
