@@ -1,8 +1,8 @@
 //! Builder support for rpc components.
 
-use crate::components::FullNodeComponents;
 use futures::TryFutureExt;
 use reth_network::NetworkHandle;
+use reth_node_api::FullNodeComponents;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     node_config::NodeConfig,

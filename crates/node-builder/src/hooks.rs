@@ -1,4 +1,6 @@
-use crate::{components::FullNodeComponents, node::FullNode};
+use reth_node_api::FullNodeComponents;
+
+use crate::node::FullNode;
 use std::fmt;
 
 /// Container for all the configurable hook functions.

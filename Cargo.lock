@@ -6816,7 +6816,11 @@ dependencies = [
  "reth-db",
  "reth-engine-primitives",
  "reth-evm",
+ "reth-network",
+ "reth-payload-builder",
  "reth-provider",
+ "reth-tasks",
+ "reth-transaction-pool",
 ]
 
 [[package]]
