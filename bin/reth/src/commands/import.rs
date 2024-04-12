@@ -131,12 +131,11 @@ impl ImportCommand {
         // open file
         let mut reader = ChunkedFileReader::new(&self.path).await?;
 
-        // override the tip
-        let tip = file_client.tip().expect("file client has no tip");
-
         loop {
             // create a new FileClient from chunk read from file
-            info!(target: "reth::cli", "Importing chain file {}", if self.chunk { "chunk" } else { "" });
+            info!(target: "reth::cli",
+                "Importing chain file {}", if self.chunk { "chunk" } else { "" }
+            );
 
             let Some(file_client) = reader.next_chunk().await? else { break };
 

@@ -9,7 +9,7 @@ use reth_interfaces::p2p::{
 };
 use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BytesMut, Header, HeadersDirection,
-    PeerId, B256,
+    PeerId, SealedHeader, B256,
 };
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;
@@ -92,9 +92,6 @@ impl FileClient {
         // use with_capacity to make sure the internal buffer contains the entire file
         let mut stream = FramedRead::with_capacity(reader, BlockFileCodec, num_bytes as usize);
 
-        let mut log_interval = 0;
-        let mut log_interval_start_block = 0;
-
         let mut remaining_bytes = vec![];
 
         let mut log_interval = 0;
@@ -148,6 +145,11 @@ impl FileClient {
     /// Get the tip hash of the chain.
     pub fn tip(&self) -> Option<B256> {
         self.headers.get(&((self.headers.len() - 1) as u64)).map(|h| h.hash_slow())
+    }
+
+    /// Get the start hash of the chain.
+    pub fn start(&self) -> Option<B256> {
+        self.headers.get(&self.min_block()?).map(|h| h.hash_slow())
     }
 
     /// Returns the highest block number of this client has or `None` if empty
@@ -384,7 +386,6 @@ mod tests {
         },
         test_utils::TestConsensus,
     };
-    use reth_primitives::SealedHeader;
     use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
 
