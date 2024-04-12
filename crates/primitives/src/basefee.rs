@@ -66,7 +66,7 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "optimism")]
-    use crate::chain::OptimismBaseFeeParams;
+    use crate::chain::{OP_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS};
 
     #[test]
     fn calculate_base_fee_success() {
@@ -127,7 +127,7 @@ mod tests {
                     gas_used[i],
                     gas_limit[i],
                     base_fee[i],
-                    crate::BaseFeeParams::optimism(),
+                    OP_BASE_FEE_PARAMS,
                 )
             );
         }
@@ -160,7 +160,7 @@ mod tests {
                     gas_used[i],
                     gas_limit[i],
                     base_fee[i],
-                    crate::BaseFeeParams::optimism_sepolia(),
+                    OP_SEPOLIA_BASE_FEE_PARAMS,
                 )
             );
         }

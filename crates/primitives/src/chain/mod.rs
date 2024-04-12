@@ -6,7 +6,11 @@ pub use spec::{
     MAINNET, SEPOLIA,
 };
 #[cfg(feature = "optimism")]
-pub use spec::{OptimismBaseFeeParams, BASE_MAINNET, BASE_SEPOLIA, OP_SEPOLIA};
+pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_SEPOLIA};
+
+#[cfg(feature = "optimism")]
+#[cfg(test)]
+pub(crate) use spec::{OP_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS};
 
 // The chain spec module.
 mod spec;

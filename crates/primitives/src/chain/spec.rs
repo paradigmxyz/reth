@@ -17,6 +17,12 @@ use std::{
 
 pub use alloy_eips::eip1559::BaseFeeParams;
 
+#[cfg(feature = "optimism")]
+pub(crate) use crate::constants::{
+    OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
+    OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+};
+
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
@@ -285,8 +291,8 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London, BaseFeeParams::optimism_sepolia()),
-                (Hardfork::Canyon, BaseFeeParams::optimism_sepolia_canyon()),
+                (Hardfork::London, OP_SEPOLIA_BASE_FEE_PARAMS),
+                (Hardfork::Canyon, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -339,8 +345,8 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London, BaseFeeParams::optimism_sepolia()),
-                (Hardfork::Canyon, BaseFeeParams::optimism_sepolia_canyon()),
+                (Hardfork::London, OP_SEPOLIA_BASE_FEE_PARAMS),
+                (Hardfork::Canyon, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -393,8 +399,8 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London, BaseFeeParams::optimism()),
-                (Hardfork::Canyon, BaseFeeParams::optimism_canyon()),
+                (Hardfork::London, OP_BASE_FEE_PARAMS),
+                (Hardfork::Canyon, OP_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -436,61 +442,6 @@ pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
 impl From<Vec<(Hardfork, BaseFeeParams)>> for ForkBaseFeeParams {
     fn from(params: Vec<(Hardfork, BaseFeeParams)>) -> Self {
         ForkBaseFeeParams(params)
-    }
-}
-
-#[cfg(feature = "optimism")]
-pub trait OptimismBaseFeeParams {
-    fn optimism_sepolia() -> BaseFeeParams;
-    fn optimism_sepolia_canyon() -> BaseFeeParams;
-    fn optimism() -> BaseFeeParams;
-    fn optimism_canyon() -> BaseFeeParams;
-}
-
-#[cfg(feature = "optimism")]
-impl OptimismBaseFeeParams for BaseFeeParams {
-    /// Get the base fee parameters for optimism sepolia
-    #[cfg(feature = "optimism")]
-    fn optimism_sepolia() -> BaseFeeParams {
-        BaseFeeParams {
-            max_change_denominator:
-                crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
-            elasticity_multiplier:
-                crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-        }
-    }
-
-    /// Get the base fee parameters for optimism goerli (post Canyon)
-    #[cfg(feature = "optimism")]
-    fn optimism_sepolia_canyon() -> BaseFeeParams {
-        BaseFeeParams {
-            max_change_denominator:
-                crate::constants::OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
-            elasticity_multiplier:
-                crate::constants::OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-        }
-    }
-
-    /// Get the base fee parameters for optimism mainnet
-    #[cfg(feature = "optimism")]
-    fn optimism() -> BaseFeeParams {
-        BaseFeeParams {
-            max_change_denominator:
-                crate::constants::OP_MAINNET_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
-            elasticity_multiplier:
-                crate::constants::OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-        }
-    }
-
-    /// Get the base fee parameters for optimism mainnet (post Canyon)
-    #[cfg(feature = "optimism")]
-    fn optimism_canyon() -> BaseFeeParams {
-        BaseFeeParams {
-            max_change_denominator:
-                crate::constants::OP_MAINNET_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
-            elasticity_multiplier:
-                crate::constants::OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
-        }
     }
 }
 

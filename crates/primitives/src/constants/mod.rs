@@ -6,6 +6,9 @@ use crate::{
 };
 use std::time::Duration;
 
+#[cfg(feature = "optimism")]
+use crate::chain::BaseFeeParams;
+
 /// [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) constants.
 pub mod eip4844;
 
@@ -93,6 +96,34 @@ pub const OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u128 = 250;
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
 #[cfg(feature = "optimism")]
 pub const OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 10;
+
+/// Get the base fee parameters for Optimism Sepolia.
+#[cfg(feature = "optimism")]
+pub const OP_SEPOLIA_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+    max_change_denominator: OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+    elasticity_multiplier: OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+};
+
+/// Get the base fee parameters for Optimism Sepolia (post Canyon).
+#[cfg(feature = "optimism")]
+pub const OP_SEPOLIA_CANYON_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+    max_change_denominator: OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
+    elasticity_multiplier: OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+};
+
+/// Get the base fee parameters for Optimism Mainnet.
+#[cfg(feature = "optimism")]
+pub const OP_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+    max_change_denominator: OP_MAINNET_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+    elasticity_multiplier: OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+};
+
+/// Get the base fee parameters for Optimism Mainnet (post Canyon).
+#[cfg(feature = "optimism")]
+pub const OP_CANYON_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+    max_change_denominator: OP_MAINNET_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
+    elasticity_multiplier: OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+};
 
 /// Multiplier for converting gwei to wei.
 pub const GWEI_TO_WEI: u64 = 1_000_000_000;
