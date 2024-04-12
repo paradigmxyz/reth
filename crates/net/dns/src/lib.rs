@@ -412,6 +412,7 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
 mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
+    use alloy_rlp::{Decodable, Encodable};
     use enr::EnrKey;
     use reth_primitives::{Chain, Hardfork, MAINNET};
     use secp256k1::rand::thread_rng;
@@ -419,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_convert_enr_node_record() {
-        // Create a sample ENR
+        // rig
         let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
         let enr = Enr::builder()
             .ip("127.0.0.1".parse().unwrap())
@@ -429,12 +430,35 @@ mod tests {
             .build(&secret_key)
             .unwrap();
 
-        // Call the function under test
-        let result = convert_enr_node_record(&enr);
+        // test
+        let node_record_update = convert_enr_node_record(&enr).unwrap();
 
-        // Assert the expected output
-        assert!(result.is_some());
-        let node_record_update = result.unwrap();
+        assert_eq!(node_record_update.node_record.address, "127.0.0.1".parse::<IpAddr>().unwrap());
+        assert_eq!(node_record_update.node_record.tcp_port, 30303);
+        assert_eq!(node_record_update.node_record.udp_port, 9000);
+        assert_eq!(node_record_update.fork_id, Some(MAINNET.latest_fork_id()));
+        assert_eq!(node_record_update.enr, enr);
+    }
+
+    #[test]
+    fn test_decode_and_convert_enr_node_record() {
+        // rig
+        let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
+        let enr = Enr::builder()
+            .ip("127.0.0.1".parse().unwrap())
+            .udp4(9000)
+            .tcp4(30303)
+            .add_value(b"eth", &MAINNET.latest_fork_id())
+            .build(&secret_key)
+            .unwrap();
+        let mut encoded_enr = vec![];
+        enr.encode(&mut encoded_enr);
+
+        // test
+        let decoded_enr = Enr::decode(&mut &encoded_enr[..]).unwrap();
+
+        let node_record_update = convert_enr_node_record(&decoded_enr).unwrap();
+
         assert_eq!(node_record_update.node_record.address, "127.0.0.1".parse::<IpAddr>().unwrap());
         assert_eq!(node_record_update.node_record.tcp_port, 30303);
         assert_eq!(node_record_update.node_record.udp_port, 9000);
