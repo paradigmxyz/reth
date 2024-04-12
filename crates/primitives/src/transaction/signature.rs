@@ -102,7 +102,7 @@ impl Signature {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
             if v != 27 && v != 28 {
                 #[cfg(feature = "optimism")]
-                if std::env::var(OP_RETH_MAINNET_BELOW_BEDROCK) == Ok("1".to_string()) && v == 0 {
+                if std::env::var(OP_RETH_MAINNET_BELOW_BEDROCK) == Ok(true.to_string()) && v == 0 {
                     return Ok((Signature { r, s, odd_y_parity: false }, None))
                 }
                 return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
