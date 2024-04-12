@@ -45,6 +45,7 @@ itertools.workspace = true
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 
 assert_matches.workspace = true
