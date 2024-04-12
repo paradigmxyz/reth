@@ -1,8 +1,3 @@
-use std::{
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
-
 use alloy_sol_types::{sol, SolEventInterface};
 use futures::Future;
 use reth::builder::FullNodeTypes;
