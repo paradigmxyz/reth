@@ -81,13 +81,20 @@ impl ExExHandle {
         )
     }
 
-    /// Reserves a slot in the `PollSender` channel and sends the notification if the slot was
+    /// Attempts to prepare the sender to receive a value.
+    /// See also [PollSender::poll_reserve]
+    fn poll_reserve(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), PollSendError<CanonStateNotification>>> {
+        self.sender.poll_reserve(cx)
+    }
+
+    /// Sends a slot in the `PollSender` channel and sends the notification if the slot was
     /// successfully reserved.
     ///
     /// When the notification is sent, it is considered delivered.
+    ///
+    /// If poll_reserve was not successfully called prior to calling send_item, then this method will panic.
     fn send(
         &mut self,
-        cx: &mut Context<'_>,
         (event_id, notification): &(usize, CanonStateNotification),
     ) -> Poll<Result<(), PollSendError<CanonStateNotification>>> {
         // check that this notification is above the finished height of the exex if the exex has set
@@ -97,11 +104,6 @@ impl ExExHandle {
                 self.next_notification_id = event_id + 1;
                 return Poll::Ready(Ok(()))
             }
-        }
-
-        match self.sender.poll_reserve(cx) {
-            Poll::Ready(Ok(())) => (),
-            other => return other,
         }
 
         match self.sender.send_item(notification.clone()) {
@@ -271,10 +273,29 @@ impl Future for ExExManager {
         // update capacity
         self.update_capacity();
 
-        // advance all poll senders
-        let mut min_id = usize::MAX;
+        // This keeps track of the lowest notification ID that has been delivered to all ExExs.
+        let mut min_notification_id = usize::MAX;
+
+        // advance all exexs and send them notifications
         for idx in (0..self.exex_handles.len()).rev() {
             let mut exex = self.exex_handles.swap_remove(idx);
+
+            // drain notifications
+            loop {
+                // TODO perhaps this should not be in this loop but in the loop above that we exit if all exex are pending
+                // ensure the exex has capacity
+                match exex.poll_reserve(cx) {
+                    Poll::Ready(Ok(())) => {}
+                    Poll::Ready(Err(err)) => return Poll::Ready(Err(err.into())),
+                    Poll::Pending => break,
+                }
+
+                // TODO try send next notification to exex if we have it
+
+
+                break
+            }
+
 
             // it is a logic error for this to ever underflow since the manager manages the
             // notification IDs
@@ -289,14 +310,14 @@ impl Future for ExExManager {
                     return Poll::Ready(Err(err.into()))
                 }
             }
-            min_id = min_id.min(exex.next_notification_id);
+            min_notification_id = min_notification_id.min(exex.next_notification_id);
             self.exex_handles.push(exex);
         }
 
         // remove processed buffered notifications
-        self.buffer.retain(|&(id, _)| id >= min_id);
-        self.min_id = min_id;
-        debug!(min_id, "lowest notification id in buffer updated");
+        self.buffer.retain(|&(id, _)| id >= min_notification_id);
+        self.min_id = min_notification_id;
+        debug!(min_notification_id, "lowest notification id in buffer updated");
 
         // update capacity
         self.update_capacity();
@@ -328,6 +349,12 @@ impl Future for ExExManager {
         if let Ok(finished_height) = finished_height {
             let _ = self.finished_height.send(Some(finished_height));
         }
+
+        // TODO this pending is potentially dangerous because of this scenario;
+        // 1. self.handle_rx.poll_recv(cx) is not fully drained
+        // 2. loop {self.exex_handles.swap_remove(idx) } drains the entire buffer
+        // 3. no waker is no set
+        // TODO: wrap the entire function in loop that only returns pending if the buffer is __not__ empty
 
         Poll::Pending
     }
