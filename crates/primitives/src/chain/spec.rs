@@ -248,6 +248,8 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::optimism_mainnet(),
+        // genesis contains empty alloc field because state at first bedrock block is imported
+        // manually from trusted source
         genesis: serde_json::from_str(include_str!("../../res/genesis/optimism.json"))
             .expect("Can't deserialize Optimism Mainnet genesis json"),
         genesis_hash: Some(b256!(
