@@ -85,7 +85,7 @@ futures.workspace = true
 # misc
 aquamarine.workspace = true
 eyre.workspace = true
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 tempfile.workspace = true
 backon = "0.4"
 similar-asserts.workspace = true
