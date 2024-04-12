@@ -77,6 +77,13 @@ impl ExExHandle {
         )
     }
 
+    // Reserves a slot in the `PollSender` channel.
+    fn poll_reserve(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), PollSendError<ExExNotification>>> {
+        self.sender.poll_reserve(cx)
+    }
     /// Reserves a slot in the `PollSender` channel and sends the notification if the slot was
     /// successfully reserved.
     ///
@@ -102,7 +109,7 @@ impl ExExHandle {
                         );
 
                         self.next_notification_id = notification_id + 1;
-                        return Poll::Ready(Ok(()))
+                        return Poll::Ready(Ok(()));
                     }
                 }
                 // Do not handle [ExExNotification::ChainReorged] and
@@ -118,10 +125,12 @@ impl ExExHandle {
             %notification_id,
             "Reserving slot for notification"
         );
-        match self.sender.poll_reserve(cx) {
-            Poll::Ready(Ok(())) => (),
+        match self.poll_reserve(cx) {
+            Poll::Ready(Ok(())) => {}
             other => return other,
         }
+
+        // self.poll_reserve(cx);
 
         debug!(
             exex_id = %self.id,
