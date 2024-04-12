@@ -20,6 +20,16 @@ pub enum BlockErrorKind {
     Execution(#[from] executor::BlockExecutionError),
 }
 
+impl BlockErrorKind {
+    /// Returns `true` if the error is a state root error.
+    pub fn is_state_root_error(&self) -> bool {
+        match self {
+            BlockErrorKind::Validation(err) => err.is_state_root_error(),
+            BlockErrorKind::Execution(err) => err.is_state_root_error(),
+        }
+    }
+}
+
 /// A stage execution error.
 #[derive(Error, Debug)]
 pub enum StageError {
