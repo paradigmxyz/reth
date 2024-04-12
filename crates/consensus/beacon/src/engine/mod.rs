@@ -8,11 +8,13 @@ use crate::{
     sync::{EngineSyncController, EngineSyncEvent},
 };
 use futures::{Future, StreamExt};
+use reth_blockchain_tree_api::{
+    BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
+};
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
-        error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
-        BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
+        BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind,
     },
     consensus::ForkchoiceState,
     executor::{BlockExecutionError, BlockValidationError},
@@ -71,7 +73,7 @@ pub use handle::BeaconConsensusEngineHandle;
 mod forkchoice;
 use crate::hooks::{EngineHookEvent, EngineHooks, PolledHook};
 pub use forkchoice::ForkchoiceStatus;
-use reth_interfaces::blockchain_tree::BlockValidationKind;
+use reth_blockchain_tree_api::BlockValidationKind;
 use reth_payload_validator::ExecutionPayloadValidator;
 
 mod metrics;

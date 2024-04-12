@@ -2,6 +2,7 @@
 members = [
     "bin/reth/",
     "crates/blockchain-tree/",
+    "crates/blockchain-tree-api/",
     "crates/config/",
     "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
@@ -199,6 +200,7 @@ reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
 reth-beacon-consensus-core = { path = "crates/consensus/beacon-core" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
+reth-blockchain-tree-api = { path = "crates/blockchain-tree-api" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-config = { path = "crates/config" }
 reth-consensus-common = { path = "crates/consensus/common" }
@@ -256,8 +258,13 @@ reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 
 # revm
-revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
+revm = { version = "8.0.0", features = [
+    "std",
+    "secp256k1",
+], default-features = false }
+revm-primitives = { version = "3.1.0", features = [
+    "std",
+], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "21f8f3d" }
 
 # eth
@@ -272,7 +279,9 @@ alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "987b
 alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "987b393" }
 alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "987b393" }
 alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "987b393" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "987b393", default-features = false, features = ["reqwest"] }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "987b393", default-features = false, features = [
+    "reqwest",
+] }
 alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "987b393" }
 alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "987b393" }
 alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "987b393" }

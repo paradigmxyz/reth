@@ -6,17 +6,17 @@ use crate::{
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
     StateProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use reth_blockchain_tree_api::{
+    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+    InsertPayloadOk,
+};
 use reth_db::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
 use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::{
-    blockchain_tree::{
-        error::{CanonicalError, InsertBlockError},
-        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
-    },
+    blockchain_tree::{CanonicalError, InsertBlockError},
     consensus::ForkchoiceState,
     provider::ProviderResult,
     RethResult,

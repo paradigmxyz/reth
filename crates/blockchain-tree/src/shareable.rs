@@ -2,13 +2,13 @@
 
 use super::BlockchainTree;
 use parking_lot::RwLock;
+use reth_blockchain_tree_api::{
+    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+    InsertPayloadOk,
+};
 use reth_db::database::Database;
 use reth_interfaces::{
-    blockchain_tree::{
-        error::{CanonicalError, InsertBlockError},
-        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
-    },
+    blockchain_tree::{CanonicalError, InsertBlockError},
     RethResult,
 };
 use reth_primitives::{

@@ -6164,6 +6164,7 @@ dependencies = [
  "metrics",
  "reth-beacon-consensus-core",
  "reth-blockchain-tree",
+ "reth-blockchain-tree-api",
  "reth-config",
  "reth-db",
  "reth-downloaders",
@@ -6210,6 +6211,7 @@ dependencies = [
  "lru",
  "metrics",
  "parking_lot 0.12.1",
+ "reth-blockchain-tree-api",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
@@ -6222,6 +6224,15 @@ dependencies = [
  "reth-trie-parallel",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-blockchain-tree-api"
+version = "0.2.0-beta.5"
+dependencies = [
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-rpc-types",
 ]
 
 [[package]]
@@ -6857,6 +6868,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-auto-seal-consensus",
  "reth-beacon-consensus",
+ "reth-blockchain-tree-api",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
@@ -7073,6 +7085,7 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "rayon",
+ "reth-blockchain-tree-api",
  "reth-codecs",
  "reth-db",
  "reth-evm",

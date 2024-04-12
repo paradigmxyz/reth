@@ -15,6 +15,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::BeaconConsensus;
+use reth_blockchain_tree_api::BlockchainTreeEngine;
 use reth_config::{
     config::{PruneConfig, StageConfig},
     Config,
@@ -25,7 +26,6 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::{
-    blockchain_tree::BlockchainTreeEngine,
     consensus::Consensus,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},

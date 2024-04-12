@@ -1,9 +1,9 @@
+use reth_blockchain_tree_api::{
+    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+    InsertPayloadOk,
+};
 use reth_interfaces::{
-    blockchain_tree::{
-        error::{BlockchainTreeError, CanonicalError, InsertBlockError},
-        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
-    },
+    blockchain_tree::{BlockchainTreeError, CanonicalError, InsertBlockError},
     provider::ProviderError,
     RethResult,
 };

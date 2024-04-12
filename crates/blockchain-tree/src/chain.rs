@@ -5,12 +5,10 @@
 
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
+use reth_blockchain_tree_api::{BlockAttachment, BlockValidationKind};
 use reth_db::database::Database;
 use reth_interfaces::{
-    blockchain_tree::{
-        error::{BlockchainTreeError, InsertBlockErrorKind},
-        BlockAttachment, BlockValidationKind,
-    },
+    blockchain_tree::{BlockchainTreeError, InsertBlockErrorKind},
     consensus::{Consensus, ConsensusError},
     RethResult,
 };

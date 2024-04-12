@@ -1,5 +1,5 @@
 use crate::{
-    blockchain_tree::error::{BlockchainTreeError, CanonicalError},
+    blockchain_tree::{BlockchainTreeError, CanonicalError},
     consensus::ConsensusError,
     db::DatabaseError,
     executor::BlockExecutionError,
