@@ -18,7 +18,13 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_interfaces::consensus::Consensus;
+use reth_interfaces::{
+    consensus::Consensus,
+    p2p::{
+        bodies::downloader::BodyDownloader,
+        headers::downloader::{HeaderDownloader, SyncTarget},
+    },
+};
 use reth_node_core::{events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256, OP_RETH_MAINNET_BELOW_BEDROCK};
@@ -183,13 +189,18 @@ impl ImportCommand {
             eyre::bail!("unable to import non canonical blocks");
         }
 
-        let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
+        let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
             .build(file_client.clone(), consensus.clone())
             .into_task();
+        header_downloader.update_local_head(file_client.tip_header().unwrap());
+        header_downloader.update_sync_target(SyncTarget::Tip(file_client.start().unwrap()));
 
-        let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
+        let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
             .build(file_client.clone(), consensus.clone(), provider_factory.clone())
             .into_task();
+        body_downloader
+            .set_download_range(file_client.min_block().unwrap()..=file_client.max_block().unwrap())
+            .expect("failed to set download range");
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let factory =
