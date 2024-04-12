@@ -17,6 +17,7 @@ alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 
 bytes.workspace = true
+modular-bitfield = "0.11.2"
 
 [dev-dependencies]
 alloy-eips = { workspace = true, default-features = false, features = ["arbitrary", "serde"] }
