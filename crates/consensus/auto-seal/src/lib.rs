@@ -16,11 +16,12 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
+use reth_engine_primitives::EngineTypes;
+use reth_evm::ConfigureEvm;
 use reth_interfaces::{
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
 };
-use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,

@@ -3,7 +3,7 @@ use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
 
-use reth_node_api::ConfigureEvm;
+use reth_evm::ConfigureEvm;
 use reth_primitives::{
     proofs::calculate_receipt_root_optimism, revm_primitives::ResultAndState, BlockWithSenders,
     Bloom, ChainSpec, Hardfork, Receipt, ReceiptWithBloom, TxType, B256, U256,

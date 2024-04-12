@@ -6121,8 +6121,9 @@ version = "0.2.0-beta.5"
 dependencies = [
  "futures-util",
  "reth-beacon-consensus",
+ "reth-engine-primitives",
+ "reth-evm",
  "reth-interfaces",
- "reth-node-api",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -7132,8 +7133,8 @@ name = "reth-revm"
 version = "0.2.0-beta.5"
 dependencies = [
  "reth-consensus-common",
+ "reth-evm",
  "reth-interfaces",
- "reth-node-api",
  "reth-primitives",
  "reth-provider",
  "reth-trie",
