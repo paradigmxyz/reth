@@ -72,7 +72,7 @@ impl WithdrawalFlags {
 }
 
 impl WithdrawalFlags {
-    ///Returns the value of index_len.
+    /// Returns the value of index_len.
     #[inline]
     pub(crate) fn index_len(&self) -> <B4 as Specifier>::InOut {
         self.index_len_or_err()
@@ -113,18 +113,16 @@ impl WithdrawalFlags {
         write_specifier::<B4>(&mut self.bytes[..], 0usize, __bf_raw_val);
         Ok(())
     }
-    ///Returns the value of validator_index_len.
+
+    /// Returns the value of validator_index_len.
     #[inline]
     pub(crate) fn validator_index_len(&self) -> <B4 as Specifier>::InOut {
         self.validator_index_len_or_err().expect(
             "value contains invalid bit pattern for field WithdrawalFlags.validator_index_len",
         )
     }
-    /**Returns the value of validator_index_len.
 
-    #Errors
-
-    If the returned value contains an invalid bit pattern for validator_index_len.*/
+    /// Returns the value of validator_index_len.
     #[inline]
     pub(crate) fn validator_index_len_or_err(
         &self,
@@ -137,21 +135,15 @@ impl WithdrawalFlags {
         };
         <B4 as Specifier>::from_bytes(__bf_read)
     }
-    /**Sets the value of validator_index_len to the given value.
 
-    #Panics
-
-    If the given value is out of bounds for validator_index_len.*/
+    /// Sets the value of validator_index_len to the given value.
     #[inline]
     pub(crate) fn set_validator_index_len(&mut self, new_val: <B4 as Specifier>::InOut) {
         self.set_validator_index_len_checked(new_val)
             .expect("value out of bounds for field WithdrawalFlags.validator_index_len")
     }
-    /**Sets the value of validator_index_len to the given value.
 
-    #Errors
-
-    If the given value is out of bounds for validator_index_len.*/
+    /// Sets the value of validator_index_len to the given value.
     #[inline]
     pub(crate) fn set_validator_index_len_checked(
         &mut self,
@@ -168,17 +160,15 @@ impl WithdrawalFlags {
         write_specifier::<B4>(&mut self.bytes[..], <B4 as Specifier>::BITS, __bf_raw_val);
         Ok(())
     }
-    ///Returns the value of amount_len.
+
+    /// Returns the value of amount_len.
     #[inline]
     pub(crate) fn amount_len(&self) -> <B4 as Specifier>::InOut {
         self.amount_len_or_err()
             .expect("value contains invalid bit pattern for field WithdrawalFlags.amount_len")
     }
-    /**Returns the value of amount_len.
 
-    #Errors
-
-    If the returned value contains an invalid bit pattern for amount_len.*/
+    /// Returns the value of amount_len.
     #[inline]
     pub(crate) fn amount_len_or_err(
         &self,
@@ -191,21 +181,15 @@ impl WithdrawalFlags {
         };
         <B4 as Specifier>::from_bytes(__bf_read)
     }
-    /**Sets the value of amount_len to the given value.
 
-    #Panics
-
-    If the given value is out of bounds for amount_len.*/
+    /// Sets the value of amount_len to the given value.
     #[inline]
     pub(crate) fn set_amount_len(&mut self, new_val: <B4 as Specifier>::InOut) {
         self.set_amount_len_checked(new_val)
             .expect("value out of bounds for field WithdrawalFlags.amount_len")
     }
-    /**Sets the value of amount_len to the given value.
 
-    #Errors
-
-    If the given value is out of bounds for amount_len.*/
+    /// Sets the value of amount_len to the given value.
     #[inline]
     pub(crate) fn set_amount_len_checked(
         &mut self,
