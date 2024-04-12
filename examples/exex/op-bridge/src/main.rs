@@ -90,6 +90,7 @@ impl<Node: FullNodeComponents> OPBridgeExEx<Node> {
 impl<Node> Future for OPBridgeExEx<Node>
 where
     Node: FullNodeComponents,
+    Node::Pool: Unpin,
 {
     type Output = eyre::Result<()>;
 
