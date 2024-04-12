@@ -1,6 +1,7 @@
 use futures_util::StreamExt;
 use reth::{
-    builder::{components::FullNodeComponents, FullNode, NodeBuilder, NodeHandle},
+    api::FullNodeComponents,
+    builder::{FullNode, NodeBuilder, NodeHandle},
     providers::CanonStateSubscriptions,
     rpc::eth::EthTransactions,
     tasks::TaskManager,
@@ -55,7 +56,7 @@ async fn assert_chain_advances<Node: FullNodeComponents>(mut node: FullNode<Node
 fn custom_chain() -> Arc<ChainSpec> {
     let custom_genesis = r#"
 {
-    
+
     "nonce": "0x42",
     "timestamp": "0x0",
     "extraData": "0x5343",

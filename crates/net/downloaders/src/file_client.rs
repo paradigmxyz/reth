@@ -116,7 +116,7 @@ impl FileClient {
 
     /// Get the tip hash of the chain.
     pub fn tip(&self) -> Option<B256> {
-        self.headers.get(&(self.headers.len() as u64)).map(|h| h.hash_slow())
+        self.headers.get(&((self.headers.len() - 1) as u64)).map(|h| h.hash_slow())
     }
 
     /// Returns the highest block number of this client has or `None` if empty

@@ -6213,8 +6213,9 @@ version = "0.2.0-beta.5"
 dependencies = [
  "futures-util",
  "reth-beacon-consensus",
+ "reth-engine-primitives",
+ "reth-evm",
  "reth-interfaces",
- "reth-node-api",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6536,6 +6537,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-engine-primitives"
+version = "0.2.0-beta.5"
+dependencies = [
+ "reth-primitives",
+ "reth-rpc-types",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "reth-eth-wire"
 version = "0.2.0-beta.5"
 dependencies = [
@@ -6590,6 +6601,21 @@ dependencies = [
  "test-fuzz",
  "thiserror",
  "tokio-util",
+]
+
+[[package]]
+name = "reth-ethereum-engine-primitives"
+version = "0.2.0-beta.5"
+dependencies = [
+ "alloy-rlp",
+ "reth-engine-primitives",
+ "reth-primitives",
+ "reth-rpc-types",
+ "reth-rpc-types-compat",
+ "revm-primitives",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
 ]
 
 [[package]]
@@ -6880,12 +6906,13 @@ name = "reth-node-api"
 version = "0.2.0-beta.5"
 dependencies = [
  "reth-db",
+ "reth-engine-primitives",
  "reth-evm",
- "reth-primitives",
+ "reth-network",
+ "reth-payload-builder",
  "reth-provider",
- "reth-rpc-types",
- "serde",
- "thiserror",
+ "reth-tasks",
+ "reth-transaction-pool",
 ]
 
 [[package]]
@@ -6994,6 +7021,7 @@ dependencies = [
  "futures",
  "reth-basic-payload-builder",
  "reth-db",
+ "reth-ethereum-engine-primitives",
  "reth-ethereum-payload-builder",
  "reth-evm-ethereum",
  "reth-exex",
@@ -7001,12 +7029,9 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-payload-builder",
- "reth-primitives",
  "reth-provider",
- "reth-rpc-types",
  "reth-tracing",
  "reth-transaction-pool",
- "serde",
 ]
 
 [[package]]
@@ -7067,21 +7092,18 @@ dependencies = [
 name = "reth-payload-builder"
 version = "0.2.0-beta.5"
 dependencies = [
- "alloy-rlp",
  "futures-util",
  "metrics",
+ "reth-engine-primitives",
+ "reth-ethereum-engine-primitives",
  "reth-interfaces",
  "reth-metrics",
- "reth-node-api",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-types",
- "reth-rpc-types-compat",
  "reth-transaction-pool",
  "revm",
- "revm-primitives",
  "serde_json",
- "sha2 0.10.8",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -7208,8 +7230,8 @@ name = "reth-revm"
 version = "0.2.0-beta.5"
 dependencies = [
  "reth-consensus-common",
+ "reth-evm",
  "reth-interfaces",
- "reth-node-api",
  "reth-primitives",
  "reth-provider",
  "reth-trie",

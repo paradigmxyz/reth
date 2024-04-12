@@ -105,7 +105,6 @@ pub mod database;
 pub mod error;
 mod events;
 mod metrics;
-mod payload;
 mod service;
 mod traits;
 
@@ -115,7 +114,10 @@ pub mod noop;
 pub mod test_utils;
 
 pub use events::Events;
-pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
+
+// re-export the Ethereum engine primitives for convenience
+#[doc(inline)]
+pub use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadBuilderAttributes};
