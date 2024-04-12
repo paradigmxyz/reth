@@ -10,8 +10,7 @@
 
 /// Exports commonly used concrete instances of the [EngineTypes](reth_node_api::EngineTypes)
 /// trait.
-pub mod engine;
-pub use engine::EthEngineTypes;
+pub use reth_ethereum_engine_primitives::EthEngineTypes;
 
 /// Exports commonly used concrete instances of the
 /// [ConfigureEvmEnv](reth_node_api::ConfigureEvmEnv) trait.

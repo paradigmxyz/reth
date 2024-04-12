@@ -9,15 +9,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Traits, validation methods, and helper types used to abstract over engine types.
-///
-/// Notably contains the [EngineTypes] trait and implementations for ethereum mainnet types.
-pub mod engine;
-pub use engine::{
-    validate_payload_timestamp, validate_version_specific_fields, validate_withdrawals_presence,
-    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, EngineTypes,
-    MessageValidationKind, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
-    VersionSpecificValidationError,
-};
+pub use reth_engine_primitives as engine;
+pub use reth_engine_primitives::*;
 
 /// Traits and helper types used to abstract over EVM methods and types.
 pub use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
