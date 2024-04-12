@@ -1,7 +1,7 @@
 use alloy_sol_types::{sol, SolEventInterface};
 use futures::Future;
-use reth::builder::FullNodeTypes;
 use reth_exex::{ExExContext, ExExEvent};
+use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{Log, SealedBlockWithSenders, TransactionSigned};
 use reth_provider::Chain;
@@ -14,7 +14,7 @@ use crate::L1StandardBridge::{ETHBridgeFinalized, ETHBridgeInitiated, L1Standard
 /// Initializes the ExEx.
 ///
 /// Opens up a SQLite database and creates the tables (if they don't exist).
-async fn init<Node: FullNodeTypes>(
+async fn init<Node: FullNodeComponents>(
     ctx: ExExContext<Node>,
     mut connection: Connection,
 ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
@@ -88,7 +88,7 @@ fn create_tables(connection: &mut Connection) -> rusqlite::Result<()> {
 
 /// An example of ExEx that listens to ETH bridging events from OP Stack chains
 /// and stores deposits and withdrawals in a SQLite database.
-async fn op_bridge_exex<Node: FullNodeTypes>(
+async fn op_bridge_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
     connection: Connection,
 ) -> eyre::Result<()> {

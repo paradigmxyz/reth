@@ -1,6 +1,6 @@
 use futures::Future;
-use reth::builder::FullNodeTypes;
 use reth_exex::ExExContext;
+use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::CanonStateNotification;
 
@@ -8,7 +8,7 @@ use reth_provider::CanonStateNotification;
 ///
 /// During initialization you can wait for resources you need to be up for the ExEx to function,
 /// like a database connection.
-async fn exex_init<Node: FullNodeTypes>(
+async fn exex_init<Node: FullNodeComponents>(
     ctx: ExExContext<Node>,
 ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
     Ok(exex(ctx))
@@ -18,7 +18,7 @@ async fn exex_init<Node: FullNodeTypes>(
 ///
 /// This ExEx just prints out whenever a state transition happens, either a new chain segment being
 /// added, or a chain segment being re-orged.
-async fn exex<Node: FullNodeTypes>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
+async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.recv().await {
         match &notification {
             CanonStateNotification::Commit { new } => {

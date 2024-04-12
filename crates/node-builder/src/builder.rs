@@ -610,6 +610,7 @@ where
                 data_dir: data_dir.clone(),
                 config: config.clone(),
                 reth_config: reth_config.clone(),
+                pool: transaction_pool.clone(),
                 events,
                 notifications,
             };
