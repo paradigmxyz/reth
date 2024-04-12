@@ -168,9 +168,9 @@ impl Default for ComponentsBuilder<(), (), (), ()> {
 /// Implementors of this trait are responsible for building all the components of the node: See
 /// [NodeComponents].
 ///
-/// The [ComponentsBuilder](crate::components::builder::ComponentsBuilder) is a generic
-/// implementation of this trait that can be used to customize certain components of the node using
-/// the builder pattern and defaults, e.g. Ethereum and Optimism.
+/// The [ComponentsBuilder] is a generic implementation of this trait that can be used to customize
+/// certain components of the node using the builder pattern and defaults, e.g. Ethereum and
+/// Optimism.
 pub trait NodeComponentsBuilder<Node: FullNodeTypes> {
     /// The transaction pool to use.
     type Pool: TransactionPool + Unpin + 'static;
