@@ -355,7 +355,7 @@ where
                     .block_number_for_id(block_hash.into())?
                     .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
-                // get the block timestamp
+                // get the block timestamp using the block number
                 let block_timestamp = self
                     .provider
                     .header_by_number(block_number)?
@@ -448,7 +448,7 @@ where
             // only one block to check and it's the current best block which we can fetch directly
             // Note: In case of a reorg, the best block's hash might have changed, hence we only
             // return early of we were able to fetch the best block's receipts
-            if let Some(receipts) = self.eth_cache.get_receipts(chain_info.best_hash).await? {
+            if let Some((block, receipts)) = self.eth_cache.get_block_and_receipts(chain_info.best_hash).await? {
                 logs_utils::append_matching_block_logs(
                     &mut all_logs,
                     &self.provider,
@@ -456,7 +456,7 @@ where
                     chain_info.into(),
                     &receipts,
                     false,
-                    0,
+                    block.header.timestamp,
                 )?;
             }
             return Ok(all_logs)
@@ -496,7 +496,7 @@ where
                             BlockNumHash::new(header.number, block_hash),
                             &receipts,
                             false,
-                            0,
+                            header.timestamp,
                         )?;
 
                         // size check but only if range is multiple blocks, so we always return all
