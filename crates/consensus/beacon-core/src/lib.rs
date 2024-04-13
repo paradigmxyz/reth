@@ -62,8 +62,7 @@ impl Consensus for BeaconConsensus {
         let is_post_merge = self.chain_spec.is_bedrock_active_at_fork(header.number);
 
         if is_post_merge {
-            #[cfg(not(feature = "optimism"))]
-            if !header.is_zero_difficulty() {
+            if !self.chain_spec.is_optimism() && !header.is_zero_difficulty() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 
