@@ -3,7 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use reth::{
-    builder::{components::ComponentsBuilder, node::NodeTypes, FullNodeTypes, Node, NodeBuilder},
+    builder::{node::NodeTypes, NodeBuilder},
     primitives::{
         address,
         revm_primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
@@ -116,25 +116,6 @@ impl NodeTypes for MyCustomNode {
 
     fn evm_config(&self) -> Self::Evm {
         Self::Evm::default()
-    }
-}
-
-impl<N> Node<N> for MyCustomNode
-where
-    N: FullNodeTypes<Engine = EthEngineTypes>,
-{
-    type PoolBuilder = EthereumPoolBuilder;
-    type NetworkBuilder = EthereumNetworkBuilder;
-    type PayloadBuilder = EthereumPayloadBuilder;
-
-    fn components(
-        self,
-    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder> {
-        ComponentsBuilder::default()
-            .node_types::<N>()
-            .pool(EthereumPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::default())
-            .network(EthereumNetworkBuilder::default())
     }
 }
 
