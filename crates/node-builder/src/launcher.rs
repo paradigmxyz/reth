@@ -10,13 +10,14 @@ use crate::{
     BuilderContext, ComponentsState, Node, NodeHandle, RethFullAdapter, RethFullBuilderState,
 };
 use eyre::Context;
-use futures::{future::Either, stream, stream_select, Future, StreamExt};
+use futures::{future, future::Either, stream, stream_select, Future, StreamExt};
 use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
-use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
+use reth_exex::{ExExContext, ExExHandle, ExExManager};
+use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals, BlockchainTree};
 use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database,
@@ -34,8 +35,9 @@ use reth_node_core::{
     init::init_genesis,
     node_config::NodeConfig,
 };
+use reth_revm::EvmProcessorFactory;
 use reth_primitives::format_ether;
-use reth_provider::{providers::BlockchainProvider, ProviderFactory};
+use reth_provider::{providers::BlockchainProvider, ProviderFactory, CanonStateSubscriptions};
 use reth_prune::PrunerBuilder;
 
 use reth_rpc_engine_api::EngineApi;
@@ -112,7 +114,6 @@ where
     > {
         // deconstruct state from builder
         let ComponentsState { types, components_builder, hooks, rpc, exexs: _ } = state;
-
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         fdlimit::raise_fd_limit()?;
@@ -142,8 +143,7 @@ where
             )
             .await?;
 
-        debug!(target: "reth::cli", chain=%config.chain.chain,
-genesis=?config.chain.genesis_hash(), "Initializing genesis");
+        debug!(target: "reth::cli", chain=%config.chain.chain, genesis=?config.chain.genesis_hash(), "Initializing genesis");
 
         let genesis_hash = init_genesis(provider_factory.clone())?;
 
@@ -158,16 +158,20 @@ genesis=?config.chain.genesis_hash(), "Initializing genesis");
 
         let prune_config = config.prune_config()?.or_else(|| reth_config.prune.clone());
 
+        // Configure the blockchain tree for the node
         let evm_config = types.evm_config();
         let tree_config = BlockchainTreeConfig::default();
-        let tree = config.build_blockchain_tree(
+        let tree_externals = TreeExternals::new(
             provider_factory.clone(),
             consensus.clone(),
-            prune_config.clone(),
-            sync_metrics_tx.clone(),
+            EvmProcessorFactory::new(config.chain.clone(), evm_config.clone()),
+        );
+        let tree = BlockchainTree::new(
+            tree_externals,
             tree_config,
-            evm_config.clone(),
-        )?;
+            prune_config.as_ref().map(|config| config.segments.clone()),
+        )?
+        .with_sync_metrics_tx(sync_metrics_tx.clone());
 
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = ShareableBlockchainTree::new(tree);
@@ -181,13 +185,19 @@ genesis=?config.chain.genesis_hash(), "Initializing genesis");
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
 
-        let ctx = BuilderContext::new(head, blockchain_db, executor, data_dir, config, reth_config, evm_config.clone());
+        let ctx = BuilderContext::new(
+            head,
+            blockchain_db,
+            executor,
+            data_dir,
+            config,
+            reth_config,
+            evm_config.clone(),
+        );
 
         debug!(target: "reth::cli", "creating components");
         let NodeComponents { transaction_pool, network, payload_builder } =
             components_builder.build_components(&ctx).await?;
-
-        // TODO(alexey): launch ExExs and consume their events
 
         let BuilderContext {
             provider: blockchain_db,
@@ -210,6 +220,70 @@ genesis=?config.chain.genesis_hash(), "Initializing genesis");
         };
         debug!(target: "reth::cli", "calling on_component_initialized hook");
         on_component_initialized.on_event(node_components.clone())?;
+
+        // spawn exexs
+        let mut exex_handles = Vec::with_capacity(state.exexs.len());
+        let mut exexs = Vec::with_capacity(state.exexs.len());
+        for (id, exex) in state.exexs {
+            // create a new exex handle
+            let (handle, events, notifications) = ExExHandle::new(id.clone());
+            exex_handles.push(handle);
+
+            // create the launch context for the exex
+            let context = ExExContext {
+                head,
+                provider: blockchain_db.clone(),
+                task_executor: executor.clone(),
+                data_dir: data_dir.clone(),
+                config: config.clone(),
+                reth_config: reth_config.clone(),
+                pool: transaction_pool.clone(),
+                events,
+                notifications,
+            };
+
+            let executor = executor.clone();
+            exexs.push(async move {
+                debug!(target: "reth::cli", id, "spawning exex");
+                let span = reth_tracing::tracing::info_span!("exex", id);
+                let _enter = span.enter();
+
+                // init the exex
+                let exex = exex.launch(context).await.unwrap();
+
+                // spawn it as a crit task
+                executor.spawn_critical("exex", async move {
+                    info!(target: "reth::cli", id, "ExEx started");
+                    exex.await.unwrap_or_else(|_| panic!("exex {} crashed", id))
+                });
+            });
+        }
+
+        future::join_all(exexs).await;
+
+        // spawn exex manager
+        if !exex_handles.is_empty() {
+            debug!(target: "reth::cli", "spawning exex manager");
+            // todo(onbjerg): rm magic number
+            let exex_manager = ExExManager::new(exex_handles, 1024);
+            let mut exex_manager_handle = exex_manager.handle();
+            executor.spawn_critical("exex manager", async move {
+                exex_manager.await.expect("exex manager crashed");
+            });
+
+            // send notifications from the blockchain tree to exex manager
+            let mut canon_state_notifications = blockchain_tree.subscribe_to_canonical_state();
+            executor.spawn_critical("exex manager blockchain tree notifications", async move {
+                while let Ok(notification) = canon_state_notifications.recv().await {
+                    exex_manager_handle
+                        .send_async(notification)
+                        .await
+                        .expect("blockchain tree notification could not be sent to exex manager");
+                }
+            });
+
+            info!(target: "reth::cli", "ExEx Manager started");
+        }
 
         // create pipeline
         let network_client = network.fetch_client().await?;
@@ -248,8 +322,7 @@ genesis=?config.chain.genesis_hash(), "Initializing genesis");
             info!(target: "reth::cli", "Starting Reth in dev mode");
 
             for (idx, (address, alloc)) in config.chain.genesis.alloc.iter().enumerate() {
-                info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx,
-address.to_string(), format_ether(alloc.balance));
+                info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
             }
 
             let mining_mode = config.mining_mode(transaction_pool.pending_transactions_listener());
@@ -265,20 +338,20 @@ address.to_string(), format_ether(alloc.balance));
             )
             .build();
 
-            let mut pipeline = config
-                .build_networked_pipeline(
-                    &reth_config.stages,
-                    client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory.clone(),
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                    static_file_producer,
-                    evm_config,
-                )
-                .await?;
+            let mut pipeline = crate::setup::build_networked_pipeline(
+                &config,
+                &reth_config.stages,
+                client.clone(),
+                Arc::clone(&consensus),
+                provider_factory.clone(),
+                &executor,
+                sync_metrics_tx,
+                prune_config.clone(),
+                max_block,
+                static_file_producer,
+                evm_config,
+            )
+            .await?;
 
             let pipeline_events = pipeline.events();
             task.set_pipeline_events(pipeline_events);
@@ -287,20 +360,20 @@ address.to_string(), format_ether(alloc.balance));
 
             (pipeline, EitherDownloader::Left(client))
         } else {
-            let pipeline = config
-                .build_networked_pipeline(
-                    &reth_config.stages,
-                    network_client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory.clone(),
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                    static_file_producer,
-                    evm_config,
-                )
-                .await?;
+            let pipeline = crate::setup::build_networked_pipeline(
+                &config,
+                &reth_config.stages,
+                network_client.clone(),
+                Arc::clone(&consensus),
+                provider_factory.clone(),
+                &executor,
+                sync_metrics_tx,
+                prune_config.clone(),
+                max_block,
+                static_file_producer,
+                evm_config,
+            )
+            .await?;
 
             (pipeline, EitherDownloader::Right(network_client))
         };
@@ -359,7 +432,7 @@ address.to_string(), format_ether(alloc.balance));
                 Some(network.clone()),
                 Some(head.number),
                 events,
-                database,
+                database.clone(),
             ),
         );
 
