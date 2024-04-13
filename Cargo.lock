@@ -6407,6 +6407,7 @@ dependencies = [
  "itertools 0.12.1",
  "metrics",
  "pin-project",
+ "rand 0.8.5",
  "rayon",
  "reth-config",
  "reth-db",
