@@ -46,7 +46,7 @@ impl Consensus for BeaconConsensus {
         Ok(())
     }
 
-    #[allow(unused_mut)]
+    #[allow(unused_assignments)]
     fn validate_header_with_total_difficulty(
         &self,
         header: &Header,

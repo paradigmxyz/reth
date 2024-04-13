@@ -124,7 +124,6 @@ optimism = [
     "reth-rpc-engine-api/optimism",
     "reth-provider/optimism",
     "reth-beacon-consensus/optimism",
-    "reth-beacon-consensus-core/optimism",
     "reth-auto-seal-consensus/optimism",
     "reth-blockchain-tree/optimism",
     "dep:reth-node-optimism",
