@@ -7220,6 +7220,7 @@ dependencies = [
  "reth-node-api",
  "reth-primitives",
  "reth-rpc-types",
+ "serde",
  "serde_json",
 ]
 

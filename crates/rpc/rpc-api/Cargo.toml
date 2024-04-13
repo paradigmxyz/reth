@@ -20,6 +20,7 @@ reth-node-api.workspace = true
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 serde_json.workspace = true
+serde = { version = "1.0.197", features = ["derive"] }
 
 [features]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
