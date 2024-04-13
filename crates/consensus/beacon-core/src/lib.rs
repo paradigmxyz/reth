@@ -51,15 +51,18 @@ impl Consensus for BeaconConsensus {
         header: &Header,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
+        #[cfg(not(feature = "optimism"))]
+        let is_post_merge = self
+            .chain_spec
+            .fork(Hardfork::Paris)
+            .active_at_ttd(total_difficulty, header.difficulty);
         #[cfg(feature = "optimism")]
-        if self.chain_spec.is_optimism_mainnet() {
-            // If OP-Stack then bedrock activation number determines when TTD (eth Merge) has been
-            // reached.
-            return self.chain_spec.is_bedrock_active_at_fork(header.number)
-        }
+        // If OP-Stack then bedrock activation number determines when TTD (eth Merge) has been
+        // reached.
+        let is_post_merge = !self.chain_spec.is_optimism_mainnet() ||
+            self.chain_spec.is_bedrock_active_at_fork(header.number);
 
-        if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
-        {
+        if is_post_merge {
             if !header.is_zero_difficulty() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
