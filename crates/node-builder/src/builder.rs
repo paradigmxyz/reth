@@ -3,13 +3,7 @@
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
 use crate::{
-    components::{ComponentsBuilder, NodeComponents, NodeComponentsBuilder, PoolBuilder},
-    exex::BoxedLaunchExEx,
-    hooks::NodeHooks,
-    node::FullNode,
-    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
-    DefaultLauncher, Node, NodeHandle,
-    LaunchNode,
+    components::{ComponentsBuilder, NodeComponents, NodeComponentsBuilder, PoolBuilder}, exex::BoxedLaunchExEx, hooks::NodeHooks, node::FullNode, rpc::{RethRpcServerHandles, RpcContext, RpcHooks}, DefaultLauncher, LaunchArgs, LaunchNode, Node, NodeHandle
 };
 use eyre::Context;
 use futures::{future, future::Either, stream, stream_select, Future, StreamExt};
@@ -490,37 +484,48 @@ where
     pub async fn launch_with<L>(
         self,
         launcher: L,
-        task_executor: TaskExecutor,
+        executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<
         NodeHandle<
             FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                // FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                RethFullAdapter<DB, Types>,
                 Components::Pool,
             >,
         >,
     >
     where
-        L: LaunchNode<DB, Types, Components>,
-        Types: Node<
-            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>,
-        >,
-        Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
-        Types::NetworkBuilder: crate::components::NetworkBuilder<
-            RethFullAdapter<DB, Types>,
-            <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
-        >,
-        Types::PayloadBuilder: crate::components::PayloadServiceBuilder<
-            RethFullAdapter<DB, Types>,
-            <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
-        >,
+        L: LaunchNode<DB, Types, Components, ComponentsState<Types, DB>>,
+        // F: FullNodeComponents,
+    //     Types: Node<
+            // F: FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>,
+    //     >,
+    //     Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
+    //     Types::NetworkBuilder: crate::components::NetworkBuilder<
+    //         RethFullAdapter<DB, Types>,
+    //         <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
+    //     >,
+    //     Types::PayloadBuilder: crate::components::PayloadServiceBuilder<
+    //         RethFullAdapter<DB, Types>,
+    //         <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
+    //     >,
     {
         // load reth config
         let reth_config = self.load_config(&data_dir)?;
 
         // deconstruct self to launch node
         let Self { config, state, database } = self;
-        launcher.launch(config, state, database, task_executor, data_dir, reth_config).await
+        let args = LaunchArgs {
+            // config,
+            // components: state,
+            // database,
+            builder: self,
+            executor,
+            data_dir,
+            reth_config,
+        };
+        launcher.launch(args).await
     }
 
     /// Check that the builder can be launched
