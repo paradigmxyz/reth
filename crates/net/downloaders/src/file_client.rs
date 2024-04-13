@@ -287,7 +287,6 @@ mod tests {
         },
         test_utils::TestConsensus,
     };
-    use reth_primitives::SealedHeader;
     use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
 
