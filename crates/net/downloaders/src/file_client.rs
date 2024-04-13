@@ -101,7 +101,7 @@ impl FileClient {
         while let Some(block_res) = stream.next().await {
             let block = match block_res {
                 Ok(block) => block,
-                Err(FileClientError::Rlp(err, bytes)) => {
+                Err(FileClientError::Rlp(_err, bytes)) => {
                     remaining_bytes = bytes;
                     break
                 }
@@ -407,7 +407,6 @@ mod tests {
         test_utils::TestConsensus,
     };
     use reth_provider::test_utils::create_test_provider_factory;
-    use reth_tracing;
     use std::{mem, sync::Arc};
 
     #[tokio::test]
@@ -534,7 +533,7 @@ mod tests {
         }
 
         // calculate min for chunk byte length range
-        let mut bodies_sizes = bodies.iter().map(|(_, body)| body.size()).collect::<Vec<_>>();
+        let mut bodies_sizes = bodies.values().map(|body| body.size()).collect::<Vec<_>>();
         bodies_sizes.sort();
         let max_block_size = MAX_BYTE_SIZE_HEADER + bodies_sizes.last().unwrap();
         let chunk_byte_len = rand::thread_rng().gen_range(max_block_size..=max_block_size + 10_000);
