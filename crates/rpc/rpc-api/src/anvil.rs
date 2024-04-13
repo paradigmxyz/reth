@@ -150,7 +150,7 @@ pub trait AnvilApi {
     ///
     /// This will mine the blocks regardless of the configured mining mode.
     ///
-    /// **Note**: This behaves exactly as [Self::evm_mine] but returns different output, for
+    /// **Note**: This behaves exactly as `evm_mine` but returns different output, for
     /// compatibility reasons, this is a separate call since `evm_mine` is not an anvil original.
     /// and `ganache` may change the `0x0` placeholder.
     #[method(name = "mine_detailed")] // This method requires using `snake_case`.
