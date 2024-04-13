@@ -59,10 +59,10 @@ impl Consensus for BeaconConsensus {
         #[cfg(feature = "optimism")]
         // If OP-Stack then bedrock activation number determines when TTD (eth Merge) has been
         // reached.
-        let is_post_merge = !self.chain_spec.is_optimism_mainnet() ||
-            self.chain_spec.is_bedrock_active_at_fork(header.number);
+        let is_post_merge = self.chain_spec.is_bedrock_active_at_fork(header.number);
 
         if is_post_merge {
+            #[cfg(not(feature = "optimism"))]
             if !header.is_zero_difficulty() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
