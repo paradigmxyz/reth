@@ -1,7 +1,4 @@
-use crate::{
-    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, BlockErrorKind, ExecInput, ExecOutput,
-    MetricEvent, MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
-};
+use crate::{stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, Stage};
 use num_traits::Zero;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -21,6 +18,10 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
+};
+use reth_stages_api::{
+    BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, StageError,
+    UnwindInput, UnwindOutput,
 };
 use std::{
     cmp::Ordering,

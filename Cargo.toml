@@ -51,6 +51,7 @@ members = [
     "crates/node-api/",
     "crates/node-e2e-tests/",
     "crates/stages/",
+    "crates/stages-api",
     "crates/static-file/",
     "crates/storage/codecs/",
     "crates/storage/codecs/derive/",
@@ -93,9 +94,9 @@ resolver = "2"
 rust.missing_debug_implementations = "warn"
 rust.missing_docs = "warn"
 rust.unreachable_pub = "warn"
-rustdoc.all = "warn"
 rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
+rustdoc.all = "warn"
 
 [workspace.lints.clippy]
 # These are some of clippy's nursery (i.e., experimental) lints that we like.
@@ -251,6 +252,7 @@ reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages" }
+reth-stages-api = { path = "crates/stages-api" }
 reth-static-file = { path = "crates/static-file" }
 reth-tasks = { path = "crates/tasks" }
 reth-tokio-util = { path = "crates/tokio-util" }

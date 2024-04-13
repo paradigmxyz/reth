@@ -33,7 +33,6 @@ use reth_provider::{
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use reth_stages::{ControlFlow, Pipeline, PipelineError};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventListeners;
 use std::{
@@ -73,6 +72,8 @@ use crate::hooks::{EngineHookEvent, EngineHooks, PolledHook};
 pub use forkchoice::ForkchoiceStatus;
 use reth_interfaces::blockchain_tree::BlockValidationKind;
 use reth_payload_validator::ExecutionPayloadValidator;
+use reth_stages::Pipeline;
+use reth_stages_api::{ControlFlow, PipelineError};
 
 mod metrics;
 

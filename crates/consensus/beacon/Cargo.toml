@@ -15,6 +15,7 @@ workspace = true
 reth-beacon-consensus-core.workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
+reth-stages-api.workspace = true
 reth-stages.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
@@ -47,6 +48,7 @@ reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
+#reth-stages-api = { workspace = true}
 reth-blockchain-tree = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }

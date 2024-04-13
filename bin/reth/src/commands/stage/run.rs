@@ -26,8 +26,9 @@ use reth_stages::{
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TransactionLookupStage,
     },
-    ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
+    Stage, StageExt,
 };
+use reth_stages_api::{ExecInput, ExecOutput, UnwindInput, UnwindOutput};
 use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
 use tracing::*;
 

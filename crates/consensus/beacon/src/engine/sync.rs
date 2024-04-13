@@ -12,7 +12,8 @@ use reth_interfaces::p2p::{
     headers::client::HeadersClient,
 };
 use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, B256};
-use reth_stages::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
+use reth_stages::{Pipeline, PipelineWithResult};
+use reth_stages_api::{ControlFlow, PipelineError};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventListeners;
 use std::{

@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::Stage;
 use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -19,6 +19,7 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, StatsReader,
 };
+use reth_stages_api::{ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
 use std::{
     cmp::Ordering,
     task::{ready, Context, Poll},

@@ -1,6 +1,6 @@
-use super::ctrl::ControlFlow;
 use crate::util::opt;
 use reth_primitives::BlockNumber;
+use reth_stages_api::ControlFlow;
 
 #[derive(Debug, Default)]
 pub(crate) struct PipelineProgress {

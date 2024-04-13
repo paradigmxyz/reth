@@ -526,7 +526,7 @@ where
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
         let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
-        let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
+        let sync_metrics_listener = reth_stages_api::MetricsListener::new(sync_metrics_rx);
         executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
 
         let prune_config = config.prune_config()?.or_else(|| reth_config.prune.clone());

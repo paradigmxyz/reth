@@ -1,7 +1,8 @@
-use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageSet};
+use crate::{pipeline::BoxedStage, Pipeline, Stage, StageSet};
 use reth_db::database::Database;
 use reth_primitives::{stage::StageId, BlockNumber, B256};
 use reth_provider::ProviderFactory;
+use reth_stages_api::MetricEventsSender;
 use reth_static_file::StaticFileProducer;
 use tokio::sync::watch;
 

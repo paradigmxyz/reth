@@ -1,4 +1,4 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::Stage;
 use num_traits::Zero;
 use reth_config::config::EtlConfig;
 use reth_db::{
@@ -18,6 +18,7 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
     TransactionsProvider, TransactionsProviderExt,
 };
+use reth_stages_api::{ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
 use tracing::*;
 
 /// The transaction lookup stage.

@@ -30,8 +30,9 @@ use reth_stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
         StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
-    ExecInput, Stage,
+    Stage,
 };
+use reth_stages_api::ExecInput;
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::{debug, info, warn};

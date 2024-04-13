@@ -12,8 +12,9 @@ use reth_stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
         StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
-    Stage, UnwindInput,
+    Stage,
 };
+use reth_stages_api::UnwindInput;
 use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(
@@ -74,8 +75,10 @@ async fn unwind_and_copy<DB: Database>(
         checkpoint: StageCheckpoint::new(tip_block_number),
         bad_block: None,
     };
-    let execute_input =
-        reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
+    let execute_input = reth_stages_api::ExecInput {
+        target: Some(to),
+        checkpoint: Some(StageCheckpoint::new(from)),
+    };
 
     // Unwind hashes all the way to FROM
 
@@ -151,7 +154,7 @@ async fn dry_run<DB: Database>(
     };
 
     loop {
-        let input = reth_stages::ExecInput {
+        let input = reth_stages_api::ExecInput {
             target: Some(to),
             checkpoint: Some(StageCheckpoint::new(from)),
         };

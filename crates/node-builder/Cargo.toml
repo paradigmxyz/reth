@@ -34,6 +34,7 @@ reth-interfaces.workspace = true
 reth-static-file.workspace = true
 reth-prune.workspace = true
 reth-stages.workspace = true
+reth-stages-api.workspace = true
 reth-config.workspace = true
 reth-downloaders.workspace = true
 

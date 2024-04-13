@@ -34,7 +34,7 @@ reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
-reth-stages.workspace = true
+reth-stages-api.workspace = true
 reth-prune.workspace = true
 reth-static-file.workspace = true
 
