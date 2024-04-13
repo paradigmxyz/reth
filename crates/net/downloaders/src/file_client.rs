@@ -19,10 +19,7 @@ use tokio_util::codec::FramedRead;
 use tracing::{trace, warn};
 
 /// Byte length of chunk to read from chain file.
-///
-/// Defaults to one static file, full of max size blocks (500k headers = one static file,
-/// transactions from 500k blocks = one static file).
-pub const DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 500_000 * 12 * 1_000_000;
+pub const DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 1_000_000_000;
 
 /// Front-end API for fetching chain data from a file.
 ///
