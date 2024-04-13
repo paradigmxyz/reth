@@ -8,8 +8,8 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId,
-    SealedHeader, B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BytesMut, Header, HeadersDirection,
+    PeerId, SealedHeader, B256,
 };
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;
@@ -17,6 +17,11 @@ use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use tracing::{trace, warn};
+
+/// Byte length of chunk to read from chain file. Equivalent to one static file, full of max
+/// size blocks (500k headers = one static file, transactions from 500k blocks = one static
+/// file).
+const BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 500_000 * 12 * 1_000_000;
 
 /// Front-end API for fetching chain data from a file.
 ///
@@ -49,8 +54,8 @@ pub enum FileClientError {
     Io(#[from] std::io::Error),
 
     /// An error occurred when decoding blocks, headers, or rlp headers from the file.
-    #[error(transparent)]
-    Rlp(#[from] alloy_rlp::Error),
+    #[error("{0}")]
+    Rlp(alloy_rlp::Error, Vec<u8>),
 }
 
 impl FileClient {
@@ -66,23 +71,41 @@ impl FileClient {
         let metadata = file.metadata().await?;
         let file_len = metadata.len();
 
-        // todo: read chunks into memory. for op mainnet 1/8 th of blocks below bedrock can be
-        // decoded at once
         let mut reader = vec![];
-        file.read_to_end(&mut reader).await.unwrap();
+        file.read_buf(&mut reader).await.unwrap();
 
+        Ok(Self::from_reader(&vec![][..], file_len).await?.0)
+    }
+
+    /// Initialize the [`FileClient`] from bytes that have been read from file.
+    pub(crate) async fn from_reader<B>(
+        reader: B,
+        num_bytes: u64,
+    ) -> Result<(Self, Vec<u8>), FileClientError>
+    where
+        B: AsyncReadExt + Unpin,
+    {
         let mut headers = HashMap::new();
         let mut hash_to_number = HashMap::new();
         let mut bodies = HashMap::new();
 
         // use with_capacity to make sure the internal buffer contains the entire file
-        let mut stream = FramedRead::with_capacity(&reader[..], BlockFileCodec, file_len as usize);
+        let mut stream = FramedRead::with_capacity(reader, BlockFileCodec, num_bytes as usize);
+
+        let mut remaining_bytes = vec![];
 
         let mut log_interval = 0;
         let mut log_interval_start_block = 0;
 
         while let Some(block_res) = stream.next().await {
-            let block = block_res?;
+            let block = match block_res {
+                Ok(block) => block,
+                Err(FileClientError::Rlp(alloy_rlp::Error::InputTooShort, bytes)) => {
+                    remaining_bytes = bytes;
+                    break
+                }
+                Err(err) => return Err(err),
+            };
             let block_number = block.header.number;
             let block_hash = block.header.hash_slow();
 
@@ -99,11 +122,15 @@ impl FileClient {
             );
 
             if log_interval == 0 {
+                trace!(target: "downloaders::file",
+                    block_number,
+                    "read first block"
+                );
                 log_interval_start_block = block_number;
-            } else if log_interval % 100000 == 0 {
+            } else if log_interval % 100_000 == 0 {
                 trace!(target: "downloaders::file",
                     blocks=?log_interval_start_block..=block_number,
-                    "inserted blocks into db"
+                    "read blocks from file"
                 );
                 log_interval_start_block = block_number + 1;
             }
@@ -112,7 +139,7 @@ impl FileClient {
 
         trace!(blocks = headers.len(), "Initialized file client");
 
-        Ok(Self { headers, hash_to_number, bodies })
+        Ok((Self { headers, hash_to_number, bodies }, remaining_bytes))
     }
 
     /// Get the tip hash of the chain.
@@ -267,6 +294,78 @@ impl DownloadClient for FileClient {
     }
 }
 
+/// Chunks file into several [`FileClient`]s.
+#[derive(Debug)]
+pub struct ChunkedFileReader {
+    /// File to read from.
+    file: File,
+    /// Current file length.
+    file_len: u64,
+    /// Bytes that have been read.
+    chunk: Vec<u8>,
+}
+
+impl ChunkedFileReader {
+    /// Opens the file to import from given path. Returns a new instance.
+    pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, FileClientError> {
+        let file = File::open(path).await?;
+        // get file len from metadata before reading
+        let metadata = file.metadata().await?;
+        let file_len = metadata.len();
+
+        Ok(Self { file, file_len, chunk: vec![] })
+    }
+
+    /// Calculates the number of bytes to read from the chain file. Returns a tuple of the chunk
+    /// length and the remaining file length.
+    fn chunk_len(&self) -> u64 {
+        if BYTE_LEN_CHUNK_CHAIN_FILE > self.file_len {
+            // last chunk
+            self.file_len
+        } else {
+            BYTE_LEN_CHUNK_CHAIN_FILE
+        }
+    }
+
+    /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
+    pub async fn next_chunk(&mut self) -> Result<Option<FileClient>, FileClientError> {
+        if self.file_len == 0 && self.chunk.is_empty() {
+            // eof
+            return Ok(None)
+        }
+
+        let chunk_len = self.chunk_len();
+        let old_bytes_len = self.chunk.len() as u64;
+
+        // calculate reserved space in chunk
+        let new_bytes_len = if chunk_len + old_bytes_len > BYTE_LEN_CHUNK_CHAIN_FILE {
+            // make space for already read bytes in chunk
+            chunk_len - old_bytes_len
+        } else {
+            // new bytes from file can fill whole chunk
+            chunk_len
+        };
+
+        // read new bytes from file
+        let mut reader = BytesMut::with_capacity(new_bytes_len as usize);
+        self.file.read_buf(&mut reader).await.unwrap();
+
+        // update remaining file length
+        self.file_len -= new_bytes_len;
+
+        // read new bytes from file into chunk
+        self.chunk.extend_from_slice(&reader[..]);
+
+        // make new file client from chunk
+        let (file_client, bytes) = FileClient::from_reader(&self.chunk[..], chunk_len).await?;
+
+        // save left over bytes
+        self.chunk = bytes;
+
+        Ok(Some(file_client))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,7 +386,6 @@ mod tests {
         },
         test_utils::TestConsensus,
     };
-    use reth_primitives::SealedHeader;
     use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
 
