@@ -103,9 +103,9 @@ impl Consensus for BeaconConsensus {
                 })
             }
 
-            // Goerli exception:
+            // Goerli and early OP exception:
             //  * If the network is goerli pre-merge, ignore the extradata check, since we do not
-            //  support clique.
+            //  support clique. Same goes for OP blocks below Bedrock.
             if self.chain_spec.chain != Chain::goerli() && !self.chain_spec.is_optimism() {
                 validate_header_extradata(header)?;
             }
