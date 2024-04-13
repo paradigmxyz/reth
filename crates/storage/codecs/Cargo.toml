@@ -21,6 +21,7 @@ alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
 serde.workspace = true
 modular-bitfield = "0.11.2"
 test-fuzz.workspace = true
+serde_json.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true

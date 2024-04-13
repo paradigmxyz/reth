@@ -2,7 +2,6 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_chains::Chain;
 use reth::{
     builder::{node::NodeTypes, NodeBuilder},
     primitives::{
@@ -21,7 +20,7 @@ use reth::{
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthereumNode};
-use reth_primitives::{ChainSpec, Genesis, Header, Transaction};
+use reth_primitives::{Chain, ChainSpec, Genesis, Header, Transaction};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 

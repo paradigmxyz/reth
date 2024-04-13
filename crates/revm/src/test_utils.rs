@@ -1,5 +1,5 @@
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_interfaces::provider::ProviderResult;
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     keccak256, revm::config::revm_spec, trie::AccountProof, Account, Address, BlockNumber,
     Bytecode, Bytes, ChainSpec, Head, Header, StorageKey, Transaction, B256, U256,
@@ -11,17 +11,17 @@ use reth_provider::{AccountReader, BlockHashReader, StateProvider, StateRootProv
 use reth_trie::updates::TrieUpdates;
 use revm::{
     db::BundleState,
-    inspector_handle_register,
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    GetInspector,
 };
 use std::collections::HashMap;
+
 #[cfg(feature = "optimism")]
 use {
     reth_primitives::revm::env::fill_op_tx_env,
     revm::{
+        inspector_handle_register,
         primitives::{HandlerCfg, SpecId},
-        Database, Evm, EvmBuilder,
+        Database, Evm, EvmBuilder, GetInspector,
     },
 };
 

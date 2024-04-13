@@ -1399,7 +1399,7 @@ impl Discv4Service {
 
     fn evict_expired_requests(&mut self, now: Instant) {
         self.pending_enr_requests.retain(|_node_id, enr_request| {
-            now.duration_since(enr_request.sent_at) < self.config.ping_expiration
+            now.duration_since(enr_request.sent_at) < self.config.enr_expiration
         });
 
         let mut failed_pings = Vec::new();
@@ -1577,8 +1577,7 @@ impl Discv4Service {
             }
 
             // re-ping some peers
-            if self.ping_interval.poll_tick(cx).is_ready() {
-                let _ = self.ping_interval.poll_tick(cx);
+            while self.ping_interval.poll_tick(cx).is_ready() {
                 self.re_ping_oldest();
             }
 
@@ -1698,7 +1697,7 @@ impl Discv4Service {
             // try resending buffered pings
             self.ping_buffered();
 
-            // evict expired nodes
+            // evict expired requests
             while self.evict_expired_requests_interval.poll_tick(cx).is_ready() {
                 self.evict_expired_requests(Instant::now());
             }
@@ -2269,12 +2268,27 @@ mod tests {
         let local_addr = service.local_addr();
 
         let mut num_inserted = 0;
-        for _ in 0..MAX_NODES_PING {
+        loop {
             let node = NodeRecord::new(local_addr, PeerId::random());
             if service.add_node(node) {
                 num_inserted += 1;
                 assert!(service.pending_pings.contains_key(&node.id));
                 assert_eq!(service.pending_pings.len(), num_inserted);
+                if num_inserted == MAX_NODES_PING {
+                    break;
+                }
+            }
+        }
+
+        // `pending_pings` is full, insert into `queued_pings`.
+        num_inserted = 0;
+        for _ in 0..MAX_NODES_PING {
+            let node = NodeRecord::new(local_addr, PeerId::random());
+            if service.add_node(node) {
+                num_inserted += 1;
+                assert!(!service.pending_pings.contains_key(&node.id));
+                assert_eq!(service.pending_pings.len(), MAX_NODES_PING);
+                assert_eq!(service.queued_pings.len(), num_inserted);
             }
         }
     }

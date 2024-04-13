@@ -23,6 +23,7 @@ mod eth;
 mod eth_filter;
 mod eth_pubsub;
 mod ganache;
+mod hardhat;
 mod mev;
 mod net;
 mod otterscan;
@@ -32,7 +33,6 @@ mod trace;
 mod txpool;
 mod validation;
 mod web3;
-mod hardhat;
 
 /// re-export of all server traits
 pub use servers::*;

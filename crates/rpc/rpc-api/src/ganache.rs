@@ -1,7 +1,6 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-
 use reth_primitives::U256;
-use reth_rpc_types::ganache::MineOptions;
+use reth_rpc_types::anvil::MineOptions;
 
 /// Ganache rpc interface.
 /// https://github.com/trufflesuite/ganache/tree/develop/docs
@@ -53,7 +52,8 @@ pub trait GanacheApi {
 
     // TODO Ganache is deprecated and this method is not implemented by Anvil and Hardhat.
     // #[method(name = "setAccountStorageAt")]
-    // async fn evm_set_account_storage_at(address: Address, slot: U256, value: B256) -> RpcResult<bool>;
+    // async fn evm_set_account_storage_at(address: Address, slot: U256, value: B256) ->
+    // RpcResult<bool>;
 
     /// Sets the internal clock time to the given timestamp.
     ///

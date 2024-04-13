@@ -161,7 +161,10 @@ impl Command {
 
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(self.chain.clone());
+        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
+            self.chain.clone(),
+            reth_node_optimism::OptimismEvmConfig::default(),
+        );
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             blockchain_db.clone(),

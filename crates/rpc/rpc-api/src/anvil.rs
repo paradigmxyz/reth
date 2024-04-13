@@ -1,10 +1,9 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
-use reth_primitives::{Address, B256, Bytes, U256};
+use reth_primitives::{Address, Bytes, B256, U256};
 use reth_rpc_types::{
-    anvil::{Forking, Metadata, NodeInfo, Params},
+    anvil::{Forking, Metadata, MineOptions, NodeInfo},
     Block,
-    ganache::MineOptions,
 };
 
 /// Anvil rpc interface.
@@ -49,7 +48,7 @@ pub trait AnvilApi {
     ///
     /// If `forking` is `None` then this will disable forking entirely.
     #[method(name = "reset")]
-    async fn anvil_reset(&self, fork: Option<Params<Option<Forking>>>) -> RpcResult<()>;
+    async fn anvil_reset(&self, fork: Option<Forking>) -> RpcResult<()>;
 
     /// Sets the backend rpc url.
     #[method(name = "setRpcUrl")]
@@ -69,7 +68,12 @@ pub trait AnvilApi {
 
     /// Writes a single slot of the account's storage.
     #[method(name = "setStorageAt")]
-    async fn anvil_set_storage_at(&self, address: Address, slot: U256, value: B256) -> RpcResult<bool>;
+    async fn anvil_set_storage_at(
+        &self,
+        address: Address,
+        slot: U256,
+        value: B256,
+    ) -> RpcResult<bool>;
 
     /// Sets the coinbase address.
     #[method(name = "setCoinbase")]
@@ -150,7 +154,7 @@ pub trait AnvilApi {
     /// compatibility reasons, this is a separate call since `evm_mine` is not an anvil original.
     /// and `ganache` may change the `0x0` placeholder.
     #[method(name = "mine_detailed")] // This method requires using `snake_case`.
-    async fn anvil_mine_detailed(&self, opts: Option<Params<Option<MineOptions>>>) -> RpcResult<Vec<Block>>;
+    async fn anvil_mine_detailed(&self, opts: Option<MineOptions>) -> RpcResult<Vec<Block>>;
 
     /// Turn on call traces for transactions that are returned to the user when they execute a
     /// transaction (instead of just txhash/receipt).

@@ -49,6 +49,7 @@ pub(crate) fn append_matching_block_logs(
     block_num_hash: BlockNumHash,
     receipts: &[Receipt],
     removed: bool,
+    block_timestamp: u64,
 ) -> Result<(), FilterError> {
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;
@@ -97,7 +98,7 @@ pub(crate) fn append_matching_block_logs(
                     transaction_index: Some(receipt_idx as u64),
                     log_index: Some(log_index),
                     removed,
-                    block_timestamp: None,
+                    block_timestamp: Some(block_timestamp),
                 };
                 all_logs.push(log);
             }

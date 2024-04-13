@@ -3,7 +3,7 @@ use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
 
-use reth_node_api::ConfigureEvm;
+use reth_evm::ConfigureEvm;
 use reth_primitives::{
     proofs::calculate_receipt_root_optimism, revm_primitives::ResultAndState, BlockWithSenders,
     Bloom, ChainSpec, Hardfork, Receipt, ReceiptWithBloom, TxType, B256, U256,
@@ -44,15 +44,6 @@ where
     EvmConfig: ConfigureEvm,
 {
     type Error = BlockExecutionError;
-
-    fn execute(
-        &mut self,
-        block: &BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError> {
-        let receipts = self.execute_inner(block, total_difficulty)?;
-        self.save_receipts(receipts)
-    }
 
     fn execute_and_verify_receipt(
         &mut self,
@@ -216,8 +207,8 @@ mod tests {
         test_utils::{StateProviderTest, TestEvmConfig},
     };
     use reth_primitives::{
-        Account, Address, Block, ChainSpecBuilder, Header, Signature, StorageKey, StorageValue,
-        Transaction, TransactionKind, TransactionSigned, TxEip1559, BASE_MAINNET,
+        b256, Account, Address, Block, ChainSpecBuilder, Header, Signature, StorageKey,
+        StorageValue, Transaction, TransactionKind, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
     use revm::L1_BLOCK_CONTRACT;
     use std::{collections::HashMap, str::FromStr, sync::Arc};
@@ -269,7 +260,10 @@ mod tests {
             number: 1,
             gas_limit: 1_000_000,
             gas_used: 42_000,
-            ..Header::default()
+            receipts_root: b256!(
+                "83465d1e7d01578c0d609be33570f91242f013e9e295b0879905346abbd63731"
+            ),
+            ..Default::default()
         };
 
         let mut db = create_op_state_provider();
@@ -306,7 +300,7 @@ mod tests {
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
         executor
-            .execute(
+            .execute_and_verify_receipt(
                 &BlockWithSenders {
                     block: Block {
                         header,
@@ -340,7 +334,10 @@ mod tests {
             number: 1,
             gas_limit: 1_000_000,
             gas_used: 42_000,
-            ..Header::default()
+            receipts_root: b256!(
+                "fffc85c4004fd03c7bfbe5491fae98a7473126c099ac11e8286fd0013f15f908"
+            ),
+            ..Default::default()
         };
 
         let mut db = create_op_state_provider();
@@ -377,7 +374,7 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
-            .execute(
+            .execute_and_verify_receipt(
                 &BlockWithSenders {
                     block: Block {
                         header,

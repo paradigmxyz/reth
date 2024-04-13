@@ -20,6 +20,7 @@ use std::{
     sync::Arc,
 };
 
+mod checksum;
 mod clear;
 mod diff;
 mod get;
@@ -69,6 +70,8 @@ pub enum Subcommands {
     Stats(stats::Command),
     /// Lists the contents of a table
     List(list::Command),
+    /// Calculates the content checksum of a table
+    Checksum(checksum::Command),
     /// Create a diff between two database tables or two entire databases.
     Diff(diff::Command),
     /// Gets the content of a table for the given key
@@ -117,6 +120,11 @@ impl Command {
                 });
             }
             Subcommands::List(command) => {
+                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::Checksum(command) => {
                 db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
                     command.execute(&tool)?;
                 });

@@ -1,17 +1,12 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-
-use reth_primitives::{Address, B256, Bytes, U256};
-use reth_rpc_types::anvil::{Forking, Metadata, Params};
+use reth_primitives::{Address, Bytes, B256, U256};
+use reth_rpc_types::anvil::{Forking, Metadata};
 
 /// Hardhat rpc interface.
 /// https://hardhat.org/hardhat-network/docs/reference#hardhat-network-methods
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "hardhat"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "hardhat"))]
 pub trait HardhatApi {
-    // TODO Need to define or import Hardhat's RPC types. https://github.com/NomicFoundation/hardhat/blob/a1a385c45c7d9b92b38ca599b0d096197833feff/crates/edr_provider/src/requests/methods.rs#L288-L295
-    // #[method(name = "addCompilationResult")]
-    // async fn hardhat_add_compilation_result(&self, version: String, input: CompilerInput, output: CompilerOutput) -> RpcResult<()>;
-
     /// Removes the given transaction from the mempool, if it exists.
     ///
     /// Returns `true` if successful, otherwise `false`.
@@ -36,7 +31,7 @@ pub trait HardhatApi {
 
     /// Resets back to a fresh forked state, fork from another block number or disable forking.
     #[method(name = "reset")]
-    async fn hardhat_reset(&self, fork: Option<Params<Option<Forking>>>) -> RpcResult<()>;
+    async fn hardhat_reset(&self, fork: Option<Forking>) -> RpcResult<()>;
 
     /// Sets the balance for the given address.
     #[method(name = "setBalance")]
@@ -60,7 +55,10 @@ pub trait HardhatApi {
 
     /// Sets the base fee of the next block.
     #[method(name = "setNextBlockBaseFeePerGas")]
-    async fn hardhat_set_next_block_base_fee_per_gas(&self, base_fee_per_gas: U256) -> RpcResult<()>;
+    async fn hardhat_set_next_block_base_fee_per_gas(
+        &self,
+        base_fee_per_gas: U256,
+    ) -> RpcResult<()>;
 
     /// Sets the `PREVRANDAO` value of the next block.
     #[method(name = "setPrevRandao")]
@@ -72,7 +70,12 @@ pub trait HardhatApi {
 
     /// Writes a single position of an account's storage.
     #[method(name = "setStorageAt")]
-    async fn hardhat_set_storage_at(&self, address: Address, slot: U256, value: B256) -> RpcResult<()>;
+    async fn hardhat_set_storage_at(
+        &self,
+        address: Address,
+        slot: U256,
+        value: B256,
+    ) -> RpcResult<()>;
 
     /// Stops impersonating the given address.
     #[method(name = "stopImpersonatingAccount")]

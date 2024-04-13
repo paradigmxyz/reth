@@ -1280,7 +1280,7 @@ where
             let block_hash = block.hash();
 
             let block_number = block_env.number.saturating_to::<u64>();
-            let base_fee = block_env.basefee.saturating_to::<u64>();
+            let base_fee = block_env.basefee.saturating_to::<u128>();
 
             // prepare transactions, we do everything upfront to reduce time spent with open state
             let max_transactions = highest_index.map_or(block.body.len(), |highest| {
@@ -1501,7 +1501,10 @@ where
             let inner_l1_data_gas = l1_block_info
                 .l1_data_gas(&self.inner.provider.chain_spec(), block_timestamp, &envelope_buf)
                 .map_err(|_| OptimismEthApiError::L1BlockGasError)?;
-            (Some(inner_l1_fee), Some(inner_l1_data_gas))
+            (
+                Some(inner_l1_fee.saturating_to::<u128>()),
+                Some(inner_l1_data_gas.saturating_to::<u128>()),
+            )
         } else {
             (None, None)
         };
@@ -1629,7 +1632,7 @@ impl TransactionSource {
                         index: Some(index),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
-                        base_fee,
+                        base_fee: base_fee.map(u128::from),
                     },
                 )
             }
@@ -1718,7 +1721,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 
     let rpc_receipt = reth_rpc_types::Receipt {
         status: receipt.success,
-        cumulative_gas_used: receipt.cumulative_gas_used,
+        cumulative_gas_used: receipt.cumulative_gas_used as u128,
         logs,
     };
 
@@ -1729,19 +1732,19 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
             r#type: transaction.transaction.tx_type().into(),
         },
         transaction_hash: meta.tx_hash,
-        transaction_index: meta.index,
+        transaction_index: Some(meta.index),
         block_hash: Some(meta.block_hash),
         block_number: Some(meta.block_number),
         from,
         to: None,
-        gas_used: Some(gas_used),
+        gas_used: gas_used as u128,
         contract_address: None,
-        effective_gas_price: transaction.effective_gas_price(meta.base_fee) as u64,
+        effective_gas_price: transaction.effective_gas_price(meta.base_fee),
         // TODO pre-byzantium receipts have a post-transaction state root
         state_root: None,
         // EIP-4844 fields
-        blob_gas_price: blob_gas_price.map(|gas| gas as u64),
-        blob_gas_used,
+        blob_gas_price,
+        blob_gas_used: blob_gas_used.map(u128::from),
     };
     let mut res_receipt = WithOtherFields::new(res_receipt);
 
@@ -1755,12 +1758,12 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
                 receipt.deposit_receipt_version.map(reth_primitives::U64::from);
         } else if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
             op_fields.l1_fee = optimism_tx_meta.l1_fee;
-            op_fields.l1_gas_used = optimism_tx_meta
-                .l1_data_gas
-                .map(|dg| dg + l1_block_info.l1_fee_overhead.unwrap_or_default());
+            op_fields.l1_gas_used = optimism_tx_meta.l1_data_gas.map(|dg| {
+                dg + l1_block_info.l1_fee_overhead.unwrap_or_default().saturating_to::<u128>()
+            });
             op_fields.l1_fee_scalar =
                 Some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
-            op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee);
+            op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee.saturating_to());
         }
 
         res_receipt.other = op_fields.into();
