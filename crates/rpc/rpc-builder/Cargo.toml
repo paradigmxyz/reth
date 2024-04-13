@@ -27,6 +27,7 @@ jsonrpsee = { workspace = true, features = ["server"] }
 tower-http = { workspace = true, features = ["full"] }
 tower = { workspace = true, features = ["full"] }
 hyper.workspace = true
+pin-project.workspace = true
 
 # metrics
 reth-metrics = { workspace = true, features = ["common"] }

@@ -8,7 +8,8 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId,
+    SealedHeader, B256,
 };
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;
@@ -65,7 +66,8 @@ impl FileClient {
         let metadata = file.metadata().await?;
         let file_len = metadata.len();
 
-        // read the entire file into memory
+        // todo: read chunks into memory. for op mainnet 1/8 th of blocks below bedrock can be
+        // decoded at once
         let mut reader = vec![];
         file.read_to_end(&mut reader).await.unwrap();
 
@@ -76,8 +78,12 @@ impl FileClient {
         // use with_capacity to make sure the internal buffer contains the entire file
         let mut stream = FramedRead::with_capacity(&reader[..], BlockFileCodec, file_len as usize);
 
+        let mut log_interval = 0;
+        let mut log_interval_start_block = 0;
+
         while let Some(block_res) = stream.next().await {
             let block = block_res?;
+            let block_number = block.header.number;
             let block_hash = block.header.hash_slow();
 
             // add to the internal maps
@@ -91,6 +97,17 @@ impl FileClient {
                     withdrawals: block.withdrawals,
                 },
             );
+
+            if log_interval == 0 {
+                log_interval_start_block = block_number;
+            } else if log_interval % 100000 == 0 {
+                trace!(target: "downloaders::file",
+                    blocks=?log_interval_start_block..=block_number,
+                    "inserted blocks into db"
+                );
+                log_interval_start_block = block_number + 1;
+            }
+            log_interval += 1;
         }
 
         trace!(blocks = headers.len(), "Initialized file client");
@@ -100,12 +117,34 @@ impl FileClient {
 
     /// Get the tip hash of the chain.
     pub fn tip(&self) -> Option<B256> {
-        self.headers.get(&(self.headers.len() as u64)).map(|h| h.hash_slow())
+        self.headers.get(&((self.headers.len() - 1) as u64)).map(|h| h.hash_slow())
+    }
+
+    /// Get the start hash of the chain.
+    pub fn start(&self) -> Option<B256> {
+        self.headers.get(&self.min_block()?).map(|h| h.hash_slow())
     }
 
     /// Returns the highest block number of this client has or `None` if empty
     pub fn max_block(&self) -> Option<u64> {
         self.headers.keys().max().copied()
+    }
+
+    /// Returns the lowest block number of this client has or `None` if empty
+    pub fn min_block(&self) -> Option<u64> {
+        self.headers.keys().min().copied()
+    }
+
+    /// Clones and returns the highest header of this client has or `None` if empty. Seals header
+    /// before returning.
+    pub fn tip_header(&self) -> Option<SealedHeader> {
+        self.headers.get(&self.max_block()?).map(|h| h.clone().seal_slow())
+    }
+
+    /// Clones and returns the lowest header of this client has or `None` if empty. Seals header
+    /// before returning.
+    pub fn start_header(&self) -> Option<SealedHeader> {
+        self.headers.get(&self.min_block()?).map(|h| h.clone().seal_slow())
     }
 
     /// Returns true if all blocks are canonical (no gaps)

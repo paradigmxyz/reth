@@ -1,6 +1,8 @@
 use futures::future;
 use reth_db::test_utils::create_test_rw_db;
-use reth_node_builder::{exex::ExExContext, FullNodeTypes, NodeBuilder, NodeConfig};
+use reth_exex::ExExContext;
+use reth_node_api::FullNodeComponents;
+use reth_node_builder::{NodeBuilder, NodeConfig};
 use reth_node_ethereum::EthereumNode;
 use std::{
     future::Future,
@@ -8,11 +10,14 @@ use std::{
     task::{Context, Poll},
 };
 
-struct DummyExEx<Node: FullNodeTypes> {
+struct DummyExEx<Node: FullNodeComponents> {
     _ctx: ExExContext<Node>,
 }
 
-impl<Node: FullNodeTypes> Future for DummyExEx<Node> {
+impl<Node> Future for DummyExEx<Node>
+where
+    Node: FullNodeComponents,
+{
     type Output = eyre::Result<()>;
 
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
@@ -28,6 +33,6 @@ fn basic_exex() {
         .with_database(db)
         .with_types(EthereumNode::default())
         .with_components(EthereumNode::components())
-        .install_exex(move |ctx| future::ok(DummyExEx { _ctx: ctx }))
+        .install_exex("dummy", move |ctx| future::ok(DummyExEx { _ctx: ctx }))
         .check_launch();
 }

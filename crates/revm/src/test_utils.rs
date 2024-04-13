@@ -1,5 +1,5 @@
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_interfaces::provider::ProviderResult;
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     keccak256, revm::config::revm_spec, trie::AccountProof, Account, Address, BlockNumber,
     Bytecode, Bytes, ChainSpec, Head, Header, StorageKey, Transaction, B256, U256,
@@ -14,12 +14,14 @@ use revm::{
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
 };
 use std::collections::HashMap;
+
 #[cfg(feature = "optimism")]
 use {
     reth_primitives::revm::env::fill_op_tx_env,
     revm::{
+        inspector_handle_register,
         primitives::{HandlerCfg, SpecId},
-        Database, Evm, EvmBuilder,
+        Database, Evm, EvmBuilder, GetInspector,
     },
 };
 
@@ -162,12 +164,17 @@ impl ConfigureEvm for TestEvmConfig {
     }
 
     #[cfg(feature = "optimism")]
-    fn evm_with_inspector<'a, DB: Database + 'a, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB> {
+    fn evm_with_inspector<'a, DB, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB>
+    where
+        DB: Database + 'a,
+        I: GetInspector<DB>,
+    {
         let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
             .with_handler_cfg(handler_cfg)
+            .append_handler_register(inspector_handle_register)
             .build()
     }
 }

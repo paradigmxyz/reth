@@ -49,6 +49,7 @@ mod sign;
 mod state;
 mod transactions;
 
+use crate::eth::traits::RawTransactionForwarder;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -104,6 +105,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
+        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -116,6 +118,7 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
+            raw_transaction_forwarder,
         )
     }
 
@@ -132,6 +135,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
+        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -155,8 +159,7 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
-            #[cfg(feature = "optimism")]
-            http_client: reqwest::Client::builder().use_rustls_tls().build().unwrap(),
+            raw_transaction_forwarder,
         };
 
         Self { inner: Arc::new(inner) }
@@ -486,7 +489,6 @@ struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     fee_history_cache: FeeHistoryCache,
     /// The type that defines how to configure the EVM
     evm_config: EvmConfig,
-    /// An http client for communicating with sequencers.
-    #[cfg(feature = "optimism")]
-    http_client: reqwest::Client,
+    /// Allows forwarding received raw transactions
+    raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
 }

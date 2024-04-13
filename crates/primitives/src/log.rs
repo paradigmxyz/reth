@@ -51,3 +51,27 @@ where
     }
     bloom
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::proptest;
+
+    proptest! {
+        #[test]
+        fn test_roundtrip_conversion_between_log_and_alloy_log(log: Log) {
+            // Convert log to buffer and then create alloy_log from buffer and compare
+            let mut compacted_log = Vec::<u8>::new();
+            let len = log.clone().to_compact(&mut compacted_log);
+
+            let alloy_log = AlloyLog::from_compact(&compacted_log, len).0;
+            assert_eq!(log, alloy_log.into());
+
+            // Create alloy_log from log and then convert it to buffer and compare compacted_alloy_log and compacted_log
+            let alloy_log = AlloyLog::new_unchecked(log.address, log.topics, log.data);
+            let mut compacted_alloy_log = Vec::<u8>::new();
+            let _len = alloy_log.to_compact(&mut compacted_alloy_log);
+            assert_eq!(compacted_log, compacted_alloy_log);
+        }
+    }
+}

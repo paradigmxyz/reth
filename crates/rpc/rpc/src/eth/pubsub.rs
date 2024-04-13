@@ -1,8 +1,13 @@
 //! `eth_` PubSub RPC handler implementation
 
-use crate::{eth::logs_utils, result::invalid_params_rpc_err};
+use crate::{
+    eth::logs_utils,
+    result::{internal_rpc_err, invalid_params_rpc_err},
+};
 use futures::StreamExt;
-use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
+use jsonrpsee::{
+    server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
+};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
@@ -95,7 +100,7 @@ async fn handle_accepted<Provider, Pool, Events, Network>(
     accepted_sink: SubscriptionSink,
     kind: SubscriptionKind,
     params: Option<Params>,
-) -> Result<(), jsonrpsee::core::Error>
+) -> Result<(), ErrorObject<'static>>
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
@@ -114,7 +119,7 @@ where
             let filter = match params {
                 Some(Params::Logs(filter)) => FilteredParams::new(Some(*filter)),
                 Some(Params::Bool(_)) => {
-                    return Err(invalid_params_rpc_err("Invalid params for logs").into())
+                    return Err(invalid_params_rpc_err("Invalid params for logs"))
                 }
                 _ => FilteredParams::default(),
             };
@@ -142,8 +147,7 @@ where
                     Params::Logs(_) => {
                         return Err(invalid_params_rpc_err(
                             "Invalid params for newPendingTransactions",
-                        )
-                        .into())
+                        ))
                     }
                 }
             }
@@ -162,7 +166,8 @@ where
             let current_sub_res = pubsub.sync_status(initial_sync_status).await;
 
             // send the current status immediately
-            let msg = SubscriptionMessage::from_json(&current_sub_res)?;
+            let msg = SubscriptionMessage::from_json(&current_sub_res)
+                .map_err(SubscriptionSerializeError::new)?;
             if accepted_sink.send(msg).await.is_err() {
                 return Ok(())
             }
@@ -176,7 +181,8 @@ where
 
                     // send a new message now that the status changed
                     let sync_status = pubsub.sync_status(current_syncing).await;
-                    let msg = SubscriptionMessage::from_json(&sync_status)?;
+                    let msg = SubscriptionMessage::from_json(&sync_status)
+                        .map_err(SubscriptionSerializeError::new)?;
                     if accepted_sink.send(msg).await.is_err() {
                         break
                     }
@@ -188,11 +194,28 @@ where
     }
 }
 
+/// Helper to convert a serde error into an [`ErrorObject`]
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to serialize subscription item: {0}")]
+pub(crate) struct SubscriptionSerializeError(#[from] serde_json::Error);
+
+impl SubscriptionSerializeError {
+    pub(crate) const fn new(err: serde_json::Error) -> Self {
+        Self(err)
+    }
+}
+
+impl From<SubscriptionSerializeError> for ErrorObject<'static> {
+    fn from(value: SubscriptionSerializeError) -> Self {
+        internal_rpc_err(value.to_string())
+    }
+}
+
 /// Pipes all stream items to the subscription sink.
 async fn pipe_from_stream<T, St>(
     sink: SubscriptionSink,
     mut stream: St,
-) -> Result<(), jsonrpsee::core::Error>
+) -> Result<(), ErrorObject<'static>>
 where
     St: Stream<Item = T> + Unpin,
     T: Serialize,
@@ -211,7 +234,7 @@ where
                         break  Ok(())
                     },
                 };
-                let msg = SubscriptionMessage::from_json(&item)?;
+                let msg = SubscriptionMessage::from_json(&item).map_err(SubscriptionSerializeError::new)?;
                 if sink.send(msg).await.is_err() {
                     break Ok(());
                 }
@@ -291,10 +314,7 @@ where
     /// Returns a stream that yields all new RPC blocks.
     fn new_headers_stream(&self) -> impl Stream<Item = Header> {
         self.chain_events.canonical_state_stream().flat_map(|new_chain| {
-            let headers = new_chain
-                .committed()
-                .map(|chain| chain.headers().collect::<Vec<_>>())
-                .unwrap_or_default();
+            let headers = new_chain.committed().headers().collect::<Vec<_>>();
             futures::stream::iter(
                 headers.into_iter().map(reth_rpc_types_compat::block::from_primitive_with_hash),
             )

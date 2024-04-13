@@ -1,10 +1,10 @@
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_op_tx_env},
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, HandlerCfg, SpecId, TxEnv},
+    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, Bytes, ChainSpec, Head, Header, Transaction, U256,
 };
-use revm::{Database, Evm, EvmBuilder};
+use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 
 /// Optimism-related EVM configuration.
 #[derive(Debug, Default, Clone, Copy)]
@@ -48,16 +48,19 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
 
 impl ConfigureEvm for OptimismEvmConfig {
     fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, (), DB> {
-        let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
-        EvmBuilder::default().with_db(db).with_handler_cfg(handler_cfg).build()
+        EvmBuilder::default().with_db(db).optimism().build()
     }
 
-    fn evm_with_inspector<'a, DB: Database + 'a, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB> {
-        let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
+    fn evm_with_inspector<'a, DB, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB>
+    where
+        DB: Database + 'a,
+        I: GetInspector<DB>,
+    {
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
-            .with_handler_cfg(handler_cfg)
+            .optimism()
+            .append_handler_register(inspector_handle_register)
             .build()
     }
 }
@@ -66,6 +69,7 @@ impl ConfigureEvm for OptimismEvmConfig {
 mod tests {
     use super::*;
     use reth_primitives::revm_primitives::{BlockEnv, CfgEnv};
+    use revm::primitives::SpecId;
 
     #[test]
     #[ignore]

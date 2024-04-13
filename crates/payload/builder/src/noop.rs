@@ -2,7 +2,7 @@
 
 use crate::{service::PayloadServiceCommand, PayloadBuilderHandle};
 use futures_util::{ready, StreamExt};
-use reth_node_api::{EngineTypes, PayloadBuilderAttributes};
+use reth_engine_primitives::{EngineTypes, PayloadBuilderAttributes};
 use std::{
     future::Future,
     pin::Pin,

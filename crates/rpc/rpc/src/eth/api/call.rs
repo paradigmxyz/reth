@@ -209,7 +209,7 @@ where
 
         // get the highest possible gas limit, either the request's set value or the currently
         // configured gas limit
-        let mut highest_gas_limit = request.gas.unwrap_or(block.gas_limit);
+        let mut highest_gas_limit = request.gas.map(U256::from).unwrap_or(block.gas_limit);
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
@@ -225,15 +225,18 @@ where
                 if let Ok(code) = db.db.account_code(to) {
                     let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
-                        // simple transfer, check if caller has sufficient funds
-                        let available_funds =
-                            db.basic_ref(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
-                        if env.tx.value > available_funds {
-                            return Err(
-                                RpcInvalidTransactionError::InsufficientFundsForTransfer.into()
-                            )
+                        // If the tx is a simple transfer (call to an account with no code) we can
+                        // shortcircuit But simply returning
+                        // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
+                        // field combos that bump the price up, so we try executing the function
+                        // with the minimum gas limit to make sure.
+                        let mut env = env.clone();
+                        env.tx.gas_limit = MIN_TRANSACTION_GAS;
+                        if let Ok((res, _)) = self.transact(&mut db, env) {
+                            if res.result.is_success() {
+                                return Ok(U256::from(MIN_TRANSACTION_GAS))
+                            }
                         }
-                        return Ok(U256::from(MIN_TRANSACTION_GAS))
                     }
                 }
             }
@@ -341,7 +344,7 @@ where
             };
 
             env.tx.gas_limit = mid_gas_limit;
-            let ethres = self.transact(&mut db, env);
+            let ethres = self.transact(&mut db, env.clone());
 
             // Exceptional case: init used too much gas, we need to increase the gas limit and try
             // again
@@ -351,20 +354,15 @@ where
             ) {
                 // increase the lowest gas limit
                 lowest_gas_limit = mid_gas_limit;
-
-                // new midpoint
-                mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
-                (_, env) = ethres?;
-                continue
+            } else {
+                (res, env) = ethres?;
+                update_estimated_gas_range(
+                    res.result,
+                    mid_gas_limit,
+                    &mut highest_gas_limit,
+                    &mut lowest_gas_limit,
+                )?;
             }
-
-            (res, env) = ethres?;
-            update_estimated_gas_range(
-                res.result,
-                mid_gas_limit,
-                &mut highest_gas_limit,
-                &mut lowest_gas_limit,
-            )?;
 
             // new midpoint
             mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;

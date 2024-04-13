@@ -30,7 +30,7 @@ pub fn calculate_next_block_base_fee(
     base_fee_params: crate::BaseFeeParams,
 ) -> u64 {
     // Calculate the target gas by dividing the gas limit by the elasticity multiplier.
-    let gas_target = gas_limit / base_fee_params.elasticity_multiplier;
+    let gas_target = gas_limit / base_fee_params.elasticity_multiplier as u64;
 
     match gas_used.cmp(&gas_target) {
         // If the gas used in the current block is equal to the gas target, the base fee remains the
@@ -45,7 +45,7 @@ pub fn calculate_next_block_base_fee(
                     // Ensure a minimum increase of 1.
                     1,
                     base_fee as u128 * (gas_used - gas_target) as u128 /
-                        (gas_target as u128 * base_fee_params.max_change_denominator as u128),
+                        (gas_target as u128 * base_fee_params.max_change_denominator),
                 ) as u64)
         }
         // If the gas used in the current block is less than the gas target, calculate a new
@@ -54,7 +54,7 @@ pub fn calculate_next_block_base_fee(
             // Calculate the decrease in base fee based on the formula defined by EIP-1559.
             base_fee.saturating_sub(
                 (base_fee as u128 * (gas_target - gas_used) as u128 /
-                    (gas_target as u128 * base_fee_params.max_change_denominator as u128))
+                    (gas_target as u128 * base_fee_params.max_change_denominator))
                     as u64,
             )
         }
@@ -64,6 +64,9 @@ pub fn calculate_next_block_base_fee(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "optimism")]
+    use crate::chain::{OP_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS};
 
     #[test]
     fn calculate_base_fee_success() {
@@ -124,7 +127,7 @@ mod tests {
                     gas_used[i],
                     gas_limit[i],
                     base_fee[i],
-                    crate::BaseFeeParams::optimism(),
+                    OP_BASE_FEE_PARAMS,
                 )
             );
         }
@@ -157,7 +160,7 @@ mod tests {
                     gas_used[i],
                     gas_limit[i],
                     base_fee[i],
-                    crate::BaseFeeParams::optimism_sepolia(),
+                    OP_SEPOLIA_BASE_FEE_PARAMS,
                 )
             );
         }

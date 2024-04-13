@@ -3,27 +3,37 @@
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
 use crate::{
-    components::{
-        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, LaunchNode,
-        NodeComponentsBuilder, PoolBuilder,
-    },
-    exex::{BoxedLaunchExEx, ExExContext},
+    components::{ComponentsBuilder, NodeComponents, NodeComponentsBuilder, PoolBuilder},
+    exex::BoxedLaunchExEx,
     hooks::NodeHooks,
     node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     DefaultLauncher, Node, NodeHandle,
+    LaunchNode,
 };
 use eyre::Context;
-use futures::Future;
-use reth_blockchain_tree::ShareableBlockchainTree;
+use futures::{future, future::Either, stream, stream_select, Future, StreamExt};
+use rayon::ThreadPoolBuilder;
+use reth_beacon_consensus::{
+    hooks::{EngineHooks, PruneHook, StaticFileHook},
+    BeaconConsensusEngine,
+};
+use reth_blockchain_tree::{
+    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+};
+use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
-use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle};
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
+use reth_exex::{ExExContext, ExExHandle, ExExManager};
+use reth_interfaces::p2p::either::EitherDownloader;
+use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
+use reth_node_api::{
+    FullNodeComponents, FullNodeComponentsAdapter, FullNodeTypes, FullNodeTypesAdapter, NodeTypes,
+};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
@@ -31,8 +41,11 @@ use reth_node_core::{
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
 };
-use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, ChainSpec};
-use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
+use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, format_ether, ChainSpec};
+use reth_provider::{
+    providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
+};
+use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::info;
@@ -415,7 +428,11 @@ where
     }
 
     /// Installs an ExEx (Execution Extension) in the node.
-    pub fn install_exex<F, R, E>(mut self, exex: F) -> Self
+    ///
+    /// # Note
+    ///
+    /// The ExEx ID must be unique.
+    pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
         F: Fn(
                 ExExContext<
@@ -430,7 +447,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.state.exexs.push(Box::new(exex));
+        self.state.exexs.push((exex_id.into(), Box::new(exex)));
         self
     }
 
@@ -767,6 +784,26 @@ where
         self
     }
 
+    /// Installs an ExEx (Execution Extension) in the node.
+    pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
+    where
+        F: Fn(
+                ExExContext<
+                    FullNodeComponentsAdapter<
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        Components::Pool,
+                    >,
+                >,
+            ) -> R
+            + Send
+            + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<()>> + Send,
+    {
+        self.builder.state.exexs.push((exex_id.into(), Box::new(exex)));
+        self
+    }
+
     /// Launches the node and returns a handle to it.
     pub async fn launch(
         self,
@@ -857,18 +894,8 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub config: NodeConfig,
     /// loaded config
     pub reth_config: reth_config::Config,
-}
-
-impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BuilderContext")
-            .field("head", &self.head)
-            .field("provider", &std::any::type_name::<Node::Provider>())
-            .field("executor", &self.executor)
-            .field("data_dir", &self.data_dir)
-            .field("config", &self.config)
-            .finish()
-    }
+    /// EVM config of the node
+    pub evm_config: Node::Evm,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -880,13 +907,19 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         data_dir: ChainPath<DataDirPath>,
         config: NodeConfig,
         reth_config: reth_config::Config,
+        evm_config: Node::Evm,
     ) -> Self {
-        Self { head, provider, executor, data_dir, config, reth_config }
+        Self { head, provider, executor, data_dir, config, reth_config, evm_config }
     }
 
     /// Returns the configured provider to interact with the blockchain.
     pub fn provider(&self) -> &Node::Provider {
         &self.provider
+    }
+
+    /// Returns the configured evm.
+    pub fn evm_config(&self) -> &Node::Evm {
+        &self.evm_config
     }
 
     /// Returns the current head of the blockchain at launch.
@@ -992,6 +1025,18 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 }
 
+impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BuilderContext")
+            .field("head", &self.head)
+            .field("provider", &std::any::type_name::<Node::Provider>())
+            .field("executor", &self.executor)
+            .field("data_dir", &self.data_dir)
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
 /// The initial state of the node builder process.
 #[derive(Debug, Default)]
 #[non_exhaustive]
@@ -1023,7 +1068,7 @@ pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
     /// Additional RPC hooks.
     pub rpc: RpcHooks<FullNode>,
     /// The ExExs (execution extensions) of the node.
-    pub exexs: Vec<Box<dyn BoxedLaunchExEx<FullNode>>>,
+    pub exexs: Vec<(String, Box<dyn BoxedLaunchExEx<FullNode>>)>,
 }
 
 impl<Types, Components, FullNode: FullNodeComponents> std::fmt::Debug

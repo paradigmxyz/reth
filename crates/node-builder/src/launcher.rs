@@ -3,14 +3,14 @@
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 use crate::{
     components::{
-        FullNodeComponentsAdapter, LaunchNode, NodeComponents, NodeComponentsBuilder, PoolBuilder,
+        NodeComponents, NodeComponentsBuilder, PoolBuilder,
     },
     hooks::NodeHooks,
     node::FullNode,
     BuilderContext, ComponentsState, Node, NodeHandle, RethFullAdapter, RethFullBuilderState,
 };
 use eyre::Context;
-use futures::{future::Either, stream, stream_select, StreamExt};
+use futures::{future::Either, stream, stream_select, Future, StreamExt};
 use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
@@ -24,6 +24,7 @@ use reth_db::{
 };
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
+use reth_node_api::FullNodeComponentsAdapter;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
@@ -44,6 +45,40 @@ use reth_tracing::tracing::{debug, error, info};
 use reth_transaction_pool::TransactionPool;
 use std::{cmp::max, sync::Arc, thread::available_parallelism};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
+
+/// Trait for launching the node.
+pub trait LaunchNode<DB, Types, Components>
+where
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    Types: Node<RethFullAdapter<DB, Types>>,
+    Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
+    Types::NetworkBuilder: crate::components::NetworkBuilder<
+        RethFullAdapter<DB, Types>,
+        <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
+    >,
+    Types::PayloadBuilder: crate::components::PayloadServiceBuilder<
+        RethFullAdapter<DB, Types>,
+        <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
+    >,
+    Components: NodeComponentsBuilder<RethFullAdapter<DB, Types>>,
+{
+    /// Launches the node and returns a handle to it.
+    ///
+    /// Returns a [NodeHandle] that can be used to interact with the node.
+    fn launch(
+        self,
+        config: NodeConfig,
+        state: RethFullBuilderState<DB, Types, Components>,
+        database: DB,
+        executor: TaskExecutor,
+        data_dir: ChainPath<DataDirPath>,
+        reth_config: reth_config::Config,
+    ) -> impl Future<
+        Output = eyre::Result<
+            NodeHandle<FullNodeComponentsAdapter<RethFullAdapter<DB, Types>, Components::Pool>>,
+        >,
+    >;
+}
 
 /// Type to launch a standard Ethereum node.
 #[derive(Default)]
@@ -146,7 +181,7 @@ genesis=?config.chain.genesis_hash(), "Initializing genesis");
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
 
-        let ctx = BuilderContext::new(head, blockchain_db, executor, data_dir, config, reth_config);
+        let ctx = BuilderContext::new(head, blockchain_db, executor, data_dir, config, reth_config, evm_config.clone());
 
         debug!(target: "reth::cli", "creating components");
         let NodeComponents { transaction_pool, network, payload_builder } =
