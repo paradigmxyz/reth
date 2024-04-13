@@ -6240,6 +6240,7 @@ dependencies = [
 name = "reth-codecs"
 version = "0.2.0-beta.5"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "arbitrary",
  "bytes",
