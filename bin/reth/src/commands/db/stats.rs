@@ -1,13 +1,24 @@
-use crate::utils::DbTool;
+use std::time::Duration;
+
+use crate::{commands::db::checksum::ChecksumViewer, utils::DbTool};
 use clap::Parser;
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
 use itertools::Itertools;
-use reth_db::{database::Database, mdbx, static_file::iter_static_files, DatabaseEnv, Tables};
+use reth_db::{
+    database::Database, mdbx, static_file::iter_static_files, AccountChangeSets, AccountsHistory,
+    AccountsTrie, BlockBodyIndices, BlockOmmers, BlockWithdrawals, Bytecodes, CanonicalHeaders,
+    DatabaseEnv, HashedAccounts, HashedStorages, HeaderNumbers, HeaderTerminalDifficulties,
+    Headers, PlainAccountState, PlainStorageState, PruneCheckpoints, Receipts,
+    StageCheckpointProgresses, StageCheckpoints, StorageChangeSets, StoragesHistory, StoragesTrie,
+    Tables, TransactionBlocks, TransactionHashNumbers, TransactionSenders, Transactions,
+    VersionHistory,
+};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
 use reth_provider::providers::StaticFileProvider;
+use tracing::info;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
@@ -15,9 +26,19 @@ pub struct Command {
     /// Show only the total size for static files.
     #[arg(long, default_value_t = false)]
     only_total_size: bool,
+
     /// Show only the summary per static file segment.
     #[arg(long, default_value_t = false)]
     summary: bool,
+
+    /// Show a checksum of each table in the database.
+    ///
+    /// WARNING: this option will take a long time to run, as it needs to traverse and hash the
+    /// entire database.
+    ///
+    /// For individual table checksums, use the `reth db checksum` command.
+    #[arg(long, default_value_t = false)]
+    checksum: bool,
 }
 
 impl Command {
@@ -27,6 +48,12 @@ impl Command {
         data_dir: ChainPath<DataDirPath>,
         tool: &DbTool<DatabaseEnv>,
     ) -> eyre::Result<()> {
+        if self.checksum {
+            let checksum_report = self.checksum_report(tool)?;
+            println!("{checksum_report}");
+            println!("\n");
+        }
+
         let static_files_stats_table = self.static_files_stats_table(data_dir)?;
         println!("{static_files_stats_table}");
 
@@ -281,6 +308,83 @@ impl Command {
         row.add_cell(Cell::new(human_bytes(
             (total_data_size + total_index_size + total_offsets_size + total_config_size) as f64,
         )));
+        table.add_row(row);
+
+        Ok(table)
+    }
+
+    fn checksum_report(&self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<ComfyTable> {
+        let mut table = ComfyTable::new();
+        table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+        table.set_header(vec![Cell::new("Table"), Cell::new("Checksum"), Cell::new("Elapsed")]);
+
+        let db_tables = Tables::ALL;
+        let mut total_elapsed = Duration::default();
+
+        for db_table in db_tables {
+            info!("Calculating checksum for table: {}", db_table);
+
+            let viewer = ChecksumViewer::new(tool);
+            let (checksum, elapsed) = match db_table {
+                Tables::AccountsHistory => viewer.get_checksum::<AccountsHistory>().unwrap(),
+                Tables::AccountChangeSets => viewer.get_checksum::<AccountChangeSets>().unwrap(),
+                Tables::AccountsTrie => viewer.get_checksum::<AccountsTrie>().unwrap(),
+                Tables::BlockBodyIndices => viewer.get_checksum::<BlockBodyIndices>().unwrap(),
+                Tables::BlockOmmers => viewer.get_checksum::<BlockOmmers>().unwrap(),
+                Tables::BlockWithdrawals => viewer.get_checksum::<BlockWithdrawals>().unwrap(),
+                Tables::Bytecodes => viewer.get_checksum::<Bytecodes>().unwrap(),
+                Tables::CanonicalHeaders => viewer.get_checksum::<CanonicalHeaders>().unwrap(),
+                Tables::HashedAccounts => viewer.get_checksum::<HashedAccounts>().unwrap(),
+                Tables::HashedStorages => viewer.get_checksum::<HashedStorages>().unwrap(),
+                Tables::HeaderNumbers => viewer.get_checksum::<HeaderNumbers>().unwrap(),
+                Tables::HeaderTerminalDifficulties => {
+                    viewer.get_checksum::<HeaderTerminalDifficulties>().unwrap()
+                }
+                Tables::Headers => viewer.get_checksum::<Headers>().unwrap(),
+                Tables::PlainAccountState => viewer.get_checksum::<PlainAccountState>().unwrap(),
+                Tables::PlainStorageState => viewer.get_checksum::<PlainStorageState>().unwrap(),
+                Tables::PruneCheckpoints => viewer.get_checksum::<PruneCheckpoints>().unwrap(),
+                Tables::Receipts => viewer.get_checksum::<Receipts>().unwrap(),
+                Tables::StageCheckpointProgresses => {
+                    viewer.get_checksum::<StageCheckpointProgresses>().unwrap()
+                }
+                Tables::StageCheckpoints => viewer.get_checksum::<StageCheckpoints>().unwrap(),
+                Tables::StorageChangeSets => viewer.get_checksum::<StorageChangeSets>().unwrap(),
+                Tables::StoragesHistory => viewer.get_checksum::<StoragesHistory>().unwrap(),
+                Tables::StoragesTrie => viewer.get_checksum::<StoragesTrie>().unwrap(),
+                Tables::TransactionBlocks => viewer.get_checksum::<TransactionBlocks>().unwrap(),
+                Tables::TransactionHashNumbers => {
+                    viewer.get_checksum::<TransactionHashNumbers>().unwrap()
+                }
+                Tables::TransactionSenders => viewer.get_checksum::<TransactionSenders>().unwrap(),
+                Tables::Transactions => viewer.get_checksum::<Transactions>().unwrap(),
+                Tables::VersionHistory => viewer.get_checksum::<VersionHistory>().unwrap(),
+            };
+
+            // increment duration for final report
+            total_elapsed += elapsed;
+
+            // add rows containing checksums to the table
+            let mut row = Row::new();
+            row.add_cell(Cell::new(db_table));
+            row.add_cell(Cell::new(format!("{:x}", checksum)));
+            row.add_cell(Cell::new(format!("{:?}", elapsed)));
+            table.add_row(row);
+        }
+
+        // add a separator for the final report
+        let max_widths = table.column_max_content_widths();
+        let mut separator = Row::new();
+        for width in max_widths {
+            separator.add_cell(Cell::new(&"-".repeat(width as usize)));
+        }
+        table.add_row(separator);
+
+        // add the final report
+        let mut row = Row::new();
+        row.add_cell(Cell::new("Total elapsed"));
+        row.add_cell(Cell::new(""));
+        row.add_cell(Cell::new(format!("{:?}", total_elapsed)));
         table.add_row(row);
 
         Ok(table)

@@ -1,4 +1,4 @@
-use reth_node_api::FullNodeTypes;
+use reth_node_api::FullNodeComponents;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
@@ -12,7 +12,7 @@ use crate::ExExEvent;
 
 /// Captures the context that an ExEx has access to.
 #[derive(Debug)]
-pub struct ExExContext<Node: FullNodeTypes> {
+pub struct ExExContext<Node: FullNodeComponents> {
     /// The current head of the blockchain at launch.
     pub head: Head,
     /// The configured provider to interact with the blockchain.
@@ -25,6 +25,8 @@ pub struct ExExContext<Node: FullNodeTypes> {
     pub config: NodeConfig,
     /// The loaded node config
     pub reth_config: reth_config::Config,
+    /// The transaction pool of the node.
+    pub pool: Node::Pool,
     /// Channel used to send [`ExExEvent`]s to the rest of the node.
     ///
     /// # Important

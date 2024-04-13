@@ -1,4 +1,5 @@
-use crate::{components::FullNodeComponents, node::FullNode};
+use crate::node::FullNode;
+use reth_node_api::FullNodeComponents;
 use reth_node_core::exit::NodeExitFuture;
 use std::fmt;
 

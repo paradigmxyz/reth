@@ -1732,7 +1732,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
             r#type: transaction.transaction.tx_type().into(),
         },
         transaction_hash: meta.tx_hash,
-        transaction_index: meta.index,
+        transaction_index: Some(meta.index),
         block_hash: Some(meta.block_hash),
         block_number: Some(meta.block_number),
         from,

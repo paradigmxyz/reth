@@ -14,13 +14,11 @@ pub use payload::*;
 pub use pool::*;
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
-pub use traits::*;
 
 mod builder;
 mod network;
 mod payload;
 mod pool;
-mod traits;
 
 /// All the components of the node.
 ///

@@ -1,11 +1,11 @@
 //! Types for launching execution extensions (ExEx).
-use crate::FullNodeTypes;
 use futures::{future::BoxFuture, FutureExt};
 use reth_exex::ExExContext;
+use reth_node_api::FullNodeComponents;
 use std::future::Future;
 
 /// A trait for launching an ExEx.
-trait LaunchExEx<Node: FullNodeTypes>: Send {
+trait LaunchExEx<Node: FullNodeComponents>: Send {
     /// Launches the ExEx.
     ///
     /// The ExEx should be able to run independently and emit events on the channels provided in
@@ -19,7 +19,7 @@ trait LaunchExEx<Node: FullNodeTypes>: Send {
 type BoxExEx = BoxFuture<'static, eyre::Result<()>>;
 
 /// A version of [LaunchExEx] that returns a boxed future. Makes the trait object-safe.
-pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
+pub(crate) trait BoxedLaunchExEx<Node: FullNodeComponents>: Send {
     fn launch(self: Box<Self>, ctx: ExExContext<Node>)
         -> BoxFuture<'static, eyre::Result<BoxExEx>>;
 }
@@ -30,7 +30,7 @@ pub(crate) trait BoxedLaunchExEx<Node: FullNodeTypes>: Send {
 impl<E, Node> BoxedLaunchExEx<Node> for E
 where
     E: LaunchExEx<Node> + Send + 'static,
-    Node: FullNodeTypes,
+    Node: FullNodeComponents,
 {
     fn launch(
         self: Box<Self>,
@@ -48,7 +48,7 @@ where
 /// resolving to an ExEx.
 impl<Node, F, Fut, E> LaunchExEx<Node> for F
 where
-    Node: FullNodeTypes,
+    Node: FullNodeComponents,
     F: FnOnce(ExExContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<E>> + Send,
     E: Future<Output = eyre::Result<()>> + Send,

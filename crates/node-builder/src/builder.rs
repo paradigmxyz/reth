@@ -3,10 +3,7 @@
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
 use crate::{
-    components::{
-        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, NodeComponents,
-        NodeComponentsBuilder, PoolBuilder,
-    },
+    components::{ComponentsBuilder, NodeComponents, NodeComponentsBuilder, PoolBuilder},
     exex::BoxedLaunchExEx,
     hooks::NodeHooks,
     node::FullNode,
@@ -33,7 +30,9 @@ use reth_db::{
 use reth_exex::{ExExContext, ExExHandle, ExExManager};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
+use reth_node_api::{
+    FullNodeComponents, FullNodeComponentsAdapter, FullNodeTypes, FullNodeTypesAdapter, NodeTypes,
+};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
@@ -611,6 +610,7 @@ where
                 data_dir: data_dir.clone(),
                 config: config.clone(),
                 reth_config: reth_config.clone(),
+                pool: transaction_pool.clone(),
                 events,
                 notifications,
             };
@@ -711,20 +711,20 @@ where
             )
             .build();
 
-            let mut pipeline = config
-                .build_networked_pipeline(
-                    &reth_config.stages,
-                    client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory.clone(),
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                    static_file_producer,
-                    evm_config,
-                )
-                .await?;
+            let mut pipeline = crate::setup::build_networked_pipeline(
+                &config,
+                &reth_config.stages,
+                client.clone(),
+                Arc::clone(&consensus),
+                provider_factory.clone(),
+                &executor,
+                sync_metrics_tx,
+                prune_config.clone(),
+                max_block,
+                static_file_producer,
+                evm_config,
+            )
+            .await?;
 
             let pipeline_events = pipeline.events();
             task.set_pipeline_events(pipeline_events);
@@ -733,20 +733,20 @@ where
 
             (pipeline, EitherDownloader::Left(client))
         } else {
-            let pipeline = config
-                .build_networked_pipeline(
-                    &reth_config.stages,
-                    network_client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory.clone(),
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                    static_file_producer,
-                    evm_config,
-                )
-                .await?;
+            let pipeline = crate::setup::build_networked_pipeline(
+                &config,
+                &reth_config.stages,
+                network_client.clone(),
+                Arc::clone(&consensus),
+                provider_factory.clone(),
+                &executor,
+                sync_metrics_tx,
+                prune_config.clone(),
+                max_block,
+                static_file_producer,
+                evm_config,
+            )
+            .await?;
 
             (pipeline, EitherDownloader::Right(network_client))
         };

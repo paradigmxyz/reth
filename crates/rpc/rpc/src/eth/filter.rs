@@ -349,11 +349,12 @@ where
     async fn logs_for_filter(&self, filter: Filter) -> Result<Vec<Log>, FilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
-                // all matching logs in the block
-                let block_number = self
+                // for all matching logs in the block
+                // get the block header with the hash
+                let block = self
                     .provider
-                    .block_number_for_id(block_hash.into())?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                    .header_by_hash_or_number(block_hash.into())?
+                    .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
 
                 // we also need to ensure that the receipts are available and return an error if
                 // not, in case the block hash been reorged
@@ -369,9 +370,10 @@ where
                     &mut all_logs,
                     &self.provider,
                     &filter,
-                    (block_hash, block_number).into(),
+                    (block_hash, block.number).into(),
                     &receipts,
                     false,
+                    block.timestamp,
                 )?;
 
                 Ok(all_logs)
@@ -440,7 +442,10 @@ where
             // only one block to check and it's the current best block which we can fetch directly
             // Note: In case of a reorg, the best block's hash might have changed, hence we only
             // return early of we were able to fetch the best block's receipts
-            if let Some(receipts) = self.eth_cache.get_receipts(chain_info.best_hash).await? {
+            // perf: we're fetching the best block here which is expected to be cached
+            if let Some((block, receipts)) =
+                self.eth_cache.get_block_and_receipts(chain_info.best_hash).await?
+            {
                 logs_utils::append_matching_block_logs(
                     &mut all_logs,
                     &self.provider,
@@ -448,6 +453,7 @@ where
                     chain_info.into(),
                     &receipts,
                     false,
+                    block.header.timestamp,
                 )?;
             }
             return Ok(all_logs)
@@ -476,7 +482,7 @@ where
                         None => self
                             .provider
                             .block_hash(header.number)?
-                            .ok_or(ProviderError::BlockNotFound(header.number.into()))?,
+                            .ok_or(ProviderError::HeaderNotFound(header.number.into()))?,
                     };
 
                     if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
@@ -487,6 +493,7 @@ where
                             BlockNumHash::new(header.number, block_hash),
                             &receipts,
                             false,
+                            header.timestamp,
                         )?;
 
                         // size check but only if range is multiple blocks, so we always return all
