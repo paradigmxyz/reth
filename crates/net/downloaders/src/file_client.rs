@@ -72,9 +72,9 @@ impl FileClient {
         let file_len = metadata.len();
 
         let mut reader = vec![];
-        file.read_buf(&mut reader).await.unwrap();
+        file.read_to_end(&mut reader).await.unwrap();
 
-        Ok(Self::from_reader(&vec![][..], file_len).await?.0)
+        Ok(Self::from_reader(&reader[..], file_len).await?.0)
     }
 
     /// Initialize the [`FileClient`] from bytes that have been read from file.
@@ -387,6 +387,7 @@ mod tests {
         test_utils::TestConsensus,
     };
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_tracing;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -449,6 +450,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_download_headers_from_file() {
+        reth_tracing::init_test_tracing();
+
         // Generate some random blocks
         let (file, headers, _) = generate_bodies_file(0..=19).await;
         // now try to read them back
