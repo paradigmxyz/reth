@@ -52,15 +52,11 @@ impl Consensus for BeaconConsensus {
         header: &Header,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
-        let mut is_post_merge;
+        let mut is_post_merge = self
+            .chain_spec
+            .fork(Hardfork::Paris)
+            .active_at_ttd(total_difficulty, header.difficulty);
 
-        #[cfg(not(feature = "optimism"))]
-        {
-            is_post_merge = self
-                .chain_spec
-                .fork(Hardfork::Paris)
-                .active_at_ttd(total_difficulty, header.difficulty);
-        }
         #[cfg(feature = "optimism")]
         {
             // If OP-Stack then bedrock activation number determines when TTD (eth Merge) has been
