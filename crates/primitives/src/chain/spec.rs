@@ -3189,4 +3189,10 @@ Post-merge hard forks (timestamp based):
             BASE_MAINNET.latest_fork_id()
         )
     }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn is_bedrock_active() {
+        assert!(!OP_MAINNET.is_bedrock_active_at_block(1))
+    }
 }
