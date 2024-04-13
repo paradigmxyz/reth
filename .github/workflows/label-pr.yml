@@ -7,6 +7,8 @@ on:
 jobs:
   label_prs:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     steps:
       - name: Label PRs
         uses: actions/github-script@v7
