@@ -632,6 +632,12 @@ impl ChainSpec {
         self.chain.is_optimism()
     }
 
+    /// Returns `true` if this chain is Optimism mainnet.
+    #[inline]
+    pub fn is_optimism_mainnet(&self) -> bool {
+        self.chain == Chain::optimism_mainnet()
+    }
+
     /// Get the genesis block specification.
     ///
     /// To get the header for the genesis block, use [`Self::genesis_header`] instead.
@@ -835,6 +841,13 @@ impl ChainSpec {
     #[inline]
     pub fn is_homestead_active_at_block(&self, block_number: u64) -> bool {
         self.fork(Hardfork::Homestead).active_at_block(block_number)
+    }
+
+    /// Convenience method to check if [Hardfork::Bedrock] is active at a given block number.
+    #[cfg(feature = "optimism")]
+    #[inline]
+    pub fn is_bedrock_active_at_block(&self, block_number: u64) -> bool {
+        self.fork(Hardfork::Bedrock).active_at_block(block_number)
     }
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
