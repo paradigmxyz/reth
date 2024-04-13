@@ -77,10 +77,6 @@ pub struct ImportCommand {
     #[arg(long, verbatim_doc_comment, env = OP_RETH_MAINNET_BELOW_BEDROCK)]
     op_mainnet_below_bedrock: bool,
 
-    /// Chunk import.
-    #[arg(long, verbatim_doc_comment)]
-    chunk: bool,
-
     /// Chunk byte length.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
@@ -110,15 +106,9 @@ impl ImportCommand {
             debug!(target: "reth::cli", "Execution stage disabled");
         }
 
-        if self.chunk_len.is_some() {
-            self.chunk = true;
-        }
-
-        if self.chunk {
-            debug!(target: "reth::cli",
-                chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE), "Chunking chain import"
-            );
-        }
+        debug!(target: "reth::cli",
+            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE), "Chunking chain import"
+        );
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
@@ -148,12 +138,12 @@ impl ImportCommand {
         while let Some(file_client) = reader.next_chunk().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
-                "Importing chain file {}", if self.chunk { "chunk" } else { "" }
+                "Importing chain file chunk"
             );
 
             // override the tip
             let tip = file_client.tip().expect("file client has no tip");
-            info!(target: "reth::cli", "Chain file {} read", if self.chunk { "chunk" } else { "" });
+            info!(target: "reth::cli", "Chain file chunk read");
 
             let (mut pipeline, events) = self
                 .build_import_pipeline(
