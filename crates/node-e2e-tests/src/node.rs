@@ -3,28 +3,19 @@ use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use reth::{
     api::FullNodeComponents,
-    blockchain_tree::ShareableBlockchainTree,
-    builder::{FullNode, FullNodeComponentsAdapter, FullNodeTypesAdapter, NodeBuilder, NodeHandle},
-    providers::{providers::BlockchainProvider, BlockReaderIdExt, CanonStateSubscriptions},
-    revm::EvmProcessorFactory,
+    builder::FullNode,
+    providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
         eth::{error::EthResult, EthTransactions},
         types::engine::PayloadAttributes,
     },
-    transaction_pool::{
-        blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPooledTransaction,
-        EthTransactionValidator, Pool, TransactionValidationTaskExecutor,
-    },
 };
-use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthereumNode};
+
+use reth_node_ethereum::EthEngineTypes;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_primitives::{Address, Bytes, B256};
 
-use std::{
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_stream::StreamExt;
 
 /// An helper struct to handle node actions
@@ -132,35 +123,3 @@ pub fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
     };
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
-
-type TestNode = FullNode<
-    FullNodeComponentsAdapter<
-        FullNodeTypesAdapter<
-            EthereumNode,
-            Arc<TempDatabase<DatabaseEnv>>,
-            BlockchainProvider<
-                Arc<TempDatabase<DatabaseEnv>>,
-                ShareableBlockchainTree<
-                    Arc<TempDatabase<DatabaseEnv>>,
-                    EvmProcessorFactory<EthEvmConfig>,
-                >,
-            >,
-        >,
-        Pool<
-            TransactionValidationTaskExecutor<
-                EthTransactionValidator<
-                    BlockchainProvider<
-                        Arc<TempDatabase<DatabaseEnv>>,
-                        ShareableBlockchainTree<
-                            Arc<TempDatabase<DatabaseEnv>>,
-                            EvmProcessorFactory<EthEvmConfig>,
-                        >,
-                    >,
-                    EthPooledTransaction,
-                >,
-            >,
-            CoinbaseTipOrdering<EthPooledTransaction>,
-            DiskFileBlobStore,
-        >,
-    >,
->;

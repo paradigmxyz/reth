@@ -3,9 +3,10 @@ use std::sync::Arc;
 use node_e2e_tests::{node::NodeHelper, wallet::Wallet};
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
-    builder::NodeConfig,
+    builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
+use reth_node_ethereum::EthereumNode;
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 
 #[tokio::test]
@@ -35,8 +36,15 @@ async fn can_sync() -> eyre::Result<()> {
         .with_unused_ports()
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
 
-    let mut first_node = NodeHelper::new(node_config.clone(), exec.clone()).await?;
-    let mut second_node = NodeHelper::new(node_config, exec).await?;
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(exec)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    let mut first_node = NodeHelper::new(node.clone()).await?;
+
+    let mut second_node = NodeHelper::new(node).await?;
 
     let wallet = Wallet::default();
     let raw_tx = wallet.transfer_tx().await;
