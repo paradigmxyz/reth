@@ -127,6 +127,8 @@ pub struct ExExManagerMetrics {
     ///
     /// Note that this might be slightly bigger than the maximum capacity in some cases.
     buffer_size: Gauge,
+    /// Current number of ExEx's on the node.
+    num_exexs: Gauge,
 }
 
 /// The execution extension manager.
@@ -200,6 +202,7 @@ impl ExExManager {
 
         let metrics = ExExManagerMetrics::default();
         metrics.max_capacity.set(max_capacity as f64);
+        metrics.num_exexs.set(num_exexs as f64);
 
         Self {
             exex_handles: handles,
