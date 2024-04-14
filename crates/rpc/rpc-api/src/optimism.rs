@@ -1,9 +1,7 @@
 #![allow(missing_docs)]
 #![allow(unreachable_pub)]
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{
-    Address, BlockHash, BlockId, BlockNumber, ChainId, Genesis, B256, U256, U64,
-};
+use reth_primitives::{Address, BlockId, BlockNumber, ChainId, Genesis, B256, U256, U64};
 use reth_rpc_types::BlockNumberOrTag;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::IpAddr, time::Duration};
@@ -14,9 +12,9 @@ use std::{collections::HashMap, net::IpAddr, time::Duration};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct L2BlockRef {
-    pub hash: BlockHash,
+    pub hash: B256,
     pub number: BlockNumber,
-    pub parent_hash: BlockHash,
+    pub parent_hash: B256,
     pub timestamp: U64,
     pub l1origin: BlockId,
     pub sequence_number: u64,
@@ -26,32 +24,24 @@ pub struct L2BlockRef {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct L1BlockRef {
-    pub hash: BlockHash,
+    pub hash: B256,
     pub number: BlockNumber,
-    pub parent_hash: BlockHash,
+    pub parent_hash: B256,
     pub timestamp: U64,
 }
-
-// #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-// pub struct BlockDescriptor {
-//     pub hash: BlockHash,
-//     pub number: U256,
-//     pub parent_hash: BlockHash,
-//     pub timestamp: U64,
-// }
 
 /// https://github.com/ethereum-optimism/optimism/blob/develop/op-service/eth/sync_status.go#L5
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncStatus {
-    current_l1: L1BlockRef,
-    current_l1_finalized: L1BlockRef,
-    head_l1: L1BlockRef,
-    safe_l1: L1BlockRef,
-    finalized_l1: L1BlockRef,
-    unsafe_l2: L2BlockRef,
-    safe_l2: L2BlockRef,
-    finalized_l2: L2BlockRef,
-    pending_safe_l2: L2BlockRef,
+    pub current_l1: L1BlockRef,
+    pub current_l1_finalized: L1BlockRef,
+    pub head_l1: L1BlockRef,
+    pub safe_l1: L1BlockRef,
+    pub finalized_l1: L1BlockRef,
+    pub unsafe_l2: L2BlockRef,
+    pub safe_l2: L2BlockRef,
+    pub finalized_l2: L2BlockRef,
+    pub pending_safe_l2: L2BlockRef,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,7 +135,7 @@ pub struct PeerScores {
     pub req_resp: ReqRespScores,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PeerInfo {
     pub peer_id: String,
@@ -164,28 +154,7 @@ pub struct PeerInfo {
     pub peer_scores: PeerScores,
 }
 
-impl Clone for PeerInfo {
-    fn clone(&self) -> Self {
-        Self {
-            peer_id: self.peer_id.clone(),
-            node_id: self.node_id.clone(),
-            user_agent: self.user_agent.clone(),
-            protocol_version: self.protocol_version.clone(),
-            enr: self.enr.clone(),
-            addresses: self.addresses.clone(),
-            protocols: self.protocols.clone(),
-            connectedness: self.connectedness.clone(),
-            direction: self.direction.clone(),
-            protected: self.protected,
-            chain_id: self.chain_id,
-            latency: self.latency,
-            gossip_blocks: self.gossip_blocks,
-            peer_scores: self.peer_scores.clone(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PeerDump {
     pub total_connected: u32,
@@ -194,18 +163,6 @@ pub struct PeerDump {
     pub banned_ips: Vec<IpAddr>,
     // todo: should be IPNet
     pub banned_subnets: Vec<IpAddr>,
-}
-
-impl Clone for PeerDump {
-    fn clone(&self) -> Self {
-        Self {
-            total_connected: self.total_connected,
-            peers: self.peers.clone(),
-            banned_peers: self.banned_peers.clone(),
-            banned_ips: self.banned_ips.clone(),
-            banned_subnets: self.banned_subnets.clone(),
-        }
-    }
 }
 
 /// Optimism specified rpc interface.
