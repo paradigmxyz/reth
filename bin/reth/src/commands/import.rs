@@ -192,8 +192,8 @@ impl ImportCommand {
         let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
             .build(file_client.clone(), consensus.clone())
             .into_task();
-        header_downloader.update_local_head(file_client.tip_header().unwrap());
-        header_downloader.update_sync_target(SyncTarget::Tip(file_client.start().unwrap()));
+        header_downloader.update_local_head(file_client.start_header().unwrap());
+        header_downloader.update_sync_target(SyncTarget::Tip(file_client.tip().unwrap()));
 
         let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
             .build(file_client.clone(), consensus.clone(), provider_factory.clone())
