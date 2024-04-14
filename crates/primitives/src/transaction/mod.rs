@@ -652,7 +652,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                     to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
                     value: tx.value,
                     input: tx.input,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
                 }))
             }
@@ -673,7 +673,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
                     to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
                     value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     input: tx.input,
                 }))
             }
@@ -694,7 +694,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
                     to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
                     value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     input: tx.input,
                     blob_versioned_hashes: tx
                         .blob_versioned_hashes
