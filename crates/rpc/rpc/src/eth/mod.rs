@@ -12,7 +12,7 @@ mod pubsub;
 pub mod revm_utils;
 mod signer;
 pub mod traits;
-pub(crate) mod utils;
+pub mod utils;
 
 #[cfg(feature = "optimism")]
 pub mod optimism;

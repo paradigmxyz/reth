@@ -6,9 +6,7 @@ use reth_primitives::{Bytes, PooledTransactionsElement, PooledTransactionsElemen
 /// Recovers a [PooledTransactionsElementEcRecovered] from an enveloped encoded byte stream.
 ///
 /// See [PooledTransactionsElement::decode_enveloped]
-pub(crate) fn recover_raw_transaction(
-    data: Bytes,
-) -> EthResult<PooledTransactionsElementEcRecovered> {
+pub fn recover_raw_transaction(data: Bytes) -> EthResult<PooledTransactionsElementEcRecovered> {
     if data.is_empty() {
         return Err(EthApiError::EmptyRawTransactionData)
     }

@@ -2,11 +2,9 @@ use crate::{engine_api::EngineApiHelper, network::NetworkHelper, payload::Payloa
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use reth::{
+    api::FullNodeComponentsAdapter,
     blockchain_tree::ShareableBlockchainTree,
-    builder::{
-        components::FullNodeComponentsAdapter, FullNode, FullNodeTypesAdapter, NodeBuilder,
-        NodeHandle,
-    },
+    builder::{FullNode, FullNodeTypesAdapter, NodeBuilder, NodeHandle},
     providers::{providers::BlockchainProvider, BlockReaderIdExt, CanonStateSubscriptions},
     revm::EvmProcessorFactory,
     rpc::{
@@ -106,8 +104,10 @@ impl NodeHelper {
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
         let head = self.engine_api.canonical_stream.next().await.unwrap();
-        let tx = head.tip().transactions().next();
-        assert_eq!(tx.unwrap().hash().as_slice(), tip_tx_hash.as_slice());
+        let tx = head.tip().transactions().next().unwrap();
+        let new_tx = tx.as_eip4844().unwrap();
+        println!("tx: {:?}", new_tx);
+        assert_eq!(tx.hash().as_slice(), tip_tx_hash.as_slice());
 
         // wait for the block to commit
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
