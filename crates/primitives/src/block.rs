@@ -604,6 +604,12 @@ impl BlockBody {
     }
 }
 
+impl From<Block> for BlockBody {
+    fn from(block: Block) -> Self {
+        Self { transactions: block.body, ommers: block.ommers, withdrawals: block.withdrawals }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{BlockNumberOrTag::*, *};
