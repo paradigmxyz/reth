@@ -1,12 +1,12 @@
-use crate::{primitives::hex, utils::DbTool};
+use crate::{
+    commands::db::get::{maybe_json_value_parser, table_key},
+    utils::DbTool,
+};
 use ahash::AHasher;
 use clap::Parser;
 use reth_db::{
-    cursor::DbCursorRO,
-    database::Database,
-    table::{Decode, Table},
-    transaction::DbTx,
-    DatabaseEnv, RawKey, RawTable, RawValue, TableViewer, Tables,
+    cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, DatabaseEnv, RawKey,
+    RawTable, RawValue, TableViewer, Tables,
 };
 use std::{
     hash::Hasher,
@@ -21,31 +21,31 @@ pub struct Command {
     table: Tables,
 
     /// start of range
-    #[arg(long, verbatim_doc_comment)]
-    start: Option<String>,
+    #[arg(long, value_parser = maybe_json_value_parser)]
+    start_key: Option<String>,
 
     /// end of range
-    #[arg(long, verbatim_doc_comment)]
-    end: Option<String>,
+    #[arg(long, value_parser = maybe_json_value_parser)]
+    end_key: Option<String>,
 }
 
 impl Command {
     /// Execute `db checksum` command
     pub fn execute(self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<()> {
         warn!("This command should be run without the node running!");
-        self.table.view(&ChecksumViewer { tool, start: self.start, end: self.end })
+        self.table.view(&ChecksumViewer { tool, start_key: self.start_key, end_key: self.end_key })
     }
 }
 
 pub(crate) struct ChecksumViewer<'a, DB: Database> {
     tool: &'a DbTool<DB>,
-    start: Option<String>,
-    end: Option<String>,
+    start_key: Option<String>,
+    end_key: Option<String>,
 }
 
 impl<DB: Database> ChecksumViewer<'_, DB> {
     pub(crate) fn new(tool: &'_ DbTool<DB>) -> ChecksumViewer<'_, DB> {
-        ChecksumViewer { tool, start: None, end: None }
+        ChecksumViewer { tool, start_key: None, end_key: None }
     }
 
     pub(crate) fn get_checksum<T: Table>(&self) -> Result<(u64, Duration), eyre::Report> {
@@ -54,33 +54,22 @@ impl<DB: Database> ChecksumViewer<'_, DB> {
         let tx = provider.tx_ref();
 
         let mut cursor = tx.cursor_read::<RawTable<T>>()?;
-        let walker = match (self.start.as_deref(), self.end.as_deref()) {
+        let walker = match (self.start_key.as_deref(), self.end_key.as_deref()) {
             (Some(start), Some(end)) => {
                 info!("start={start} \n end={end}");
-                let start = hex::decode(start).map_err(|s| eyre::eyre!(s.to_string()))?;
-                let start_key = RawKey::<T::Key>::decode(start)
-                    .map_err(|_| eyre::eyre!("Invalid start key"))?;
-
-                let end = hex::decode(end).map_err(|_| eyre::eyre!("Invalid end key"))?;
-                let end_key =
-                    RawKey::<T::Key>::decode(end).map_err(|_| eyre::eyre!("Invalid end key"))?;
-
+                let start_key = table_key::<T>(start).map(RawKey::<T::Key>::new)?;
+                let end_key = table_key::<T>(end).map(RawKey::<T::Key>::new)?;
                 cursor.walk_range(start_key..=end_key)?
             }
             (None, Some(end)) => {
                 info!("start=.. \n end={end}");
-                let end = hex::decode(end).map_err(|_| eyre::eyre!("Invalid end key"))?;
-                let end_key =
-                    RawKey::<T::Key>::decode(end).map_err(|_| eyre::eyre!("Invalid end key"))?;
+                let end_key = table_key::<T>(end).map(RawKey::<T::Key>::new)?;
 
                 cursor.walk_range(..=end_key)?
             }
             (Some(start), None) => {
                 info!("start={start} \n end= ");
-                let start = hex::decode(start).map_err(|s| eyre::eyre!(s.to_string()))?;
-                let start_key =
-                    RawKey::<T::Key>::decode(start).map_err(|e| eyre::eyre!(e.to_string()))?;
-
+                let start_key = table_key::<T>(start).map(RawKey::<T::Key>::new)?;
                 cursor.walk_range(start_key..)?
             }
             (None, None) => cursor.walk_range(..)?,
