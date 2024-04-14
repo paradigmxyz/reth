@@ -2,6 +2,7 @@ use crate::{engine_api::EngineApiHelper, network::NetworkHelper, payload::Payloa
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use reth::{
+    api::FullNodeComponents,
     blockchain_tree::ShareableBlockchainTree,
     builder::{FullNode, FullNodeComponentsAdapter, FullNodeTypesAdapter, NodeBuilder, NodeHandle},
     providers::{providers::BlockchainProvider, BlockReaderIdExt, CanonStateSubscriptions},
@@ -17,8 +18,7 @@ use reth::{
     },
 };
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-use reth_node_core::node_config::NodeConfig;
-use reth_node_ethereum::{EthEvmConfig, EthereumNode};
+use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthereumNode};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_primitives::{Address, Bytes, B256};
 
@@ -29,26 +29,22 @@ use std::{
 use tokio_stream::StreamExt;
 
 /// An helper struct to handle node actions
-pub struct NodeHelper {
-    pub inner: TestNode,
-    payload: PayloadHelper,
+pub struct NodeHelper<Node: FullNodeComponents> {
+    pub inner: FullNode<Node>,
+    payload: PayloadHelper<EthEngineTypes>,
     pub network: NetworkHelper,
     pub engine_api: EngineApiHelper,
 }
 
-impl NodeHelper {
+impl<Node: FullNodeComponents> NodeHelper<Node> {
     /// Creates a new test node
-    pub async fn new(node_config: NodeConfig, task_exec: TaskExecutor) -> eyre::Result<Self> {
-        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-            .testing_node(task_exec)
-            .node(EthereumNode::default())
-            .launch()
-            .await?;
+    pub async fn new(node: FullNode<Node>, task_exec: TaskExecutor) -> eyre::Result<Self> {
+        let builder = node.payload_builder.clone();
 
         Ok(Self {
             inner: node.clone(),
             network: NetworkHelper::new(node.network.clone()),
-            payload: PayloadHelper::new(node.payload_builder.clone()).await?,
+            payload: PayloadHelper::new(builder).await?,
             engine_api: EngineApiHelper {
                 engine_api_client: node.auth_server_handle().http_client(),
                 canonical_stream: node.provider.canonical_state_stream(),

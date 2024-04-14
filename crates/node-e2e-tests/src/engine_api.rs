@@ -18,11 +18,12 @@ pub struct EngineApiHelper {
 
 impl EngineApiHelper {
     /// Retrieves a v3 payload from the engine api
-    pub async fn get_payload_v3(&self, payload_id: PayloadId) -> eyre::Result<()> {
-        let _ =
-            EngineApiClient::<EthEngineTypes>::get_payload_v3(&self.engine_api_client, payload_id)
-                .await?;
-        Ok(())
+    pub async fn get_payload_v3(
+        &self,
+        payload_id: PayloadId,
+    ) -> eyre::Result<ExecutionPayloadEnvelopeV3> {
+        Ok(EngineApiClient::<EthEngineTypes>::get_payload_v3(&self.engine_api_client, payload_id)
+            .await?)
     }
 
     /// Submits a payload to the engine api
