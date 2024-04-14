@@ -36,13 +36,19 @@ async fn can_sync() -> eyre::Result<()> {
         .with_unused_ports()
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
 
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(exec)
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
+        .testing_node(exec.clone())
         .node(EthereumNode::default())
         .launch()
         .await?;
 
     let mut first_node = NodeHelper::new(node.clone()).await?;
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(exec)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
 
     let mut second_node = NodeHelper::new(node).await?;
 
