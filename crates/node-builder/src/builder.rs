@@ -627,7 +627,10 @@ where
                 // spawn it as a crit task
                 executor.spawn_critical("exex", async move {
                     info!(target: "reth::cli", id, "ExEx started");
-                    exex.await.unwrap_or_else(|_| panic!("exex {} crashed", id))
+                    match exex.await {
+                        Ok(_) => panic!("ExEx {id} finished. ExEx's should run indefinitely"),
+                        Err(err) => panic!("ExEx {id} crashed: {err}"),
+                    }
                 });
             });
         }
