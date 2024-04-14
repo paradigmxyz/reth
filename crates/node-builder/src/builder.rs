@@ -628,7 +628,7 @@ where
                 executor.spawn_critical("exex", async move {
                     info!(target: "reth::cli", id, "ExEx started");
                     match exex.await {
-                        Ok(_) => panic!("ExEx {id} finished"),
+                        Ok(_) => panic!("ExEx {id} finished. ExEx's should run indefinitely"),
                         Err(err) => panic!("ExEx {id} crashed: {err}"),
                     }
                 });
