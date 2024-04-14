@@ -3,10 +3,7 @@ use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use reth::{
     blockchain_tree::ShareableBlockchainTree,
-    builder::{
-        components::FullNodeComponentsAdapter, FullNode, FullNodeTypesAdapter, NodeBuilder,
-        NodeHandle,
-    },
+    builder::{FullNode, FullNodeComponentsAdapter, FullNodeTypesAdapter, NodeBuilder, NodeHandle},
     providers::{providers::BlockchainProvider, BlockReaderIdExt, CanonStateSubscriptions},
     revm::EvmProcessorFactory,
     rpc::{
