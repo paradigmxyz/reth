@@ -11,7 +11,6 @@ use reth::{
         eth::{error::EthResult, EthTransactions},
         types::engine::PayloadAttributes,
     },
-    tasks::TaskExecutor,
     transaction_pool::{
         blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPooledTransaction,
         EthTransactionValidator, Pool, TransactionValidationTaskExecutor,
@@ -29,16 +28,22 @@ use std::{
 use tokio_stream::StreamExt;
 
 /// An helper struct to handle node actions
-pub struct NodeHelper<Node: FullNodeComponents> {
+pub struct NodeHelper<Node>
+where
+    Node: FullNodeComponents<Engine = EthEngineTypes>,
+{
     pub inner: FullNode<Node>,
-    payload: PayloadHelper<EthEngineTypes>,
+    payload: PayloadHelper<Node::Engine>,
     pub network: NetworkHelper,
     pub engine_api: EngineApiHelper,
 }
 
-impl<Node: FullNodeComponents> NodeHelper<Node> {
+impl<Node> NodeHelper<Node>
+where
+    Node: FullNodeComponents<Engine = EthEngineTypes>,
+{
     /// Creates a new test node
-    pub async fn new(node: FullNode<Node>, task_exec: TaskExecutor) -> eyre::Result<Self> {
+    pub async fn new(node: FullNode<Node>) -> eyre::Result<Self> {
         let builder = node.payload_builder.clone();
 
         Ok(Self {

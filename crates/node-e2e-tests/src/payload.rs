@@ -5,9 +5,12 @@ use reth::{
     api::{BuiltPayload, EngineTypes, PayloadBuilderAttributes},
     rpc::types::engine::PayloadAttributes,
 };
+use reth_node_ethereum::EthEngineTypes;
 use reth_payload_builder::{EthPayloadBuilderAttributes, Events, PayloadBuilderHandle, PayloadId};
 use reth_primitives::{Address, B256};
 use tokio_stream::wrappers::BroadcastStream;
+
+impl PayloadHelper<EthEngineTypes> {}
 
 /// Helper for payload operations
 pub struct PayloadHelper<E: EngineTypes + 'static> {
@@ -25,7 +28,7 @@ impl<E: EngineTypes> PayloadHelper<E> {
 
     /// Creates a new payload job from static attributes
     pub async fn new_payload(&self) -> eyre::Result<E::PayloadBuilderAttributes> {
-        let attributes = eth_payload_attributes();
+        let attributes = eth_payload_attributes::<E::PayloadAttributes>();
         self.payload_builder.new_payload(attributes.clone()).await.unwrap();
         Ok(attributes)
     }
@@ -68,7 +71,9 @@ impl<E: EngineTypes> PayloadHelper<E> {
 }
 
 /// Helper function to create a new eth payload attributes
-fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
+fn eth_payload_attributes<
+    Attrs: PayloadBuilderAttributes<RpcPayloadAttributes = PayloadAttributes>,
+>() -> Attrs {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     let attributes = PayloadAttributes {
@@ -78,5 +83,5 @@ fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
     };
-    EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
+    Attrs::try_new(B256::ZERO, attributes).unwrap()
 }
