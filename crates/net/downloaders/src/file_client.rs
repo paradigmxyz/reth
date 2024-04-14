@@ -8,7 +8,8 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId,
+    SealedHeader, B256,
 };
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;
@@ -119,9 +120,31 @@ impl FileClient {
         self.headers.get(&((self.headers.len() - 1) as u64)).map(|h| h.hash_slow())
     }
 
+    /// Get the start hash of the chain.
+    pub fn start(&self) -> Option<B256> {
+        self.headers.get(&self.min_block()?).map(|h| h.hash_slow())
+    }
+
     /// Returns the highest block number of this client has or `None` if empty
     pub fn max_block(&self) -> Option<u64> {
         self.headers.keys().max().copied()
+    }
+
+    /// Returns the lowest block number of this client has or `None` if empty
+    pub fn min_block(&self) -> Option<u64> {
+        self.headers.keys().min().copied()
+    }
+
+    /// Clones and returns the highest header of this client has or `None` if empty. Seals header
+    /// before returning.
+    pub fn tip_header(&self) -> Option<SealedHeader> {
+        self.headers.get(&self.max_block()?).map(|h| h.clone().seal_slow())
+    }
+
+    /// Clones and returns the lowest header of this client has or `None` if empty. Seals header
+    /// before returning.
+    pub fn start_header(&self) -> Option<SealedHeader> {
+        self.headers.get(&self.min_block()?).map(|h| h.clone().seal_slow())
     }
 
     /// Returns true if all blocks are canonical (no gaps)
@@ -264,7 +287,6 @@ mod tests {
         },
         test_utils::TestConsensus,
     };
-    use reth_primitives::SealedHeader;
     use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
 

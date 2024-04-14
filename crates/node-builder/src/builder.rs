@@ -3,10 +3,7 @@
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
 use crate::{
-    components::{
-        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, NodeComponents,
-        NodeComponentsBuilder, PoolBuilder,
-    },
+    components::{ComponentsBuilder, NodeComponents, NodeComponentsBuilder, PoolBuilder},
     exex::BoxedLaunchExEx,
     hooks::NodeHooks,
     node::FullNode,
@@ -33,7 +30,9 @@ use reth_db::{
 use reth_exex::{ExExContext, ExExHandle, ExExManager};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
+use reth_node_api::{
+    FullNodeComponents, FullNodeComponentsAdapter, FullNodeTypes, FullNodeTypesAdapter, NodeTypes,
+};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
@@ -611,6 +610,7 @@ where
                 data_dir: data_dir.clone(),
                 config: config.clone(),
                 reth_config: reth_config.clone(),
+                pool: transaction_pool.clone(),
                 events,
                 notifications,
             };
@@ -627,7 +627,10 @@ where
                 // spawn it as a crit task
                 executor.spawn_critical("exex", async move {
                     info!(target: "reth::cli", id, "ExEx started");
-                    exex.await.unwrap_or_else(|_| panic!("exex {} crashed", id))
+                    match exex.await {
+                        Ok(_) => panic!("ExEx {id} finished. ExEx's should run indefinitely"),
+                        Err(err) => panic!("ExEx {id} crashed: {err}"),
+                    }
                 });
             });
         }

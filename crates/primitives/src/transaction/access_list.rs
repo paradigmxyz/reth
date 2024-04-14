@@ -173,3 +173,30 @@ impl From<AccessList> for reth_rpc_types::AccessList {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use proptest::proptest;
+
+    proptest!(
+        #[test]
+        fn test_roundtrip_accesslist_conversion(access_list: AccessList) {
+            // Convert access_list to buffer and then create alloy_access_list from buffer and
+            // compare
+            let mut compacted_access_list = Vec::<u8>::new();
+            let len = access_list.clone().to_compact(&mut compacted_access_list);
+
+            let alloy_access_list = AccessList::from_compact(&compacted_access_list, len).0;
+            assert_eq!(access_list, alloy_access_list);
+
+            // Create alloy_access_list from access_list and then convert it to buffer and compare
+            // compacted_alloy_access_list and compacted_access_list
+            let alloy_access_list = AccessList(access_list.0);
+            let mut compacted_alloy_access_list = Vec::<u8>::new();
+            let _len = alloy_access_list.to_compact(&mut compacted_alloy_access_list);
+            assert_eq!(compacted_access_list, compacted_alloy_access_list);
+        }
+    );
+}

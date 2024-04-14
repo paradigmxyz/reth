@@ -1,5 +1,5 @@
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_interfaces::provider::ProviderResult;
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     keccak256, revm::config::revm_spec, trie::AccountProof, Account, Address, BlockNumber,
     Bytecode, Bytes, ChainSpec, Head, Header, StorageKey, Transaction, B256, U256,
