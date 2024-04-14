@@ -25,7 +25,7 @@ pub const OPSTACK: &[u8] = b"opstack";
 const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 60;
 
 /// Optimism mainnet and base mainnet boot nodes.
-/// Added from https://github.com/ethereum-optimism/op-geth/blob/v1.101311.0/params/bootnodes.go
+/// Added from <https://github.com/ethereum-optimism/op-geth/blob/v1.101311.0/params/bootnodes.go>
 const BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET: &[&str] = &[
     // OP Labs
     "enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305",
