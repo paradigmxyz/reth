@@ -1491,9 +1491,9 @@ impl TransactionSigned {
 
     /// Decodes the "raw" format of transaction (similar to `eth_sendRawTransaction`).
     ///
-    /// This should be used for any RPC method that accepts a raw transaction, **excluding** raw
-    /// EIP-4844 transactions in `eth_sendRawTransaction`. Currently, this includes:
-    /// * `eth_sendRawTransaction` for non-EIP-4844 transactions.
+    /// This should be used for any RPC method that accepts a raw transaction.
+    /// Currently, this includes:
+    /// * `eth_sendRawTransaction`.
     /// * All versions of `engine_newPayload`, in the `transactions` field.
     ///
     /// A raw transaction is either a legacy transaction or EIP-2718 typed transaction.
@@ -1503,9 +1503,6 @@ impl TransactionSigned {
     ///
     /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
     /// followed by the rlp of the transaction: `type || rlp(tx-data)`.
-    ///
-    /// To decode EIP-4844 transactions from `eth_sendRawTransaction`, use
-    /// [PooledTransactionsElement::decode_enveloped].
     pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if data.is_empty() {
             return Err(RlpError::InputTooShort)
