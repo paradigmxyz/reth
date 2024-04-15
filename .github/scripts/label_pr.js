@@ -8,7 +8,7 @@ module.exports = async ({ github, context }) => {
         const pattern = new RegExp(`(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) ${repoUrl}/issues/(?<issue_number>\\d+)`, 'i')
 
         const re = prBody.match(pattern);
-        const issueNumber = re && re.groups?.issue_number;
+        const issueNumber = re?.groups?.issue_number;
 
         if (!issueNumber) {
             console.log("No issue reference found in PR description.");
