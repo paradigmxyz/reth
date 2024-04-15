@@ -143,7 +143,10 @@ pub use c_kzg as kzg;
 mod optimism {
     pub use crate::{
         chain::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA},
-        net::{op_nodes, op_testnet_nodes, OP_BOOTNODES, OP_TESTNET_BOOTNODES},
+        net::{
+            base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes, BASE_BOOTNODES,
+            BASE_TESTNET_BOOTNODES, OP_BOOTNODES, OP_TESTNET_BOOTNODES,
+        },
         transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
     };
 }

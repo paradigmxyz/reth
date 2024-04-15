@@ -1,7 +1,7 @@
 use crate::{
     constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS},
     holesky_nodes,
-    net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
+    net::{base_nodes, base_testnet_nodes, goerli_nodes, mainnet_nodes, sepolia_nodes},
     proofs::state_root_ref_unhashed,
     revm_primitives::{address, b256},
     Address, BlockNumber, Chain, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork,
@@ -917,13 +917,13 @@ impl ChainSpec {
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
             #[cfg(feature = "optimism")]
-            C::Base | C::Optimism => Some(op_nodes()),
+            C::Base => Some(base_nodes()),
             #[cfg(feature = "optimism")]
-            C::BaseGoerli |
-            C::BaseSepolia |
-            C::OptimismGoerli |
-            C::OptimismSepolia |
-            C::OptimismKovan => Some(op_testnet_nodes()),
+            C::Optimism => Some(op_nodes()),
+            #[cfg(feature = "optimism")]
+            C::BaseGoerli | C::BaseSepolia => Some(base_testnet_nodes()),
+            #[cfg(feature = "optimism")]
+            C::OptimismSepolia | C::OptimismGoerli | C::OptimismKovan => Some(op_testnet_nodes()),
             _ => None,
         }
     }
