@@ -276,20 +276,20 @@ alloy-dyn-abi = "0.7.0"
 alloy-sol-types = "0.7.0"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.3.1"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307", default-features = false, features = [
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "8cb0307" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "28b5750" }
 
 # misc
 aquamarine = "0.5"

@@ -186,7 +186,7 @@ impl TryFrom<reth_rpc_types::Block> for Block {
             header: block.header.try_into()?,
             body,
             ommers: Default::default(),
-            withdrawals: block.withdrawals.map(Withdrawals::new),
+            withdrawals: block.withdrawals.map(Into::into),
         })
     }
 }

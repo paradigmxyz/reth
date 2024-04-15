@@ -496,38 +496,36 @@ impl TryFrom<reth_rpc_types::Header> for Header {
                 .map(|base_fee_per_gas| {
                     base_fee_per_gas
                         .try_into()
-                        .map_err(|_| ConversionError::BaseFeePerGasConversion)
+                        .map_err(|e| ConversionError::BaseFeePerGasConversion(e))
                 })
                 .transpose()?,
             beneficiary: header.miner,
-            blob_gas_used: header.blob_gas_used.map(|blob_gas_used| blob_gas_used.to::<u64>()),
+            blob_gas_used: header
+                .blob_gas_used
+                .map(|blob_gas_used| blob_gas_used.try_into().unwrap()),
             difficulty: header.difficulty,
             excess_blob_gas: header
                 .excess_blob_gas
-                .map(|excess_blob_gas| excess_blob_gas.to::<u64>()),
+                .map(|excess_blob_gas| excess_blob_gas.try_into().unwrap()),
             extra_data: header.extra_data,
             gas_limit: header
                 .gas_limit
                 .try_into()
-                .map_err(|_| ConversionError::GasLimitConversion)?,
-            gas_used: header.gas_used.try_into().map_err(|_| ConversionError::GasUsedConversion)?,
+                .map_err(|e| ConversionError::GasLimitConversion(e))?,
+            gas_used: header
+                .gas_used
+                .try_into()
+                .map_err(|e| ConversionError::GasUsedConversion(e))?,
             logs_bloom: header.logs_bloom,
             mix_hash: header.mix_hash.unwrap_or_default(),
             nonce: u64::from_be_bytes(header.nonce.unwrap_or_default().0),
-            number: header
-                .number
-                .ok_or(ConversionError::MissingBlockNumber)?
-                .try_into()
-                .map_err(|_| ConversionError::BlockNumberConversion)?,
+            number: header.number.ok_or(ConversionError::MissingBlockNumber)?,
             ommers_hash: header.uncles_hash,
             parent_beacon_block_root: header.parent_beacon_block_root,
             parent_hash: header.parent_hash,
             receipts_root: header.receipts_root,
             state_root: header.state_root,
-            timestamp: header
-                .timestamp
-                .try_into()
-                .map_err(|_| ConversionError::TimestampConversion)?,
+            timestamp: header.timestamp,
             transactions_root: header.transactions_root,
             withdrawals_root: header.withdrawals_root,
         })
