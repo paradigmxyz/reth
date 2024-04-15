@@ -98,7 +98,7 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub ws_api: Option<RpcModuleSelection>,
 
-    /// Disable the IPC-RPC  server
+    /// Disable the IPC-RPC server
     #[arg(long)]
     pub ipcdisable: bool,
 
@@ -122,6 +122,14 @@ pub struct RpcServerArgs {
     /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
     pub auth_jwtsecret: Option<PathBuf>,
+
+    /// Enable auth engine api over IPC
+    #[arg(long)]
+    pub auth_ipc: bool,
+
+    /// Filename for auth IPC socket/pipe within the datadir
+    #[arg(long = "auth-ipc.path", default_value_t = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())]
+    pub auth_ipc_path: String,
 
     /// Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and
     /// `--ws.api`.
@@ -176,14 +184,6 @@ pub struct RpcServerArgs {
     /// Gas price oracle configuration.
     #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
-
-    /// Enable auth engine api over IPC
-    #[arg(long)]
-    pub auth_ipc: bool,
-
-    /// Filename for auth IPC socket/pipe within the datadir
-    #[arg(long = "auth-ipc.path", default_value_t = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())]
-    pub auth_ipc_path: String,
 }
 
 impl RpcServerArgs {
