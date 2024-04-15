@@ -25,9 +25,11 @@ mod tests {
     use proptest::proptest;
     use reth_codecs::{main_codec, Compact};
 
+    /// This type is kept for compatibility tests after the codec support was added to alloy-primitives
+    /// Log type natively
     #[main_codec(rlp)]
     #[derive(Clone, Debug, PartialEq, Eq, RlpDecodable, RlpEncodable, Default)]
-    pub struct Log {
+    struct Log {
         /// Contract that emitted this log.
         pub address: Address,
         /// Topics of the log. The number of logs depend on what `LOG` opcode is used.
