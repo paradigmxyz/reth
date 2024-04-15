@@ -14,7 +14,7 @@ pub struct BlockId {
     pub number: BlockNumber,
 }
 
-/// https://github.com/ethereum-optimism/optimism/blob/develop/op-service/eth/id.go#L33
+// https://github.com/ethereum-optimism/optimism/blob/develop/op-service/eth/id.go#L33
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct L2BlockRef {
@@ -26,7 +26,7 @@ pub struct L2BlockRef {
     pub sequence_number: u64,
 }
 
-/// https://github.com/ethereum-optimism/optimism/blob/develop/op-service/eth/id.go#L52
+// https://github.com/ethereum-optimism/optimism/blob/develop/op-service/eth/id.go#L52
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct L1BlockRef {
@@ -36,7 +36,7 @@ pub struct L1BlockRef {
     pub timestamp: u64,
 }
 
-/// https://github.com/ethereum-optimism/optimism/blob/develop/op-service/eth/sync_status.go#L5
+// https://github.com/ethereum-optimism/optimism/blob/develop/op-service/eth/sync_status.go#L5
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncStatus {
     pub current_l1: L1BlockRef,
@@ -61,7 +61,7 @@ pub struct OutputResponse {
     pub sync_status: SyncStatus,
 }
 
-/// https://github.com/ethereum-optimism/optimism/blob/c7ad0ebae5dca3bf8aa6f219367a95c15a15ae41/op-service/eth/types.go#L371
+// https://github.com/ethereum-optimism/optimism/blob/c7ad0ebae5dca3bf8aa6f219367a95c15a15ae41/op-service/eth/types.go#L371
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemConfig {
@@ -79,7 +79,7 @@ pub struct Genesis {
     pub system_config: SystemConfig,
 }
 
-/// https://github.com/ethereum-optimism/optimism/blob/develop/op-node/rollup/types.go#L53
+// https://github.com/ethereum-optimism/optimism/blob/develop/op-node/rollup/types.go#L53
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RollupConfig {
     pub genesis: Genesis,
@@ -117,7 +117,7 @@ pub struct RollupConfig {
     pub use_plasma: bool,
 }
 
-/// https://github.com/ethereum-optimism/optimism/blob/8dd17a7b114a7c25505cd2e15ce4e3d0f7e3f7c1/op-node/p2p/store/iface.go#L13
+// https://github.com/ethereum-optimism/optimism/blob/8dd17a7b114a7c25505cd2e15ce4e3d0f7e3f7c1/op-node/p2p/store/iface.go#L13
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicScores {
@@ -127,7 +127,7 @@ pub struct TopicScores {
     pub invalid_message_deliveries: f64,
 }
 
-/// https://github.com/ethereum-optimism/optimism/blob/8dd17a7b114a7c25505cd2e15ce4e3d0f7e3f7c1/op-node/p2p/store/iface.go#L20C6-L20C18
+// https://github.com/ethereum-optimism/optimism/blob/8dd17a7b114a7c25505cd2e15ce4e3d0f7e3f7c1/op-node/p2p/store/iface.go#L20C6-L20C18
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GossipScores {
@@ -138,7 +138,7 @@ pub struct GossipScores {
     pub behavioral_penalty: f64,
 }
 
-/// https://github.com/ethereum-optimism/optimism/blob/8dd17a7b114a7c25505cd2e15ce4e3d0f7e3f7c1/op-node/p2p/store/iface.go#L31C1-L35C2
+// https://github.com/ethereum-optimism/optimism/blob/8dd17a7b114a7c25505cd2e15ce4e3d0f7e3f7c1/op-node/p2p/store/iface.go#L31C1-L35C2
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReqRespScores {
@@ -147,7 +147,7 @@ pub struct ReqRespScores {
     pub rejected_payloads: f64,
 }
 
-/// https://github.com/ethereum-optimism/optimism/blob/8dd17a7b114a7c25505cd2e15ce4e3d0f7e3f7c1/op-node/p2p/store/iface.go#L81
+// https://github.com/ethereum-optimism/optimism/blob/8dd17a7b114a7c25505cd2e15ce4e3d0f7e3f7c1/op-node/p2p/store/iface.go#L81
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PeerScores {
@@ -155,7 +155,7 @@ pub struct PeerScores {
     pub req_resp: ReqRespScores,
 }
 
-/// https://github.com/ethereum-optimism/optimism/blob/develop/op-node/p2p/rpc_api.go#L15
+// https://github.com/ethereum-optimism/optimism/blob/develop/op-node/p2p/rpc_api.go#L15
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PeerInfo {
@@ -197,7 +197,7 @@ pub struct PeerDump {
     pub banned_subnets: Vec<IpAddr>,
 }
 
-/// https://github.com/ethereum-optimism/optimism/blob/develop/op-node/p2p/rpc_server.go#L203
+// https://github.com/ethereum-optimism/optimism/blob/develop/op-node/p2p/rpc_server.go#L203
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PeerStats {
     pub connected: u32,
@@ -295,6 +295,7 @@ pub trait OpP2PApi {
     async fn opp2p_disconnect_peer(&self, peer: String) -> RpcResult<()>;
 }
 
+/// The admin namespace endpoints
 /// https://github.com/ethereum-optimism/optimism/blob/c7ad0ebae5dca3bf8aa6f219367a95c15a15ae41/op-node/node/api.go#L28-L36
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "admin"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "admin"))]
