@@ -16,6 +16,7 @@ use bytes::BufMut;
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
+use reth_rpc_types::ConversionError;
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
 
@@ -482,6 +483,54 @@ impl Decodable for Header {
             })
         }
         Ok(this)
+    }
+}
+
+impl TryFrom<reth_rpc_types::Header> for Header {
+    type Error = ConversionError;
+
+    fn try_from(header: reth_rpc_types::Header) -> Result<Self, Self::Error> {
+        Ok(Self {
+            base_fee_per_gas: header
+                .base_fee_per_gas
+                .map(|base_fee_per_gas| {
+                    base_fee_per_gas
+                        .try_into()
+                        .map_err(|_| ConversionError::BaseFeePerGasConversion)
+                })
+                .transpose()?,
+            beneficiary: header.miner,
+            blob_gas_used: header.blob_gas_used.map(|blob_gas_used| blob_gas_used.to::<u64>()),
+            difficulty: header.difficulty,
+            excess_blob_gas: header
+                .excess_blob_gas
+                .map(|excess_blob_gas| excess_blob_gas.to::<u64>()),
+            extra_data: header.extra_data,
+            gas_limit: header
+                .gas_limit
+                .try_into()
+                .map_err(|_| ConversionError::GasLimitConversion)?,
+            gas_used: header.gas_used.try_into().map_err(|_| ConversionError::GasUsedConversion)?,
+            logs_bloom: header.logs_bloom,
+            mix_hash: header.mix_hash.unwrap_or_default(),
+            nonce: u64::from_be_bytes(header.nonce.unwrap_or_default().0),
+            number: header
+                .number
+                .ok_or(ConversionError::MissingBlockNumber)?
+                .try_into()
+                .map_err(|_| ConversionError::BlockNumberConversion)?,
+            ommers_hash: header.uncles_hash,
+            parent_beacon_block_root: header.parent_beacon_block_root,
+            parent_hash: header.parent_hash,
+            receipts_root: header.receipts_root,
+            state_root: header.state_root,
+            timestamp: header
+                .timestamp
+                .try_into()
+                .map_err(|_| ConversionError::TimestampConversion)?,
+            transactions_root: header.transactions_root,
+            withdrawals_root: header.withdrawals_root,
+        })
     }
 }
 
