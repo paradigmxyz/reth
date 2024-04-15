@@ -132,37 +132,37 @@ pub struct RpcServerArgs {
     pub rpc_jwtsecret: Option<JwtSecret>,
 
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
-    #[arg(long, default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into())]
+    #[arg(long = "rpc.max-request-size", alias = "rpc_max_request_size", default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into())]
     pub rpc_max_request_size: MaxU32,
 
     /// Set the maximum RPC response payload size for both HTTP and WS in megabytes.
-    #[arg(long, visible_alias = "--rpc.returndata.limit", default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into())]
+    #[arg(long = "rpc.max-response-size", alias = "rpc-max-response-size", visible_alias = "rpc.returndata.limit", default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into())]
     pub rpc_max_response_size: MaxU32,
 
     /// Set the maximum concurrent subscriptions per connection.
-    #[arg(long, default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN.into())]
+    #[arg(long = "rpc.max-subscriptions-per-connection", alias = "--rpc_max_subscriptions_per_connection", default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN.into())]
     pub rpc_max_subscriptions_per_connection: MaxU32,
 
     /// Maximum number of RPC server connections.
-    #[arg(long, value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_CONNECTIONS.into())]
+    #[arg(long = "rpc.max-connections", alias = "rpc_max_connections", value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_CONNECTIONS.into())]
     pub rpc_max_connections: MaxU32,
 
     /// Maximum number of concurrent tracing requests.
-    #[arg(long, value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
+    #[arg(long = "rpc.max-tracing-requests", alias = "rpc_max_tracing_requests", value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
     pub rpc_max_tracing_requests: usize,
 
     /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
-    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
+    #[arg(long = "rpc.max-blocks-per-filter", alias = "rpc_max_blocks_per_filter", value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
     pub rpc_max_blocks_per_filter: ZeroAsNoneU64,
 
     /// Maximum number of logs that can be returned in a single response. (0 = no limit)
-    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64))]
+    #[arg(long = "rpc.max-logs-per-response", alias = "rpc_max_logs_per_response", value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64))]
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     #[arg(
-        long,
-        alias = "rpc.gascap",
+        long = "rpc.gascap",
+        alias = "rpc-gascap",
         value_name = "GAS_CAP",
         value_parser = RangedU64ValueParser::<u64>::new().range(1..),
         default_value_t = RPC_DEFAULT_GAS_CAP.into()
@@ -177,7 +177,7 @@ pub struct RpcServerArgs {
     #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
 
-    /// Enable auth engine api over IPC  
+    /// Enable auth engine api over IPC
     #[arg(long)]
     pub auth_ipc: bool,
 
