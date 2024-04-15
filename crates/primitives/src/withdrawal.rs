@@ -36,6 +36,17 @@ impl Withdrawal {
     }
 }
 
+impl From<reth_rpc_types::Withdrawal> for Withdrawal {
+    fn from(withdrawal: reth_rpc_types::Withdrawal) -> Self {
+        Self {
+            index: withdrawal.index,
+            validator_index: withdrawal.index,
+            address: withdrawal.address,
+            amount: withdrawal.amount,
+        }
+    }
+}
+
 /// Represents a collection of Withdrawals.
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodableWrapper, RlpDecodableWrapper)]
@@ -101,6 +112,12 @@ impl Deref for Withdrawals {
 impl DerefMut for Withdrawals {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl From<Vec<reth_rpc_types::Withdrawal>> for Withdrawals {
+    fn from(withdrawals: Vec<reth_rpc_types::Withdrawal>) -> Self {
+        Self(withdrawals.into_iter().map(Into::into).collect())
     }
 }
 
