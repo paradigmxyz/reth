@@ -20,7 +20,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    
     use alloy_primitives::{Address, Bytes, Log as AlloyLog, B256};
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::proptest;
