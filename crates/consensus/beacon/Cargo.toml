@@ -65,4 +65,5 @@ optimism = [
     "reth-interfaces/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
+    "reth-beacon-consensus-core/optimism"
 ]

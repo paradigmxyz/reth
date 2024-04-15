@@ -3,8 +3,8 @@ use crate::{
     processor::EVMProcessor,
     stack::{InspectorStack, InspectorStackConfig},
 };
+use reth_evm::ConfigureEvm;
 use reth_interfaces::executor::BlockExecutionError;
-use reth_node_api::ConfigureEvm;
 use reth_primitives::ChainSpec;
 use reth_provider::{ExecutorFactory, PrunableBlockExecutor, StateProvider};
 use std::sync::Arc;

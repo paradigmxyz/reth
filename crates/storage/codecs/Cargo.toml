@@ -13,10 +13,12 @@ workspace = true
 [dependencies]
 reth-codecs-derive = { path = "./derive", default-features = false }
 
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 bytes.workspace = true
 
 [dev-dependencies]
+alloy-eips = { workspace = true, features = ["arbitrary", "serde"] }
 alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
 serde.workspace = true
 modular-bitfield = "0.11.2"
@@ -28,10 +30,6 @@ proptest.workspace = true
 proptest-derive.workspace = true
 
 [features]
-default = ["compact", "std"]
+default = ["std"]
 std = ["alloy-primitives/std", "bytes/std"]
-compact = ["reth-codecs-derive/compact"]
-scale = ["reth-codecs-derive/scale"]
-postcard = ["reth-codecs-derive/postcard"]
-no_codec = ["reth-codecs-derive/no_codec"]
 optimism = ["reth-codecs-derive/optimism"]

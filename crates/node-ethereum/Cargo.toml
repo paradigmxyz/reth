@@ -29,4 +29,6 @@ eyre.workspace = true
 [dev-dependencies]
 reth-db.workspace = true
 reth-exex.workspace = true
+reth-node-api.workspace = true
+
 futures.workspace = true

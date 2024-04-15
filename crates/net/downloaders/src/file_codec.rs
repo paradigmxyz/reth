@@ -31,9 +31,12 @@ impl Decoder for BlockFileCodec {
         if src.is_empty() {
             return Ok(None)
         }
+
         let buf_slice = &mut src.as_ref();
-        let body = Block::decode(buf_slice)?;
+        let body =
+            Block::decode(buf_slice).map_err(|err| FileClientError::Rlp(err, src.to_vec()))?;
         src.advance(src.len() - buf_slice.len());
+
         Ok(Some(body))
     }
 }

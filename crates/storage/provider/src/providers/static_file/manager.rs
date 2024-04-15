@@ -1103,6 +1103,13 @@ impl BlockReader for StaticFileProvider {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn block_with_senders_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl WithdrawalsProvider for StaticFileProvider {
