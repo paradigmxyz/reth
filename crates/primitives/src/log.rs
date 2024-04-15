@@ -25,13 +25,13 @@ mod tests {
     use proptest::proptest;
     use reth_codecs::{main_codec, Compact};
 
-    /// This type is kept for compatibility tests after the codec support was added to alloy-primitives
-    /// Log type natively
+    /// This type is kept for compatibility tests after the codec support was added to
+    /// alloy-primitives Log type natively
     #[main_codec(rlp)]
     #[derive(Clone, Debug, PartialEq, Eq, RlpDecodable, RlpEncodable, Default)]
     struct Log {
         /// Contract that emitted this log.
-        pub address: Address,
+        pub(crate) address: Address,
         /// Topics of the log. The number of logs depend on what `LOG` opcode is used.
         #[cfg_attr(
             any(test, feature = "arbitrary"),
@@ -39,9 +39,9 @@ mod tests {
                 strategy = "proptest::collection::vec(proptest::arbitrary::any::<B256>(), 0..=5)"
             )
         )]
-        pub topics: Vec<B256>,
+        pub(crate) topics: Vec<B256>,
         /// Arbitrary length data.
-        pub data: Bytes,
+        pub(crate) data: Bytes,
     }
 
     impl From<AlloyLog> for Log {
