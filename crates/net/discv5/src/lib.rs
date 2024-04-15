@@ -285,6 +285,7 @@ impl Discv5 {
             }
         }
 
+        // If a session is established, the ENR is added straight away to discv5 kbuckets
         Ok(_ = join_all(enr_requests).await)
     }
 
