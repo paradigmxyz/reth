@@ -81,13 +81,13 @@ pub fn holesky_nodes() -> Vec<NodeRecord> {
 }
 
 #[cfg(feature = "optimism")]
-/// Returns parsed mainnet nodes
+/// Returns parsed op-stack mainnet nodes
 pub fn op_nodes() -> Vec<NodeRecord> {
     parse_nodes(&OP_BOOTNODES[..])
 }
 
 #[cfg(feature = "optimism")]
-/// Returns parsed mainnet nodes
+/// Returns parsed op-stack testnet nodes
 pub fn op_testnet_nodes() -> Vec<NodeRecord> {
     parse_nodes(&OP_TESTNET_BOOTNODES[..])
 }
