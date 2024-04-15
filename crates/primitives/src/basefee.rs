@@ -23,16 +23,7 @@
 /// The calculated base fee for the next block as a `u64`.
 ///
 /// For more information, refer to the [EIP-1559 spec](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1559.md).
-use alloy_eips::eip1559::calc_next_block_base_fee;
-
-pub fn calculate_next_block_base_fee(
-    gas_used: u64,
-    gas_limit: u64,
-    base_fee: u64,
-    base_fee_params: crate::BaseFeeParams,
-) -> u64 {
-    calc_next_block_base_fee(gas_used as u128, gas_limit as u128, base_fee as u128, base_fee_params) as u64
-}
+pub use alloy_eips::eip1559::calc_next_block_base_fee;
 
 #[cfg(test)]
 mod tests {
@@ -63,12 +54,12 @@ mod tests {
         for i in 0..base_fee.len() {
             assert_eq!(
                 next_base_fee[i],
-                calculate_next_block_base_fee(
-                    gas_used[i],
-                    gas_limit[i],
-                    base_fee[i],
+                calc_next_block_base_fee(
+                    gas_used[i] as u128,
+                    gas_limit[i] as u128,
+                    base_fee[i] as u128,
                     crate::BaseFeeParams::ethereum(),
-                )
+                ) as u64
             );
         }
     }
@@ -96,12 +87,12 @@ mod tests {
         for i in 0..base_fee.len() {
             assert_eq!(
                 next_base_fee[i],
-                calculate_next_block_base_fee(
-                    gas_used[i],
-                    gas_limit[i],
-                    base_fee[i],
+                calc_next_block_base_fee(
+                    gas_used[i] as u128,
+                    gas_limit[i] as u128,
+                    base_fee[i] as u128,
                     OP_BASE_FEE_PARAMS,
-                )
+                ) as u64
             );
         }
     }
@@ -129,12 +120,12 @@ mod tests {
         for i in 0..base_fee.len() {
             assert_eq!(
                 next_base_fee[i],
-                calculate_next_block_base_fee(
-                    gas_used[i],
-                    gas_limit[i],
-                    base_fee[i],
+                calc_next_block_base_fee(
+                    gas_used[i] as u128,
+                    gas_limit[i] as u128,
+                    base_fee[i] as u128,
                     OP_SEPOLIA_BASE_FEE_PARAMS,
-                )
+                ) as u64
             );
         }
     }

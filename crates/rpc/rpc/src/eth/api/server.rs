@@ -447,7 +447,7 @@ mod tests {
     use reth_interfaces::test_utils::{generators, generators::Rng};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
-        basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams,
+        basefee::calc_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams,
         Block, BlockNumberOrTag, Header, TransactionSigned, B256,
     };
     use reth_provider::{
@@ -565,12 +565,12 @@ mod tests {
 
         // Add final base fee (for the next block outside of the request)
         let last_header = last_header.unwrap();
-        base_fees_per_gas.push(calculate_next_block_base_fee(
-            last_header.gas_used,
-            last_header.gas_limit,
-            last_header.base_fee_per_gas.unwrap_or_default(),
+        base_fees_per_gas.push(calc_next_block_base_fee(
+            last_header.gas_used as u128,
+            last_header.gas_limit as u128,
+            last_header.base_fee_per_gas.unwrap_or_default() as u128,
             BaseFeeParams::ethereum(),
-        ) as u128);
+        ));
 
         let eth_api = build_test_eth_api(mock_provider);
 
