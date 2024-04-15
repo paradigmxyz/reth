@@ -101,14 +101,6 @@ where
         tree.update_chains_metrics();
         res
     }
-
-    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()> {
-        trace!(target: "blockchain_tree", unwind_to, "Unwinding to block number");
-        let mut tree = self.tree.write();
-        let res = tree.unwind(unwind_to);
-        tree.update_chains_metrics();
-        res
-    }
 }
 
 impl<DB, EF> BlockchainTreeViewer for ShareableBlockchainTree<DB, EF>
