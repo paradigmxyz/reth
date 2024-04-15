@@ -1,6 +1,6 @@
 //! Traits for execution.
 
-use reth_primitives::{BlockNumber, Receipts, U256};
+use reth_primitives::U256;
 use revm::db::BundleState;
 use revm_primitives::db::{Database, DatabaseCommit};
 
@@ -43,29 +43,16 @@ pub struct BatchBlockOutput {
 /// The output of an ethereum block.
 ///
 /// Contains the receipts of the transactions in the block and the total gas used.
+///
+/// TODO combine with BundleStateWithReceipts
 #[derive(Debug)]
 pub struct EthBlockOutput<T> {
     /// The changed state of the block after execution.
     pub state: BundleState,
     /// All the receipts of the transactions in the block.
-    pub receipts: T,
+    pub receipts: Vec<T>,
     /// The total gas used by the block.
     pub gas_used: u64,
-}
-
-/// The final output of a batch of blocks.
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct EthBatchOutput<T> {
-    /// Bundle state with reverts.
-    pub bundle: BundleState,
-    /// The collection of receipts.
-    /// Outer vector stores receipts for each block sequentially.
-    /// The inner vector stores receipts ordered by transaction number.
-    ///
-    /// If receipt is None it means it is pruned.
-    pub receipts: T,
-    /// First block of bundle state.
-    pub first_block: BlockNumber,
 }
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
@@ -75,6 +62,19 @@ pub struct EthBlockExecutionInput<'a, Block> {
     pub block: &'a Block,
     /// The total difficulty of the block.
     pub total_difficulty: U256,
+}
+
+impl<'a, Block> EthBlockExecutionInput<'a, Block> {
+    /// Creates a new input.
+    pub fn new(block: &'a Block, total_difficulty: U256) -> Self {
+        Self { block, total_difficulty }
+    }
+}
+
+impl<'a, Block> From<(&'a Block, U256)> for EthBlockExecutionInput<'a, Block> {
+    fn from((block, total_difficulty): (&'a Block, U256)) -> Self {
+        Self::new(block, total_difficulty)
+    }
 }
 
 /// A type that can create a new executor.

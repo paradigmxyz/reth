@@ -1,14 +1,16 @@
 //! Ethereum executor.
+//!
+//! TODO refactor this so it can be reused by other networks.
 
 use reth_evm::{
-    execute::{
-        BatchBlockOutput, BatchExecutor, EthBatchOutput, EthBlockExecutionInput, EthBlockOutput,
-        Executor,
-    },
+    execute::{BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor},
     ConfigureEvm,
 };
 use reth_interfaces::executor::BlockExecutionError;
-use reth_primitives::{Address, BlockWithSenders, ChainSpec, PruneModes, Receipts, U256};
+use reth_primitives::{
+    BlockNumber, BlockWithSenders, ChainSpec, PruneModes, Receipt, Receipts, U256,
+};
+use reth_provider::BundleStateWithReceipts;
 use reth_revm::{stack::InspectorStack, State};
 use revm_primitives::db::{Database, DatabaseCommit};
 use std::sync::Arc;
@@ -53,7 +55,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Receipts, u64), BlockExecutionError> {
+    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
         todo!()
     }
 
@@ -75,7 +77,7 @@ where
     DB: Database + DatabaseCommit,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
-    type Output = EthBlockOutput<Receipts>;
+    type Output = EthBlockOutput<Receipt>;
     type Error = BlockExecutionError;
 
     /// Executes the block and commits the state changes.
@@ -92,9 +94,20 @@ where
     }
 }
 
+/// TODO make this reusable for other networks.
 pub struct EthBatchExecutor<Evm, DB> {
-    /// The
+    /// The executor used to execute blocks.
     executor: EthBlockExecutor<Evm, DB>,
+    /// The collection of receipts.
+    /// Outer vector stores receipts for each block sequentially.
+    /// The inner vector stores receipts ordered by transaction number.
+    ///
+    /// If receipt is None it means it is pruned.
+    receipts: Receipts,
+    /// First block will be initialized to `None`
+    /// and be set to the block number of first block executed.
+    first_block: Option<BlockNumber>,
+
     /// Pruning configuration.
     ///
     /// TODO: make everything related to pruning a separate type.
@@ -109,14 +122,28 @@ where
     DB: Database + DatabaseCommit,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
-    type Output = EthBatchOutput<Receipts>;
+    type Output = BundleStateWithReceipts;
     type Error = BlockExecutionError;
 
     fn execute_one(&mut self, input: Self::Input<'_>) -> Result<BatchBlockOutput, Self::Error> {
-        todo!()
+        let EthBlockExecutionInput { block, total_difficulty } = input;
+        let (receipts, _gas_used) = self.executor.execute_block(block, total_difficulty)?;
+
+        let mut receipts = receipts.into_iter().map(Option::Some).collect();
+
+        // TODO: prune receipts according to the prune mode
+
+        self.receipts.push(receipts);
+
+        Ok(BatchBlockOutput { size_hint: Some(self.executor.state.bundle_size_hint()) })
     }
 
-    fn finalize(self) -> Self::Output {
-        todo!()
+    fn finalize(mut self) -> Self::Output {
+        let receipts = std::mem::take(&mut self.receipts);
+        BundleStateWithReceipts::new(
+            self.executor.state.take_bundle(),
+            receipts,
+            self.first_block.unwrap_or_default(),
+        )
     }
 }
