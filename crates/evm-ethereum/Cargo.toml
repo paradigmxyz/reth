@@ -15,6 +15,7 @@ workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-revm.workspace = true
+reth-interfaces.workspace = true
 
 # Ethereum
 revm-primitives.workspace = true
