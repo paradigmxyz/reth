@@ -679,10 +679,6 @@ where
     fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         self.tree.make_canonical(block_hash)
     }
-
-    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()> {
-        self.tree.unwind(unwind_to)
-    }
 }
 
 impl<DB, Tree> BlockchainTreeViewer for BlockchainProvider<DB, Tree>
