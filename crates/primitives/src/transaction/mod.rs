@@ -1790,7 +1790,7 @@ fn get_deposit_or_null_address(
         return Some(*from)
     }
     // OP blocks below bedrock include transactions sent from the null address
-    if std::env::var(OP_RETH_MAINNET_BELOW_BEDROCK) == Ok(true.to_string()) &&
+    if std::env::var_os(OP_RETH_MAINNET_BELOW_BEDROCK).as_deref() == Some("true".as_ref()) &&
         *signature == Signature::optimism_deposit_tx_signature()
     {
         return Some(Address::default())
