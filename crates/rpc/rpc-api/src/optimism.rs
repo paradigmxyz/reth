@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 #![allow(unreachable_pub)]
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, BlockNumber, ChainId, B256, U64};
+use reth_primitives::{Address, BlockNumber, ChainId, B256};
 use reth_rpc_types::BlockNumberOrTag;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::IpAddr};
@@ -21,7 +21,7 @@ pub struct L2BlockRef {
     pub hash: B256,
     pub number: BlockNumber,
     pub parent_hash: B256,
-    pub timestamp: U64,
+    pub timestamp: u64,
     pub l1origin: BlockId,
     pub sequence_number: u64,
 }
@@ -401,28 +401,6 @@ mod tests {
       "number": 4427339
     },
     "sequenceNumber": 3
-  },
-  "queued_unsafe_l2": {
-    "hash": "0x3af253f5b993f58fffdd5e594b3f53f5b7b254cdc18f4bdb13ea7331149942db",
-    "number": 4054795,
-    "parentHash": "0x284b7dc92bac97be8ec3b2cf548e75208eb288704de381f2557938ecdf86539d",
-    "timestamp": 1699912130,
-    "l1origin": {
-      "hash": "0x1490a63c372090a0331e05e63ec6a7a6e84835f91776306531f28b4217394d76",
-      "number": 4688196
-    },
-    "sequenceNumber": 2
-  },
-  "engine_sync_target": {
-    "hash": "0x9a3b2edab72150de252d45cabe2f1ac57d48ddd52bb891831ffed00e89408fe4",
-    "number": 2338094,
-    "parentHash": "0x935b94ec0bac0e63c67a870b1a97d79e3fa84dda86d31996516cb2f940753f53",
-    "timestamp": 1696478728,
-    "l1origin": {
-      "hash": "0x38731e0a6eeb40091f0c4a00650e911c57d054aaeb5b158f55cd5705fa6a3ebf",
-      "number": 4427339
-    },
-    "sequenceNumber": 3
   }
 }"#;
         test_helper::<SyncStatus>(sync_status_json);
@@ -566,8 +544,8 @@ mod tests {
     }
 
     #[test]
-    fn test_peer_stat() {
-        let peer_stat_json = r#"{
+    fn test_peer_stats() {
+        let peer_stats_json = r#"{
   "connected": 20,
   "table": 94,
   "blocksTopic": 20,
@@ -576,6 +554,6 @@ mod tests {
   "banned": 0,
   "known": 71
 }"#;
-        test_helper::<PeerStats>(peer_stat_json);
+        test_helper::<PeerStats>(peer_stats_json);
     }
 }
