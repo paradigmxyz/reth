@@ -10,6 +10,8 @@ use crate::{
     },
     result::{internal_rpc_err, ToRpcResult},
 };
+
+use ethereum_json_rpc_client::reqwest::ReqwestClient;
 use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::NetworkInfo;
 use reth_node_api::ConfigureEvmEnv;
@@ -22,6 +24,7 @@ use reth_provider::{
     HeaderProvider, StateProviderFactory,
 };
 use reth_rpc_api::EthApiServer;
+
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle,
     EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
@@ -362,8 +365,18 @@ where
     }
 
     /// Handler for: `eth_sendRawTransaction`
-    async fn send_raw_transaction(&self, _tx: Bytes) -> Result<B256> {
-        Err(internal_rpc_err("read-only node"))
+    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256> {
+        use ethereum_json_rpc_client::EthJsonRpcClient;
+        let rpc_url = &self.provider().chain_spec().rpc_url;
+        trace!(target: "rpc::eth", ?rpc_url, "Serving eth_sendRawTransaction");
+
+        let client = EthJsonRpcClient::new(ReqwestClient::new(rpc_url.to_string()));
+
+        let tx_hash = client.send_raw_transaction_bytes(&tx).await.map_err(|e| {
+            internal_rpc_err(format!("failed to send raw transaction to {}: {}", rpc_url, e))
+        })?;
+
+        Ok(tx_hash.0.into())
     }
 
     /// Handler for: `eth_sign`
