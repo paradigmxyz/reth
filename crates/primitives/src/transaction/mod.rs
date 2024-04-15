@@ -956,8 +956,8 @@ impl TransactionSignedNoHash {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
 
         let signature_hash = self.signature_hash();
@@ -976,11 +976,9 @@ impl TransactionSignedNoHash {
         buffer.clear();
         self.transaction.encode_without_signature(buffer);
 
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
 
         self.signature.recover_signer_unchecked(keccak256(buffer))
@@ -1189,8 +1187,8 @@ impl TransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
@@ -1205,8 +1203,8 @@ impl TransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer_unchecked(signature_hash)
@@ -1779,6 +1777,26 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.clone()
     }
+}
+
+#[cfg(feature = "optimism")]
+fn get_deposit_or_null_address(
+    transaction: &Transaction,
+    signature: &Signature,
+) -> Option<Address> {
+    // Optimism's Deposit transaction does not have a signature. Directly return the
+    // `from` address.
+    if let Transaction::Deposit(TxDeposit { from, .. }) = transaction {
+        return Some(*from)
+    }
+    // OP blocks below bedrock include transactions sent from the null address
+    if std::env::var(OP_RETH_MAINNET_BELOW_BEDROCK) == Ok(true.to_string()) &&
+        *signature == Signature::optimism_deposit_tx_signature()
+    {
+        return Some(Address::default())
+    }
+
+    None
 }
 
 #[cfg(test)]
