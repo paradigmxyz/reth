@@ -374,11 +374,11 @@ pub fn random_receipt<R: Rng>(
 pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: Option<u8>) -> Log {
     let data_byte_count = rng.gen::<u8>() as usize;
     let topics_count = topics_count.unwrap_or_else(|| rng.gen()) as usize;
-    Log {
-        address: address.unwrap_or_else(|| rng.gen()),
-        topics: std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
-        data: std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
-    }
+    Log::new_unchecked(
+        address.unwrap_or_else(|| rng.gen()),
+        std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
+        std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
+    )
 }
 
 #[cfg(test)]

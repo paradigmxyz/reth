@@ -4,7 +4,7 @@
 #[inline]
 pub fn from_primitive_log(log: reth_primitives::Log) -> reth_rpc_types::Log {
     reth_rpc_types::Log {
-        inner: log.into(),
+        inner: log,
         block_hash: None,
         block_number: None,
         block_timestamp: None,
@@ -18,5 +18,5 @@ pub fn from_primitive_log(log: reth_primitives::Log) -> reth_rpc_types::Log {
 /// Converts from a [reth_rpc_types::Log] to a [reth_primitives::Log]
 #[inline]
 pub fn to_primitive_log(log: reth_rpc_types::Log) -> reth_primitives::Log {
-    log.inner.into()
+    log.inner
 }

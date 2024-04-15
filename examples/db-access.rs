@@ -201,7 +201,7 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
         let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
         for log in &receipts.logs {
             if filter_params.filter_address(&log.address) &&
-                filter_params.filter_topics(&log.topics)
+                filter_params.filter_topics(log.topics())
             {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")
