@@ -1,7 +1,7 @@
 use crate::{
     constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS},
     holesky_nodes,
-    net::{base_nodes, base_testnet_nodes, goerli_nodes, mainnet_nodes, sepolia_nodes},
+    net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     proofs::state_root_ref_unhashed,
     revm_primitives::{address, b256},
     Address, BlockNumber, Chain, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork,
@@ -23,7 +23,7 @@ pub(crate) use crate::{
         OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
         OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
     },
-    net::{op_nodes, op_testnet_nodes},
+    net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes},
 };
 
 /// The Ethereum mainnet spec

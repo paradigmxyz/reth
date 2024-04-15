@@ -13,8 +13,7 @@ use reth_discv5::config::OPSTACK;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
-    mainnet_nodes, pk2id, sepolia_nodes, Chain, ChainSpec, ForkFilter, Head, NamedChain,
-    NodeRecord, PeerId, MAINNET,
+    mainnet_nodes, pk2id, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET,
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -570,7 +569,7 @@ mod tests {
     use super::*;
     use rand::thread_rng;
     use reth_dns_discovery::tree::LinkEntry;
-    use reth_primitives::ForkHash;
+    use reth_primitives::{Chain, ForkHash};
     use reth_provider::test_utils::NoopProvider;
     use std::collections::BTreeMap;
 
