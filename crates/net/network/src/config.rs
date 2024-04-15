@@ -132,14 +132,6 @@ impl<C> NetworkConfig<C> {
             builder = builder.fork(OPSTACK, fork_id)
         }
 
-        if chain == Chain::optimism_mainnet() || chain == Chain::base_mainnet() {
-            builder = builder.add_optimism_mainnet_boot_nodes()
-        } else if chain == Chain::from_named(NamedChain::OptimismSepolia) ||
-            chain == Chain::from_named(NamedChain::BaseSepolia)
-        {
-            builder = builder.add_optimism_sepolia_boot_nodes()
-        }
-
         self.set_discovery_v5(f(builder))
     }
 

@@ -41,6 +41,25 @@ pub static HOLESKY_BOOTNODES : [&str; 2] = [
     "enode://a3435a0155a3e837c02f5e7f5662a2f1fbc25b48e4dc232016e1c51b544cb5b4510ef633ea3278c0e970fa8ad8141e2d4d0f9f95456c537ff05fdf9b31c15072@178.128.136.233:30303",
 ];
 
+#[cfg(feature = "optimism")]
+/// OP-Stack BOOTNODES
+pub static OP_BOOTNODES: [&str; 8] = [
+    "enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305", 
+    "enode://dd751a9ef8912be1bfa7a5e34e2c3785cc5253110bd929f385e07ba7ac19929fb0e0c5d93f77827291f4da02b2232240fbc47ea7ce04c46e333e452f8656b667@34.65.107.0:30305", 
+    "enode://c5d289b56a77b6a2342ca29956dfd07aadf45364dde8ab20d1dc4efd4d1bc6b4655d902501daea308f4d8950737a4e93a4dfedd17b49cd5760ffd127837ca965@34.65.202.239:30305", 
+    "enode://87a32fd13bd596b2ffca97020e31aef4ddcc1bbd4b95bb633d16c1329f654f34049ed240a36b449fda5e5225d70fe40bc667f53c304b71f8e68fc9d448690b51@3.231.138.188:30301", 
+    "enode://ca21ea8f176adb2e229ce2d700830c844af0ea941a1d8152a9513b966fe525e809c3a6c73a2c18a12b74ed6ec4380edf91662778fe0b79f6a591236e49e176f9@184.72.129.189:30301", 
+    "enode://acf4507a211ba7c1e52cdf4eef62cdc3c32e7c9c47998954f7ba024026f9a6b2150cd3f0b734d9c78e507ab70d59ba61dfe5c45e1078c7ad0775fb251d7735a2@3.220.145.177:30301", 
+    "enode://8a5a5006159bf079d06a04e5eceab2a1ce6e0f721875b2a9c96905336219dbe14203d38f70f3754686a6324f786c2f9852d8c0dd3adac2d080f4db35efc678c5@3.231.11.52:30301", 
+    "enode://cdadbe835308ad3557f9a1de8db411da1a260a98f8421d62da90e71da66e55e98aaa8e90aa7ce01b408a54e4bd2253d701218081ded3dbe5efbbc7b41d7cef79@54.198.153.150:30301"
+];
+
+#[cfg(feature = "optimism")]
+/// OP-Stack Testnet BOOTNODES
+pub static OP_TESTNET_BOOTNODES: [&str; 1] = [
+    "enode://09d1a6110757b95628cc54ab6cc50a29773075ed00e3a25bd9388807c9a6c007664e88646a6fefd82baad5d8374ba555e426e8aed93f0f0c517e2eb5d929b2a2@34.65.21.188:30304?discport=30303"]
+;
+
 /// Returns parsed mainnet nodes
 pub fn mainnet_nodes() -> Vec<NodeRecord> {
     parse_nodes(&MAINNET_BOOTNODES[..])
@@ -59,6 +78,18 @@ pub fn sepolia_nodes() -> Vec<NodeRecord> {
 /// Returns parsed holesky nodes
 pub fn holesky_nodes() -> Vec<NodeRecord> {
     parse_nodes(&HOLESKY_BOOTNODES[..])
+}
+
+#[cfg(feature = "optimism")]
+/// Returns parsed mainnet nodes
+pub fn op_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&OP_BOOTNODES[..])
+}
+
+#[cfg(feature = "optimism")]
+/// Returns parsed mainnet nodes
+pub fn op_testnet_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&OP_TESTNET_BOOTNODES[..])
 }
 
 /// Parses all the nodes
