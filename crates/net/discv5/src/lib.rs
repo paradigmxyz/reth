@@ -16,7 +16,7 @@ use std::{
     time::Duration,
 };
 
-use ::enr::{CombinedKey, Enr};
+use ::enr::Enr;
 use alloy_rlp::Decodable;
 use discv5::ListenConfig;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
@@ -262,47 +262,30 @@ impl Discv5 {
             "adding bootstrap nodes .."
         );
 
-        let add_enr = |node: Enr<CombinedKey>| {
-            let ip4 = node.ip4();
-            if let Err(err) = discv5.add_enr(node) {
-                debug!(target: "net::discv5",
-                    ?ip4,
-                    %err,
-                    "failed adding boot node"
-                );
-            }
-        };
-
         let mut enr_requests = vec![];
         for node in bootstrap_nodes {
             match node {
                 BootNode::Enr(node) => {
-                    add_enr(node)
+                    if let Err(err) = discv5.add_enr(node) {
+                        return Err(Error::AddNodeFailed(err))
+                    }
                 }
                 BootNode::Enode(enode) => {
                     let discv5 = discv5.clone();
                     enr_requests.push(async move {
-                        match discv5.request_enr(enode.to_string()).await {
-                            Ok(node) => Some(node),
-                            Err(err) => {
-                                debug!(target: "net::discv5",
-                                    ?enode,
-                                    %err,
-                                    "failed requesting boot node enr"
-                                );
-                                None
-                            }
+                        if let Err(err) = discv5.request_enr(enode.to_string()).await {
+                            debug!(target: "net::discv5",
+                                ?enode,
+                                %err,
+                                "failed adding boot node"
+                            );
                         }
                     })
                 }
             }
         }
-        for node in join_all(enr_requests).await {
-            if let Some(node) = node {
-                add_enr(node)
-            }
-        }
-        Ok(())
+
+        Ok(_ = join_all(enr_requests).await)
     }
 
     /// Backgrounds regular look up queries, in order to keep kbuckets populated.
