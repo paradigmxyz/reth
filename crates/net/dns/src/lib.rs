@@ -414,7 +414,7 @@ mod tests {
     use crate::tree::TreeRootEntry;
     use alloy_rlp::{Decodable, Encodable};
     use enr::EnrKey;
-    use reth_primitives::{Chain, Hardfork, MAINNET};
+    use reth_primitives::{Chain, ForkHash, Hardfork, MAINNET};
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
 
@@ -443,14 +443,17 @@ mod tests {
     #[test]
     fn test_decode_and_convert_enr_node_record() {
         // rig
+
         let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
         let enr = Enr::builder()
             .ip("127.0.0.1".parse().unwrap())
             .udp4(9000)
             .tcp4(30303)
             .add_value(b"eth", &MAINNET.latest_fork_id())
+            .add_value(b"opstack", &ForkId { hash: ForkHash(rand::random()), next: rand::random() })
             .build(&secret_key)
             .unwrap();
+
         let mut encoded_enr = vec![];
         enr.encode(&mut encoded_enr);
 
