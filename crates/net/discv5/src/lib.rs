@@ -265,43 +265,28 @@ impl Discv5 {
         let add_enr = |node: Enr<CombinedKey>| {
             let ip4 = node.ip4();
             if let Err(err) = discv5.add_enr(node) {
-                debug!(target: "net::discv5",
-                    ?ip4,
-                    %err,
-                    "failed adding boot node"
-                );
+                debug!(target: "net::discv5", ?ip4, %err, "failed adding boot node");
             }
         };
 
         let mut enr_requests = vec![];
         for node in bootstrap_nodes {
             match node {
-                BootNode::Enr(node) => {
-                    add_enr(node)
-                }
+                BootNode::Enr(node) => add_enr(node),
                 BootNode::Enode(enode) => {
                     let discv5 = discv5.clone();
                     enr_requests.push(async move {
-                        match discv5.request_enr(enode.to_string()).await {
-                            Ok(node) => Some(node),
-                            Err(err) => {
-                                debug!(target: "net::discv5",
-                                    ?enode,
-                                    %err,
-                                    "failed requesting boot node enr"
-                                );
-                                None
-                            }
-                        }
+                        discv5.request_enr(enode.to_string()).await.map_err(|err| {
+                            debug!(target: "net::discv5", ?enode, %err, "failed requesting boot node enr");
+                            err
+                        }).ok()
                     })
                 }
             }
         }
-        for node in join_all(enr_requests).await {
-            if let Some(node) = node {
-                add_enr(node)
-            }
-        }
+
+        join_all(enr_requests).await.into_iter().flatten().for_each(|node| add_enr(node));
+
         Ok(())
     }
 
