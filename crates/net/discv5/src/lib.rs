@@ -402,6 +402,7 @@ impl Discv5 {
             Err(err) => {
                 trace!(target: "net::discovery::discv5",
                     %err,
+                    ?enr,
                     "discovered peer is unreachable"
                 );
 
