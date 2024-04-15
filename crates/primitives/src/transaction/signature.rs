@@ -86,7 +86,7 @@ impl Signature {
             self.odd_y_parity as u64 + chain_id * 2 + 35
         } else {
             #[cfg(feature = "optimism")]
-            if std::env::var(OP_RETH_MAINNET_BELOW_BEDROCK) == Ok(true.to_string()) &&
+            if std::env::var_os(OP_RETH_MAINNET_BELOW_BEDROCK).as_deref() == Some("true".as_ref()) &&
                 *self == Self::optimism_deposit_tx_signature()
             {
                 return 0
