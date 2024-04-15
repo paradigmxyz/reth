@@ -502,11 +502,19 @@ impl TryFrom<reth_rpc_types::Header> for Header {
             beneficiary: header.miner,
             blob_gas_used: header
                 .blob_gas_used
-                .map(|blob_gas_used| blob_gas_used.try_into().unwrap()),
+                .map(|blob_gas_used| {
+                    blob_gas_used.try_into().map_err(ConversionError::BlobGasUsedConversion)
+                })
+                .transpose()?,
             difficulty: header.difficulty,
             excess_blob_gas: header
                 .excess_blob_gas
-                .map(|excess_blob_gas| excess_blob_gas.try_into().unwrap()),
+                .map(|excess_blob_gas| {
+                    excess_blob_gas
+                        .try_into()
+                        .map_err(|e| ConversionError::ExcessBlobGasConversion(e))
+                })
+                .transpose()?,
             extra_data: header.extra_data,
             gas_limit: header
                 .gas_limit

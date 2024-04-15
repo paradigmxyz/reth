@@ -160,7 +160,7 @@ impl TryFrom<reth_rpc_types::Block> for Block {
                     .into_iter()
                     .map(|tx| {
                         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
-                        let tx_signed = TransactionSigned::from_transaction_and_signature(
+                        Ok(TransactionSigned::from_transaction_and_signature(
                             tx.try_into()?,
                             Signature {
                                 r: signature.r,
@@ -170,8 +170,7 @@ impl TryFrom<reth_rpc_types::Block> for Block {
                                     .unwrap_or(reth_rpc_types::Parity(false))
                                     .0,
                             },
-                        );
-                        Ok(tx_signed)
+                        ))
                     })
                     .collect(),
                 reth_rpc_types::BlockTransactions::Hashes(_) |
