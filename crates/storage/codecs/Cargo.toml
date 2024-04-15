@@ -30,10 +30,6 @@ proptest.workspace = true
 proptest-derive.workspace = true
 
 [features]
-default = ["compact", "std"]
+default = ["std"]
 std = ["alloy-primitives/std", "bytes/std"]
-compact = ["reth-codecs-derive/compact"]
-scale = ["reth-codecs-derive/scale"]
-postcard = ["reth-codecs-derive/postcard"]
-no_codec = ["reth-codecs-derive/no_codec"]
 optimism = ["reth-codecs-derive/optimism"]

@@ -56,10 +56,6 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
     fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash }.into())
     }
-
-    fn unwind(&self, _unwind_to: BlockNumber) -> RethResult<()> {
-        Ok(())
-    }
 }
 
 impl BlockchainTreeViewer for NoopBlockchainTree {

@@ -325,26 +325,16 @@ pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithS
 
 impl<'a> fmt::Display for DisplayBlocksChain<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0.len() <= 3 {
-            write!(f, "[")?;
-            let mut iter = self.0.values().map(|block| block.num_hash());
-            if let Some(block_num_hash) = iter.next() {
-                write!(f, "{block_num_hash:?}")?;
-                for block_num_hash_iter in iter {
-                    write!(f, ", {block_num_hash_iter:?}")?;
-                }
-            }
-            write!(f, "]")?;
+        let mut list = f.debug_list();
+        let mut values = self.0.values().map(|block| block.num_hash());
+        if values.len() <= 3 {
+            list.entries(values);
         } else {
-            write!(
-                f,
-                "[{:?}, ..., {:?}]",
-                self.0.values().next().unwrap().num_hash(),
-                self.0.values().last().unwrap().num_hash()
-            )?;
+            list.entry(&values.next().unwrap());
+            list.entry(&format_args!("..."));
+            list.entry(&values.next_back().unwrap());
         }
-
-        Ok(())
+        list.finish()
     }
 }
 
