@@ -494,9 +494,7 @@ impl TryFrom<reth_rpc_types::Header> for Header {
             base_fee_per_gas: header
                 .base_fee_per_gas
                 .map(|base_fee_per_gas| {
-                    base_fee_per_gas
-                        .try_into()
-                        .map_err(|e| ConversionError::BaseFeePerGasConversion(e))
+                    base_fee_per_gas.try_into().map_err(ConversionError::BaseFeePerGasConversion)
                 })
                 .transpose()?,
             beneficiary: header.miner,
@@ -510,20 +508,12 @@ impl TryFrom<reth_rpc_types::Header> for Header {
             excess_blob_gas: header
                 .excess_blob_gas
                 .map(|excess_blob_gas| {
-                    excess_blob_gas
-                        .try_into()
-                        .map_err(|e| ConversionError::ExcessBlobGasConversion(e))
+                    excess_blob_gas.try_into().map_err(ConversionError::ExcessBlobGasConversion)
                 })
                 .transpose()?,
             extra_data: header.extra_data,
-            gas_limit: header
-                .gas_limit
-                .try_into()
-                .map_err(|e| ConversionError::GasLimitConversion(e))?,
-            gas_used: header
-                .gas_used
-                .try_into()
-                .map_err(|e| ConversionError::GasUsedConversion(e))?,
+            gas_limit: header.gas_limit.try_into().map_err(ConversionError::GasLimitConversion)?,
+            gas_used: header.gas_used.try_into().map_err(ConversionError::GasUsedConversion)?,
             logs_bloom: header.logs_bloom,
             mix_hash: header.mix_hash.unwrap_or_default(),
             nonce: u64::from_be_bytes(header.nonce.unwrap_or_default().0),
