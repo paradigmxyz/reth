@@ -1,7 +1,7 @@
 #[cfg(any(test, feature = "arbitrary"))]
 use crate::block::{generate_valid_header, valid_header_strategy};
 use crate::{
-    basefee::calculate_next_block_base_fee,
+    basefee::calc_next_block_base_fee,
     constants,
     constants::{
         ALLOWED_FUTURE_BLOCK_TIME_SECONDS, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH,
@@ -247,12 +247,12 @@ impl Header {
     ///
     /// Returns a `None` if no base fee is set, no EIP-1559 support
     pub fn next_block_base_fee(&self, base_fee_params: BaseFeeParams) -> Option<u64> {
-        Some(calculate_next_block_base_fee(
-            self.gas_used,
-            self.gas_limit,
-            self.base_fee_per_gas?,
+        Some(calc_next_block_base_fee(
+            self.gas_used as u128,
+            self.gas_limit as u128,
+            self.base_fee_per_gas? as u128,
             base_fee_params,
-        ))
+        ) as u64)
     }
 
     /// Calculate excess blob gas for the next block according to the EIP-4844 spec.
