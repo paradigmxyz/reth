@@ -310,13 +310,16 @@ impl Discv5 {
                         discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
                     );
 
-                    trace!(target: "net::discv5",
-                        lookup_interval=format!("{:#?}", lookup_interval),
-                        "starting periodic lookup query"
-                    );
                     // make sure node is connected to each subtree in the network by target
                     // selection (ref kademlia)
                     let target = get_lookup_target(log2_distance, local_node_id);
+
+                    trace!(target: "net::discv5",
+                        target=format!("{:#?}", target),
+                        lookup_interval=format!("{:#?}", lookup_interval),
+                        "starting periodic lookup query"
+                    );
+
                     if log2_distance < MAX_LOG2_DISTANCE {
                         // try to populate bucket one step further away
                         log2_distance += 1
@@ -331,6 +334,7 @@ impl Discv5 {
                             "periodic lookup query failed"
                         ),
                         Ok(peers) => trace!(target: "net::discv5",
+                            target=format!("{:#?}", target),
                             lookup_interval=format!("{:#?}", lookup_interval),
                             peers_count=peers.len(),
                             peers=format!("[{:#}]", peers.iter()
