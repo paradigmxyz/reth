@@ -1,28 +1,7 @@
 //! Helpers for working with EIP-1559 base fee
 
-/// Calculate the base fee for the next block based on the EIP-1559 specification.
-///
-/// This function calculates the base fee for the next block according to the rules defined in the
-/// EIP-1559. EIP-1559 introduces a new transaction pricing mechanism that includes a
-/// fixed-per-block network fee that is burned and dynamically adjusts block sizes to handle
-/// transient congestion.
-///
-/// For each block, the base fee per gas is determined by the gas used in the parent block and the
-/// target gas (the block gas limit divided by the elasticity multiplier). The algorithm increases
-/// the base fee when blocks are congested and decreases it when they are under the target gas
-/// usage. The base fee per gas is always burned.
-///
-/// Parameters:
-/// - `gas_used`: The gas used in the current block.
-/// - `gas_limit`: The gas limit of the current block.
-/// - `base_fee`: The current base fee per gas.
-/// - `base_fee_params`: Base fee parameters such as elasticity multiplier and max change
-///   denominator.
-///
-/// Returns:
-/// The calculated base fee for the next block as a `u64`.
-///
-/// For more information, refer to the [EIP-1559 spec](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1559.md).
+// re-export
+#[doc(inline)]
 pub use alloy_eips::eip1559::calc_next_block_base_fee;
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use crate::{
 };
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{basefee::calc_next_block_base_fee, BlockNumberOrTag, U256};
+use reth_primitives::{BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::FeeHistory;
 use reth_transaction_pool::TransactionPool;
@@ -187,12 +187,12 @@ where
             //
             // The unwrap is safe since we checked earlier that we got at least 1 header.
             let last_header = headers.last().expect("is present");
-            base_fee_per_gas.push(calc_next_block_base_fee(
-                last_header.gas_used as u128,
-                last_header.gas_limit as u128,
-                last_header.base_fee_per_gas.unwrap_or_default() as u128,
-                self.provider().chain_spec().base_fee_params(last_header.timestamp),
-            ));
+            base_fee_per_gas.push(
+                self.provider().chain_spec().base_fee_params(last_header.timestamp).next_block_base_fee(
+                    last_header.gas_used as u128,
+                    last_header.gas_limit as u128,
+                    last_header.base_fee_per_gas.unwrap_or_default() as u128,
+                ));
 
             // Same goes for the `base_fee_per_blob_gas`:
             // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
