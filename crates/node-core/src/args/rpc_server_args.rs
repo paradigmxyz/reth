@@ -140,7 +140,7 @@ pub struct RpcServerArgs {
     pub rpc_jwtsecret: Option<JwtSecret>,
 
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
-    #[arg(long = "rpc.max-request-size", alias = "rpc_max_request_size", default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into())]
+    #[arg(long = "rpc.max-request-size", alias = "rpc-max-request-size", default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into())]
     pub rpc_max_request_size: MaxU32,
 
     /// Set the maximum RPC response payload size for both HTTP and WS in megabytes.
@@ -148,23 +148,23 @@ pub struct RpcServerArgs {
     pub rpc_max_response_size: MaxU32,
 
     /// Set the maximum concurrent subscriptions per connection.
-    #[arg(long = "rpc.max-subscriptions-per-connection", alias = "--rpc_max_subscriptions_per_connection", default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN.into())]
+    #[arg(long = "rpc.max-subscriptions-per-connection", alias = "rpc-max-subscriptions-per-connection", default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN.into())]
     pub rpc_max_subscriptions_per_connection: MaxU32,
 
     /// Maximum number of RPC server connections.
-    #[arg(long = "rpc.max-connections", alias = "rpc_max_connections", value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_CONNECTIONS.into())]
+    #[arg(long = "rpc.max-connections", alias = "rpc-max-connections", value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_CONNECTIONS.into())]
     pub rpc_max_connections: MaxU32,
 
     /// Maximum number of concurrent tracing requests.
-    #[arg(long = "rpc.max-tracing-requests", alias = "rpc_max_tracing_requests", value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
+    #[arg(long = "rpc.max-tracing-requests", alias = "rpc-max-tracing-requests", value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
     pub rpc_max_tracing_requests: usize,
 
     /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
-    #[arg(long = "rpc.max-blocks-per-filter", alias = "rpc_max_blocks_per_filter", value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
+    #[arg(long = "rpc.max-blocks-per-filter", alias = "rpc-max-blocks-per-filter", value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
     pub rpc_max_blocks_per_filter: ZeroAsNoneU64,
 
     /// Maximum number of logs that can be returned in a single response. (0 = no limit)
-    #[arg(long = "rpc.max-logs-per-response", alias = "rpc_max_logs_per_response", value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64))]
+    #[arg(long = "rpc.max-logs-per-response", alias = "rpc-max-logs-per-response", value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64))]
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
