@@ -21,8 +21,8 @@ use reth_primitives::{
     BlockHash, BlockNumber, SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter}, DatabaseProviderRW, HeaderProvider,
-    HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
+    providers::{StaticFileProvider, StaticFileWriter},
+    DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
 };
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
@@ -377,7 +377,7 @@ mod tests {
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockBody, SealedBlock, SealedBlockWithSenders, B256,
     };
-    use reth_provider::{BlockWriter, BundleStateWithReceipts, ProviderFactory};
+    use reth_provider::{BlockHashReader, BlockWriter, BundleStateWithReceipts, ProviderFactory};
     use reth_trie::{updates::TrieUpdates, HashedPostState};
     use test_runner::HeadersTestRunner;
 
