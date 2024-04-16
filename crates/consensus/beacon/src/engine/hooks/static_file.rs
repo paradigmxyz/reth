@@ -1,7 +1,7 @@
 //! StaticFile hook for the engine implementation.
 
 use crate::{
-    engine::hooks::{EngineContext, EngineHook, EngineHookError, EngineHookEvent},
+    engine::hooks::{EngineHook, EngineHookContext, EngineHookError, EngineHookEvent},
     hooks::EngineHookDBAccessLevel,
 };
 use futures::FutureExt;
@@ -135,7 +135,7 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
-        ctx: EngineContext,
+        ctx: EngineHookContext,
     ) -> Poll<RethResult<EngineHookEvent>> {
         let Some(finalized_block_number) = ctx.finalized_block_number else {
             trace!(target: "consensus::engine::hooks::static_file", ?ctx, "Finalized block number is not available");

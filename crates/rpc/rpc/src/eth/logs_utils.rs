@@ -22,7 +22,7 @@ where
         for log in receipt.logs.iter() {
             if log_matches_filter(block_num_hash, log, filter) {
                 let log = Log {
-                    inner: log.clone().into(),
+                    inner: log.clone(),
                     block_hash: Some(block_num_hash.hash),
                     block_number: Some(block_num_hash.number),
                     transaction_hash: Some(tx_hash),
@@ -90,7 +90,7 @@ pub(crate) fn append_matching_block_logs(
                 }
 
                 let log = Log {
-                    inner: log.clone().into(),
+                    inner: log.clone(),
                     block_hash: Some(block_num_hash.hash),
                     block_number: Some(block_num_hash.number),
                     transaction_hash,
@@ -118,7 +118,7 @@ pub(crate) fn log_matches_filter(
         (!params.filter_block_range(block.number) ||
             !params.filter_block_hash(block.hash) ||
             !params.filter_address(&log.address) ||
-            !params.filter_topics(&log.topics))
+            !params.filter_topics(log.topics()))
     {
         return false
     }
