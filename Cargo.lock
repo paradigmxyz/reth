@@ -6603,6 +6603,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "revm-primitives",
+ "tracing",
 ]
 
 [[package]]

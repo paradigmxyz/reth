@@ -779,6 +779,18 @@ impl ChainSpec {
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
     }
 
+    /// Convenience method to check if [Hardfork::Byzantium] is active at a given block number.
+    #[inline]
+    pub fn is_byzantium_active_at_block(&self, block_number: u64) -> bool {
+        self.fork(Hardfork::Byzantium).active_at_block(block_number)
+    }
+
+    /// Convenience method to check if [Hardfork::SpuriousDragon] is active at a given block number.
+    #[inline]
+    pub fn is_spurious_dragon_active_at_block(&self, block_number: u64) -> bool {
+        self.fork(Hardfork::SpuriousDragon).active_at_block(block_number)
+    }
+
     /// Convenience method to check if [Hardfork::Homestead] is active at a given block number.
     #[inline]
     pub fn is_homestead_active_at_block(&self, block_number: u64) -> bool {

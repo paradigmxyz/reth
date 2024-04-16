@@ -20,3 +20,6 @@ reth-provider.workspace = true
 
 # Ethereum
 revm-primitives.workspace = true
+
+# misc
+tracing.workspace = true
