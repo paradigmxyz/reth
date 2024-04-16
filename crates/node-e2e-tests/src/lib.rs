@@ -1,6 +1,14 @@
-/// Helper type to configure the chain spec as needed for e2e tests
-mod chain_spec_builder;
-/// Test suite for e2e tests
-pub mod test_suite;
+/// Wrapper type to create test nodes
+pub mod node;
+
 /// Helper type to yield accounts from mnemonic
-mod wallet;
+pub mod wallet;
+
+/// Helper for payload operations
+mod payload;
+
+/// Helper for network operations
+mod network;
+
+/// Helper for engine api operations
+mod engine_api;
