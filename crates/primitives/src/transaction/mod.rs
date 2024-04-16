@@ -708,6 +708,8 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .ok_or(ConversionError::MissingMaxFeePerBlobGas)?,
                 }))
             }
+            #[cfg(feature = "optimism")]
+            Some(TxType::Deposit) => todo!(),
         }
     }
 }
