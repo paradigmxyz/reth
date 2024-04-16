@@ -13,7 +13,8 @@ use reth_discv5::{OptimismForkId, ENR_FORK_KEY_ETH, ENR_FORK_KEY_OPSTACK};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
-    mainnet_nodes, pk2id, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET,
+    mainnet_nodes, pk2id, sepolia_nodes, ChainSpec, ForkFilter, Head, NamedChain, NodeRecord,
+    PeerId, MAINNET,
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
