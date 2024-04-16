@@ -18,9 +18,12 @@ use std::{
 pub use alloy_eips::eip1559::BaseFeeParams;
 
 #[cfg(feature = "optimism")]
-pub(crate) use crate::constants::{
-    OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
-    OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+pub(crate) use crate::{
+    constants::{
+        OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
+        OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+    },
+    net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes},
 };
 
 /// The Ethereum mainnet spec
@@ -938,6 +941,14 @@ impl ChainSpec {
             C::Goerli => Some(goerli_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
+            #[cfg(feature = "optimism")]
+            C::Base => Some(base_nodes()),
+            #[cfg(feature = "optimism")]
+            C::Optimism => Some(op_nodes()),
+            #[cfg(feature = "optimism")]
+            C::BaseGoerli | C::BaseSepolia => Some(base_testnet_nodes()),
+            #[cfg(feature = "optimism")]
+            C::OptimismSepolia | C::OptimismGoerli | C::OptimismKovan => Some(op_testnet_nodes()),
             _ => None,
         }
     }
