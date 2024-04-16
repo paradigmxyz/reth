@@ -20,7 +20,9 @@ pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::TxEip4844;
 
-pub use error::{InvalidTransactionError, TransactionConversionError};
+pub use error::{
+    InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+};
 pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 #[cfg(feature = "c-kzg")]
@@ -1744,16 +1746,30 @@ impl Decodable for TransactionSignedEcRecovered {
 ///
 /// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
 /// transaction type that the transaction pool uses.
-pub trait FromRecoveredTransaction {
+pub trait TryFromRecoveredTransaction {
+    /// The error type returned by the transaction.
+    type Error;
     /// Converts to this type from the given [`TransactionSignedEcRecovered`].
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self;
+    fn try_from_recovered_transaction(
+        tx: TransactionSignedEcRecovered,
+    ) -> Result<Self, Self::Error>
+    where
+        Self: Sized;
 }
 
 // Noop conversion
-impl FromRecoveredTransaction for TransactionSignedEcRecovered {
+impl TryFromRecoveredTransaction for TransactionSignedEcRecovered {
+    type Error = TryFromRecoveredTransactionError;
+
     #[inline]
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        tx
+    fn try_from_recovered_transaction(
+        tx: TransactionSignedEcRecovered,
+    ) -> Result<Self, Self::Error> {
+        if tx.is_eip4844() {
+            Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
+        } else {
+            Ok(tx)
+        }
     }
 }
 
@@ -1768,7 +1784,7 @@ pub trait FromRecoveredPooledTransaction {
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
 }
 
-/// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
+/// The inverse of [TryFromRecoveredTransaction] that ensure the transaction can be sent over the
 /// network
 pub trait IntoRecoveredTransaction {
     /// Converts to this type into a [`TransactionSignedEcRecovered`].
