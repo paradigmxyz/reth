@@ -41,11 +41,8 @@ pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
 use metrics::Discv5Metrics;
 
-/// Max log2 distance.
-const MAX_LOG2_DISTANCE: usize = 256;
-
-/// Min log2 distance.
-const MIN_LOG2_DISTANCE: usize = 1;
+/// Max kbucket index (max log2distance - 1).
+const MAX_KBUCKET_INDEX: usize = 255;
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Clone)]
@@ -303,7 +300,7 @@ impl Discv5 {
             let local_node_id = discv5.local_enr().node_id();
             let lookup_interval = Duration::from_secs(lookup_interval);
             let mut metrics = metrics.discovered_peers;
-            let mut log2_distance = MAX_LOG2_DISTANCE;
+            let mut kbucket_index = MAX_KBUCKET_INDEX;
             // todo: graceful shutdown
 
             async move {
@@ -315,7 +312,7 @@ impl Discv5 {
 
                     // make sure node is connected to each subtree in the network by target
                     // selection (ref kademlia)
-                    let target = get_lookup_target(log2_distance, local_node_id);
+                    let target = get_lookup_target(kbucket_index, local_node_id);
 
                     trace!(target: "net::discv5",
                         target=format!("{:#?}", target),
@@ -323,12 +320,12 @@ impl Discv5 {
                         "starting periodic lookup query"
                     );
 
-                    if log2_distance > MIN_LOG2_DISTANCE {
+                    if kbucket_index > 0 {
                         // try to populate bucket one step closer
-                        log2_distance -= 1
+                        kbucket_index -= 1
                     } else {
                         // start over with bucket furthest away
-                        log2_distance = MAX_LOG2_DISTANCE
+                        kbucket_index = MAX_KBUCKET_INDEX
                     }
                     match discv5.find_node(target).await {
                         Err(err) => trace!(target: "net::discv5",
@@ -524,19 +521,17 @@ pub struct DiscoveredPeer {
     pub fork_id: Option<ForkId>,
 }
 
-/// Gets the next lookup target, based on which distance is currently being targeted.
+/// Gets the next lookup target, based on which bucket is currently being targeted.
 pub fn get_lookup_target(
-    log2_distance: usize,
+    kbucket_index: usize,
     local_node_id: discv5::enr::NodeId,
 ) -> discv5::enr::NodeId {
-    let bucket_index = log2_distance - 1;
-
     // init target
     let mut target = local_node_id.raw();
 
-    // make sure target has a 'distance'-long suffix that differs from local node id
-    if bucket_index != 0 {
-        let suffix_bit_offset = MAX_LOG2_DISTANCE.saturating_sub(bucket_index);
+    // make sure target has a 'log2distance'-long suffix that differs from local node id
+    if kbucket_index != 0 {
+        let suffix_bit_offset = MAX_KBUCKET_INDEX.saturating_sub(kbucket_index);
         let suffix_byte_offset = suffix_bit_offset / 8;
         // todo: flip the precise bit
         // let rel_suffix_bit_offset = suffix_bit_offset % 8;
@@ -766,23 +761,23 @@ mod tests {
 
     #[test]
     fn select_lookup_target() {
-        // distance ceiled to the next byte
-        const fn expected_log2_distance(log2_distance: usize) -> u64 {
-            let log2_distance = log2_distance / 8;
-            ((log2_distance + 1) * 8) as u64
+        // bucket index ceiled to the next multiple of 4
+        const fn expected_bucket_index(kbucket_index: usize) -> u64 {
+            let kbucket_index = kbucket_index / 8;
+            ((kbucket_index + 1) * 8) as u64
         }
 
-        let log2_distance = rand::thread_rng().gen_range(MIN_LOG2_DISTANCE..=MAX_LOG2_DISTANCE);
+        let bucket_index = rand::thread_rng().gen_range(0..MAX_KBUCKET_INDEX);
 
         let sk = CombinedKey::generate_secp256k1();
         let local_node_id = discv5::enr::NodeId::from(sk.public());
-        let target = get_lookup_target(log2_distance, local_node_id);
+        let target = get_lookup_target(bucket_index, local_node_id);
 
         let local_node_id = sigp::Key::from(local_node_id);
         let target = sigp::Key::from(target);
 
         assert_eq!(
-            expected_log2_distance(log2_distance),
+            expected_bucket_index(bucket_index),
             local_node_id.log2_distance(&target).unwrap()
         );
     }
