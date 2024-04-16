@@ -1,39 +1,39 @@
+#[cfg(not(feature = "optimism"))]
+use revm::DatabaseCommit;
+use revm::{
+    db::{states::bundle_state::BundleRetention, StateDBBox},
+    inspector_handle_register,
+    interpreter::Host,
+    primitives::{CfgEnvWithHandlerCfg, ResultAndState},
+    Evm, State,
+};
+use std::{sync::Arc, time::Instant};
+#[cfg(not(feature = "optimism"))]
+use tracing::{debug, trace};
+
+use reth_evm::ConfigureEvm;
+use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+#[cfg(feature = "optimism")]
+use reth_primitives::revm::env::fill_op_tx_env;
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::revm::env::fill_tx_env;
+use reth_primitives::{
+    Address, Block, BlockNumber, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
+    PruneMode, PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts,
+    TransactionSigned, Withdrawals, B256, MINIMUM_PRUNING_DISTANCE, U256,
+};
+#[cfg(not(feature = "optimism"))]
+use reth_provider::BundleStateWithReceipts;
+use reth_provider::{
+    BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
+};
+
 use crate::{
     database::StateProviderDatabase,
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     stack::{InspectorStack, InspectorStackConfig},
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
 };
-use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
-use reth_node_api::ConfigureEvm;
-use reth_primitives::{
-    Address, Block, BlockNumber, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
-    PruneMode, PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts,
-    TransactionSigned, Withdrawals, B256, MINIMUM_PRUNING_DISTANCE, U256,
-};
-use reth_provider::{
-    BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
-};
-use revm::{
-    db::{states::bundle_state::BundleRetention, EmptyDBTyped, StateDBBox},
-    inspector_handle_register,
-    interpreter::Host,
-    primitives::{CfgEnvWithHandlerCfg, ResultAndState},
-    Evm, State, StateBuilder,
-};
-use std::{sync::Arc, time::Instant};
-
-#[cfg(feature = "optimism")]
-use reth_primitives::revm::env::fill_op_tx_env;
-#[cfg(not(feature = "optimism"))]
-use reth_primitives::revm::env::fill_tx_env;
-
-#[cfg(not(feature = "optimism"))]
-use reth_provider::BundleStateWithReceipts;
-#[cfg(not(feature = "optimism"))]
-use revm::DatabaseCommit;
-#[cfg(not(feature = "optimism"))]
-use tracing::{debug, trace};
 
 /// EVMProcessor is a block executor that uses revm to execute blocks or multiple blocks.
 ///
@@ -86,30 +86,6 @@ where
     /// Return chain spec.
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
-    }
-
-    /// Create a new pocessor with the given chain spec.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        // create evm with boxed empty db that is going to be set later.
-        let db = Box::new(
-            StateBuilder::new().with_database_boxed(Box::new(EmptyDBTyped::<ProviderError>::new())),
-        )
-        .build();
-
-        // Hook and inspector stack that we want to invoke on that hook.
-        let stack = InspectorStack::new(InspectorStackConfig::default());
-        let evm = evm_config.evm_with_inspector(db, stack);
-        EVMProcessor {
-            chain_spec,
-            evm,
-            receipts: Receipts::new(),
-            first_block: None,
-            tip: None,
-            prune_modes: PruneModes::none(),
-            pruning_address_filter: None,
-            stats: BlockExecutorStats::default(),
-            _evm_config: evm_config,
-        }
     }
 
     /// Creates a new executor from the given chain spec and database.
@@ -189,7 +165,7 @@ where
     ///
     /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
     /// state changes are made.
-    pub fn apply_beacon_root_contract_call(
+    fn apply_beacon_root_contract_call(
         &mut self,
         block: &Block,
     ) -> Result<(), BlockExecutionError> {
@@ -408,15 +384,6 @@ where
 {
     type Error = BlockExecutionError;
 
-    fn execute(
-        &mut self,
-        block: &BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError> {
-        let receipts = self.execute_inner(block, total_difficulty)?;
-        self.save_receipts(receipts)
-    }
-
     fn execute_and_verify_receipt(
         &mut self,
         block: &BlockWithSenders,
@@ -580,16 +547,20 @@ pub fn compare_receipts_root_and_logs_bloom(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::test_utils::{StateProviderTest, TestEvmConfig};
+    use std::collections::HashMap;
+
+    use revm::{Database, TransitionState};
+
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS},
         keccak256, Account, Bytes, ChainSpecBuilder, ForkCondition, Signature, Transaction,
         TransactionKind, TxEip1559, MAINNET,
     };
-    use revm::{Database, TransitionState};
-    use std::collections::HashMap;
+
+    use crate::test_utils::{StateProviderTest, TestEvmConfig};
+
+    use super::*;
 
     static BEACON_ROOT_CONTRACT_CODE: Bytes = bytes!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
 
@@ -660,7 +631,7 @@ mod tests {
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
-            .execute(
+            .execute_and_verify_receipt(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
@@ -854,7 +825,7 @@ mod tests {
         // now try to process the genesis block again, this time ensuring that a system contract
         // call does not occur
         executor
-            .execute(
+            .execute_and_verify_receipt(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
@@ -913,7 +884,7 @@ mod tests {
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
-            .execute(
+            .execute_and_verify_receipt(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),

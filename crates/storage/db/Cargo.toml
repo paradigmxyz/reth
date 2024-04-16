@@ -60,7 +60,7 @@ test-fuzz.workspace = true
 
 pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion.workspace = true
-iai = "0.1.1"
+iai-callgrind = "0.10.2"
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true

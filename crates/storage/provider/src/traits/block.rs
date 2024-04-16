@@ -133,6 +133,15 @@ pub trait BlockReader:
     ///
     /// Note: returns only available blocks
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>>;
+
+    /// retrieves a range of blocks from the database, along with the senders of each
+    /// transaction in the blocks.
+    ///
+    /// The `transaction_kind` parameter determines whether to return its hash
+    fn block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>>;
 }
 
 /// Trait extension for `BlockReader`, for types that implement `BlockId` conversion.

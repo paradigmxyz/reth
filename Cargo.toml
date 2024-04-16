@@ -11,6 +11,7 @@ members = [
     "crates/etl/",
     "crates/evm/",
     "crates/evm-ethereum/",
+    "crates/exex/",
     "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
@@ -41,6 +42,8 @@ members = [
     "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc-types-compat/",
+    "crates/engine-primitives/",
+    "crates/ethereum-engine-primitives/",
     "crates/node-ethereum/",
     "crates/node-builder/",
     "crates/node-optimism/",
@@ -76,6 +79,8 @@ members = [
     "examples/trace-transaction-cli/",
     "examples/polygon-p2p/",
     "examples/custom-inspector/",
+    "examples/exex/minimal/",
+    "examples/exex/op-bridge/",
     "testing/ef-tests/",
 ]
 default-members = ["bin/reth"]
@@ -203,6 +208,8 @@ reth-db = { path = "crates/storage/db" }
 reth-discv4 = { path = "crates/net/discv4" }
 reth-discv5 = { path = "crates/net/discv5" }
 reth-dns-discovery = { path = "crates/net/dns" }
+reth-engine-primitives = { path = "crates/engine-primitives" }
+reth-ethereum-engine-primitives = { path = "crates/ethereum-engine-primitives" }
 reth-node-builder = { path = "crates/node-builder" }
 reth-node-ethereum = { path = "crates/node-ethereum" }
 reth-node-optimism = { path = "crates/node-optimism" }
@@ -217,6 +224,7 @@ reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/evm-ethereum" }
+reth-exex = { path = "crates/exex" }
 reth-optimism-payload-builder = { path = "crates/payload/optimism" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
@@ -252,27 +260,36 @@ reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 
 # revm
-revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "0ef5814" }
+revm = { version = "8.0.0", features = [
+    "std",
+    "secp256k1",
+], default-features = false }
+revm-primitives = { version = "3.1.0", features = [
+    "std",
+], default-features = false }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "67f9968" }
 
 # eth
-alloy-chains = { version = "0.1", feature = ["serde", "rlp", "arbitrary"] }
+alloy-chains = "0.1.15"
 alloy-primitives = "0.7.0"
 alloy-dyn-abi = "0.7.0"
 alloy-sol-types = "0.7.0"
 alloy-rlp = "0.3.4"
-alloy-trie = "0.3"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "8c9dd0a" }
-
-# TODO: Remove
-ethers-core = { version = "2.0.14", default-features = false }
-ethers-providers = { version = "2.0.14", default-features = false }
+alloy-trie = "0.3.1"
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7", default-features = false, features = [
+    "reqwest",
+] }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "a32e6f7" }
 
 # misc
 aquamarine = "0.5"
@@ -328,9 +345,9 @@ discv5 = { git = "https://github.com/sigp/discv5", rev = "04ac004" }
 igd-next = "0.14.3"
 
 # rpc
-jsonrpsee = "0.20"
-jsonrpsee-core = "0.20"
-jsonrpsee-types = "0.20"
+jsonrpsee = "0.22"
+jsonrpsee-core = "0.22"
+jsonrpsee-types = "0.22"
 
 # crypto
 secp256k1 = { version = "0.27.0", default-features = false, features = [

@@ -121,7 +121,7 @@ mod tests {
     use crate::eth::{
         cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig,
     };
-    use reth_node_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_tasks::pool::BlockingTaskPool;
@@ -145,6 +145,7 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
+            None,
         );
         let address = Address::random();
         let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
@@ -169,6 +170,7 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
+            None,
         );
 
         let storage_key: U256 = storage_key.into();

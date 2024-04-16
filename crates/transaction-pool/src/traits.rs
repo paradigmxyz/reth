@@ -531,7 +531,7 @@ pub struct NewBlobSidecar {
     /// hash of the EIP-4844 transaction.
     pub tx_hash: TxHash,
     /// the blob transaction sidecar.
-    pub sidecar: BlobTransactionSidecar,
+    pub sidecar: Arc<BlobTransactionSidecar>,
 }
 
 /// Where the transaction originates from.

@@ -240,16 +240,16 @@ pub(crate) fn create_txn_env(
 
     let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
         CallFees::ensure_fees(
-            gas_price,
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
+            gas_price.map(U256::from),
+            max_fee_per_gas.map(U256::from),
+            max_priority_fee_per_gas.map(U256::from),
             block_env.basefee,
             blob_versioned_hashes.as_deref(),
-            max_fee_per_blob_gas,
+            max_fee_per_blob_gas.map(U256::from),
             block_env.get_blob_gasprice().map(U256::from),
         )?;
 
-    let gas_limit = gas.unwrap_or_else(|| block_env.gas_limit.min(U256::from(u64::MAX)));
+    let gas_limit = gas.unwrap_or_else(|| block_env.gas_limit.min(U256::from(u64::MAX)).to());
     let env = TxEnv {
         gas_limit: gas_limit.try_into().map_err(|_| RpcInvalidTransactionError::GasUintOverflow)?,
         nonce,

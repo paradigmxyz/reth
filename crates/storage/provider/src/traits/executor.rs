@@ -18,20 +18,18 @@ pub trait ExecutorFactory: Send + Sync + 'static {
 }
 
 /// An executor capable of executing a block.
+///
+/// This type is capable of executing (multiple) blocks by applying the state changes made by each
+/// block. The final state of the executor can extracted using
+/// [take_output_state](BlockExecutor::take_output_state).
 pub trait BlockExecutor {
     /// The error type returned by the executor.
     type Error;
 
-    /// Execute a block.
-    fn execute(
-        &mut self,
-        block: &BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(), Self::Error>;
-
-    /// Executes the block and checks receipts.
+    /// Executes the entire block and verifies:
+    ///  - receipts (receipts root)
     ///
-    /// See [execute](BlockExecutor::execute) for more details.
+    /// This will update the state of the executor with the changes made by the block.
     fn execute_and_verify_receipt(
         &mut self,
         block: &BlockWithSenders,
@@ -49,7 +47,8 @@ pub trait BlockExecutor {
     ///
     /// The second returned value represents the total gas used by this block of transactions.
     ///
-    /// See [execute](BlockExecutor::execute) for more details.
+    /// See [execute_and_verify_receipt](BlockExecutor::execute_and_verify_receipt) for more
+    /// details.
     fn execute_transactions(
         &mut self,
         block: &BlockWithSenders,

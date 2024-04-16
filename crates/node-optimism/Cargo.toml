@@ -28,18 +28,29 @@ reth-network.workspace = true
 reth-revm.workspace = true
 revm.workspace = true
 
+# async
+async-trait.workspace = true
+hyper.workspace = true
+http = "0.2.8"
+http-body = "0.4.5"
+reqwest = { version = "0.11", default-features = false, features = [
+    "rustls-tls",
+]}
+
 # misc
 clap.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 eyre.workspace = true
 parking_lot.workspace = true
+thiserror.workspace = true
+jsonrpsee.workspace = true
 
 [dev-dependencies]
 reth-db.workspace = true
 
 [features]
 optimism = [
-    "reth-network/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",

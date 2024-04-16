@@ -96,10 +96,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// # Returns
     ///
     /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, CanonicalError>;
-
-    /// Unwind tables and put it inside state
-    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()>;
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError>;
 }
 
 /// Represents the kind of validation that should be performed when inserting a block.

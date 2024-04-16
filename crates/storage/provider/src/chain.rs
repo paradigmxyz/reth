@@ -8,7 +8,7 @@ use reth_primitives::{
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
-use std::{borrow::Cow, collections::BTreeMap, fmt};
+use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive};
 
 /// A chain of blocks and their final state.
 ///
@@ -177,6 +177,11 @@ impl Chain {
         self.blocks.len()
     }
 
+    /// Returns the range of block numbers in the chain.
+    pub fn range(&self) -> RangeInclusive<BlockNumber> {
+        self.first().number..=self.tip().number
+    }
+
     /// Get all receipts for the given block.
     pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&Receipt>> {
         let num = self.block_number(block_hash)?;
@@ -320,26 +325,16 @@ pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithS
 
 impl<'a> fmt::Display for DisplayBlocksChain<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0.len() <= 3 {
-            write!(f, "[")?;
-            let mut iter = self.0.values().map(|block| block.num_hash());
-            if let Some(block_num_hash) = iter.next() {
-                write!(f, "{block_num_hash:?}")?;
-                for block_num_hash_iter in iter {
-                    write!(f, ", {block_num_hash_iter:?}")?;
-                }
-            }
-            write!(f, "]")?;
+        let mut list = f.debug_list();
+        let mut values = self.0.values().map(|block| block.num_hash());
+        if values.len() <= 3 {
+            list.entries(values);
         } else {
-            write!(
-                f,
-                "[{:?}, ..., {:?}]",
-                self.0.values().next().unwrap().num_hash(),
-                self.0.values().last().unwrap().num_hash()
-            )?;
+            list.entry(&values.next().unwrap());
+            list.entry(&format_args!("..."));
+            list.entry(&values.next_back().unwrap());
         }
-
-        Ok(())
+        list.finish()
     }
 }
 

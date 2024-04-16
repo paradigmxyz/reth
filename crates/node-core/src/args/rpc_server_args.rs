@@ -27,7 +27,7 @@ use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
     constants,
     error::RpcError,
-    EthConfig, IpcServerBuilder, RethRpcModule, RpcModuleConfig, RpcModuleSelection,
+    EthConfig, Identity, IpcServerBuilder, RethRpcModule, RpcModuleConfig, RpcModuleSelection,
     RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::EngineApi;
@@ -176,6 +176,14 @@ pub struct RpcServerArgs {
     /// Gas price oracle configuration.
     #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
+
+    /// Enable auth engine api over IPC  
+    #[arg(long)]
+    pub auth_ipc: bool,
+
+    /// Filename for auth IPC socket/pipe within the datadir
+    #[arg(long = "auth-ipc.path", default_value_t = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())]
+    pub auth_ipc_path: String,
 }
 
 impl RpcServerArgs {
@@ -188,6 +196,12 @@ impl RpcServerArgs {
     /// Enables the WS-RPC server.
     pub fn with_ws(mut self) -> Self {
         self.ws = true;
+        self
+    }
+
+    /// Enables the Auth IPC
+    pub fn with_auth_ipc(mut self) -> Self {
+        self.auth_ipc = true;
         self
     }
 
@@ -414,7 +428,7 @@ impl RethRpcConfig for RpcServerArgs {
         config
     }
 
-    fn http_ws_server_builder(&self) -> ServerBuilder {
+    fn http_ws_server_builder(&self) -> ServerBuilder<Identity, Identity> {
         ServerBuilder::new()
             .max_connections(self.rpc_max_connections.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())
@@ -458,7 +472,11 @@ impl RethRpcConfig for RpcServerArgs {
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError> {
         let address = SocketAddr::new(self.auth_addr, self.auth_port);
 
-        Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
+        let mut builder = AuthServerConfig::builder(jwt_secret).socket_addr(address);
+        if self.auth_ipc {
+            builder = builder.ipc_endpoint(self.auth_ipc_path.clone());
+        }
+        Ok(builder.build())
     }
 
     fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
@@ -494,6 +512,8 @@ impl Default for RpcServerArgs {
             auth_addr: Ipv4Addr::LOCALHOST.into(),
             auth_port: constants::DEFAULT_AUTH_PORT,
             auth_jwtsecret: None,
+            auth_ipc: false,
+            auth_ipc_path: constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string(),
             rpc_jwtsecret: None,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
