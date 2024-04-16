@@ -405,7 +405,7 @@ where
                             elapsed,
                         ));
                     }
-                }
+                };
 
                 // Validate that the forkchoice state is consistent.
                 if let Some(invalid_fcu_response) =
@@ -417,17 +417,14 @@ where
 
                 if let Some(attrs) = attrs {
                     // the CL requested to build a new payload on top of this new VALID head
-                    let payload_response = self.process_payload_attributes(
-                        attrs,
-                        outcome.into_header().unseal(),
-                        state,
-                    );
-
-                    trace!(target: "consensus::engine", status = ?payload_response, ?state, "Returning forkchoice status");
-                    return Ok(payload_response)
+                    let head = outcome.into_header().unseal();
+                    self.process_payload_attributes(attrs, head, state)
+                } else {
+                    OnForkChoiceUpdated::valid(PayloadStatus::new(
+                        PayloadStatusEnum::Valid,
+                        Some(state.head_block_hash),
+                    ))
                 }
-
-                PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
             }
             Err(err) => {
                 if err.is_fatal() {
@@ -435,12 +432,12 @@ where
                     return Err(err.into())
                 }
 
-                self.on_failed_canonical_forkchoice_update(&state, err)
+                OnForkChoiceUpdated::valid(self.on_failed_canonical_forkchoice_update(&state, err))
             }
         };
 
         trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
-        Ok(OnForkChoiceUpdated::valid(status))
+        Ok(status)
     }
 
     /// Invoked when head hash references a `VALID` block that is already canonical.
