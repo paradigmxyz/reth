@@ -78,12 +78,12 @@
 //!
 //! ```
 //! use reth_engine_primitives::EngineTypes;
+//! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 //! };
-//! use reth_reth_evm::ConfigureEvm;
 //! use reth_rpc::JwtSecret;
 //! use reth_rpc_api::EngineApiServer;
 //! use reth_rpc_builder::{
