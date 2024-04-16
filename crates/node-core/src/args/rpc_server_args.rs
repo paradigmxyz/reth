@@ -123,7 +123,7 @@ pub struct RpcServerArgs {
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
     pub auth_jwtsecret: Option<PathBuf>,
 
-    /// Enable auth engine api over IPC
+    /// Enable auth engine API over IPC
     #[arg(long)]
     pub auth_ipc: bool,
 
