@@ -618,8 +618,12 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
     type Error = ConversionError;
 
     fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        match tx.transaction_type {
-            None | Some(0) => {
+        match tx.transaction_type.map(TryInto::try_into).transpose().map_err(|_| {
+            ConversionError::Eip2718Error(Eip2718Error::UnexpectedType(
+                tx.transaction_type.unwrap(),
+            ))
+        })? {
+            None | Some(TxType::Legacy) => {
                 // legacy
                 if tx.max_fee_per_gas.is_some() || tx.max_priority_fee_per_gas.is_some() {
                     return Err(ConversionError::Eip2718Error(
@@ -640,7 +644,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                     input: tx.input,
                 }))
             }
-            Some(1u8) => {
+            Some(TxType::Eip2930) => {
                 // eip2930
                 Ok(Transaction::Eip2930(TxEip2930 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
@@ -656,7 +660,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                     gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
                 }))
             }
-            Some(2u8) => {
+            Some(TxType::Eip1559) => {
                 // EIP-1559
                 Ok(Transaction::Eip1559(TxEip1559 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
@@ -677,7 +681,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                     input: tx.input,
                 }))
             }
-            Some(3u8) => {
+            Some(TxType::Eip4844) => {
                 // EIP-4844
                 Ok(Transaction::Eip4844(TxEip4844 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
@@ -704,7 +708,8 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .ok_or(ConversionError::MissingMaxFeePerBlobGas)?,
                 }))
             }
-            Some(tx_type) => Err(Eip2718Error::UnexpectedType(tx_type).into()),
+            #[cfg(feature = "optimism")]
+            Some(TxType::Deposit) => todo!(),
         }
     }
 }
