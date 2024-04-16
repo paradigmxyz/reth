@@ -2,7 +2,7 @@
 use metrics::{Counter, Gauge};
 use reth_metrics::Metrics;
 
-use crate::config::{ETH, ETH2, OPSTACK};
+use crate::fork_id::{ENR_FORK_ID_KEY_ETH, ENR_FORK_ID_KEY_ETH2, ENR_FORK_ID_KEY_OPSTACK};
 
 /// Information tracked by [`Discv5`](crate::Discv5).
 #[derive(Debug, Default, Clone)]
@@ -104,13 +104,13 @@ pub struct AdvertisedChainMetrics {
 impl AdvertisedChainMetrics {
     /// Counts each recognised network type that is advertised on node record, once.
     pub fn increment_once_by_network_type(&mut self, enr: &discv5::Enr) {
-        if enr.get_raw_rlp(OPSTACK).is_some() {
+        if enr.get_raw_rlp(ENR_FORK_ID_KEY_OPSTACK).is_some() {
             self.opstack.increment(1u64)
         }
-        if enr.get_raw_rlp(ETH).is_some() {
+        if enr.get_raw_rlp(ENR_FORK_ID_KEY_ETH).is_some() {
             self.eth.increment(1u64)
         }
-        if enr.get_raw_rlp(ETH2).is_some() {
+        if enr.get_raw_rlp(ENR_FORK_ID_KEY_ETH2).is_some() {
             self.eth2.increment(1u64)
         }
     }

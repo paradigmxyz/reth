@@ -11,14 +11,10 @@ use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
 use reth_primitives::{NodeRecord, MAINNET};
 
-use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys};
-
-/// L1 EL
-pub const ETH: &[u8] = b"eth";
-/// L1 CL
-pub const ETH2: &[u8] = b"eth2";
-/// Optimism
-pub const OPSTACK: &[u8] = b"opstack";
+use crate::{
+    enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, fork_id::ENR_FORK_ID_KEY_ETH2,
+    ENR_FORK_ID_KEY_ETH,
+};
 
 /// Default interval in seconds at which to run a self-lookup up query.
 ///
@@ -44,10 +40,6 @@ const BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET: &[&str] = &[
 const BOOT_NODES_OP_SEPOLIA_AND_BASE_SEPOLIA: &[&str] = &[
     "enode://09d1a6110757b95628cc54ab6cc50a29773075ed00e3a25bd9388807c9a6c007664e88646a6fefd82baad5d8374ba555e426e8aed93f0f0c517e2eb5d929b2a2@34.65.21.188:30304?discport=30303"
 ];
-
-/// Auto-trait for value to insert in local ENR.
-pub trait EnrValue: alloy_rlp::Encodable + Debug {}
-impl<T> EnrValue for T where T: alloy_rlp::Encodable + Debug {}
 
 /// Builds a [`Config`].
 #[derive(Debug, Default)]
@@ -160,7 +152,7 @@ impl ConfigBuilder {
     pub fn fork(
         mut self,
         key: &'static [u8],
-        value: impl alloy_rlp::Encodable + Debug + 'static,
+        value: impl alloy_rlp::Encodable + Debug + Send + 'static,
     ) -> Self {
         self.fork = Some((key, Box::new(value)));
         self
@@ -176,7 +168,7 @@ impl ConfigBuilder {
     pub fn add_enr_kv_pair(
         mut self,
         key: &'static [u8],
-        value: impl alloy_rlp::Encodable + Debug + 'static,
+        value: impl alloy_rlp::Encodable + Debug + Send + 'static,
     ) -> Self {
         self.other_enr_kv_pairs.push((key, Box::new(value)));
         self
@@ -207,12 +199,12 @@ impl ConfigBuilder {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let fork = fork.unwrap_or((ETH, Box::new(MAINNET.latest_fork_id())));
+        let fork = fork.unwrap_or((ENR_FORK_ID_KEY_ETH, Box::new(MAINNET.latest_fork_id())));
 
         let lookup_interval = lookup_interval.unwrap_or(DEFAULT_SECONDS_LOOKUP_INTERVAL);
 
-        let discovered_peer_filter =
-            discovered_peer_filter.unwrap_or_else(|| MustNotIncludeKeys::new(&[ETH2]));
+        let discovered_peer_filter = discovered_peer_filter
+            .unwrap_or_else(|| MustNotIncludeKeys::new(&[ENR_FORK_ID_KEY_ETH2]));
 
         Config {
             discv5_config,
@@ -310,6 +302,10 @@ impl BootNode {
         Ok(Self::Enode(multi_address))
     }
 }
+
+/// Auto-trait for value to insert in a local ENR kv-pair.
+pub trait EnrValue: alloy_rlp::Encodable + Debug + Send {}
+impl<T> EnrValue for T where T: alloy_rlp::Encodable + Debug + Send {}
 
 #[cfg(test)]
 mod test {
