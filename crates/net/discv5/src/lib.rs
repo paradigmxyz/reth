@@ -41,8 +41,11 @@ pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
 use metrics::Discv5Metrics;
 
-/// The max log2 distance, is equivalent to the index of the last bit in a discv5 node id.
+/// Max log2 distance.
 const MAX_LOG2_DISTANCE: usize = 256;
+
+/// Min log2 distance.
+const MIN_LOG2_DISTANCE: usize = 1;
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Clone)]
@@ -320,7 +323,7 @@ impl Discv5 {
                         "starting periodic lookup query"
                     );
 
-                    if log2_distance > 1 {
+                    if log2_distance > MIN_LOG2_DISTANCE {
                         // try to populate bucket one step closer
                         log2_distance -= 1
                     } else {
@@ -769,7 +772,7 @@ mod tests {
             ((log2_distance + 1) * 8) as u64
         }
 
-        let log2_distance = rand::thread_rng().gen_range(0..=MAX_LOG2_DISTANCE);
+        let log2_distance = rand::thread_rng().gen_range(MIN_LOG2_DISTANCE..=MAX_LOG2_DISTANCE);
 
         let sk = CombinedKey::generate_secp256k1();
         let local_node_id = discv5::enr::NodeId::from(sk.public());
