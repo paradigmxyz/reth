@@ -48,7 +48,6 @@ reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
-#reth-stages-api = { workspace = true}
 reth-blockchain-tree = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }

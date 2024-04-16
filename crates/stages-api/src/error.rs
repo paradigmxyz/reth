@@ -34,13 +34,13 @@ pub enum StageError {
     /// The stage encountered a downloader error where the responses cannot be attached to the
     /// current head.
     #[error(
-    "stage encountered inconsistent chain: \
+        "stage encountered inconsistent chain: \
          downloaded header #{header_number} ({header_hash}) is detached from \
          local head #{head_number} ({head_hash}): {error}",
-    header_number = header.number,
-    header_hash = header.hash(),
-    head_number = local_head.number,
-    head_hash = local_head.hash(),
+        header_number = header.number,
+        header_hash = header.hash(),
+        head_number = local_head.number,
+        head_hash = local_head.hash(),
     )]
     DetachedHead {
         /// The local head we attempted to attach to.

@@ -1,4 +1,3 @@
-//! Definition
 use crate::error::StageError;
 use reth_db::database::Database;
 use reth_primitives::{
@@ -249,7 +248,7 @@ pub trait Stage<DB: Database>: Send + Sync {
 
 /// [Stage] trait extension.
 pub trait StageExt<DB: Database>: Stage<DB> {
-    /// Utility extension for the `Stage` trait that invokes `Stage:poll_execute_ready`
+    /// Utility extension for the `Stage` trait that invokes `Stage::poll_execute_ready`
     /// with [poll_fn] context. For more information see [Stage::poll_execute_ready].
     fn execute_ready(
         &mut self,

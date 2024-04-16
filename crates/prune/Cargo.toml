@@ -34,8 +34,7 @@ tokio-stream.workspace = true
 [dev-dependencies]
 # reth
 reth-db = { workspace = true, features = ["test-utils"] }
-#reth-stages-api = { workspace = true, features = ["test-utils"] }
-reth-stages = { workspace = true}
+reth-stages = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 
 # misc
