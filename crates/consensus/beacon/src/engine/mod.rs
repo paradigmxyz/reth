@@ -4,7 +4,7 @@ use crate::{
         message::OnForkChoiceUpdated,
         metrics::EngineMetrics,
     },
-    hooks::{EngineContext, EngineHooksController},
+    hooks::{EngineHookContext, EngineHooksController},
     sync::{EngineSyncController, EngineSyncEvent},
 };
 use futures::{Future, StreamExt};
@@ -324,6 +324,17 @@ where
         }
 
         Ok((this, handle))
+    }
+
+    /// Returns current [EngineHookContext] that's used for polling engine hooks.
+    fn current_engine_hook_context(&self) -> RethResult<EngineHookContext> {
+        Ok(EngineHookContext {
+            tip_block_number: self.blockchain.canonical_tip().number,
+            finalized_block_number: self
+                .blockchain
+                .finalized_block_number()
+                .map_err(RethError::Provider)?,
+        })
     }
 
     /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
@@ -1841,16 +1852,9 @@ where
             loop {
                 // Poll a running hook with db write access first, as we will not be able to process
                 // any engine messages until it's finished.
-                if let Poll::Ready(result) = this.hooks.poll_active_db_write_hook(
-                    cx,
-                    EngineContext {
-                        tip_block_number: this.blockchain.canonical_tip().number,
-                        finalized_block_number: this
-                            .blockchain
-                            .finalized_block_number()
-                            .map_err(RethError::Provider)?,
-                    },
-                )? {
+                if let Poll::Ready(result) =
+                    this.hooks.poll_active_db_write_hook(cx, this.current_engine_hook_context()?)?
+                {
                     this.on_hook_result(result)?;
                     continue
                 }
@@ -1916,13 +1920,7 @@ where
             if !this.forkchoice_state_tracker.is_latest_invalid() {
                 if let Poll::Ready(result) = this.hooks.poll_next_hook(
                     cx,
-                    EngineContext {
-                        tip_block_number: this.blockchain.canonical_tip().number,
-                        finalized_block_number: this
-                            .blockchain
-                            .finalized_block_number()
-                            .map_err(RethError::Provider)?,
-                    },
+                    this.current_engine_hook_context()?,
                     this.sync.is_pipeline_active(),
                 )? {
                     this.on_hook_result(result)?;
