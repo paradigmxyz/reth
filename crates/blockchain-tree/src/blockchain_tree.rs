@@ -1642,11 +1642,11 @@ mod tests {
         );
 
         assert_eq!(
-            tree.insert_block(block4.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            tree.insert_block(block4, BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
 
-        let mut block2a = block2.clone();
+        let mut block2a = block2;
         let block2a_hash = B256::new([0x34; 32]);
         block2a.set_hash(block2a_hash);
 
@@ -1655,7 +1655,7 @@ mod tests {
             InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
         );
 
-        let mut block3a = block3.clone();
+        let mut block3a = block3;
         let block3a_hash = B256::new([0x35; 32]);
         block3a.set_hash(block3a_hash);
         block3a.set_parent_hash(block2a.hash());
