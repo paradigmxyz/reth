@@ -111,7 +111,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
 
-          [default: reth/v0.2.0-beta.5-770785d2d/x86_64-unknown-linux-gnu]
+          [default: reth/<VERSION>-<SHA>/<ARCH>-gnu]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
