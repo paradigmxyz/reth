@@ -31,7 +31,7 @@ mod tests {
     #[derive(Clone, Debug, PartialEq, Eq, RlpDecodable, RlpEncodable, Default)]
     struct Log {
         /// Contract that emitted this log.
-        pub(crate) address: Address,
+        address: Address,
         /// Topics of the log. The number of logs depend on what `LOG` opcode is used.
         #[cfg_attr(
             any(test, feature = "arbitrary"),
@@ -39,9 +39,9 @@ mod tests {
                 strategy = "proptest::collection::vec(proptest::arbitrary::any::<B256>(), 0..=5)"
             )
         )]
-        pub(crate) topics: Vec<B256>,
+        topics: Vec<B256>,
         /// Arbitrary length data.
-        pub(crate) data: Bytes,
+        data: Bytes,
     }
 
     impl From<AlloyLog> for Log {
@@ -73,7 +73,8 @@ mod tests {
             // Create alloy_log from log and then convert it to buffer and compare compacted_alloy_log and compacted_log
             let alloy_log = AlloyLog::new_unchecked(log.address, log.topics, log.data);
             let mut compacted_alloy_log = Vec::<u8>::new();
-            let _len = alloy_log.to_compact(&mut compacted_alloy_log);
+            let alloy_len = alloy_log.to_compact(&mut compacted_alloy_log);
+            assert_eq!(len, alloy_len);
             assert_eq!(compacted_log, compacted_alloy_log);
         }
     }
