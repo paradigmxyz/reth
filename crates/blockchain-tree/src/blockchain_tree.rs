@@ -430,8 +430,8 @@ where
         chain_id: BlockChainId,
         block_validation_kind: BlockValidationKind,
     ) -> Result<BlockStatus, InsertBlockErrorKind> {
-        debug!(target: "blockchain_tree", "Inserting block into side chain");
         let block_num_hash = block.num_hash();
+        debug!(target: "blockchain_tree", ?block_num_hash, "Inserting block into side chain");
         // Create a new sidechain by forking the given chain, or append the block if the parent
         // block is the top of the given chain.
         let block_hashes = self.all_chain_hashes(chain_id);
@@ -458,9 +458,9 @@ where
                 BlockAttachment::HistoricalFork
             };
 
-            debug!(target: "blockchain_tree", "Appending block to side chain");
             let block_hash = block.hash();
             let block_number = block.number;
+            debug!(target: "blockchain_tree", ?block_hash, ?block_number, "Appending block to side chain");
             parent_chain.append_block(
                 block,
                 block_hashes,
