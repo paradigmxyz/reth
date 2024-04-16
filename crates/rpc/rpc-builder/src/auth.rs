@@ -16,8 +16,9 @@ use jsonrpsee::{
 use reth_ipc::client::IpcClientBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
+use reth_engine_primitives::EngineTypes;
+use reth_evm::ConfigureEvm;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
     StateProviderFactory,
