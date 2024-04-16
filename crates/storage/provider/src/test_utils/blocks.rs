@@ -267,7 +267,9 @@ fn block3(
                         .clone()
                         .map(|slot| (U256::from(slot), (U256::ZERO, U256::from(slot)))),
                 ),
-            );
+            )
+            .revert_account_info(number, address, Some(None))
+            .revert_storage(number, address, Vec::new());
     }
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),

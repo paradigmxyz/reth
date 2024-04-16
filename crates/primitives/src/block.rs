@@ -1,11 +1,12 @@
 use crate::{
-    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
+    Address, Bytes, GotExpected, Header, SealedHeader, Signature, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::{any, prop_compose};
 use reth_codecs::derive_arbitrary;
+use reth_rpc_types::ConversionError;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
@@ -144,6 +145,48 @@ impl Deref for Block {
     type Target = Header;
     fn deref(&self) -> &Self::Target {
         &self.header
+    }
+}
+
+impl TryFrom<reth_rpc_types::Block> for Block {
+    type Error = ConversionError;
+
+    fn try_from(block: reth_rpc_types::Block) -> Result<Self, Self::Error> {
+        let body = {
+            let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
+                .transactions
+            {
+                reth_rpc_types::BlockTransactions::Full(transactions) => transactions
+                    .into_iter()
+                    .map(|tx| {
+                        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
+                        Ok(TransactionSigned::from_transaction_and_signature(
+                            tx.try_into()?,
+                            Signature {
+                                r: signature.r,
+                                s: signature.s,
+                                odd_y_parity: signature
+                                    .y_parity
+                                    .unwrap_or(reth_rpc_types::Parity(false))
+                                    .0,
+                            },
+                        ))
+                    })
+                    .collect(),
+                reth_rpc_types::BlockTransactions::Hashes(_) |
+                reth_rpc_types::BlockTransactions::Uncle => {
+                    return Err(ConversionError::MissingFullTransactions);
+                }
+            };
+            transactions?
+        };
+
+        Ok(Self {
+            header: block.header.try_into()?,
+            body,
+            ommers: Default::default(),
+            withdrawals: block.withdrawals.map(Into::into),
+        })
     }
 }
 

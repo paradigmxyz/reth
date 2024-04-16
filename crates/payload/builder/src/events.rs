@@ -1,4 +1,3 @@
-use futures_util::Stream;
 use reth_engine_primitives::EngineTypes;
 use tokio::sync::broadcast;
 use tokio_stream::{
@@ -26,9 +25,7 @@ pub struct PayloadEvents<Engine: EngineTypes> {
 
 impl<Engine: EngineTypes + 'static> PayloadEvents<Engine> {
     // Convert this receiver into a stream of PayloadEvents.
-    pub fn into_stream(
-        self,
-    ) -> impl Stream<Item = Result<Events<Engine>, BroadcastStreamRecvError>> {
+    pub fn into_stream(self) -> BroadcastStream<Events<Engine>> {
         BroadcastStream::new(self.receiver)
     }
     /// Asynchronously receives the next payload event.

@@ -1,7 +1,7 @@
 #[cfg(not(feature = "optimism"))]
 use revm::DatabaseCommit;
 use revm::{
-    db::{states::bundle_state::BundleRetention, StateDBBox},
+    db::StateDBBox,
     inspector_handle_register,
     interpreter::Host,
     primitives::{CfgEnvWithHandlerCfg, ResultAndState},
@@ -19,16 +19,14 @@ use reth_primitives::revm::env::fill_op_tx_env;
 use reth_primitives::revm::env::fill_tx_env;
 use reth_primitives::{
     Address, Block, BlockNumber, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
-    PruneMode, PruneModes, PruneSegmentError, Receipt, ReceiptWithBloom, Receipts,
-    TransactionSigned, Withdrawals, B256, MINIMUM_PRUNING_DISTANCE, U256,
+    PruneModes, Receipt, ReceiptWithBloom, Receipts, TransactionSigned, Withdrawals, B256, U256,
 };
 #[cfg(not(feature = "optimism"))]
 use reth_provider::BundleStateWithReceipts;
-use reth_provider::{
-    BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
-};
+use reth_provider::{BlockExecutor, ProviderError, PrunableBlockExecutor, StateProvider};
 
 use crate::{
+    batch::{BlockBatchRecord, BlockExecutorStats},
     database::StateProviderDatabase,
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     stack::{InspectorStack, InspectorStackConfig},
@@ -56,23 +54,8 @@ pub struct EVMProcessor<'a, EvmConfig> {
     pub(crate) chain_spec: Arc<ChainSpec>,
     /// revm instance that contains database and env environment.
     pub(crate) evm: Evm<'a, InspectorStack, StateDBBox<'a, ProviderError>>,
-    /// The collection of receipts.
-    /// Outer vector stores receipts for each block sequentially.
-    /// The inner vector stores receipts ordered by transaction number.
-    ///
-    /// If receipt is None it means it is pruned.
-    pub(crate) receipts: Receipts,
-    /// First block will be initialized to `None`
-    /// and be set to the block number of first block executed.
-    pub(crate) first_block: Option<BlockNumber>,
-    /// The maximum known block.
-    tip: Option<BlockNumber>,
-    /// Pruning configuration.
-    prune_modes: PruneModes,
-    /// Memoized address pruning filter.
-    /// Empty implies that there is going to be addresses to include in the filter in a future
-    /// block. None means there isn't any kind of configuration.
-    pruning_address_filter: Option<(u64, Vec<Address>)>,
+    /// Keeps track of the recorded receipts and pruning configuration.
+    pub(crate) batch_record: BlockBatchRecord,
     /// Execution stats
     pub(crate) stats: BlockExecutorStats,
     /// The type that is able to configure the EVM environment.
@@ -113,11 +96,7 @@ where
         EVMProcessor {
             chain_spec,
             evm,
-            receipts: Receipts::new(),
-            first_block: None,
-            tip: None,
-            prune_modes: PruneModes::none(),
-            pruning_address_filter: None,
+            batch_record: BlockBatchRecord::default(),
             stats: BlockExecutorStats::default(),
             _evm_config: evm_config,
         }
@@ -130,7 +109,17 @@ where
 
     /// Configure the executor with the given block.
     pub fn set_first_block(&mut self, num: BlockNumber) {
-        self.first_block = Some(num);
+        self.batch_record.set_first_block(num);
+    }
+
+    /// Saves the receipts to the batch record.
+    pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
+        self.batch_record.save_receipts(receipts)
+    }
+
+    /// Returns the recorded receipts.
+    pub fn receipts(&self) -> &Receipts {
+        self.batch_record.receipts()
     }
 
     /// Returns a reference to the database
@@ -288,91 +277,15 @@ where
         self.stats.apply_post_execution_state_changes_duration += time.elapsed();
 
         let time = Instant::now();
-        let retention = if self.tip.map_or(true, |tip| {
-            !self
-                .prune_modes
-                .account_history
-                .map_or(false, |mode| mode.should_prune(block.number, tip)) &&
-                !self
-                    .prune_modes
-                    .storage_history
-                    .map_or(false, |mode| mode.should_prune(block.number, tip))
-        }) {
-            BundleRetention::Reverts
-        } else {
-            BundleRetention::PlainState
-        };
+        let retention = self.batch_record.bundle_retention(block.number);
         self.db_mut().merge_transitions(retention);
         self.stats.merge_transitions_duration += time.elapsed();
 
-        if self.first_block.is_none() {
-            self.first_block = Some(block.number);
+        if self.batch_record.first_block().is_none() {
+            self.batch_record.set_first_block(block.number);
         }
 
         Ok(receipts)
-    }
-
-    /// Save receipts to the executor.
-    pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
-        let mut receipts = receipts.into_iter().map(Option::Some).collect();
-        // Prune receipts if necessary.
-        self.prune_receipts(&mut receipts)?;
-        // Save receipts.
-        self.receipts.push(receipts);
-        Ok(())
-    }
-
-    /// Prune receipts according to the pruning configuration.
-    fn prune_receipts(
-        &mut self,
-        receipts: &mut Vec<Option<Receipt>>,
-    ) -> Result<(), PruneSegmentError> {
-        let (first_block, tip) = match self.first_block.zip(self.tip) {
-            Some((block, tip)) => (block, tip),
-            _ => return Ok(()),
-        };
-
-        let block_number = first_block + self.receipts.len() as u64;
-
-        // Block receipts should not be retained
-        if self.prune_modes.receipts == Some(PruneMode::Full) ||
-                // [`PruneSegment::Receipts`] takes priority over [`PruneSegment::ContractLogs`]
-            self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
-        {
-            receipts.clear();
-            return Ok(())
-        }
-
-        // All receipts from the last 128 blocks are required for blockchain tree, even with
-        // [`PruneSegment::ContractLogs`].
-        let prunable_receipts =
-            PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
-        if !prunable_receipts {
-            return Ok(())
-        }
-
-        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
-
-        if !contract_log_pruner.is_empty() {
-            let (prev_block, filter) = self.pruning_address_filter.get_or_insert((0, Vec::new()));
-            for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
-                filter.extend(addresses.iter().copied());
-            }
-        }
-
-        for receipt in receipts.iter_mut() {
-            let inner_receipt = receipt.as_ref().expect("receipts have not been pruned");
-
-            // If there is an address_filter, and it does not contain any of the
-            // contract addresses, then remove this receipts
-            if let Some((_, filter)) = &self.pruning_address_filter {
-                if !inner_receipt.logs.iter().any(|log| filter.contains(&log.address)) {
-                    receipt.take();
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -407,7 +320,8 @@ where
             self.stats.receipt_root_duration += time.elapsed();
         }
 
-        self.save_receipts(receipts)
+        self.batch_record.save_receipts(receipts)?;
+        Ok(())
     }
 
     fn execute_transactions(
@@ -470,11 +384,10 @@ where
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         self.stats.log_debug();
-        let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
             self.evm.context.evm.db.take_bundle(),
-            receipts,
-            self.first_block.unwrap_or_default(),
+            self.batch_record.take_receipts(),
+            self.batch_record.first_block().unwrap_or_default(),
         )
     }
 
@@ -488,11 +401,11 @@ where
     EvmConfig: ConfigureEvm,
 {
     fn set_tip(&mut self, tip: BlockNumber) {
-        self.tip = Some(tip);
+        self.batch_record.set_tip(tip);
     }
 
     fn set_prune_modes(&mut self, prune_modes: PruneModes) {
-        self.prune_modes = prune_modes;
+        self.batch_record.set_prune_modes(prune_modes);
     }
 }
 
