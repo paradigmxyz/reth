@@ -1434,12 +1434,7 @@ where
                         if let Err((hash, error)) =
                             self.try_make_sync_target_canonical(downloaded_num_hash)
                         {
-                            if !matches!(
-                                error,
-                                CanonicalError::BlockchainTree(
-                                    BlockchainTreeError::BlockHashNotFoundInChain { .. }
-                                )
-                            ) {
+                            if !error.is_block_hash_not_found() {
                                 if error.is_fatal() {
                                     error!(target: "consensus::engine", %error, "Encountered fatal error while making sync target canonical: {:?}, {:?}", error, hash);
                                 } else {
@@ -1572,12 +1567,7 @@ where
                     // if we failed to make the FCU's head canonical, because we don't have that
                     // block yet, then we can try to make the inserted block canonical if we know
                     // it's part of the canonical chain: if it's the safe or the finalized block
-                    if matches!(
-                        err,
-                        CanonicalError::BlockchainTree(
-                            BlockchainTreeError::BlockHashNotFoundInChain { .. }
-                        )
-                    ) {
+                    if err.is_block_hash_not_found() {
                         // if the inserted block is the currently targeted `finalized` or `safe`
                         // block, we will attempt to make them canonical,
                         // because they are also part of the canonical chain and
