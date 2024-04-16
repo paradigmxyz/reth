@@ -45,6 +45,7 @@ pub enum MetricEvent {
 #[derive(Debug)]
 pub struct MetricsListener {
     events_rx: UnboundedReceiver<MetricEvent>,
+    /// underline metrics of stages
     pub sync_metrics: SyncMetrics,
 }
 

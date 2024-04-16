@@ -12,8 +12,9 @@ use reth_primitives::{stage::StageCheckpoint, BlockNumber};
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TransactionLookupStage},
     test_utils::TestStageDB,
-    ExecInput, Stage, StageExt, UnwindInput,
+    Stage, StageExt,
 };
+use reth_stages_api::{ExecInput, UnwindInput};
 use std::{ops::RangeInclusive, sync::Arc};
 
 mod setup;

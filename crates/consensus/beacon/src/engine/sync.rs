@@ -440,7 +440,8 @@ mod tests {
         test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
         BundleStateWithReceipts,
     };
-    use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
+    use reth_stages::test_utils::TestStages;
+    use reth_stages_api::{ExecOutput, StageError};
     use reth_static_file::StaticFileProducer;
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, future::poll_fn, ops::Range};

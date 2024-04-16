@@ -1,8 +1,9 @@
 use super::TestStageDB;
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, UnwindOutput};
+use crate::{Stage, StageExt};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_interfaces::db::DatabaseError;
 use reth_provider::ProviderError;
+use reth_stages_api::{ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 

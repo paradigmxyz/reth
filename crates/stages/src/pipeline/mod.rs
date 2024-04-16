@@ -547,7 +547,7 @@ impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::TestStage, UnwindOutput};
+    use crate::test_utils::TestStage;
     use assert_matches::assert_matches;
     use reth_interfaces::{
         consensus,
@@ -556,6 +556,7 @@ mod tests {
     };
     use reth_primitives::PruneModes;
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_stages_api::UnwindOutput;
     use tokio_stream::StreamExt;
 
     #[test]

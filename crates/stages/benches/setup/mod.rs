@@ -18,7 +18,7 @@ use reth_primitives::{fs, Account, Address, SealedBlock, B256, U256};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::{StorageKind, TestStageDB},
-    ExecInput, Stage, UnwindInput,
+    Stage,
 };
 use reth_trie::StateRoot;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
@@ -27,6 +27,7 @@ mod constants;
 
 mod account_hashing;
 pub use account_hashing::*;
+use reth_stages_api::{ExecInput, UnwindInput};
 
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
