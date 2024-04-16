@@ -179,6 +179,7 @@ pub struct PeerInfo {
     pub protected: bool,
     #[serde(rename = "chainID")]
     pub chain_id: ChainId,
+    /// nanosecond
     pub latency: u64,
     pub gossip_blocks: bool,
     #[serde(rename = "scores")]
