@@ -114,6 +114,11 @@ where
         self.batch_record.set_first_block(num);
     }
 
+    /// Saves the receipts to the batch record.
+    pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
+        self.batch_record.save_receipts(receipts)
+    }
+
     /// Returns the recorded receipts.
     pub fn receipts(&self) -> &Receipts {
         self.batch_record.receipts()
