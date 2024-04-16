@@ -506,9 +506,15 @@ where
         loop {
             let Some(chain) = self.state.chains.get(&chain_id) else { return hashes };
 
-            // The parent chains might contain blocks with overlapping numbers.
-            // Insert the block hash only if it's not present for the given block number.
-            for block in chain.blocks().values() {
+            // The parent chains might contain blocks with overlapping numbers or numbers greater
+            // than original chain tip. Insert the block hash only if it's not present
+            // for the given block number and the block number does not exceed the
+            // original chain tip.
+            let latest_block_number = hashes
+                .last_key_value()
+                .map(|(number, _)| *number)
+                .unwrap_or_else(|| chain.tip().number);
+            for block in chain.blocks().values().filter(|b| b.number <= latest_block_number) {
                 if let Entry::Vacant(e) = hashes.entry(block.number) {
                     e.insert(block.hash());
                 }
@@ -1601,10 +1607,12 @@ mod tests {
         let (block1, exec1) = data.blocks[0].clone();
         let (block2, exec2) = data.blocks[1].clone();
         let (block3, exec3) = data.blocks[2].clone();
+        let (block4, exec4) = data.blocks[3].clone();
         let genesis = data.genesis;
 
         // test pops execution results from vector, so order is from last to first.
-        let externals = setup_externals(vec![exec3.clone(), exec2.clone(), exec3, exec2, exec1]);
+        let externals =
+            setup_externals(vec![exec3.clone(), exec2.clone(), exec4, exec3, exec2, exec1]);
 
         // last finalized block would be number 9.
         setup_genesis(&externals.provider_factory, genesis);
@@ -1630,6 +1638,11 @@ mod tests {
 
         assert_eq!(
             tree.insert_block(block3.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        assert_eq!(
+            tree.insert_block(block4.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
 
