@@ -1,9 +1,9 @@
 use crate::EthPooledTransaction;
 use rand::Rng;
 use reth_primitives::{
-    constants::MIN_PROTOCOL_BASE_FEE, sign_message, transaction::TryFromRecoveredTransactionError,
-    AccessList, Address, Bytes, Transaction, TransactionKind, TransactionSigned,
-    TryFromRecoveredTransaction, TxEip1559, TxEip4844, TxLegacy, B256, MAINNET, U256,
+    constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Address, Bytes, Transaction,
+    TransactionKind, TransactionSigned, TryFromRecoveredTransaction, TxEip1559, TxEip4844,
+    TxLegacy, B256, MAINNET, U256,
 };
 
 /// A generator for transactions for testing purposes.
@@ -97,20 +97,18 @@ impl<R: Rng> TransactionGenerator<R> {
     }
 
     /// Generates and returns a pooled EIP-1559 transaction with a random signer.
-    pub fn gen_eip1559_pooled(
-        &mut self,
-    ) -> Result<EthPooledTransaction, TryFromRecoveredTransactionError> {
+    pub fn gen_eip1559_pooled(&mut self) -> EthPooledTransaction {
         EthPooledTransaction::try_from_recovered_transaction(
             self.gen_eip1559().into_ecrecovered().unwrap(),
         )
+        .unwrap()
     }
+
     /// Generates and returns a pooled EIP-4844 transaction with a random signer.
-    pub fn gen_eip4844_pooled(
-        &mut self,
-    ) -> Result<EthPooledTransaction, TryFromRecoveredTransactionError> {
-        EthPooledTransaction::try_from_recovered_transaction(
-            self.gen_eip4844().into_ecrecovered().unwrap(),
-        )
+    pub fn gen_eip4844_pooled(&mut self) -> EthPooledTransaction {
+        let tx = self.gen_eip4844().into_ecrecovered().unwrap();
+        let encoded_length = tx.length_without_header();
+        EthPooledTransaction::new(tx, encoded_length)
     }
 }
 

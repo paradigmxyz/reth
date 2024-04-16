@@ -54,9 +54,7 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                         for _ in 0..num_broadcasts {
                             for _ in 0..2 {
                                 let mut txs = Vec::new();
-                                let tx = gen
-                                    .gen_eip1559_pooled()
-                                    .expect("Failed to generate EIP-1559 pooled transaction");
+                                let tx = gen.gen_eip1559_pooled();
                                 // ensure the sender has balance
                                 provider.add_account(
                                     tx.sender(),
