@@ -509,7 +509,7 @@ mod tests {
     }
 
     #[test]
-    fn db_dup_cursor_delete() {
+    fn db_dup_cursor_delete_first() {
         let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
@@ -529,8 +529,7 @@ mod tests {
         let mut walker = dup_cursor.walk(None).unwrap();
         walker.delete_current().expect(ERROR_DEL);
 
-        // We just deleted this entry *FROM THE WALKER*
-        assert_eq!(walker.next(), Some(Ok((Address::with_last_byte(1), entry_0))));
+        assert_eq!(walker.next(), Some(Ok((Address::with_last_byte(1), entry_1))));
 
         // Check the tx view - it correctly holds entry_1
         assert_eq!(
@@ -545,7 +544,6 @@ mod tests {
         );
 
         // Check the remainder of walker
-        assert_eq!(walker.next(), Some(Ok((Address::with_last_byte(1), entry_1))));
         assert_eq!(walker.next(), None);
     }
 
