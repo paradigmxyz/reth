@@ -315,7 +315,7 @@ impl BootNode {
 mod test {
     use std::net::SocketAddrV4;
 
-    use reth_primitives::{hex, revm_primitives::bitvec::vec, ChainId, ForkHash};
+    use reth_primitives::hex;
 
     use super::*;
 

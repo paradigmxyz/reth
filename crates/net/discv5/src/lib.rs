@@ -51,8 +51,8 @@ pub struct Discv5 {
     discv5: Arc<discv5::Discv5>,
     /// [`IpMode`] of the the node.
     ip_mode: IpMode,
-    /// Key used in kv-pair to ID chain.
-    fork_id_key: &'static [u8],
+    /// Key used in kv-pair to ID chain, e.g. 'opstack' or 'eth'.
+    fork_key: &'static [u8],
     /// Filter applied to a discovered peers before passing it up to app.
     discovered_peer_filter: MustNotIncludeKeys,
     /// Metrics for underlying [`discv5::Discv5`] node and filtered discovered peers.
@@ -145,82 +145,21 @@ impl Discv5 {
         //
         // 1. make local enr from listen config
         //
+        let (enr, bc_enr, fork_key, ip_mode) = Self::build_local_enr(sk, &discv5_config);
+
+        trace!(target: "net::discv5",
+            ?enr,
+            "local ENR"
+        );
+
+        //
+        // 2. start discv5
+        //
         let Config {
-            discv5_config,
-            bootstrap_nodes,
-            fork,
-            tcp_port,
-            other_enr_kv_pairs,
-            lookup_interval,
-            discovered_peer_filter,
+            discv5_config, bootstrap_nodes, lookup_interval, discovered_peer_filter, ..
         } = discv5_config;
 
-        let (enr, bc_enr, ip_mode, fork_id_key) = {
-            let mut builder = discv5::enr::Enr::builder();
-
-            let (ip_mode, socket) = match discv5_config.listen_config {
-                ListenConfig::Ipv4 { ip, port } => {
-                    if ip != Ipv4Addr::UNSPECIFIED {
-                        builder.ip4(ip);
-                    }
-                    builder.udp4(port);
-                    builder.tcp4(tcp_port);
-
-                    (IpMode::Ip4, (ip, port).into())
-                }
-                ListenConfig::Ipv6 { ip, port } => {
-                    if ip != Ipv6Addr::UNSPECIFIED {
-                        builder.ip6(ip);
-                    }
-                    builder.udp6(port);
-                    builder.tcp6(tcp_port);
-
-                    (IpMode::Ip6, (ip, port).into())
-                }
-                ListenConfig::DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
-                    if ipv4 != Ipv4Addr::UNSPECIFIED {
-                        builder.ip4(ipv4);
-                    }
-                    builder.udp4(ipv4_port);
-                    builder.tcp4(tcp_port);
-
-                    if ipv6 != Ipv6Addr::UNSPECIFIED {
-                        builder.ip6(ipv6);
-                    }
-                    builder.udp6(ipv6_port);
-
-                    (IpMode::DualStack, (ipv6, ipv6_port).into())
-                }
-            };
-
-            // add fork id
-            let (chain, fork_id) = fork;
-            builder.add_value_rlp(chain, alloy_rlp::encode(fork_id).into());
-
-            // add other data
-            for (key, value) in other_enr_kv_pairs {
-                builder.add_value_rlp(key, alloy_rlp::encode(value).into());
-            }
-
-            // enr v4 not to get confused with discv4, independent versioning enr and
-            // discovery
-            let enr = builder.build(sk).expect("should build enr v4");
-            let EnrCombinedKeyWrapper(enr) = enr.into();
-
-            trace!(target: "net::discv5",
-                ?enr,
-                "local ENR"
-            );
-
-            // backwards compatible enr
-            let bc_enr = NodeRecord::from_secret_key(socket, sk);
-
-            (enr, bc_enr, ip_mode, chain)
-        };
-
-        //
-        // 3. start discv5
-        //
+        let EnrCombinedKeyWrapper(enr) = enr.into();
         let sk = discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk.secret_bytes()).unwrap();
         let mut discv5 = match discv5::Discv5::new(enr, sk, discv5_config) {
             Ok(discv5) => discv5,
@@ -234,22 +173,84 @@ impl Discv5 {
         let discv5 = Arc::new(discv5);
 
         //
-        // 4. add boot nodes
+        // 3. add boot nodes
         //
         Self::bootstrap(bootstrap_nodes, &discv5).await?;
 
         let metrics = Discv5Metrics::default();
 
         //
-        // 5. bg kbuckets maintenance
+        // 4. start bg kbuckets maintenance
         //
         Self::spawn_populate_kbuckets_bg(lookup_interval, metrics.clone(), discv5.clone());
 
         Ok((
-            Self { discv5, ip_mode, fork_id_key, discovered_peer_filter, metrics },
+            Self { discv5, ip_mode, fork_key, discovered_peer_filter, metrics },
             discv5_updates,
             bc_enr,
         ))
+    }
+
+    fn build_local_enr(
+        sk: &SecretKey,
+        config: &Config,
+    ) -> (Enr<SecretKey>, NodeRecord, &'static [u8], IpMode) {
+        let mut builder = discv5::enr::Enr::builder();
+
+        let Config { discv5_config, fork, tcp_port, other_enr_kv_pairs, .. } = config;
+
+        let (ip_mode, socket) = match discv5_config.listen_config {
+            ListenConfig::Ipv4 { ip, port } => {
+                if ip != Ipv4Addr::UNSPECIFIED {
+                    builder.ip4(ip);
+                }
+                builder.udp4(port);
+                builder.tcp4(*tcp_port);
+
+                (IpMode::Ip4, (ip, port).into())
+            }
+            ListenConfig::Ipv6 { ip, port } => {
+                if ip != Ipv6Addr::UNSPECIFIED {
+                    builder.ip6(ip);
+                }
+                builder.udp6(port);
+                builder.tcp6(*tcp_port);
+
+                (IpMode::Ip6, (ip, port).into())
+            }
+            ListenConfig::DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
+                if ipv4 != Ipv4Addr::UNSPECIFIED {
+                    builder.ip4(ipv4);
+                }
+                builder.udp4(ipv4_port);
+                builder.tcp4(*tcp_port);
+
+                if ipv6 != Ipv6Addr::UNSPECIFIED {
+                    builder.ip6(ipv6);
+                }
+                builder.udp6(ipv6_port);
+
+                (IpMode::DualStack, (ipv6, ipv6_port).into())
+            }
+        };
+
+        // identifies which network node is on
+        let (network, fork_value) = fork;
+        builder.add_value_rlp(network, alloy_rlp::encode(fork_value).into());
+
+        // add other data
+        for (key, value) in other_enr_kv_pairs {
+            builder.add_value_rlp(key, alloy_rlp::encode(value).into());
+        }
+
+        // enr v4 not to get confused with discv4, independent versioning enr and
+        // discovery
+        let enr = builder.build(sk).expect("should build enr v4");
+
+        // backwards compatible enr
+        let bc_enr = NodeRecord::from_secret_key(socket, sk);
+
+        (enr, bc_enr, network, ip_mode)
     }
 
     /// Bootstraps underlying [`discv5::Discv5`] node with configured peers.
@@ -473,7 +474,7 @@ impl Discv5 {
         &self,
         enr: &discv5::enr::Enr<K>,
     ) -> Result<ForkId, Error> {
-        let key = self.fork_id_key;
+        let key = self.fork_key;
         let mut fork_id_bytes = enr.get_raw_rlp(key).ok_or(Error::ForkMissing(key))?;
 
         Ok(ForkId::decode(&mut fork_id_bytes)?)
@@ -501,8 +502,8 @@ impl Discv5 {
     }
 
     /// Returns the key to use to identify the [`ForkId`] kv-pair on the [`Enr`](discv5::Enr).
-    pub fn fork_id_key(&self) -> &[u8] {
-        self.fork_id_key
+    pub fn fork_key(&self) -> &[u8] {
+        self.fork_key
     }
 }
 
@@ -549,6 +550,7 @@ pub fn get_lookup_target(
 mod tests {
     use ::enr::{CombinedKey, EnrKey};
     use rand::Rng;
+    use reth_primitives::{Chain, ChainId};
     use secp256k1::rand::thread_rng;
     use tracing::trace;
 
@@ -568,7 +570,7 @@ mod tests {
                 .unwrap(),
             ),
             ip_mode: IpMode::Ip4,
-            fork_id_key: b"noop",
+            fork_key: b"noop",
             discovered_peer_filter: MustNotIncludeKeys::default(),
             metrics: Discv5Metrics::default(),
         }
@@ -779,6 +781,20 @@ mod tests {
         assert_eq!(
             expected_log2_distance(log2_distance),
             local_node_id.log2_distance(&target).unwrap()
+        );
+    }
+
+    #[test]
+    fn op_chain_id_enr() {
+        let config =
+            Config::builder(30303).add_enr_kv_pair(OPSTACK, Chain::optimism_mainnet().id()).build();
+
+        let sk = SecretKey::new(&mut thread_rng());
+        let (enr, _, _, _) = Discv5::build_local_enr(&sk, &config);
+
+        assert_eq!(
+            Chain::optimism_mainnet().id(),
+            enr.get_decodable::<ChainId>(OPSTACK).unwrap().unwrap()
         );
     }
 }
