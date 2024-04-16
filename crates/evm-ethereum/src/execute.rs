@@ -1,19 +1,18 @@
 //! Ethereum executor.
-//!
-//! TODO refactor this so it can be reused by other networks.
 
+use std::sync::Arc;
+use revm_primitives::db::{Database, DatabaseCommit};
 use reth_evm::{
-    execute::{BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor},
     ConfigureEvm,
+    execute::{BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor},
 };
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, ChainSpec, PruneModes, Receipt, Receipts, U256,
+    BlockWithSenders, ChainSpec, Receipt, U256,
 };
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{stack::InspectorStack, State};
-use revm_primitives::db::{Database, DatabaseCommit};
-use std::sync::Arc;
+use reth_revm::batch::BlockBatchRecord;
 
 /// A basic Ethereum block executor.
 ///
@@ -84,7 +83,7 @@ where
     ///
     /// Returns the receipts of the transactions in the block.
     ///
-    /// Returns an error if the block could not be executed.
+    /// Returns an error if the block could not be executed or failed verification.
     ///
     /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
@@ -94,25 +93,16 @@ where
     }
 }
 
-/// TODO make this reusable for other networks.
+
+/// An executor for a batch of blocks.
+///
+/// State changes are tracked until the executor is finalized.
+#[derive(Debug)]
 pub struct EthBatchExecutor<Evm, DB> {
     /// The executor used to execute blocks.
     executor: EthBlockExecutor<Evm, DB>,
-    /// The collection of receipts.
-    /// Outer vector stores receipts for each block sequentially.
-    /// The inner vector stores receipts ordered by transaction number.
-    ///
-    /// If receipt is None it means it is pruned.
-    receipts: Receipts,
-    /// First block will be initialized to `None`
-    /// and be set to the block number of first block executed.
-    first_block: Option<BlockNumber>,
-
-    /// Pruning configuration.
-    ///
-    /// TODO: make everything related to pruning a separate type.
-    prune_mode: PruneModes,
-
+    /// Keeps track of the batch and record receipts based on the configured prune mode
+    batch_record: BlockBatchRecord,
     stats: (),
 }
 
@@ -128,22 +118,17 @@ where
     fn execute_one(&mut self, input: Self::Input<'_>) -> Result<BatchBlockOutput, Self::Error> {
         let EthBlockExecutionInput { block, total_difficulty } = input;
         let (receipts, _gas_used) = self.executor.execute_block(block, total_difficulty)?;
-
-        let mut receipts = receipts.into_iter().map(Option::Some).collect();
-
-        // TODO: prune receipts according to the prune mode
-
-        self.receipts.push(receipts);
+        self.batch_record.save_receipts(receipts)?;
 
         Ok(BatchBlockOutput { size_hint: Some(self.executor.state.bundle_size_hint()) })
     }
 
     fn finalize(mut self) -> Self::Output {
-        let receipts = std::mem::take(&mut self.receipts);
+        // TODO log stats
         BundleStateWithReceipts::new(
             self.executor.state.take_bundle(),
-            receipts,
-            self.first_block.unwrap_or_default(),
+            self.batch_record.take_receipts(),
+            self.batch_record.first_block().unwrap_or_default(),
         )
     }
 }
