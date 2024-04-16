@@ -15,7 +15,7 @@ use reth_primitives::{
     IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionKind,
     TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxEip4844, TxHash, B256,
-    DEPOSIT_TX_TYPE_ID, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
+    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -840,11 +840,6 @@ pub trait PoolTransaction:
         self.tx_type() == EIP4844_TX_TYPE_ID
     }
 
-    /// Returns true if the transaction is an OP deposit transaction.
-    fn is_op_deposit(&self) -> bool {
-        self.tx_type() == DEPOSIT_TX_TYPE_ID
-    }
-
     /// Returns the length of the rlp encoded transaction object
     ///
     /// Note: Implementations should cache this value.
@@ -1123,14 +1118,25 @@ impl TryFromRecoveredTransaction for EthPooledTransaction {
     fn try_from_recovered_transaction(
         tx: TransactionSignedEcRecovered,
     ) -> Result<Self, Self::Error> {
-        // CAUTION: this should not be done for EIP-4844 transactions, as the blob sidecar is
-        // missing.
+        // ensure we can handle the transaction type and its format
+        match tx.tx_type() as u8 {
+            0..=EIP1559_TX_TYPE_ID => {
+                // supported
+            }
+            EIP4844_TX_TYPE_ID => {
+                // doesn't have a blob sidecar
+                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing);
+            }
+            unsupported => {
+                // unsupported transaction type
+                return Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(
+                    unsupported,
+                ));
+            }
+        };
+
         let encoded_length = tx.length_without_header();
         let transaction = EthPooledTransaction::new(tx, encoded_length);
-
-        if transaction.is_op_deposit() {
-            return Err(TryFromRecoveredTransactionError::BlobSidecarMissing);
-        }
         Ok(transaction)
     }
 }
