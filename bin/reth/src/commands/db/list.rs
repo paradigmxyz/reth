@@ -2,7 +2,9 @@ use super::tui::DbListTUI;
 use crate::utils::{DbTool, ListFilter};
 use clap::Parser;
 use eyre::WrapErr;
-use reth_db::{database::Database, table::Table, DatabaseEnv, RawValue, TableViewer, Tables};
+use reth_db::{
+    database::Database, table::Table, transaction::DbTx, DatabaseEnv, RawValue, TableViewer, Tables,
+};
 use reth_primitives::hex;
 use std::cell::RefCell;
 use tracing::error;
@@ -90,6 +92,8 @@ impl TableViewer<()> for ListTableViewer<'_> {
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
         self.tool.provider_factory.db_ref().view(|tx| {
+            // Disable timeout because we are entering a TUI which might read for a long time
+            tx.inner.disable_timeout();
             let table_db = tx.inner.open_db(Some(self.args.table.name())).wrap_err("Could not open db.")?;
             let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
             let total_entries = stats.entries();
