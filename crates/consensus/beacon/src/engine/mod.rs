@@ -9,6 +9,7 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use reth_db::database::Database;
+use reth_engine_primitives::{EngineTypes, PayloadAttributes, PayloadBuilderAttributes};
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -20,7 +21,6 @@ use reth_interfaces::{
     sync::{NetworkSyncUpdater, SyncState},
     RethError, RethResult,
 };
-use reth_node_api::{EngineTypes, PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,

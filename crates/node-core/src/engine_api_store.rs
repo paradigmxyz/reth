@@ -1,7 +1,7 @@
 //! Stores engine API messages to disk for later inspection and replay.
 
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_node_api::EngineTypes;
+use reth_engine_primitives::EngineTypes;
 use reth_primitives::fs::{self};
 use reth_rpc_types::{
     engine::{CancunPayloadFields, ForkchoiceState},
