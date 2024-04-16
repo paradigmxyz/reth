@@ -17,8 +17,8 @@
 //! Configure only an http server with a selection of [RethRpcModule]s
 //!
 //! ```
+//! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_node_api::ConfigureEvm;
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -77,12 +77,13 @@
 //!
 //!
 //! ```
+//! use reth_engine_primitives::EngineTypes;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_node_api::{ConfigureEvm, EngineTypes};
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 //! };
+//! use reth_reth_evm::ConfigureEvm;
 //! use reth_rpc::JwtSecret;
 //! use reth_rpc_api::EngineApiServer;
 //! use reth_rpc_builder::{
@@ -167,10 +168,11 @@ use jsonrpsee::{
     server::{AlreadyStoppedError, IdProvider, RpcServiceBuilder, Server, ServerHandle},
     Methods, RpcModule,
 };
+use reth_engine_primitives::EngineTypes;
+use reth_evm::ConfigureEvm;
 use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
-use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -498,8 +500,8 @@ where
     /// # Example
     ///
     /// ```no_run
+    /// use reth_evm::ConfigureEvm;
     /// use reth_network_api::noop::NoopNetwork;
-    /// use reth_node_api::ConfigureEvm;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc_builder::RpcModuleBuilder;
     /// use reth_tasks::TokioTaskExecutor;
