@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{Address, U256, U64};
+use reth_primitives::Address;
 use reth_rpc_api::TxPoolApiServer;
 use reth_rpc_types::{
     txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},
@@ -69,10 +69,7 @@ where
     async fn txpool_status(&self) -> Result<TxpoolStatus> {
         trace!(target: "rpc::eth", "Serving txpool_status");
         let all = self.pool.all_transactions();
-        Ok(TxpoolStatus {
-            pending: U64::from(all.pending.len()),
-            queued: U64::from(all.queued.len()),
-        })
+        Ok(TxpoolStatus { pending: all.pending.len() as u64, queued: all.queued.len() as u64 })
     }
 
     /// Returns a summary of all the transactions currently pending for inclusion in the next
@@ -97,8 +94,8 @@ where
                 TxpoolInspectSummary {
                     to: tx.to(),
                     value: tx.value(),
-                    gas: U256::from(tx.gas_limit()),
-                    gas_price: U256::from(tx.transaction.max_fee_per_gas()),
+                    gas: tx.gas_limit() as u128,
+                    gas_price: tx.transaction.max_fee_per_gas(),
                 },
             );
         }

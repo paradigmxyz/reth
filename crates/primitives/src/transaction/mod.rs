@@ -652,7 +652,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                     to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
                     value: tx.value,
                     input: tx.input,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
                 }))
             }
@@ -673,7 +673,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
                     to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
                     value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     input: tx.input,
                 }))
             }
@@ -694,7 +694,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
                     to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
                     value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     input: tx.input,
                     blob_versioned_hashes: tx
                         .blob_versioned_hashes
@@ -956,8 +956,8 @@ impl TransactionSignedNoHash {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
 
         let signature_hash = self.signature_hash();
@@ -976,11 +976,9 @@ impl TransactionSignedNoHash {
         buffer.clear();
         self.transaction.encode_without_signature(buffer);
 
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
 
         self.signature.recover_signer_unchecked(keccak256(buffer))
@@ -1189,8 +1187,8 @@ impl TransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
@@ -1205,8 +1203,8 @@ impl TransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer_unchecked(signature_hash)
@@ -1491,9 +1489,9 @@ impl TransactionSigned {
 
     /// Decodes the "raw" format of transaction (similar to `eth_sendRawTransaction`).
     ///
-    /// This should be used for any RPC method that accepts a raw transaction, **excluding** raw
-    /// EIP-4844 transactions in `eth_sendRawTransaction`. Currently, this includes:
-    /// * `eth_sendRawTransaction` for non-EIP-4844 transactions.
+    /// This should be used for any RPC method that accepts a raw transaction.
+    /// Currently, this includes:
+    /// * `eth_sendRawTransaction`.
     /// * All versions of `engine_newPayload`, in the `transactions` field.
     ///
     /// A raw transaction is either a legacy transaction or EIP-2718 typed transaction.
@@ -1503,9 +1501,6 @@ impl TransactionSigned {
     ///
     /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
     /// followed by the rlp of the transaction: `type || rlp(tx-data)`.
-    ///
-    /// To decode EIP-4844 transactions from `eth_sendRawTransaction`, use
-    /// [PooledTransactionsElement::decode_enveloped].
     pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if data.is_empty() {
             return Err(RlpError::InputTooShort)
@@ -1782,6 +1777,26 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.clone()
     }
+}
+
+#[cfg(feature = "optimism")]
+fn get_deposit_or_null_address(
+    transaction: &Transaction,
+    signature: &Signature,
+) -> Option<Address> {
+    // Optimism's Deposit transaction does not have a signature. Directly return the
+    // `from` address.
+    if let Transaction::Deposit(TxDeposit { from, .. }) = transaction {
+        return Some(*from)
+    }
+    // OP blocks below bedrock include transactions sent from the null address
+    if std::env::var_os(OP_RETH_MAINNET_BELOW_BEDROCK).as_deref() == Some("true".as_ref()) &&
+        *signature == Signature::optimism_deposit_tx_signature()
+    {
+        return Some(Address::default())
+    }
+
+    None
 }
 
 #[cfg(test)]
