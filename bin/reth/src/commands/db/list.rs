@@ -3,7 +3,7 @@ use crate::utils::{DbTool, ListFilter};
 use clap::Parser;
 use eyre::WrapErr;
 use reth_db::{
-    database::Database, table::Table, transaction::DbTx, DatabaseEnv, RawValue, TableViewer, Tables,
+    database::Database, table::Table, DatabaseEnv, RawValue, TableViewer, Tables,
 };
 use reth_primitives::hex;
 use std::cell::RefCell;
