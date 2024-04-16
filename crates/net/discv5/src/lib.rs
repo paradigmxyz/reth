@@ -41,6 +41,8 @@ pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
 use metrics::Discv5Metrics;
 
+use crate::config::ETH;
+
 /// The max log2 distance, is equivalent to the index of the last bit in a discv5 node id.
 const MAX_LOG2_DISTANCE: usize = 255;
 
@@ -412,20 +414,19 @@ impl Discv5 {
                 return None
             }
         };
-        let fork_id = match self.filter_discovered_peer(enr) {
-            FilterOutcome::Ok => self.get_fork_id(enr).ok(),
-            FilterOutcome::Ignore { reason } => {
-                trace!(target: "net::discovery::discv5",
-                    ?enr,
-                    reason,
-                    "filtered out discovered peer"
-                );
+        if let FilterOutcome::Ignore { reason } = self.filter_discovered_peer(enr) {
+            trace!(target: "net::discovery::discv5",
+                ?enr,
+                reason,
+                "filtered out discovered peer"
+            );
 
-                self.metrics.discovered_peers.increment_established_sessions_filtered(1);
+            self.metrics.discovered_peers.increment_established_sessions_filtered(1);
 
-                return None
-            }
-        };
+            return None
+        }
+
+        let fork_id = (self.fork_key == ETH).then(|| self.get_fork_id(enr).ok()).flatten();
 
         trace!(target: "net::discovery::discv5",
             ?fork_id,
