@@ -96,7 +96,7 @@ mod tests {
     use alloy_rlp::Bytes;
     use discv5::enr::{CombinedKey, Enr};
 
-    use crate::fork_id::{ENR_FORK_ID_KEY_ETH, ENR_FORK_ID_KEY_ETH2};
+    use crate::fork_id::{ENR_FORK_KEY_ETH, ENR_FORK_KEY_ETH2};
 
     use super::*;
 
@@ -104,19 +104,19 @@ mod tests {
     fn must_not_include_key_filter() {
         // rig test
 
-        let filter = MustNotIncludeKeys::new(&[ENR_FORK_ID_KEY_ETH, ENR_FORK_ID_KEY_ETH2]);
+        let filter = MustNotIncludeKeys::new(&[ENR_FORK_KEY_ETH, ENR_FORK_KEY_ETH2]);
 
         // enr_1 advertises a fork from one of the keys configured in filter
         let sk = CombinedKey::generate_secp256k1();
         let enr_1 = Enr::builder()
-            .add_value_rlp(ENR_FORK_ID_KEY_ETH as &[u8], Bytes::from("cancun"))
+            .add_value_rlp(ENR_FORK_KEY_ETH as &[u8], Bytes::from("cancun"))
             .build(&sk)
             .unwrap();
 
         // enr_2 advertises a fork from one the other key configured in filter
         let sk = CombinedKey::generate_secp256k1();
         let enr_2 = Enr::builder()
-            .add_value_rlp(ENR_FORK_ID_KEY_ETH2, Bytes::from("deneb"))
+            .add_value_rlp(ENR_FORK_KEY_ETH2, Bytes::from("deneb"))
             .build(&sk)
             .unwrap();
 

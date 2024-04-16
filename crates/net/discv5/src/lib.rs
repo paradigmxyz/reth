@@ -40,7 +40,7 @@ pub use config::{BootNode, Config, ConfigBuilder};
 pub use enr::enr_to_discv4_id;
 pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
-pub use fork_id::{OptimismForkId, ENR_FORK_ID_KEY_ETH, ENR_FORK_ID_KEY_OPSTACK};
+pub use fork_id::{OptimismForkId, ENR_FORK_KEY_ETH, ENR_FORK_KEY_OPSTACK};
 use metrics::Discv5Metrics;
 
 /// The max log2 distance, is equivalent to the index of the last bit in a discv5 node id.
@@ -427,7 +427,7 @@ impl Discv5 {
         }
 
         let fork_id =
-            (self.fork_key == ENR_FORK_ID_KEY_ETH).then(|| self.get_fork_id(enr).ok()).flatten();
+            (self.fork_key == ENR_FORK_KEY_ETH).then(|| self.get_fork_id(enr).ok()).flatten();
 
         trace!(target: "net::discovery::discv5",
             ?fork_id,
@@ -790,14 +790,14 @@ mod tests {
             OptimismForkId::new(Chain::optimism_mainnet().id());
 
         let config = Config::builder(30303)
-            .add_enr_kv_pair(ENR_FORK_ID_KEY_OPSTACK, OP_MAINNET_FORK_ID)
+            .add_enr_kv_pair(ENR_FORK_KEY_OPSTACK, OP_MAINNET_FORK_ID)
             .build();
 
         let sk = SecretKey::new(&mut thread_rng());
         let (enr, _, _, _) = Discv5::build_local_enr(&sk, &config);
 
         let fork_id =
-            OptimismForkId::decode(&mut enr.get_raw_rlp(ENR_FORK_ID_KEY_OPSTACK).unwrap()).unwrap();
+            OptimismForkId::decode(&mut enr.get_raw_rlp(ENR_FORK_KEY_OPSTACK).unwrap()).unwrap();
 
         assert_eq!(OP_MAINNET_FORK_ID, fork_id);
     }

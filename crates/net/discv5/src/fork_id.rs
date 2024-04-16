@@ -5,13 +5,13 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_primitives::ChainId;
 
 /// ENR fork ID kv-pair key, for an Ethereum L1 EL node.
-pub const ENR_FORK_ID_KEY_ETH: &[u8] = b"eth";
+pub const ENR_FORK_KEY_ETH: &[u8] = b"eth";
 
 /// ENR fork ID kv-pair key, for an Ethereum L1 CL node.
-pub const ENR_FORK_ID_KEY_ETH2: &[u8] = b"eth2";
+pub const ENR_FORK_KEY_ETH2: &[u8] = b"eth2";
 
 /// ENR fork ID kv-pair key, for an Optimism node.
-pub const ENR_FORK_ID_KEY_OPSTACK: &[u8] = b"opstack";
+pub const ENR_FORK_KEY_OPSTACK: &[u8] = b"opstack";
 
 /// Optimism fork ID, used to identify OP chains on discovery network.
 ///
