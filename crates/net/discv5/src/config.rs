@@ -2,13 +2,14 @@
 
 use std::{
     collections::HashSet,
+    fmt::Debug,
     net::{IpAddr, SocketAddr},
 };
 
 use derive_more::Display;
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{Bytes, ForkId, NodeRecord, MAINNET};
+use reth_primitives::{NodeRecord, MAINNET};
 
 use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys};
 
@@ -44,6 +45,10 @@ const BOOT_NODES_OP_SEPOLIA_AND_BASE_SEPOLIA: &[&str] = &[
     "enode://09d1a6110757b95628cc54ab6cc50a29773075ed00e3a25bd9388807c9a6c007664e88646a6fefd82baad5d8374ba555e426e8aed93f0f0c517e2eb5d929b2a2@34.65.21.188:30304?discport=30303"
 ];
 
+/// Auto-trait for value to insert in local ENR.
+pub trait EnrValue: alloy_rlp::Encodable + Debug {}
+impl<T> EnrValue for T where T: alloy_rlp::Encodable + Debug {}
+
 /// Builds a [`Config`].
 #[derive(Debug, Default)]
 pub struct ConfigBuilder {
@@ -51,14 +56,18 @@ pub struct ConfigBuilder {
     discv5_config: Option<discv5::Config>,
     /// Nodes to boot from.
     bootstrap_nodes: HashSet<BootNode>,
-    /// [`ForkId`] to set in local node record.
-    fork: Option<(&'static [u8], ForkId)>,
+    /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
+    /// belongs, e.g. (b"opstack", ChainId) or (b"eth", ForkId).
+    ///
+    /// Defaults to L1 mainnet if not set.
+    fork: Option<(&'static [u8], Box<dyn EnrValue>)>,
     /// RLPx TCP port to advertise. Note: so long as `reth_network` handles [`NodeRecord`]s as
     /// opposed to [`Enr`](enr::Enr)s, TCP is limited to same IP address as UDP, since
     /// [`NodeRecord`] doesn't supply an extra field for and alternative TCP address.
     tcp_port: u16,
-    /// Additional kv-pairs that should be advertised to peers by including in local node record.
-    other_enr_data: Vec<(&'static str, Bytes)>,
+    /// Additional kv-pairs (asides tcp port, udp port and fork) that should be advertised to
+    /// peers by including in local node record.
+    other_enr_kv_pairs: Vec<(&'static [u8], Box<dyn EnrValue>)>,
     /// Interval in seconds at which to run a lookup up query to populate kbuckets.
     lookup_interval: Option<u64>,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
@@ -72,9 +81,9 @@ impl ConfigBuilder {
         let Config {
             discv5_config,
             bootstrap_nodes,
-            fork: fork_id,
+            fork,
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval,
             discovered_peer_filter,
         } = discv5_config;
@@ -82,9 +91,9 @@ impl ConfigBuilder {
         Self {
             discv5_config: Some(discv5_config),
             bootstrap_nodes,
-            fork: Some(fork_id),
+            fork: Some(fork),
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval: Some(lookup_interval),
             discovered_peer_filter: Some(discovered_peer_filter),
         }
@@ -148,8 +157,12 @@ impl ConfigBuilder {
     }
 
     /// Set [`ForkId`], and key used to identify it, to set in local [`Enr`](discv5::enr::Enr).
-    pub fn fork(mut self, key: &'static [u8], value: ForkId) -> Self {
-        self.fork = Some((key, value));
+    pub fn fork(
+        mut self,
+        key: &'static [u8],
+        value: impl alloy_rlp::Encodable + Debug + 'static,
+    ) -> Self {
+        self.fork = Some((key, Box::new(value)));
         self
     }
 
@@ -160,8 +173,12 @@ impl ConfigBuilder {
     }
 
     /// Adds an additional kv-pair to include in the local [`Enr`](discv5::enr::Enr).
-    pub fn add_enr_kv_pair(mut self, kv_pair: (&'static str, Bytes)) -> Self {
-        self.other_enr_data.push(kv_pair);
+    pub fn add_enr_kv_pair(
+        mut self,
+        key: &'static [u8],
+        value: impl alloy_rlp::Encodable + Debug + 'static,
+    ) -> Self {
+        self.other_enr_kv_pairs.push((key, Box::new(value)));
         self
     }
 
@@ -182,7 +199,7 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval,
             discovered_peer_filter,
         } = self;
@@ -190,7 +207,7 @@ impl ConfigBuilder {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let fork = fork.unwrap_or((ETH, MAINNET.latest_fork_id()));
+        let fork = fork.unwrap_or((ETH, Box::new(MAINNET.latest_fork_id())));
 
         let lookup_interval = lookup_interval.unwrap_or(DEFAULT_SECONDS_LOOKUP_INTERVAL);
 
@@ -202,7 +219,7 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval,
             discovered_peer_filter,
         }
@@ -217,12 +234,14 @@ pub struct Config {
     pub(super) discv5_config: discv5::Config,
     /// Nodes to boot from.
     pub(super) bootstrap_nodes: HashSet<BootNode>,
-    /// [`ForkId`] to set in local node record.
-    pub(super) fork: (&'static [u8], ForkId),
+    /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
+    /// belongs, e.g. (b"opstack", ChainId) or (b"eth", ForkId).
+    pub(super) fork: (&'static [u8], Box<dyn EnrValue>),
     /// RLPx TCP port to advertise.
     pub(super) tcp_port: u16,
-    /// Additional kv-pairs to include in local node record.
-    pub(super) other_enr_data: Vec<(&'static str, Bytes)>,
+    /// Additional kv-pairs (asides tcp port, udp port and fork) that should be advertised to
+    /// peers by including in local node record.
+    pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Box<dyn EnrValue>)>,
     /// Interval in seconds at which to run a lookup up query with to populate kbuckets.
     pub(super) lookup_interval: u64,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
@@ -296,7 +315,7 @@ impl BootNode {
 mod test {
     use std::net::SocketAddrV4;
 
-    use reth_primitives::hex;
+    use reth_primitives::{hex, revm_primitives::bitvec::vec, ChainId, ForkHash};
 
     use super::*;
 

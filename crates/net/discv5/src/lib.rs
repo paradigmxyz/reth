@@ -150,7 +150,7 @@ impl Discv5 {
             bootstrap_nodes,
             fork,
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval,
             discovered_peer_filter,
         } = discv5_config;
@@ -198,7 +198,7 @@ impl Discv5 {
             builder.add_value_rlp(chain, alloy_rlp::encode(fork_id).into());
 
             // add other data
-            for (key, value) in other_enr_data {
+            for (key, value) in other_enr_kv_pairs {
                 builder.add_value_rlp(key, alloy_rlp::encode(value).into());
             }
 
@@ -551,6 +551,8 @@ mod tests {
     use rand::Rng;
     use secp256k1::rand::thread_rng;
     use tracing::trace;
+
+    use self::config::OPSTACK;
 
     use super::*;
 
