@@ -130,13 +130,14 @@ impl Command {
 
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 
-        let network = network_config_builder
-            .build(Arc::new(ProviderFactory::new(
-                noop_db,
-                self.chain.clone(),
-                data_dir.static_files_path(),
-            )?))
-            .discovery_v5_with_config_builder(|builder| {
+        let mut network_config = network_config_builder.build(Arc::new(ProviderFactory::new(
+            noop_db,
+            self.chain.clone(),
+            data_dir.static_files_path(),
+        )?));
+
+        if self.discovery.enable_discv5_discovery {
+            network_config = network_config.discovery_v5_with_config_builder(|builder| {
                 let DiscoveryArgs { discv5_addr, discv5_port, .. } = self.discovery;
                 builder
                     .discv5_config(
@@ -147,10 +148,10 @@ impl Command {
                         .build(),
                     )
                     .build()
-            })
-            .start_network()
-            .await?;
+            });
+        }
 
+        let network = network_config.start_network().await?;
         let fetch_client = network.fetch_client().await?;
         let retries = self.retries.max(1);
         let backoff = ConstantBuilder::default().with_max_times(retries);
