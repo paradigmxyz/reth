@@ -321,40 +321,39 @@ where
     ) -> Result<UnwindOutput, StageError> {
         self.sync_gap.take();
 
+        let unwind_target = input.unwind_to + 1;
+
+        // First unwind the db tables, until the unwind_to block number. use the walker to unwind
+        // HeaderNumbers based on the index in CanonicalHeaders
+        provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
+            unwind_target,
+        )?;
+        provider.unwind_table_by_num::<tables::CanonicalHeaders>(unwind_target)?;
+        provider.unwind_table_by_num::<tables::HeaderTerminalDifficulties>(unwind_target)?;
+        let unfinalized_headers_unwound =
+            provider.unwind_table_by_num::<tables::Headers>(unwind_target)?;
+
+        // determine how many headers to unwind from the static files based on the highest block and
+        // the unwind_to block
         let static_file_provider = provider.static_file_provider();
         let highest_block = static_file_provider
             .get_highest_static_file_block(StaticFileSegment::Headers)
             .unwrap_or_default();
+        let static_file_headers_to_unwind = highest_block - input.unwind_to;
 
-        provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
-            input.unwind_to + 1,
-        )?;
-        provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        let unfinalized_headers =
-            provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
-        provider.unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
-
-        let unwound_headers = highest_block - input.unwind_to;
-
-        for block in (input.unwind_to + 1)..=highest_block {
-            let header_hash = static_file_provider
-                .block_hash(block)?
-                .ok_or(ProviderError::HeaderNotFound(block.into()))?;
-
-            provider.tx_ref().delete::<tables::HeaderNumbers>(header_hash, None)?;
-        }
-
+        // Now unwind the static files until the unwind_to block number
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-        writer.prune_headers(unwound_headers)?;
+        writer.prune_headers(static_file_headers_to_unwind)?;
 
+        // Set the stage checkpoin entities processed based on how much we unwound - we add the
+        // headers unwound from static files and db
         let stage_checkpoint =
             input.checkpoint.headers_stage_checkpoint().map(|stage_checkpoint| HeadersCheckpoint {
                 block_range: stage_checkpoint.block_range,
                 progress: EntitiesCheckpoint {
-                    processed: stage_checkpoint
-                        .progress
-                        .processed
-                        .saturating_sub(unwound_headers + unfinalized_headers as u64),
+                    processed: stage_checkpoint.progress.processed.saturating_sub(
+                        static_file_headers_to_unwind + unfinalized_headers_unwound as u64,
+                    ),
                     total: stage_checkpoint.progress.total,
                 },
             });
