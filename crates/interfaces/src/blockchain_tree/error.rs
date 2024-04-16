@@ -74,6 +74,15 @@ impl CanonicalError {
     pub fn is_fatal(&self) -> bool {
         matches!(self, Self::CanonicalCommit(_) | Self::CanonicalRevert(_))
     }
+
+    /// Returns `true` if the underlying error matches
+    /// [BlockchainTreeError::BlockHashNotFoundInChain].
+    pub fn is_block_hash_not_found(&self) -> bool {
+        matches!(
+            self,
+            CanonicalError::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain { .. })
+        )
+    }
 }
 
 /// Error thrown when inserting a block failed because the block is considered invalid.
