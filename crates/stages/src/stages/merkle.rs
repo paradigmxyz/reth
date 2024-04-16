@@ -1,4 +1,3 @@
-use crate::Stage;
 use reth_codecs::Compact;
 use reth_db::{
     database::Database,
@@ -16,7 +15,7 @@ use reth_provider::{
     StageCheckpointWriter, StatsReader,
 };
 use reth_stages_api::{
-    BlockErrorKind, ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput,
+    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::fmt::Debug;

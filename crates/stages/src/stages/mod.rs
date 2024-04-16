@@ -40,7 +40,7 @@ use utils::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{stage::Stage, test_utils::TestStageDB};
+    use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use reth_db::{
         cursor::DbCursorRO,
@@ -61,7 +61,7 @@ mod tests {
         StorageReader,
     };
     use reth_revm::EvmProcessorFactory;
-    use reth_stages_api::ExecInput;
+    use reth_stages_api::{ExecInput, Stage};
     use std::sync::Arc;
 
     #[tokio::test]

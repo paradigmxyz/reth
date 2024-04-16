@@ -1,4 +1,3 @@
-use crate::Stage;
 use futures_util::StreamExt;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
@@ -27,7 +26,7 @@ use reth_provider::{
     HeaderSyncMode,
 };
 use reth_stages_api::{
-    BlockErrorKind, ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput,
+    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use std::{
     sync::Arc,

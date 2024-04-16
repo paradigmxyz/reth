@@ -1,4 +1,3 @@
-use crate::Stage;
 use itertools::Itertools;
 use reth_config::config::EtlConfig;
 use reth_db::{
@@ -18,7 +17,7 @@ use reth_primitives::{
     BufMut, StorageEntry, B256,
 };
 use reth_provider::{DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
-use reth_stages_api::{ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::{
     fmt::Debug,
     sync::mpsc::{self, Receiver},

@@ -10,8 +10,8 @@ use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
 use reth_provider::{providers::StaticFileWriter, HashingWriter, ProviderFactory};
-use reth_stages::{stages::ExecutionStage, Stage};
-use reth_stages_api::ExecInput;
+use reth_stages::stages::ExecutionStage;
+use reth_stages_api::{ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.

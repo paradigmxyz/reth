@@ -7395,6 +7395,7 @@ dependencies = [
 name = "reth-stages-api"
 version = "0.2.0-beta.5"
 dependencies = [
+ "auto_impl",
  "metrics",
  "reth-db",
  "reth-interfaces",

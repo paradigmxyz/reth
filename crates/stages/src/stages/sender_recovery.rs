@@ -1,4 +1,3 @@
-use crate::Stage;
 use reth_db::{
     cursor::DbCursorRW,
     database::Database,
@@ -17,7 +16,7 @@ use reth_provider::{
     StatsReader,
 };
 use reth_stages_api::{
-    BlockErrorKind, ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput,
+    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;

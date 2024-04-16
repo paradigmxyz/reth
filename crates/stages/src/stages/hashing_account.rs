@@ -1,4 +1,3 @@
-use crate::Stage;
 use itertools::Itertools;
 use reth_config::config::EtlConfig;
 use reth_db::{
@@ -16,7 +15,7 @@ use reth_primitives::{
     Account, B256,
 };
 use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
-use reth_stages_api::{ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},

@@ -21,5 +21,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
+auto_impl = "1"
+
 [lints]
 workspace = true

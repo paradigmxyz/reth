@@ -25,14 +25,11 @@ use reth_primitives::{
     BlockHashOrNumber, ChainSpec, PruneModes,
 };
 use reth_provider::{BlockWriter, ProviderFactory, StageCheckpointReader};
-use reth_stages::{
-    stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
-        StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-    },
-    Stage,
+use reth_stages::stages::{
+    AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
+    StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
 };
-use reth_stages_api::ExecInput;
+use reth_stages_api::{ExecInput, Stage};
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::{debug, info, warn};

@@ -1,4 +1,3 @@
-use crate::{Stage, StageExt};
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
@@ -11,6 +10,7 @@ use reth_primitives::{
 use reth_provider::{
     providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
 };
+use reth_stages_api::{Stage, StageExt};
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::EventListeners;
 use std::pin::Pin;

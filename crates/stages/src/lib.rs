@@ -78,7 +78,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod pipeline;
-mod stage;
 mod util;
 
 #[allow(missing_docs)]
@@ -94,4 +93,3 @@ pub mod stages;
 pub mod sets;
 
 pub use pipeline::*;
-pub use stage::*;

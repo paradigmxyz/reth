@@ -1,4 +1,4 @@
-use crate::{stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, Stage};
+use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use num_traits::Zero;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -20,7 +20,7 @@ use reth_provider::{
     OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
 };
 use reth_stages_api::{
-    BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, StageError,
+    BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
     UnwindInput, UnwindOutput,
 };
 use std::{

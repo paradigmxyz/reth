@@ -27,7 +27,7 @@ use reth_provider::{
 };
 use reth_stages_api::{ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
 
-use crate::Stage;
+use reth_stages_api::Stage;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.

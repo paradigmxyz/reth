@@ -5,8 +5,8 @@ use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::{stage::StageCheckpoint, BlockNumber};
 use reth_provider::ProviderFactory;
-use reth_stages::{stages::AccountHashingStage, Stage};
-use reth_stages_api::UnwindInput;
+use reth_stages::stages::AccountHashingStage;
+use reth_stages_api::{Stage, UnwindInput};
 use tracing::info;
 
 pub(crate) async fn dump_hashing_account_stage<DB: Database>(
