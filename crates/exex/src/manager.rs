@@ -13,7 +13,7 @@ use crate::ExExEvent;
 use futures::StreamExt;
 use metrics::Gauge;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_primitives::BlockNumber;
+use reth_primitives::{BlockNumber, FinishedExExHeight};
 use reth_provider::CanonStateNotification;
 use reth_tracing::tracing::debug;
 use tokio::sync::{
@@ -168,14 +168,7 @@ pub struct ExExManager {
     is_ready: watch::Sender<bool>,
 
     /// The finished height of all ExEx's.
-    ///
-    /// This is the lowest common denominator between all ExEx's. If an ExEx has not emitted a
-    /// `FinishedHeight` event, it will be `None`.
-    ///
-    /// This block is used to (amongst other things) determine what blocks are safe to prune.
-    ///
-    /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
-    finished_height: watch::Sender<Option<BlockNumber>>,
+    finished_height: watch::Sender<FinishedExExHeight>,
 
     /// A handle to the ExEx manager.
     handle: ExExManagerHandle,
@@ -196,7 +189,11 @@ impl ExExManager {
 
         let (handle_tx, handle_rx) = mpsc::unbounded_channel();
         let (is_ready_tx, is_ready_rx) = watch::channel(true);
-        let (finished_height_tx, finished_height_rx) = watch::channel(None);
+        let (finished_height_tx, finished_height_rx) = watch::channel(if num_exexs == 0 {
+            FinishedExExHeight::NoExExs
+        } else {
+            FinishedExExHeight::NotReady
+        });
 
         let current_capacity = Arc::new(AtomicUsize::new(max_capacity));
 
@@ -329,7 +326,7 @@ impl Future for ExExManager {
             }
         });
         if let Ok(finished_height) = finished_height {
-            let _ = self.finished_height.send(Some(finished_height));
+            let _ = self.finished_height.send(FinishedExExHeight::Height(finished_height));
         }
 
         Poll::Pending
@@ -354,14 +351,7 @@ pub struct ExExManagerHandle {
     /// The current capacity of the manager's internal notification buffer.
     current_capacity: Arc<AtomicUsize>,
     /// The finished height of all ExEx's.
-    ///
-    /// This is the lowest common denominator between all ExEx's. If an ExEx has not emitted a
-    /// `FinishedHeight` event, it will be `None`.
-    ///
-    /// This block is used to (amongst other things) determine what blocks are safe to prune.
-    ///
-    /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
-    finished_height: watch::Receiver<Option<BlockNumber>>,
+    finished_height: watch::Receiver<FinishedExExHeight>,
 }
 
 impl ExExManagerHandle {
@@ -406,14 +396,7 @@ impl ExExManagerHandle {
     }
 
     /// The finished height of all ExEx's.
-    ///
-    /// This is the lowest common denominator between all ExEx's. If an ExEx has not emitted a
-    /// `FinishedHeight` event, it will be `None`.
-    ///
-    /// This block is used to (amongst other things) determine what blocks are safe to prune.
-    ///
-    /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
-    pub fn finished_height(&mut self) -> Option<BlockNumber> {
+    pub fn finished_height(&mut self) -> FinishedExExHeight {
         *self.finished_height.borrow_and_update()
     }
 

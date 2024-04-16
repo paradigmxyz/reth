@@ -169,6 +169,12 @@ impl Compact for TxType {
     }
 }
 
+impl PartialEq<u8> for TxType {
+    fn eq(&self, other: &u8) -> bool {
+        *self as u8 == *other
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

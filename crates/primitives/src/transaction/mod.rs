@@ -20,7 +20,9 @@ pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::TxEip4844;
 
-pub use error::{InvalidTransactionError, TransactionConversionError};
+pub use error::{
+    InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+};
 pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 #[cfg(feature = "c-kzg")]
@@ -618,8 +620,12 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
     type Error = ConversionError;
 
     fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        match tx.transaction_type {
-            None | Some(0) => {
+        match tx.transaction_type.map(TryInto::try_into).transpose().map_err(|_| {
+            ConversionError::Eip2718Error(Eip2718Error::UnexpectedType(
+                tx.transaction_type.unwrap(),
+            ))
+        })? {
+            None | Some(TxType::Legacy) => {
                 // legacy
                 if tx.max_fee_per_gas.is_some() || tx.max_priority_fee_per_gas.is_some() {
                     return Err(ConversionError::Eip2718Error(
@@ -640,7 +646,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                     input: tx.input,
                 }))
             }
-            Some(1u8) => {
+            Some(TxType::Eip2930) => {
                 // eip2930
                 Ok(Transaction::Eip2930(TxEip2930 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
@@ -656,7 +662,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                     gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
                 }))
             }
-            Some(2u8) => {
+            Some(TxType::Eip1559) => {
                 // EIP-1559
                 Ok(Transaction::Eip1559(TxEip1559 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
@@ -677,7 +683,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                     input: tx.input,
                 }))
             }
-            Some(3u8) => {
+            Some(TxType::Eip4844) => {
                 // EIP-4844
                 Ok(Transaction::Eip4844(TxEip4844 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
@@ -704,7 +710,8 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .ok_or(ConversionError::MissingMaxFeePerBlobGas)?,
                 }))
             }
-            Some(tx_type) => Err(Eip2718Error::UnexpectedType(tx_type).into()),
+            #[cfg(feature = "optimism")]
+            Some(TxType::Deposit) => todo!(),
         }
     }
 }
@@ -956,8 +963,8 @@ impl TransactionSignedNoHash {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
 
         let signature_hash = self.signature_hash();
@@ -976,11 +983,9 @@ impl TransactionSignedNoHash {
         buffer.clear();
         self.transaction.encode_without_signature(buffer);
 
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
 
         self.signature.recover_signer_unchecked(keccak256(buffer))
@@ -1189,8 +1194,8 @@ impl TransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
@@ -1205,8 +1210,8 @@ impl TransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
+            return Some(address)
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer_unchecked(signature_hash)
@@ -1741,16 +1746,30 @@ impl Decodable for TransactionSignedEcRecovered {
 ///
 /// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
 /// transaction type that the transaction pool uses.
-pub trait FromRecoveredTransaction {
+pub trait TryFromRecoveredTransaction {
+    /// The error type returned by the transaction.
+    type Error;
     /// Converts to this type from the given [`TransactionSignedEcRecovered`].
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self;
+    fn try_from_recovered_transaction(
+        tx: TransactionSignedEcRecovered,
+    ) -> Result<Self, Self::Error>
+    where
+        Self: Sized;
 }
 
 // Noop conversion
-impl FromRecoveredTransaction for TransactionSignedEcRecovered {
+impl TryFromRecoveredTransaction for TransactionSignedEcRecovered {
+    type Error = TryFromRecoveredTransactionError;
+
     #[inline]
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        tx
+    fn try_from_recovered_transaction(
+        tx: TransactionSignedEcRecovered,
+    ) -> Result<Self, Self::Error> {
+        if tx.is_eip4844() {
+            Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
+        } else {
+            Ok(tx)
+        }
     }
 }
 
@@ -1765,7 +1784,7 @@ pub trait FromRecoveredPooledTransaction {
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
 }
 
-/// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
+/// The inverse of [TryFromRecoveredTransaction] that ensure the transaction can be sent over the
 /// network
 pub trait IntoRecoveredTransaction {
     /// Converts to this type into a [`TransactionSignedEcRecovered`].
@@ -1779,6 +1798,26 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.clone()
     }
+}
+
+#[cfg(feature = "optimism")]
+fn get_deposit_or_null_address(
+    transaction: &Transaction,
+    signature: &Signature,
+) -> Option<Address> {
+    // Optimism's Deposit transaction does not have a signature. Directly return the
+    // `from` address.
+    if let Transaction::Deposit(TxDeposit { from, .. }) = transaction {
+        return Some(*from)
+    }
+    // OP blocks below bedrock include transactions sent from the null address
+    if std::env::var_os(OP_RETH_MAINNET_BELOW_BEDROCK).as_deref() == Some("true".as_ref()) &&
+        *signature == Signature::optimism_deposit_tx_signature()
+    {
+        return Some(Address::default())
+    }
+
+    None
 }
 
 #[cfg(test)]

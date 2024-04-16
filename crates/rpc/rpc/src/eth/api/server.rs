@@ -1,16 +1,10 @@
 //! Implementation of the [`jsonrpsee`] generated [`reth_rpc_api::EthApiServer`] trait
 //! Handles RPC requests for the `eth_` namespace.
 
-use super::EthApiSpec;
-use crate::{
-    eth::{
-        api::{EthApi, EthTransactions},
-        error::EthApiError,
-        revm_utils::EvmOverrides,
-    },
-    result::{internal_rpc_err, ToRpcResult},
-};
 use jsonrpsee::core::RpcResult as Result;
+use serde_json::Value;
+use tracing::trace;
+
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
@@ -28,8 +22,17 @@ use reth_rpc_types::{
     StateContext, SyncStatus, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
-use serde_json::Value;
-use tracing::trace;
+
+use crate::{
+    eth::{
+        api::{EthApi, EthTransactions},
+        error::EthApiError,
+        revm_utils::EvmOverrides,
+    },
+    result::{internal_rpc_err, ToRpcResult},
+};
+
+use super::EthApiSpec;
 
 #[async_trait::async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool, Network, EvmConfig>
@@ -435,6 +438,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use jsonrpsee::types::error::INVALID_PARAMS_CODE;
+
     use crate::{
         eth::{
             cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
@@ -442,13 +447,12 @@ mod tests {
         },
         EthApi,
     };
-    use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_interfaces::test_utils::{generators, generators::Rng};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
-        basefee::calculate_next_block_base_fee, constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams,
-        Block, BlockNumberOrTag, Header, TransactionSigned, B256,
+        constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams, Block, BlockNumberOrTag, Header,
+        TransactionSigned, B256,
     };
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
@@ -565,12 +569,11 @@ mod tests {
 
         // Add final base fee (for the next block outside of the request)
         let last_header = last_header.unwrap();
-        base_fees_per_gas.push(calculate_next_block_base_fee(
-            last_header.gas_used,
-            last_header.gas_limit,
-            last_header.base_fee_per_gas.unwrap_or_default(),
-            BaseFeeParams::ethereum(),
-        ) as u128);
+        base_fees_per_gas.push(BaseFeeParams::ethereum().next_block_base_fee(
+            last_header.gas_used as u128,
+            last_header.gas_limit as u128,
+            last_header.base_fee_per_gas.unwrap_or_default() as u128,
+        ));
 
         let eth_api = build_test_eth_api(mock_provider);
 
