@@ -118,16 +118,6 @@ impl ConfigBuilder {
         self
     }
 
-    /// Add optimism mainnet boot nodes.
-    pub fn add_optimism_mainnet_boot_nodes(self) -> Self {
-        self.add_serialized_unsigned_boot_nodes(BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET)
-    }
-
-    /// Add optimism sepolia boot nodes.
-    pub fn add_optimism_sepolia_boot_nodes(self) -> Self {
-        self.add_serialized_unsigned_boot_nodes(BOOT_NODES_OP_SEPOLIA_AND_BASE_SEPOLIA)
-    }
-
     /// Set fork ID kv-pair to set in local [`Enr`](discv5::enr::Enr). This lets peers on discovery
     /// network know which chain this node belongs to.
     pub fn fork(
