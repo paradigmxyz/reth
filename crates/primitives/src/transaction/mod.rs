@@ -1779,7 +1779,7 @@ pub trait FromRecoveredPooledTransaction {
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
 }
 
-/// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
+/// The inverse of [TryFromRecoveredTransaction] that ensure the transaction can be sent over the
 /// network
 pub trait IntoRecoveredTransaction {
     /// Converts to this type into a [`TransactionSignedEcRecovered`].
