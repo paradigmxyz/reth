@@ -6,6 +6,8 @@ use reth_primitives::{
     PruneMode, PruneModes, PruneSegmentError, Receipt, Receipts, MINIMUM_PRUNING_DISTANCE,
 };
 use revm::db::states::bundle_state::BundleRetention;
+use std::time::Duration;
+use tracing::debug;
 
 /// Takes care of:
 ///  - recording receipts during execution of multiple blocks.
@@ -152,5 +154,36 @@ impl BlockBatchRecord {
         }
 
         Ok(())
+    }
+}
+
+/// Block execution statistics. Contains duration of each step of block execution.
+#[derive(Clone, Debug, Default)]
+pub struct BlockExecutorStats {
+    /// Execution duration.
+    pub execution_duration: Duration,
+    /// Time needed to apply output of revm execution to revm cached state.
+    pub apply_state_duration: Duration,
+    /// Time needed to apply post execution state changes.
+    pub apply_post_execution_state_changes_duration: Duration,
+    /// Time needed to merge transitions and create reverts.
+    /// It this time transitions are applies to revm bundle state.
+    pub merge_transitions_duration: Duration,
+    /// Time needed to calculate receipt roots.
+    pub receipt_root_duration: Duration,
+}
+
+impl BlockExecutorStats {
+    /// Log duration to debug level log.
+    pub fn log_debug(&self) {
+        debug!(
+            target: "evm",
+            evm_transact = ?self.execution_duration,
+            apply_state = ?self.apply_state_duration,
+            apply_post_state = ?self.apply_post_execution_state_changes_duration,
+            merge_transitions = ?self.merge_transitions_duration,
+            receipt_root = ?self.receipt_root_duration,
+            "Execution time"
+        );
     }
 }

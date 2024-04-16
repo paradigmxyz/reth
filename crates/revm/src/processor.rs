@@ -23,12 +23,10 @@ use reth_primitives::{
 };
 #[cfg(not(feature = "optimism"))]
 use reth_provider::BundleStateWithReceipts;
-use reth_provider::{
-    BlockExecutor, BlockExecutorStats, ProviderError, PrunableBlockExecutor, StateProvider,
-};
+use reth_provider::{BlockExecutor, ProviderError, PrunableBlockExecutor, StateProvider};
 
 use crate::{
-    batch::BlockBatchRecord,
+    batch::{BlockBatchRecord, BlockExecutorStats},
     database::StateProviderDatabase,
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     stack::{InspectorStack, InspectorStackConfig},
