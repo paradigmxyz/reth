@@ -11,18 +11,19 @@ use tokio::sync::watch;
 #[derive(Debug, Clone)]
 pub struct PrunerBuilder {
     /// Minimum pruning interval measured in blocks.
-    pub block_interval: usize,
+    block_interval: usize,
     /// Pruning configuration for every part of the data that can be pruned.
-    pub segments: PruneModes,
+    segments: PruneModes,
     /// The number of blocks that can be re-orged.
-    pub max_reorg_depth: usize,
+    max_reorg_depth: usize,
     /// The delete limit for pruner, per block. In the actual pruner run it will be multiplied by
     /// the amount of blocks between pruner runs to account for the difference in amount of new
     /// data coming in.
-    pub prune_delete_limit: usize,
+    prune_delete_limit: usize,
     /// Time a pruner job can run before timing out.
-    pub timeout: Option<Duration>,
-    pub finished_exex_height: watch::Receiver<FinishedExExHeight>,
+    timeout: Option<Duration>,
+    /// The finished height of all ExEx's.
+    finished_exex_height: watch::Receiver<FinishedExExHeight>,
 }
 
 impl PrunerBuilder {
