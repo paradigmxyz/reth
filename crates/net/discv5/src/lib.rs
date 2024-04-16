@@ -42,7 +42,7 @@ pub use filter::{FilterOutcome, MustNotIncludeKeys};
 use metrics::Discv5Metrics;
 
 /// The max log2 distance, is equivalent to the index of the last bit in a discv5 node id.
-const MAX_LOG2_DISTANCE: usize = 255;
+const MAX_LOG2_DISTANCE: usize = 256;
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Clone)]
@@ -300,7 +300,7 @@ impl Discv5 {
             let local_node_id = discv5.local_enr().node_id();
             let lookup_interval = Duration::from_secs(lookup_interval);
             let mut metrics = metrics.discovered_peers;
-            let mut log2_distance = 0usize;
+            let mut log2_distance = MAX_LOG2_DISTANCE;
             // todo: graceful shutdown
 
             async move {
@@ -320,12 +320,12 @@ impl Discv5 {
                         "starting periodic lookup query"
                     );
 
-                    if log2_distance < MAX_LOG2_DISTANCE {
-                        // try to populate bucket one step further away
-                        log2_distance += 1
+                    if log2_distance > 1 {
+                        // try to populate bucket one step closer
+                        log2_distance -= 1
                     } else {
-                        // start over with self lookup
-                        log2_distance = 0
+                        // start over with bucket furthest away
+                        log2_distance = MAX_LOG2_DISTANCE
                     }
                     match discv5.find_node(target).await {
                         Err(err) => trace!(target: "net::discv5",
@@ -526,10 +526,14 @@ pub fn get_lookup_target(
     log2_distance: usize,
     local_node_id: discv5::enr::NodeId,
 ) -> discv5::enr::NodeId {
+    let bucket_index = log2_distance - 1;
+
+    // init target
     let mut target = local_node_id.raw();
-    //make sure target has a 'distance'-long suffix that differs from local node id
-    if log2_distance != 0 {
-        let suffix_bit_offset = MAX_LOG2_DISTANCE.saturating_sub(log2_distance);
+
+    // make sure target has a 'distance'-long suffix that differs from local node id
+    if bucket_index != 0 {
+        let suffix_bit_offset = MAX_LOG2_DISTANCE.saturating_sub(bucket_index);
         let suffix_byte_offset = suffix_bit_offset / 8;
         // todo: flip the precise bit
         // let rel_suffix_bit_offset = suffix_bit_offset % 8;
