@@ -21,9 +21,8 @@ use reth_primitives::{
     BlockHash, BlockNumber, SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HeaderSyncMode,
+    providers::{StaticFileProvider, StaticFileWriter}, DatabaseProviderRW, HeaderProvider,
+    HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
 };
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
