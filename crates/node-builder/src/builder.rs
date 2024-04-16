@@ -638,20 +638,21 @@ where
         future::join_all(exexs).await;
 
         // spawn exex manager
-        if !exex_handles.is_empty() {
+        let exex_manager_handle = if !exex_handles.is_empty() {
             debug!(target: "reth::cli", "spawning exex manager");
             // todo(onbjerg): rm magic number
             let exex_manager = ExExManager::new(exex_handles, 1024);
-            let mut exex_manager_handle = exex_manager.handle();
+            let exex_manager_handle = exex_manager.handle();
             executor.spawn_critical("exex manager", async move {
                 exex_manager.await.expect("exex manager crashed");
             });
 
             // send notifications from the blockchain tree to exex manager
             let mut canon_state_notifications = blockchain_tree.subscribe_to_canonical_state();
+            let mut handle = exex_manager_handle.clone();
             executor.spawn_critical("exex manager blockchain tree notifications", async move {
                 while let Ok(notification) = canon_state_notifications.recv().await {
-                    exex_manager_handle
+                    handle
                         .send_async(notification)
                         .await
                         .expect("blockchain tree notification could not be sent to exex manager");
@@ -659,7 +660,11 @@ where
             });
 
             info!(target: "reth::cli", "ExEx Manager started");
-        }
+
+            Some(exex_manager_handle)
+        } else {
+            None
+        };
 
         // create pipeline
         let network_client = network.fetch_client().await?;
@@ -759,11 +764,16 @@ where
         let initial_target = config.initial_pipeline_target(genesis_hash);
 
         let prune_config = prune_config.unwrap_or_default();
-        let mut pruner = PrunerBuilder::new(prune_config.clone())
+        let mut pruner_builder = PrunerBuilder::new(prune_config.clone())
             .max_reorg_depth(tree_config.max_reorg_depth() as usize)
             .prune_delete_limit(config.chain.prune_delete_limit)
-            .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
-            .build(provider_factory.clone());
+            .timeout(PrunerBuilder::DEFAULT_TIMEOUT);
+        if let Some(exex_manager_handle) = &exex_manager_handle {
+            pruner_builder =
+                pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
+        }
+
+        let mut pruner = pruner_builder.build(provider_factory.clone());
 
         let pruner_events = pruner.events();
         hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));

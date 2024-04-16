@@ -3,11 +3,12 @@ use std::time::Duration;
 use crate::{segments::SegmentSet, Pruner};
 use reth_config::PruneConfig;
 use reth_db::database::Database;
-use reth_primitives::{PruneModes, MAINNET};
+use reth_primitives::{FinishedExExHeight, PruneModes, MAINNET};
 use reth_provider::ProviderFactory;
+use tokio::sync::watch;
 
 /// Contains the information required to build a pruner
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct PrunerBuilder {
     /// Minimum pruning interval measured in blocks.
     pub block_interval: usize,
@@ -21,6 +22,7 @@ pub struct PrunerBuilder {
     pub prune_delete_limit: usize,
     /// Time a pruner job can run before timing out.
     pub timeout: Option<Duration>,
+    pub finished_exex_height: watch::Receiver<FinishedExExHeight>,
 }
 
 impl PrunerBuilder {
@@ -67,6 +69,14 @@ impl PrunerBuilder {
         self
     }
 
+    pub fn finished_exex_height(
+        mut self,
+        finished_exex_height: watch::Receiver<FinishedExExHeight>,
+    ) -> Self {
+        self.finished_exex_height = finished_exex_height;
+        self
+    }
+
     /// Builds a [Pruner] from the current configuration.
     pub fn build<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> Pruner<DB> {
         let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
@@ -78,6 +88,7 @@ impl PrunerBuilder {
             self.prune_delete_limit,
             self.max_reorg_depth,
             self.timeout,
+            self.finished_exex_height,
         )
     }
 }
@@ -90,6 +101,7 @@ impl Default for PrunerBuilder {
             max_reorg_depth: 64,
             prune_delete_limit: MAINNET.prune_delete_limit,
             timeout: Some(Self::DEFAULT_TIMEOUT),
+            finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,
         }
     }
 }
