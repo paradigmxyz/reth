@@ -13,8 +13,7 @@ use reth_discv5::{OptimismForkId, ENR_FORK_KEY_ETH, ENR_FORK_KEY_OPSTACK};
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
-    mainnet_nodes, pk2id, sepolia_nodes, Chain, ChainSpec, ForkFilter, Head, NamedChain,
-    NodeRecord, PeerId, MAINNET,
+    mainnet_nodes, pk2id, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET,
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -131,14 +130,6 @@ impl<C> NetworkConfig<C> {
             builder = builder.fork(ENR_FORK_KEY_OPSTACK, OptimismForkId::new(chain.id()))
         } else if chain.named() == Some(NamedChain::Mainnet) {
             builder = builder.fork(ENR_FORK_KEY_ETH, self.status.forkid)
-        }
-
-        if chain == Chain::optimism_mainnet() || chain == Chain::base_mainnet() {
-            builder = builder.add_optimism_mainnet_boot_nodes()
-        } else if chain == Chain::from_named(NamedChain::OptimismSepolia) ||
-            chain == Chain::from_named(NamedChain::BaseSepolia)
-        {
-            builder = builder.add_optimism_sepolia_boot_nodes()
         }
 
         self.set_discovery_v5(f(builder))
@@ -579,7 +570,7 @@ mod tests {
     use super::*;
     use rand::thread_rng;
     use reth_dns_discovery::tree::LinkEntry;
-    use reth_primitives::ForkHash;
+    use reth_primitives::{Chain, ForkHash};
     use reth_provider::test_utils::NoopProvider;
     use std::collections::BTreeMap;
 

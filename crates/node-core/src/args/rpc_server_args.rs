@@ -13,8 +13,9 @@ use clap::{
     Arg, Args, Command,
 };
 use rand::Rng;
+use reth_engine_primitives::EngineTypes;
+use reth_evm::ConfigureEvm;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,

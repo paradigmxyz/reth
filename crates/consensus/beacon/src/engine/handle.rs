@@ -5,8 +5,8 @@ use crate::{
     BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
 };
 use futures::TryFutureExt;
+use reth_engine_primitives::EngineTypes;
 use reth_interfaces::RethResult;
-use reth_node_api::EngineTypes;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };

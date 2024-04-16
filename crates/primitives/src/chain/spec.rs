@@ -18,9 +18,12 @@ use std::{
 pub use alloy_eips::eip1559::BaseFeeParams;
 
 #[cfg(feature = "optimism")]
-pub(crate) use crate::constants::{
-    OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
-    OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+pub(crate) use crate::{
+    constants::{
+        OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
+        OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+    },
+    net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes},
 };
 
 /// The Ethereum mainnet spec
@@ -779,6 +782,18 @@ impl ChainSpec {
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
     }
 
+    /// Convenience method to check if [Hardfork::Byzantium] is active at a given block number.
+    #[inline]
+    pub fn is_byzantium_active_at_block(&self, block_number: u64) -> bool {
+        self.fork(Hardfork::Byzantium).active_at_block(block_number)
+    }
+
+    /// Convenience method to check if [Hardfork::SpuriousDragon] is active at a given block number.
+    #[inline]
+    pub fn is_spurious_dragon_active_at_block(&self, block_number: u64) -> bool {
+        self.fork(Hardfork::SpuriousDragon).active_at_block(block_number)
+    }
+
     /// Convenience method to check if [Hardfork::Homestead] is active at a given block number.
     #[inline]
     pub fn is_homestead_active_at_block(&self, block_number: u64) -> bool {
@@ -926,6 +941,14 @@ impl ChainSpec {
             C::Goerli => Some(goerli_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
+            #[cfg(feature = "optimism")]
+            C::Base => Some(base_nodes()),
+            #[cfg(feature = "optimism")]
+            C::Optimism => Some(op_nodes()),
+            #[cfg(feature = "optimism")]
+            C::BaseGoerli | C::BaseSepolia => Some(base_testnet_nodes()),
+            #[cfg(feature = "optimism")]
+            C::OptimismSepolia | C::OptimismGoerli | C::OptimismKovan => Some(op_testnet_nodes()),
             _ => None,
         }
     }
