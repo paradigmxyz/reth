@@ -2,21 +2,26 @@
 
 use reth_evm::{
     execute::{BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor},
-    ConfigureEvm,
+    ConfigureEvm, ConfigureEvmEnv,
 };
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{BlockWithSenders, ChainSpec, Hardfork, Header, Receipt, U256};
+use reth_primitives::{
+    BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, Receipt, Receipts, U256,
+};
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     processor::verify_receipt,
     stack::InspectorStack,
+    state_change::apply_beacon_root_contract_call,
     Evm, State,
 };
-use revm_primitives::{db::{Database, DatabaseCommit}, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState};
+use revm_primitives::{
+    db::{Database, DatabaseCommit},
+    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
+};
 use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace};
-use reth_revm::state_change::apply_beacon_root_contract_call;
 
 /// A basic Ethereum block executor.
 ///
@@ -51,9 +56,10 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
+   // TODO: get rid of this
+    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
     DB: Database + DatabaseCommit,
 {
-
     /// Configures a new evm configuration and block environment for the given block.
     ///
     /// Caution: this does not initialize the tx environment.
@@ -84,9 +90,7 @@ where
 
         // 2. configure the evm and execute
         let env = self.evm_env_for_block(&block.header, total_difficulty);
-
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
-        self.execute_and_verify_with_evm(block, total_difficulty, evm)?;
 
         // 3. apply pre execution changes
         apply_beacon_root_contract_call(
@@ -101,7 +105,6 @@ where
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
         for (sender, transaction) in block.transactions_with_sender() {
-            let time = Instant::now();
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
@@ -110,14 +113,25 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                    .into())
+                .into())
             }
+
+            EvmConfig::fill_tx_env(evm.tx_mut(), &transaction, *sender, ());
+
             // Execute transaction.
-            let ResultAndState { result, state } = evm.transact(transaction, *sender)?;
+            let ResultAndState { result, state } = evm.transact().map_err(move |err| {
+                // // Ensure hash is calculated for error log, if not already done
+                // BlockValidationError::EVM {
+                //     hash: transaction.recalculate_hash(),
+                //     error: err.into(),
+                // }
+                // .into()
+                todo!()
+            })?;
             // self.stats.execution_duration += time.elapsed();
             // let time = Instant::now();
 
-            self.db_mut().commit(state);
+            evm.db_mut().commit(state);
 
             // self.stats.apply_state_duration += time.elapsed();
 
@@ -138,13 +152,17 @@ where
             });
         }
 
-
-
+        // Check if gas used matches the value set in header.
+        if block.gas_used != cumulative_gas_used {
+            let receipts = Receipts::from_block_receipt(receipts);
+            return Err(BlockValidationError::BlockGasUsed {
+                gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
+                gas_spent_by_tx: receipts.gas_spent_by_tx()?,
+            }
+            .into())
+        }
 
         // 5. apply post execution changes
-
-
-
 
         // TODO Before Byzantium, receipts contained state root that would mean that expensive
         // operation as hashing that is required for state root got calculated in every
@@ -161,7 +179,6 @@ where
 
         todo!()
     }
-
 
     fn execute_transactions(&mut self) {}
 
@@ -184,9 +201,10 @@ where
     }
 }
 
-impl<Evm, DB> Executor for EthBlockExecutor<Evm, DB>
+impl<EvmConfig, DB> Executor for EthBlockExecutor<EvmConfig, DB>
 where
-    Evm: ConfigureEvm,
+    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
     DB: Database + DatabaseCommit,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
@@ -211,17 +229,19 @@ where
 ///
 /// State changes are tracked until the executor is finalized.
 #[derive(Debug)]
-pub struct EthBatchExecutor<Evm, DB> {
+pub struct EthBatchExecutor<EvmConfig, DB> {
     /// The executor used to execute blocks.
-    executor: EthBlockExecutor<Evm, DB>,
+    executor: EthBlockExecutor<EvmConfig, DB>,
     /// Keeps track of the batch and record receipts based on the configured prune mode
     batch_record: BlockBatchRecord,
     stats: BlockExecutorStats,
 }
 
-impl<Evm, DB> BatchExecutor for EthBatchExecutor<Evm, DB>
+impl<EvmConfig, DB> BatchExecutor for EthBatchExecutor<EvmConfig, DB>
 where
-    Evm: ConfigureEvm,
+    EvmConfig: ConfigureEvm,
+    // TODO: get rid of this
+    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
     DB: Database + DatabaseCommit,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;

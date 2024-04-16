@@ -84,7 +84,7 @@ pub trait ExecutorProvider: Send + Sync + Clone {
     where
         DB: Database + DatabaseCommit;
 
-    // Returns a new executor for single block execution.
+    /// Returns a new executor for single block execution.
     fn executor<DB>(&self, db: DB) -> impl Executor
     where
         DB: Database + DatabaseCommit;
