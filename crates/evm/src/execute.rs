@@ -6,7 +6,7 @@ use revm::db::BundleState;
 use revm_primitives::db::{Database, DatabaseCommit};
 
 /// A general purpose executor trait that executes on an input and produces an output.
-pub trait Executor {
+pub trait Executor<DB> {
     /// The input type for the executor.
     type Input<'a>;
     /// The output type for the executor.
@@ -22,7 +22,7 @@ pub trait Executor {
 
 /// An executor that can execute multiple blocks in a row and keep track of the state over the
 /// entire batch.
-pub trait BatchExecutor {
+pub trait BatchExecutor<DB> {
     /// Input
     type Input<'a>;
     /// The output type for the executor.
@@ -83,13 +83,17 @@ impl<'a, Block> From<(&'a Block, U256)> for EthBlockExecutionInput<'a, Block> {
 
 /// A type that can create a new executor.
 pub trait ExecutorProvider: Send + Sync + Clone {
+    /// An executor that can execute a single block given a database.
+    type Executor<DB>: Executor<DB>;
+    /// An executor that can execute a batch of block given a database.
+    type BatchExecutor<DB>: BatchExecutor<DB>;
     /// Creates a new batch executor
-    fn batch_executor<DB>(&self, db: DB) -> impl BatchExecutor
+    fn batch_executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit;
 
     /// Returns a new executor for single block execution.
-    fn executor<DB>(&self, db: DB) -> impl Executor
+    fn executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit;
 }
@@ -97,21 +101,24 @@ pub trait ExecutorProvider: Send + Sync + Clone {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm::db::{CacheDB, EmptyDB};
+    use revm::db::{CacheDB, EmptyDBTyped};
     use std::marker::PhantomData;
 
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
 
     impl ExecutorProvider for TestExecutorProvider {
-        fn batch_executor<DB>(&self, db: DB) -> impl BatchExecutor
+        type Executor<DB> = TestExecutor<DB>;
+        type BatchExecutor<DB> = TestExecutor<DB>;
+
+        fn batch_executor<DB>(&self, _db: DB) -> Self::Executor<DB>
         where
             DB: Database + DatabaseCommit,
         {
             TestExecutor(PhantomData)
         }
 
-        fn executor<DB>(&self, db: DB) -> impl Executor
+        fn executor<DB>(&self, _db: DB) -> Self::BatchExecutor<DB>
         where
             DB: Database + DatabaseCommit,
         {
@@ -121,22 +128,22 @@ mod tests {
 
     struct TestExecutor<DB>(PhantomData<DB>);
 
-    impl<DB> Executor for TestExecutor<DB> {
+    impl<DB> Executor<DB> for TestExecutor<DB> {
         type Input<'a> = &'static str;
         type Output = ();
         type Error = String;
 
-        fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+        fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
             Ok(())
         }
     }
 
-    impl<DB> BatchExecutor for TestExecutor<DB> {
+    impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
         type Input<'a> = &'static str;
         type Output = ();
         type Error = String;
 
-        fn execute_one(&mut self, input: Self::Input<'_>) -> Result<BatchBlockOutput, Self::Error> {
+        fn execute_one(&mut self, _input: Self::Input<'_>) -> Result<BatchBlockOutput, Self::Error> {
             Ok(BatchBlockOutput { size_hint: None })
         }
 
@@ -145,9 +152,9 @@ mod tests {
 
     #[test]
     fn test_provider() {
-        let provider = TestExecutorProvider::default();
-        let db = CacheDB::<EmptyDB>::default();
-        let mut executor = provider.executor(db);
+        let provider = TestExecutorProvider;
+        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let executor = provider.executor(db);
         executor.execute("test").unwrap();
     }
 }
