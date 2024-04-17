@@ -52,7 +52,14 @@ where
         if let Ok(Some(block)) =
             this.inner.client().block_by_number_or_tag(reth_primitives::BlockNumberOrTag::Latest)
         {
-            this.update_l1_block_info(&block);
+            // genesis block has no txs, so we can't extract L1 info, we set the block info to empty
+            // so that we will accept txs into the pool before the first block
+            if block.number == 0 {
+                this.block_info.timestamp.store(block.timestamp, Ordering::Relaxed);
+                *this.block_info.l1_block_info.write() = Some(Default::default())
+            } else {
+                this.update_l1_block_info(&block);
+            }
         }
 
         this
@@ -69,8 +76,9 @@ where
     /// Update the L1 block info.
     fn update_l1_block_info(&self, block: &Block) {
         self.block_info.timestamp.store(block.timestamp, Ordering::Relaxed);
-        let cost_addition = reth_revm::optimism::extract_l1_info(block).ok();
-        *self.block_info.l1_block_info.write() = cost_addition;
+        if let Some(cost_addition) = reth_revm::optimism::extract_l1_info(block) {
+            *self.block_info.l1_block_info.write() = cost_addition;
+        }
     }
 
     /// Validates a single transaction.
