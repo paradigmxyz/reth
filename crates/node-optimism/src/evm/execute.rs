@@ -22,7 +22,6 @@ use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
-    eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     optimism::ensure_create2_deployer,
     processor::compare_receipts_root_and_logs_bloom,
     stack::InspectorStack,
@@ -381,7 +380,7 @@ where
         block: &BlockWithSenders,
         total_difficulty: U256,
     ) -> Result<(), BlockExecutionError> {
-        let mut balance_increments = post_block_balance_increments(
+        let balance_increments = post_block_balance_increments(
             self.chain_spec(),
             block.number,
             block.difficulty,
@@ -391,20 +390,6 @@ where
             &block.ommers,
             block.withdrawals.as_ref().map(Withdrawals::as_ref),
         );
-
-        // Irregular state change at Ethereum DAO hardfork
-        if self.chain_spec().fork(Hardfork::Dao).transitions_at_block(block.number) {
-            // drain balances from hardcoded addresses.
-            let drained_balance: u128 = self
-                .state
-                .drain_balances(DAO_HARDKFORK_ACCOUNTS)
-                .map_err(|_| BlockValidationError::IncrementBalanceFailed)?
-                .into_iter()
-                .sum();
-
-            // return balance to DAO beneficiary.
-            *balance_increments.entry(DAO_HARDFORK_BENEFICIARY).or_default() += drained_balance;
-        }
         // increment balances
         self.state
             .increment_balances(balance_increments)
