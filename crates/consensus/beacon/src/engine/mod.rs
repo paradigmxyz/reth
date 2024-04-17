@@ -416,29 +416,26 @@ where
                             elapsed,
                         ));
                     }
+                };
+
+                // Validate that the forkchoice state is consistent.
+                if let Some(invalid_fcu_response) =
+                    self.ensure_consistent_forkchoice_state(state)?
+                {
+                    trace!(target: "consensus::engine", ?state, "Forkchoice state is inconsistent, returning invalid response");
+                    return Ok(invalid_fcu_response)
                 }
 
                 if let Some(attrs) = attrs {
-                    // if we return early then we wouldn't perform these consistency checks, so we
-                    // need to do them here, and should do them before we process any payload
-                    // attributes
-                    if let Some(invalid_fcu_response) = self.ensure_consistent_state(state)? {
-                        trace!(target: "consensus::engine", ?state, head=?state.head_block_hash, "Forkchoice state is inconsistent, returning invalid response");
-                        return Ok(invalid_fcu_response)
-                    }
-
                     // the CL requested to build a new payload on top of this new VALID head
-                    let payload_response = self.process_payload_attributes(
-                        attrs,
-                        outcome.into_header().unseal(),
-                        state,
-                    );
-
-                    trace!(target: "consensus::engine", status = ?payload_response, ?state, "Returning forkchoice status");
-                    return Ok(payload_response)
+                    let head = outcome.into_header().unseal();
+                    self.process_payload_attributes(attrs, head, state)
+                } else {
+                    OnForkChoiceUpdated::valid(PayloadStatus::new(
+                        PayloadStatusEnum::Valid,
+                        Some(state.head_block_hash),
+                    ))
                 }
-
-                PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
             }
             Err(err) => {
                 if err.is_fatal() {
@@ -446,19 +443,12 @@ where
                     return Err(err.into())
                 }
 
-                self.on_failed_canonical_forkchoice_update(&state, err)
+                OnForkChoiceUpdated::valid(self.on_failed_canonical_forkchoice_update(&state, err))
             }
         };
 
-        if let Some(invalid_fcu_response) =
-            self.ensure_consistent_state_with_status(state, &status)?
-        {
-            trace!(target: "consensus::engine", ?status, ?state, "Forkchoice state is inconsistent, returning invalid response");
-            return Ok(invalid_fcu_response)
-        }
-
         trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
-        Ok(OnForkChoiceUpdated::valid(status))
+        Ok(status)
     }
 
     /// Invoked when head hash references a `VALID` block that is already canonical.
@@ -831,37 +821,6 @@ where
     }
 
     /// Ensures that the given forkchoice state is consistent, assuming the head block has been
-    /// made canonical. This takes a status as input, and will only perform consistency checks if
-    /// the input status is VALID.
-    ///
-    /// If the forkchoice state is consistent, this will return Ok(None). Otherwise, this will
-    /// return an instance of [OnForkChoiceUpdated] that is INVALID.
-    ///
-    /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
-    /// consistent with the head block.
-    fn ensure_consistent_state_with_status(
-        &mut self,
-        state: ForkchoiceState,
-        status: &PayloadStatus,
-    ) -> RethResult<Option<OnForkChoiceUpdated>> {
-        // We only perform consistency checks if the status is VALID because if the status is
-        // INVALID, we want to return the correct _type_ of error to the CL so we can properly
-        // describe the reason it is invalid. For example, it's possible that the status is invalid
-        // because the safe block has an invalid state root. In that case, we want to preserve the
-        // correct `latestValidHash`, instead of returning a generic "invalid state" error that
-        // does not contain a `latestValidHash`.
-        //
-        // We also should not perform these checks if the status is SYNCING, because in that case
-        // we likely do not have the finalized or safe blocks, and would return an incorrect
-        // INVALID status instead.
-        if status.is_valid() {
-            return self.ensure_consistent_state(state)
-        }
-
-        Ok(None)
-    }
-
-    /// Ensures that the given forkchoice state is consistent, assuming the head block has been
     /// made canonical.
     ///
     /// If the forkchoice state is consistent, this will return Ok(None). Otherwise, this will
@@ -869,7 +828,7 @@ where
     ///
     /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
     /// consistent with the head block.
-    fn ensure_consistent_state(
+    fn ensure_consistent_forkchoice_state(
         &mut self,
         state: ForkchoiceState,
     ) -> RethResult<Option<OnForkChoiceUpdated>> {
