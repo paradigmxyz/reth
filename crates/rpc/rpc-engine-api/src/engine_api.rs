@@ -12,9 +12,7 @@ use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hard
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2,
-    ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    TransitionConfiguration, CAPABILITIES,
+    CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
@@ -683,6 +681,15 @@ where
         let start = Instant::now();
         let res = EngineApi::exchange_transition_configuration(self, config).await;
         self.inner.metrics.exchange_transition_configuration.record(start.elapsed());
+        Ok(res?)
+    }
+    // handler for `engine_getClientVersionV1`
+    // see also <https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md>
+    async fn get_client_version_v1(&self, client:ClientVersionV1) -> RpcResult<Vec<ClientVersionV1>> {
+        trace!(target: "rpc::engine", "Serving engine_getClientVersionV1");
+        let start = Instant::now();
+        let res = EngineApi::get_client_version_v1(self, client).await;
+        // self.inner.metrics.new_payload_v1.record(start.elapsed());
         Ok(res?)
     }
 

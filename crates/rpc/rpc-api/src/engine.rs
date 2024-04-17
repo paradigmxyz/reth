@@ -9,7 +9,7 @@ use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
-        ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
+        ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,ClientVersionV1
     },
     state::StateOverride,
     BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
@@ -45,6 +45,7 @@ pub trait EngineApi<Engine: EngineTypes> {
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus>;
 
+    
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
     /// Caution: This should not accept the `withdrawals` field in the payload attributes.
@@ -153,6 +154,10 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         transition_configuration: TransitionConfiguration,
     ) -> RpcResult<TransitionConfiguration>;
+
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md#engine_getclientversionv1>
+    #[method(name = "getClientVersionV1")]
+    async fn get_client_version_v1(&self, client_version:ClientVersionV1) -> RpcResult<Vec<ClientVersionV1>>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     #[method(name = "exchangeCapabilities")]
