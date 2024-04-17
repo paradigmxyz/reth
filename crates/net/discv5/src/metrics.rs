@@ -57,7 +57,7 @@ impl DiscoveredPeersMetrics {
     }
 
     /// Increments the number of kbucket insertions in [`discv5::Discv5`].
-    pub fn increment_kbucket_insertions(&mut self, num: u64) {
+    pub fn increment_kbucket_insertions(&self, num: u64) {
         self.total_inserted_kbucket_peers_raw.increment(num)
     }
 
@@ -67,19 +67,19 @@ impl DiscoveredPeersMetrics {
     }
 
     /// Increments number of sessions established by [`discv5::Discv5`].
-    pub fn increment_established_sessions_raw(&mut self, num: u64) {
+    pub fn increment_established_sessions_raw(&self, num: u64) {
         self.total_established_sessions_raw.increment(num)
     }
 
     /// Increments number of sessions established by [`discv5::Discv5`], with peers that don't have
     /// a reachable node record.
-    pub fn increment_established_sessions_unreachable_enr(&mut self, num: u64) {
+    pub fn increment_established_sessions_unreachable_enr(&self, num: u64) {
         self.total_established_sessions_unreachable_enr.increment(num)
     }
 
     /// Increments number of sessions established by [`discv5::Discv5`], that pass configured
     /// [`filter`](crate::filter) rules.
-    pub fn increment_established_sessions_filtered(&mut self, num: u64) {
+    pub fn increment_established_sessions_filtered(&self, num: u64) {
         self.total_established_sessions_custom_filtered.increment(num)
     }
 }
@@ -103,7 +103,7 @@ pub struct AdvertisedChainMetrics {
 
 impl AdvertisedChainMetrics {
     /// Counts each recognised network type that is advertised on node record, once.
-    pub fn increment_once_by_network_type(&mut self, enr: &discv5::Enr) {
+    pub fn increment_once_by_network_type(&self, enr: &discv5::Enr) {
         if enr.get_raw_rlp(OPSTACK).is_some() {
             self.opstack.increment(1u64)
         }
