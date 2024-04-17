@@ -44,7 +44,7 @@ use metrics::Discv5Metrics;
 /// Default number of times to do pulse lookup queries, at bootstrap (5 second intervals).
 ///
 /// Default is 200 seconds.
-pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 200;
+pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 100;
 
 /// Default duration of look up interval, for pulse look ups at bootstrap.
 ///
