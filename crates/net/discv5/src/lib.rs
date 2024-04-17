@@ -43,7 +43,7 @@ use metrics::{DiscoveredPeersMetrics, Discv5Metrics};
 
 /// Default number of times to do pulse lookup queries, at bootstrap (5 second intervals).
 ///
-/// Default is 200 seconds.
+/// Default is 100 seconds.
 pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 100;
 
 /// Default duration of look up interval, for pulse look ups at bootstrap.
@@ -234,7 +234,7 @@ impl Discv5 {
         };
 
         //
-        // 3. start discv5
+        // 2. start discv5
         //
         let sk = discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk.secret_bytes()).unwrap();
         let mut discv5 = match discv5::Discv5::new(enr, sk, discv5_config) {
@@ -249,14 +249,14 @@ impl Discv5 {
         let discv5 = Arc::new(discv5);
 
         //
-        // 4. add boot nodes
+        // 3. add boot nodes
         //
         Self::bootstrap(bootstrap_nodes, &discv5).await?;
 
         let metrics = Discv5Metrics::default();
 
         //
-        // 5. bg kbuckets maintenance
+        // 4. bg kbuckets maintenance
         //
         Self::spawn_populate_kbuckets_bg(lookup_interval, metrics.clone(), discv5.clone());
 
@@ -347,7 +347,7 @@ impl Discv5 {
                         lookup_interval=format!("{:#?}", lookup_interval),
                         "starting periodic lookup query"
                     );
-                  
+
                     lookup(target, &discv5, &metrics).await;
 
                     if kbucket_index > DEFAULT_MIN_TARGET_KBUCKET_INDEX {
