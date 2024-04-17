@@ -1681,25 +1681,60 @@ impl RpcServerConfig {
             modules.config.ensure_ws_http_identical()?;
 
             let builder = self.http_server_config.take().expect("http_server_config is Some");
-            let (server, addr) = WsHttpServerKind::build(
-                builder,
-                http_socket_addr,
-                cors,
-                secret,
-                ServerKind::WsHttp(http_socket_addr),
-                modules
+
+            let mut jl: Option<AuthLayer<JwtAuthValidator>> = None;
+            let mut cl: Option<CorsLayer> = None;
+
+            if let Some(cors) = cors.as_deref().map(cors::create_cors_layer) {
+                let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
+                cl = Some(cors);
+            }
+            if let Some(secret) = jwt_secret {
+                jl = Some(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+            }
+            // plain server without any middleware
+            let middleware = tower::ServiceBuilder::new()
+                .option_layer(cl)
+                .option_layer(jl);
+
+            let server = builder
+                .set_http_middleware(middleware)
+                .set_rpc_middleware(RpcServiceBuilder::new().layer(
+                    modules
                     .http
                     .as_ref()
                     .or(modules.ws.as_ref())
                     .map(RpcRequestMetrics::same_port)
-                    .unwrap_or_default(),
-            )
-            .await?;
+                    .unwrap_or_default()
+
+                ))
+                .build(http_socket_addr)
+                .await
+                .map_err(|err| RpcError::server_error(err, ServerKind::WsHttp(http_socket_addr)))?;
+            let addr =
+                server.local_addr().map_err(|err| RpcError::server_error(err, ServerKind::WsHttp(http_socket_addr)))?;
+            let server = WsHttpServerKind::WithOptions(server);
+
+            // let (server, addr) = WsHttpServerKind::build(
+            //     builder,
+            //     http_socket_addr,
+            //     cors,
+            //     secret,
+            //     ServerKind::WsHttp(http_socket_addr),
+            //     modules
+            //         .http
+            //         .as_ref()
+            //         .or(modules.ws.as_ref())
+            //         .map(RpcRequestMetrics::same_port)
+            //         .unwrap_or_default(),
+            // )
+            // .await?;
             return Ok(WsHttpServer {
                 http_local_addr: Some(addr),
                 ws_local_addr: Some(addr),
                 server: WsHttpServers::SamePort(server),
-                jwt_secret,
+                //jwt_secret,
+                jwt_secret: secret,
             })
         }
 
@@ -1710,31 +1745,79 @@ impl RpcServerConfig {
         let mut ws_server = None;
         if let Some(builder) = self.ws_server_config.take() {
             let builder = builder.ws_only();
-            let (server, addr) = WsHttpServerKind::build(
-                builder,
-                ws_socket_addr,
-                self.ws_cors_domains.take(),
-                self.jwt_secret.clone(),
-                ServerKind::WS(ws_socket_addr),
-                modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default(),
-            )
-            .await?;
+            // let (server, addr) = WsHttpServerKind::build(
+            //     builder,
+            //     ws_socket_addr,
+            //     self.ws_cors_domains.take(),
+            //     self.jwt_secret.clone(),
+            //     ServerKind::WS(ws_socket_addr),
+            //     modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default(),
+            // )
+            // .await?;
+
+            let mut jl: Option<AuthLayer<JwtAuthValidator>> = None;
+            let mut cl: Option<CorsLayer> = None;
+    
+            if let Some(cors) = self.ws_cors_domains.as_deref().map(cors::create_cors_layer) {
+                let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
+                cl = Some(cors);
+            }
+            if let Some(secret) = jwt_secret {
+                jl = Some(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+            }
+            // plain server without any middleware
+            let middleware = tower::ServiceBuilder::new()
+                .option_layer(cl)
+                .option_layer(jl);
+    
+            let server = builder
+                .set_http_middleware(middleware)
+                .set_rpc_middleware(RpcServiceBuilder::new().layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()))
+                .build(ws_socket_addr)
+                .await
+                .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
+            let addr =
+                server.local_addr().map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
+            let server = WsHttpServerKind::WithOptions(server);
+
             ws_local_addr = Some(addr);
             ws_server = Some(server);
         }
 
         if let Some(builder) = self.http_server_config.take() {
             let builder = builder.http_only();
-            let (server, addr) = WsHttpServerKind::build(
-                builder,
-                http_socket_addr,
-                self.http_cors_domains.take(),
-                self.jwt_secret.clone(),
-                ServerKind::Http(http_socket_addr),
-                modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
-            )
-            .await?;
-            http_local_addr = Some(addr);
+            // let (server, addr) = WsHttpServerKind::build(
+            //     builder,
+            //     http_socket_addr,
+            //     self.http_cors_domains.take(),
+            //     self.jwt_secret.clone(),
+            //     ServerKind::Http(http_socket_addr),
+            //     modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
+            // )
+            // .await?;
+            let mut cl: Option<CorsLayer> = None;
+            if let Some(cors) = self.http_cors_domains.take().as_deref().map(cors::create_cors_layer) {
+                let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
+                cl = Some(cors);
+            }
+            let mut jl: Option<AuthLayer<JwtAuthValidator>> = None;
+            if let Some(secret) = self.jwt_secret.clone() {
+                jl = Some(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+            }
+            let middleware = tower::ServiceBuilder::new()
+            .option_layer(cl)
+            .option_layer(jl);
+
+            let server = builder
+            .set_http_middleware(middleware)
+            .set_rpc_middleware(RpcServiceBuilder::new().layer(modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default()))
+            .build(http_socket_addr)
+            .await
+            .map_err(|err| RpcError::server_error(err, ServerKind::Http(http_socket_addr)))?;
+        let local_addr =
+            server.local_addr().map_err(|err| RpcError::server_error(err, ServerKind::Http(http_socket_addr)))?;
+        let server = WsHttpServerKind::WithOptions(server);
+            http_local_addr = Some(local_addr);
             http_server = Some(server);
         }
 
@@ -1742,7 +1825,8 @@ impl RpcServerConfig {
             http_local_addr,
             ws_local_addr,
             server: WsHttpServers::DifferentPort { http: http_server, ws: ws_server },
-            jwt_secret,
+            //jwt_secret,
+            jwt_secret: self.jwt_secret.clone(),
         })
     }
 
