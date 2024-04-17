@@ -1,7 +1,10 @@
 //! Ethereum block executor.
 
 use reth_evm::{
-    execute::{BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor},
+    execute::{
+        BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor,
+        ExecutorProvider,
+    },
     ConfigureEvm, ConfigureEvmEnv,
 };
 use reth_interfaces::{
@@ -9,8 +12,8 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::{
-    BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, Receipt, Receipts, Withdrawals,
-    U256,
+    BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt, Receipts,
+    Withdrawals, U256,
 };
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
@@ -20,7 +23,7 @@ use reth_revm::{
     processor::verify_receipt,
     stack::InspectorStack,
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
-    Evm, State,
+    Evm, State, StateBuilder,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -28,6 +31,77 @@ use revm_primitives::{
 };
 use std::sync::Arc;
 use tracing::debug;
+
+/// Provides executors to execute regular ethereum blocks
+#[derive(Debug, Clone)]
+pub struct EthExecutorProvider<EvmConfig> {
+    chain_spec: Arc<ChainSpec>,
+    evm_config: EvmConfig,
+    inspector: Option<InspectorStack>,
+    prune_modes: PruneModes,
+}
+
+impl<EvmConfig> EthExecutorProvider<EvmConfig> {
+    /// Creates a new executor provider.
+    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+        Self { chain_spec, evm_config, inspector: None, prune_modes: PruneModes::none() }
+    }
+
+    /// Configures an optional inspector stack for debugging.
+    pub fn with_inspector(mut self, inspector: InspectorStack) -> Self {
+        self.inspector = Some(inspector);
+        self
+    }
+
+    /// Configures the prune modes for the executor.
+    pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
+        self.prune_modes = prune_modes;
+        self
+    }
+}
+
+impl<EvmConfig> EthExecutorProvider<EvmConfig>
+where
+    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
+{
+    fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
+    where
+        DB: Database<Error = ProviderError> + DatabaseCommit,
+    {
+        EthBlockExecutor::new(
+            self.chain_spec.clone(),
+            self.evm_config.clone(),
+            State::builder().with_database(db).with_bundle_update().without_state_clear().build(),
+        )
+        .with_inspector(self.inspector.clone())
+    }
+}
+
+impl<EvmConfig> ExecutorProvider for EthExecutorProvider<EvmConfig>
+where
+    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
+{
+    fn batch_executor<DB>(&self, db: DB) -> impl BatchExecutor
+    where
+        DB: Database<Error = ProviderError> + DatabaseCommit,
+    {
+        let executor = self.eth_executor(db);
+        EthBatchExecutor {
+            executor,
+            batch_record: BlockBatchRecord::new(self.prune_modes.clone()),
+            stats: BlockExecutorStats::default(),
+        }
+    }
+
+    fn executor<DB>(&self, db: DB) -> impl Executor
+    where
+        DB: Database<Error = ProviderError> + DatabaseCommit,
+    {
+        self.eth_executor(db)
+    }
+}
 
 /// Helper container type for EVM with chain spec.
 #[derive(Debug, Clone)]
@@ -148,8 +222,8 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     }
 
     /// Sets the inspector stack for debugging.
-    pub fn with_inspector(mut self, inspector: InspectorStack) -> Self {
-        self.inspector = Some(inspector);
+    pub fn with_inspector(mut self, inspector: Option<InspectorStack>) -> Self {
+        self.inspector = inspector;
         self
     }
 

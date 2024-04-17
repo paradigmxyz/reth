@@ -6588,6 +6588,7 @@ dependencies = [
 name = "reth-evm"
 version = "0.2.0-beta.5"
 dependencies = [
+ "reth-interfaces",
  "reth-primitives",
  "revm",
  "revm-primitives",

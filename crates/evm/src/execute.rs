@@ -1,5 +1,6 @@
 //! Traits for execution.
 
+use reth_interfaces::provider::ProviderError;
 use reth_primitives::U256;
 use revm::db::BundleState;
 use revm_primitives::db::{Database, DatabaseCommit};
@@ -85,21 +86,19 @@ pub trait ExecutorProvider: Send + Sync + Clone {
     /// Creates a new batch executor
     fn batch_executor<DB>(&self, db: DB) -> impl BatchExecutor
     where
-        DB: Database + DatabaseCommit;
+        DB: Database<Error = ProviderError> + DatabaseCommit;
 
     /// Returns a new executor for single block execution.
     fn executor<DB>(&self, db: DB) -> impl Executor
     where
-        DB: Database + DatabaseCommit;
+        DB: Database<Error = ProviderError> + DatabaseCommit;
 }
 
 #[cfg(test)]
 mod tests {
-    use std::marker::PhantomData;
-
-    use revm::db::{CacheDB, EmptyDB};
-
     use super::*;
+    use revm::db::{CacheDB, EmptyDB};
+    use std::marker::PhantomData;
 
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
