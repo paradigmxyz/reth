@@ -481,7 +481,7 @@ where
 
     fn finalize(mut self) -> Self::Output {
         // TODO: track stats
-        // self.stats.log_debug();
+        self.stats.log_debug();
 
         BundleStateWithReceipts::new(
             self.executor.state.take_bundle(),
