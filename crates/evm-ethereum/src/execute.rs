@@ -83,7 +83,20 @@ where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
 {
-    fn batch_executor<DB>(&self, db: DB) -> impl BatchExecutor
+    type Executor<DB: Database<Error = ProviderError> + DatabaseCommit> =
+        EthBlockExecutor<EvmConfig, DB>;
+
+    type BatchExecutor<DB: Database<Error = ProviderError> + DatabaseCommit> =
+        EthBatchExecutor<EvmConfig, DB>;
+
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    where
+        DB: Database<Error = ProviderError> + DatabaseCommit,
+    {
+        self.eth_executor(db)
+    }
+
+    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit,
     {
@@ -93,13 +106,6 @@ where
             batch_record: BlockBatchRecord::new(self.prune_modes.clone()),
             stats: BlockExecutorStats::default(),
         }
-    }
-
-    fn executor<DB>(&self, db: DB) -> impl Executor
-    where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
-    {
-        self.eth_executor(db)
     }
 }
 
@@ -352,7 +358,7 @@ where
     }
 }
 
-impl<EvmConfig, DB> Executor for EthBlockExecutor<EvmConfig, DB>
+impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
@@ -392,7 +398,7 @@ pub struct EthBatchExecutor<EvmConfig, DB> {
     stats: BlockExecutorStats,
 }
 
-impl<EvmConfig, DB> BatchExecutor for EthBatchExecutor<EvmConfig, DB>
+impl<EvmConfig, DB> BatchExecutor<DB> for EthBatchExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
     // TODO: get rid of this

@@ -84,7 +84,19 @@ where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
 {
-    fn batch_executor<DB>(&self, db: DB) -> impl BatchExecutor
+    type Executor<DB: Database<Error = ProviderError> + DatabaseCommit> =
+        OpBlockExecutor<EvmConfig, DB>;
+
+    type BatchExecutor<DB: Database<Error = ProviderError> + DatabaseCommit> =
+        OpBatchExecutor<EvmConfig, DB>;
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    where
+        DB: Database<Error = ProviderError> + DatabaseCommit,
+    {
+        self.op_executor(db)
+    }
+
+    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit,
     {
@@ -94,13 +106,6 @@ where
             batch_record: BlockBatchRecord::new(self.prune_modes.clone()),
             stats: BlockExecutorStats::default(),
         }
-    }
-
-    fn executor<DB>(&self, db: DB) -> impl Executor
-    where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
-    {
-        self.op_executor(db)
     }
 }
 
@@ -397,7 +402,7 @@ where
     }
 }
 
-impl<EvmConfig, DB> Executor for OpBlockExecutor<EvmConfig, DB>
+impl<EvmConfig, DB> Executor<DB> for OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
@@ -437,7 +442,7 @@ pub struct OpBatchExecutor<EvmConfig, DB> {
     stats: BlockExecutorStats,
 }
 
-impl<EvmConfig, DB> BatchExecutor for OpBatchExecutor<EvmConfig, DB>
+impl<EvmConfig, DB> BatchExecutor<DB> for OpBatchExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
     // TODO: get rid of this

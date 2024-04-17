@@ -84,16 +84,16 @@ impl<'a, Block> From<(&'a Block, U256)> for EthBlockExecutionInput<'a, Block> {
 /// A type that can create a new executor.
 pub trait ExecutorProvider: Send + Sync + Clone {
     /// An executor that can execute a single block given a database.
-    type Executor<DB>: Executor<DB>;
+    type Executor<DB: Database<Error = ProviderError> + DatabaseCommit>: Executor<DB>;
     /// An executor that can execute a batch of block given a database.
-    type BatchExecutor<DB>: BatchExecutor<DB>;
-    /// Creates a new batch executor
-    fn batch_executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    type BatchExecutor<DB: Database<Error = ProviderError> + DatabaseCommit>: BatchExecutor<DB>;
+    /// Returns a new executor for single block execution.
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit;
 
-    /// Returns a new executor for single block execution.
-    fn executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
+    /// Creates a new batch executor
+    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit;
 }
@@ -108,19 +108,19 @@ mod tests {
     struct TestExecutorProvider;
 
     impl ExecutorProvider for TestExecutorProvider {
-        type Executor<DB> = TestExecutor<DB>;
-        type BatchExecutor<DB> = TestExecutor<DB>;
+        type Executor<DB: Database<Error = ProviderError> + DatabaseCommit> = TestExecutor<DB>;
+        type BatchExecutor<DB: Database<Error = ProviderError> + DatabaseCommit> = TestExecutor<DB>;
 
-        fn batch_executor<DB>(&self, _db: DB) -> Self::Executor<DB>
+        fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
         where
-            DB: Database + DatabaseCommit,
+            DB: Database<Error = ProviderError> + DatabaseCommit,
         {
             TestExecutor(PhantomData)
         }
 
-        fn executor<DB>(&self, _db: DB) -> Self::BatchExecutor<DB>
+        fn batch_executor<DB>(&self, _db: DB) -> Self::BatchExecutor<DB>
         where
-            DB: Database + DatabaseCommit,
+            DB: Database<Error = ProviderError> + DatabaseCommit,
         {
             TestExecutor(PhantomData)
         }
@@ -143,7 +143,10 @@ mod tests {
         type Output = ();
         type Error = String;
 
-        fn execute_one(&mut self, _input: Self::Input<'_>) -> Result<BatchBlockOutput, Self::Error> {
+        fn execute_one(
+            &mut self,
+            _input: Self::Input<'_>,
+        ) -> Result<BatchBlockOutput, Self::Error> {
             Ok(BatchBlockOutput { size_hint: None })
         }
 
