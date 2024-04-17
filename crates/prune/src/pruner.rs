@@ -322,7 +322,7 @@ mod tests {
 
     use crate::Pruner;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_primitives::MAINNET;
+    use reth_primitives::{FinishedExExHeight, MAINNET};
     use reth_provider::ProviderFactory;
 
     #[test]
@@ -331,7 +331,12 @@ mod tests {
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let provider_factory = ProviderFactory::new(db, MAINNET.clone(), static_dir_path)
             .expect("create provide factory with static_files");
-        let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5, None);
+
+        let (finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+
+        let mut pruner =
+            Pruner::new(provider_factory, vec![], 5, 0, 5, None, finished_exex_height_rx);
 
         // No last pruned block number was set before
         let first_block_number = 1;
@@ -344,7 +349,20 @@ mod tests {
         pruner.previous_tip_block_number = Some(second_block_number);
 
         // Tip block number delta is < than min block interval
-        let third_block_number = second_block_number;
-        assert!(!pruner.is_pruning_needed(third_block_number));
+        assert!(!pruner.is_pruning_needed(second_block_number));
+
+        // Not all ExExs have emitted a `FinishedHeight` event yet
+        finished_exex_height_tx.send(FinishedExExHeight::NotReady).unwrap();
+        assert!(!pruner.is_pruning_needed(second_block_number));
+
+        // Adjust tip block number to the finished ExEx height that doesn't reach the threshold
+        let fourth_block_number = second_block_number + pruner.min_block_interval as u64;
+        finished_exex_height_tx.send(FinishedExExHeight::Height(second_block_number)).unwrap();
+        pruner.previous_tip_block_number = Some(second_block_number);
+        assert!(!pruner.is_pruning_needed(fourth_block_number));
+
+        // Adjust tip block number to the finished ExEx height that reaches the threshold
+        finished_exex_height_tx.send(FinishedExExHeight::Height(fourth_block_number)).unwrap();
+        assert!(pruner.is_pruning_needed(fourth_block_number));
     }
 }
