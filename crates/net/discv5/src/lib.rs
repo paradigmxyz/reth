@@ -301,6 +301,7 @@ impl Discv5 {
             let lookup_interval = Duration::from_secs(lookup_interval);
             let mut metrics = metrics.discovered_peers;
             let mut log2_distance = 0usize;
+            let mut boost_bootstrap = 100;
             // todo: graceful shutdown
 
             async move {
@@ -310,9 +311,27 @@ impl Discv5 {
                         discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
                     );
 
-                    // make sure node is connected to each subtree in the network by target
-                    // selection (ref kademlia)
-                    let target = get_lookup_target(log2_distance, local_node_id);
+                    let target = if boost_bootstrap > 0 {
+                        let tgt = discv5::enr::NodeId::random();
+
+                        boost_bootstrap -= 1;
+
+                        tgt
+                    } else {
+                        // make sure node is connected to each subtree in the network by target
+                        // selection (ref kademlia)
+                        let tgt = get_lookup_target(log2_distance, local_node_id);
+
+                        if log2_distance < MAX_LOG2_DISTANCE {
+                            // try to populate bucket one step further away
+                            log2_distance += 1
+                        } else {
+                            // start over with self lookup
+                            log2_distance = 0
+                        }
+
+                        tgt
+                    };
 
                     trace!(target: "net::discv5",
                         target=format!("{:#?}", target),
@@ -320,13 +339,6 @@ impl Discv5 {
                         "starting periodic lookup query"
                     );
 
-                    if log2_distance < MAX_LOG2_DISTANCE {
-                        // try to populate bucket one step further away
-                        log2_distance += 1
-                    } else {
-                        // start over with self lookup
-                        log2_distance = 0
-                    }
                     match discv5.find_node(target).await {
                         Err(err) => trace!(target: "net::discv5",
                             lookup_interval=format!("{:#?}", lookup_interval),
@@ -351,7 +363,9 @@ impl Discv5 {
                         connected_peers=discv5.connected_peers(),
                         "connected peers in routing table"
                     );
-                    tokio::time::sleep(lookup_interval).await;
+                    let sleep =
+                        if boost_bootstrap > 0 { Duration::from_secs(5) } else { lookup_interval };
+                    tokio::time::sleep(sleep).await;
                 }
             }
         });
