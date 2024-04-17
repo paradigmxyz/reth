@@ -303,6 +303,13 @@ impl<DB: Database> Pruner<DB> {
         }
     }
 
+    /// Adjusts the tip block number to the finished ExEx height. This is needed to not prune more
+    /// data than ExExs have processed. Depending on the height:
+    /// - [FinishedExExHeight::NoExExs] returns the tip block number as is as no adjustment for
+    ///   ExExs is needed.
+    /// - [FinishedExExHeight::NotReady] returns `None` as not all ExExs have emitted a
+    ///   `FinishedHeight` event yet.
+    /// - [FinishedExExHeight::Height] returns the finished ExEx height.
     fn adjust_tip_block_number_to_finished_exex_height(
         &self,
         tip_block_number: BlockNumber,
