@@ -988,42 +988,38 @@ where
             }
         }
 
-        // we assume the FCU is valid and at least the head is missing, so we need to start syncing
-        // to it
-        let target = if self.forkchoice_state_tracker.is_empty() {
-            // find the appropriate target to sync to, if we don't have the safe block hash then we
-            // start syncing to the safe block via pipeline first
-            let target = if !state.safe_block_hash.is_zero() &&
-                self.blockchain.block_number(state.safe_block_hash).ok().flatten().is_none()
-            {
-                state.safe_block_hash
-            } else {
-                state.head_block_hash
-            };
-
-            // we need to first check the buffer for the head and its ancestors
-            let lowest_unknown_hash = self.lowest_buffered_ancestor_or(target);
-            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering full block download for missing ancestors of the new head");
-            lowest_unknown_hash
+        // we assume the FCU is valid and at least the head is missing,
+        // so we need to start syncing to it
+        //
+        // find the appropriate target to sync to, if we don't have the safe block hash then we
+        // start syncing to the safe block via pipeline first
+        let target = if self.forkchoice_state_tracker.is_empty() &&
+            // check that safe block is valid and missing
+            !state.safe_block_hash.is_zero() &&
+            self.blockchain.block_number(state.safe_block_hash).ok().flatten().is_none()
+        {
+            state.safe_block_hash
         } else {
-            // we need to first check the buffer for the head and its ancestors
-            let lowest_unknown_hash = self.lowest_buffered_ancestor_or(state.head_block_hash);
-            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering full block download for missing ancestors of the new head");
-            lowest_unknown_hash
+            state.head_block_hash
         };
+
+        // we need to first check the buffer for the target and its ancestors
+        let target = self.lowest_buffered_ancestor_or(target);
 
         // if the threshold is zero, we should not download the block first, and just use the
         // pipeline. Otherwise we use the tree to insert the block first
         if self.pipeline_run_threshold == 0 {
             // use the pipeline to sync to the target
+            trace!(target: "consensus::engine", %target, "Triggering pipeline run to sync missing ancestors of the new head");
             self.sync.set_pipeline_sync_target(target);
         } else {
             // trigger a full block download for missing hash, or the parent of its lowest buffered
             // ancestor
+            trace!(target: "consensus::engine", request=%target, "Triggering full block download for missing ancestors of the new head");
             self.sync.download_full_block(target);
         }
 
-        debug!(target: "consensus::engine", ?target, "Syncing to new target");
+        debug!(target: "consensus::engine", %target, "Syncing to new target");
         PayloadStatus::from_status(PayloadStatusEnum::Syncing)
     }
 
