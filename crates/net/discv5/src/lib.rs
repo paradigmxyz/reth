@@ -41,6 +41,11 @@ pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
 use metrics::Discv5Metrics;
 
+/// Default number of times to do pulse lookup queries, at bootstrap (5 second intervals).
+///
+/// Default is 200 seconds.
+pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 200;
+
 /// The max log2 distance, is equivalent to the index of the last bit in a discv5 node id.
 const MAX_LOG2_DISTANCE: usize = 255;
 
@@ -301,7 +306,7 @@ impl Discv5 {
             let lookup_interval = Duration::from_secs(lookup_interval);
             let mut metrics = metrics.discovered_peers;
             let mut log2_distance = 0usize;
-            let mut boost_bootstrap = 100;
+            let mut boost_bootstrap = DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP;
             // todo: graceful shutdown
 
             async move {
