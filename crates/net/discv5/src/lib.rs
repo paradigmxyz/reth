@@ -42,7 +42,12 @@ pub use filter::{FilterOutcome, MustNotIncludeKeys};
 use metrics::Discv5Metrics;
 
 /// Max kbucket index (max log2distance - 1).
-const MAX_KBUCKET_INDEX: usize = 255;
+pub const MAX_KBUCKET_INDEX: usize = 255;
+
+/// Default lowest kbucket index to attempt filling, in periodic look up query to populate kbuckets.
+///
+/// Default is 127th kbucket.
+pub const DEFAULT_MIN_TARGET_KBUCKET_INDEX: usize = MAX_KBUCKET_INDEX / 2;
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Clone)]
@@ -320,7 +325,7 @@ impl Discv5 {
                         "starting periodic lookup query"
                     );
 
-                    if kbucket_index > 0 {
+                    if kbucket_index > DEFAULT_MIN_TARGET_KBUCKET_INDEX {
                         // try to populate bucket one step closer
                         kbucket_index -= 1
                     } else {
