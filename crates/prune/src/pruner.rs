@@ -355,18 +355,20 @@ mod tests {
         // Tip block number delta is < than min block interval
         assert!(!pruner.is_pruning_needed(second_block_number));
 
+        // Tip block number delta is >= than min block interval
+        let third_block_number = second_block_number + pruner.min_block_interval as u64;
+        assert!(pruner.is_pruning_needed(third_block_number));
+
         // Not all ExExs have emitted a `FinishedHeight` event yet
         finished_exex_height_tx.send(FinishedExExHeight::NotReady).unwrap();
-        assert!(!pruner.is_pruning_needed(second_block_number));
+        assert!(!pruner.is_pruning_needed(third_block_number));
 
         // Adjust tip block number to the finished ExEx height that doesn't reach the threshold
-        let fourth_block_number = second_block_number + pruner.min_block_interval as u64;
         finished_exex_height_tx.send(FinishedExExHeight::Height(second_block_number)).unwrap();
-        pruner.previous_tip_block_number = Some(second_block_number);
-        assert!(!pruner.is_pruning_needed(fourth_block_number));
+        assert!(!pruner.is_pruning_needed(third_block_number));
 
         // Adjust tip block number to the finished ExEx height that reaches the threshold
-        finished_exex_height_tx.send(FinishedExExHeight::Height(fourth_block_number)).unwrap();
-        assert!(pruner.is_pruning_needed(fourth_block_number));
+        finished_exex_height_tx.send(FinishedExExHeight::Height(third_block_number)).unwrap();
+        assert!(pruner.is_pruning_needed(third_block_number));
     }
 }
