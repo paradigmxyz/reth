@@ -1,27 +1,31 @@
 //! Ethereum executor.
 
 use std::sync::Arc;
-
 use revm_primitives::{
     BlockEnv,
     CfgEnvWithHandlerCfg, db::{Database, DatabaseCommit}, EnvWithHandlerCfg, ResultAndState,
 };
-
+use tracing::debug;
 use reth_evm::{
     ConfigureEvm,
     ConfigureEvmEnv, execute::{BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor},
 };
-use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{
-    BlockWithSenders, ChainSpec, GotExpected, Header, Receipt, Receipts, U256,
+use reth_interfaces::{
+    executor::{BlockExecutionError, BlockValidationError},
+    provider::ProviderError,
 };
+use reth_primitives::{Block, BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, Receipt, Receipts, U256, Withdrawals};
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
-    batch::{BlockBatchRecord, BlockExecutorStats}
+    batch::{BlockBatchRecord, BlockExecutorStats},
     stack::InspectorStack,
-    State
-    ,state_change::apply_beacon_root_contract_call,
+    State,
+    state_change::apply_beacon_root_contract_call,
 };
+use reth_revm::db::states::bundle_state::BundleRetention;
+use reth_revm::eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS};
+use reth_revm::processor::verify_receipt;
+use reth_revm::state_change::post_block_balance_increments;
 
 /// A basic Ethereum block executor.
 ///
@@ -56,9 +60,9 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-   // TODO: get rid of this
+    // TODO: get rid of this
     EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
-    DB: Database + DatabaseCommit,
+    DB: Database<Error = ProviderError> + DatabaseCommit,
 {
     /// Configures a new evm configuration and block environment for the given block.
     ///
@@ -120,17 +124,12 @@ where
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {
-                // // Ensure hash is calculated for error log, if not already done
-                // BlockValidationError::EVM {
-                //     hash: transaction.recalculate_hash(),
-                //     error: err.into(),
-                // }
-                // .into()
-                todo!()
+                // Ensure hash is calculated for error log, if not already done
+                BlockValidationError::EVM {
+                    hash: transaction.recalculate_hash(),
+                    error: err.into(),
+                }
             })?;
-            // self.stats.execution_duration += time.elapsed();
-            // let time = Instant::now();
-
             evm.db_mut().commit(state);
 
             // self.stats.apply_state_duration += time.elapsed();
@@ -146,11 +145,12 @@ where
                 success: result.is_success(),
                 cumulative_gas_used,
                 // convert to reth log
-                logs: result.into_logs().into_iter().map(Into::into).collect(),
+                logs: result.into_logs(),
 
                 ..Default::default()
             });
         }
+        drop(evm);
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
@@ -163,24 +163,24 @@ where
         }
 
         // 5. apply post execution changes
+        self.post_execution(block, total_difficulty)?;
 
-        // TODO Before Byzantium, receipts contained state root that would mean that expensive
+
+        // Before Byzantium, receipts contained state root that would mean that expensive
         // operation as hashing that is required for state root got calculated in every
         // transaction This was replaced with is_success flag.
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec.is_byzantium_active_at_block(block.header.number) {
-            // if let Err(error) =
-            //     verify_receipt(block.header.receipts_root, block.header.logs_bloom,
-            // receipts.iter()) {
-            //     debug!(target: "evm", %error, ?receipts, "receipts verification failed");
-            //     return Err(error)
-            // };
+            if let Err(error) =
+                verify_receipt(block.header.receipts_root, block.header.logs_bloom,
+            receipts.iter()) {
+                debug!(target: "evm", %error, ?receipts, "receipts verification failed");
+                return Err(error)
+            };
         }
 
-        todo!()
+        Ok((receipts, cumulative_gas_used))
     }
-
-    fn execute_transactions(&mut self) {}
 
     /// Apply settings before a new block is executed.
     pub(crate) fn on_new_block(&mut self, header: &Header) {
@@ -189,15 +189,43 @@ where
         self.state.set_state_clear_flag(state_clear_flag);
     }
 
-    /// Invoked before transactions are executed
-    fn pre_execution(&self, block: &BlockWithSenders) -> Result<(), BlockExecutionError> {
-        todo!()
-    }
-
     /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO
     /// hardfork state change.
-    fn post_execution(&self) {
-        todo!()
+    pub fn post_execution(
+        &mut self,
+        block: &BlockWithSenders,
+        total_difficulty: U256,
+    ) -> Result<(), BlockExecutionError> {
+        let mut balance_increments = post_block_balance_increments(
+            &self.chain_spec,
+            block.number,
+            block.difficulty,
+            block.beneficiary,
+            block.timestamp,
+            total_difficulty,
+            &block.ommers,
+            block.withdrawals.as_ref().map(Withdrawals::as_ref),
+        );
+
+        // Irregular state change at Ethereum DAO hardfork
+        if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
+            // drain balances from hardcoded addresses.
+            let drained_balance: u128 = self
+                .state
+                .drain_balances(DAO_HARDKFORK_ACCOUNTS)
+                .map_err(|_| BlockValidationError::IncrementBalanceFailed)?
+                .into_iter()
+                .sum();
+
+            // return balance to DAO beneficiary.
+            *balance_increments.entry(DAO_HARDFORK_BENEFICIARY).or_default() += drained_balance;
+        }
+        // increment balances
+        self.state
+            .increment_balances(balance_increments)
+            .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+
+        Ok(())
     }
 }
 
@@ -205,7 +233,7 @@ impl<EvmConfig, DB> Executor for EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
-    DB: Database + DatabaseCommit,
+    DB: Database<Error = ProviderError> + DatabaseCommit,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
     type Output = EthBlockOutput<Receipt>;
@@ -221,6 +249,10 @@ where
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let EthBlockExecutionInput { block, total_difficulty } = input;
         let (receipts, gas_used) = self.execute_and_verify(block, total_difficulty)?;
+
+        // prepare the state for extraction
+        self.state.merge_transitions(BundleRetention::PlainState);
+
         Ok(EthBlockOutput { state: self.state.take_bundle(), receipts, gas_used })
     }
 }
@@ -242,7 +274,7 @@ where
     EvmConfig: ConfigureEvm,
     // TODO: get rid of this
     EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
-    DB: Database + DatabaseCommit,
+    DB: Database<Error = ProviderError> + DatabaseCommit,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
     type Output = BundleStateWithReceipts;
@@ -251,6 +283,12 @@ where
     fn execute_one(&mut self, input: Self::Input<'_>) -> Result<BatchBlockOutput, Self::Error> {
         let EthBlockExecutionInput { block, total_difficulty } = input;
         let (receipts, _gas_used) = self.executor.execute_and_verify(block, total_difficulty)?;
+
+        // prepare the state according to the prune mode
+        let retention = self.batch_record.bundle_retention(block.number);
+        self.executor.state.merge_transitions(retention);
+
+        // store receipts in the set
         self.batch_record.save_receipts(receipts)?;
 
         Ok(BatchBlockOutput { size_hint: Some(self.executor.state.bundle_size_hint()) })

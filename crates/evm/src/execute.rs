@@ -26,6 +26,7 @@ pub trait BatchExecutor {
     type Input<'a>;
     /// The output type for the executor.
     type Output;
+    /// The error type returned by the executor.
     type Error;
 
     /// Executes the next block in the batch and update the state internally.
