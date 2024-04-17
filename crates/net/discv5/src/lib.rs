@@ -46,6 +46,11 @@ use metrics::Discv5Metrics;
 /// Default is 200 seconds.
 pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 200;
 
+/// Default duration of look up interval, for pulse look ups at bootstrap.
+///
+/// Default is 5 seconds.
+pub const DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL: u64 = 5;
+
 /// The max log2 distance, is equivalent to the index of the last bit in a discv5 node id.
 const MAX_LOG2_DISTANCE: usize = 255;
 
@@ -307,6 +312,7 @@ impl Discv5 {
             let mut metrics = metrics.discovered_peers;
             let mut log2_distance = 0usize;
             let mut boost_bootstrap = DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP;
+            let pulse_lookup_interval = Duration::from_secs(DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL);
             // todo: graceful shutdown
 
             async move {
@@ -316,12 +322,12 @@ impl Discv5 {
                         discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
                     );
 
-                    let target = if boost_bootstrap > 0 {
+                    let (target, sleep) = if boost_bootstrap > 0 {
                         let tgt = discv5::enr::NodeId::random();
 
                         boost_bootstrap -= 1;
 
-                        tgt
+                        (tgt, pulse_lookup_interval)
                     } else {
                         // make sure node is connected to each subtree in the network by target
                         // selection (ref kademlia)
@@ -335,11 +341,8 @@ impl Discv5 {
                             log2_distance = 0
                         }
 
-                        tgt
+                        (tgt, lookup_interval)
                     };
-
-                    let sleep =
-                        if boost_bootstrap > 0 { Duration::from_secs(5) } else { lookup_interval };
 
                     trace!(target: "net::discv5",
                         target=format!("{:#?}", target),
