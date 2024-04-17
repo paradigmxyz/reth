@@ -108,7 +108,7 @@ mod tests {
         where
             DB: Database + DatabaseCommit,
         {
-            todo!()
+            TestExecutor(PhantomData)
         }
 
         fn executor<DB>(&self, db: DB) -> impl Executor
@@ -122,9 +122,9 @@ mod tests {
     struct TestExecutor<DB>(PhantomData<DB>);
 
     impl<DB> Executor for TestExecutor<DB> {
-        type Input<'a> = &'a str;
+        type Input<'a> = &'static str;
         type Output = ();
-        type Error = ();
+        type Error = String;
 
         fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
             Ok(())
@@ -132,17 +132,15 @@ mod tests {
     }
 
     impl<DB> BatchExecutor for TestExecutor<DB> {
-        type Input<'a> = &'a str;
+        type Input<'a> = &'static str;
         type Output = ();
-        type Error = ();
+        type Error = String;
 
         fn execute_one(&mut self, input: Self::Input<'_>) -> Result<BatchBlockOutput, Self::Error> {
             Ok(BatchBlockOutput { size_hint: None })
         }
 
-        fn finalize(self) -> Self::Output {
-            ()
-        }
+        fn finalize(self) -> Self::Output {}
     }
 
     #[test]
