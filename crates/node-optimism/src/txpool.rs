@@ -76,8 +76,8 @@ where
     /// Update the L1 block info.
     fn update_l1_block_info(&self, block: &Block) {
         self.block_info.timestamp.store(block.timestamp, Ordering::Relaxed);
-        if let Some(cost_addition) = reth_revm::optimism::extract_l1_info(block) {
-            *self.block_info.l1_block_info.write() = cost_addition;
+        if let Ok(cost_addition) = reth_revm::optimism::extract_l1_info(block) {
+            *self.block_info.l1_block_info.write() = Some(cost_addition);
         }
     }
 
