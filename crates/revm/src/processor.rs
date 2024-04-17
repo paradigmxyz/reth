@@ -290,7 +290,7 @@ where
 }
 
 /// Default Ethereum implementation of the [BlockExecutor] trait for the [EVMProcessor].
-// #[cfg(not(feature = "optimism"))]
+#[cfg(not(feature = "optimism"))]
 impl<'a, EvmConfig> BlockExecutor for EVMProcessor<'a, EvmConfig>
 where
     EvmConfig: ConfigureEvm,
