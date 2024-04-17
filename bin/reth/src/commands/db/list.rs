@@ -2,9 +2,7 @@ use super::tui::DbListTUI;
 use crate::utils::{DbTool, ListFilter};
 use clap::Parser;
 use eyre::WrapErr;
-use reth_db::{
-    database::Database, table::Table, DatabaseEnv, RawValue, TableViewer, Tables,
-};
+use reth_db::{database::Database, table::Table, DatabaseEnv, RawValue, TableViewer, Tables};
 use reth_primitives::hex;
 use std::cell::RefCell;
 use tracing::error;
