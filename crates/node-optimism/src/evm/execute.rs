@@ -1,7 +1,5 @@
 //! Optimism block executor.
 
-//! Ethereum block executor.
-
 use reth_evm::{
     execute::{
         BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor,
@@ -51,8 +49,8 @@ impl<EvmConfig> OpExecutorProvider<EvmConfig> {
     }
 
     /// Configures an optional inspector stack for debugging.
-    pub fn with_inspector(mut self, inspector: InspectorStack) -> Self {
-        self.inspector = Some(inspector);
+    pub fn with_inspector(mut self, inspector: Option<InspectorStack>) -> Self {
+        self.inspector = inspector;
         self
     }
 
