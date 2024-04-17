@@ -86,7 +86,9 @@ impl<DB: Database> Pruner<DB> {
 
     /// Run the pruner
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
-        let Some(tip_block_number) = self.adjust_tip_block_number_to_finished_exex_height(tip_block_number) else {
+        let Some(tip_block_number) =
+            self.adjust_tip_block_number_to_finished_exex_height(tip_block_number)
+        else {
             return Ok(PruneProgress::Finished)
         };
         if tip_block_number == 0 {
@@ -277,7 +279,9 @@ impl<DB: Database> Pruner<DB> {
     /// Returns `true` if the pruning is needed at the provided tip block number.
     /// This determined by the check against minimum pruning interval and last pruned block number.
     pub fn is_pruning_needed(&self, tip_block_number: BlockNumber) -> bool {
-        let Some(tip_block_number) = self.adjust_tip_block_number_to_finished_exex_height(tip_block_number) else {
+        let Some(tip_block_number) =
+            self.adjust_tip_block_number_to_finished_exex_height(tip_block_number)
+        else {
             return false
         };
 
