@@ -2,9 +2,9 @@ use std::{cell::RefCell, thread_local};
 use zstd::bulk::{Compressor, Decompressor};
 
 /// Compression/Decompression dictionary for `Receipt`.
-pub static RECEIPT_DICTIONARY: &[u8] = include_bytes!("./receipt_dictionary.bin");
+pub static RECEIPT_DICTIONARY: &[u8] = include_bytes!("./compression/receipt_dictionary.bin");
 /// Compression/Decompression dictionary for `Transaction`.
-pub static TRANSACTION_DICTIONARY: &[u8] = include_bytes!("./transaction_dictionary.bin");
+pub static TRANSACTION_DICTIONARY: &[u8] = include_bytes!("./compression/transaction_dictionary.bin");
 
 // We use `thread_local` compressors and decompressors because dictionaries can be quite big, and
 // zstd-rs recommends to use one context/compressor per thread
