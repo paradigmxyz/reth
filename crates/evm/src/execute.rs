@@ -37,6 +37,7 @@ pub trait BatchExecutor {
 }
 
 /// The output of an executed block in a batch.
+#[derive(Debug, Clone, Copy)]
 pub struct BatchBlockOutput {
     /// The size hint of the batch's tracked state.
     pub size_hint: Option<usize>,

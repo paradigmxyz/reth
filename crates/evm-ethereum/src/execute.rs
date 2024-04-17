@@ -9,8 +9,8 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::{
-    Block, BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, Receipt, Receipts,
-    Withdrawals, U256,
+    BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, Receipt, Receipts, Withdrawals,
+    U256,
 };
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
