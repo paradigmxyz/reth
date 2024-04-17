@@ -1,27 +1,27 @@
 //! Ethereum executor.
 
+use std::sync::Arc;
+
+use revm_primitives::{
+    BlockEnv,
+    CfgEnvWithHandlerCfg, db::{Database, DatabaseCommit}, EnvWithHandlerCfg, ResultAndState,
+};
+
 use reth_evm::{
-    execute::{BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor},
-    ConfigureEvm, ConfigureEvmEnv,
+    ConfigureEvm,
+    ConfigureEvmEnv, execute::{BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor},
 };
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, Receipt, Receipts, U256,
+    BlockWithSenders, ChainSpec, GotExpected, Header, Receipt, Receipts, U256,
 };
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
-    batch::{BlockBatchRecord, BlockExecutorStats},
-    processor::verify_receipt,
+    batch::{BlockBatchRecord, BlockExecutorStats}
     stack::InspectorStack,
-    state_change::apply_beacon_root_contract_call,
-    Evm, State,
+    State
+    ,state_change::apply_beacon_root_contract_call,
 };
-use revm_primitives::{
-    db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
-};
-use std::{sync::Arc, time::Instant};
-use tracing::{debug, trace};
 
 /// A basic Ethereum block executor.
 ///
