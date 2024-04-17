@@ -333,21 +333,24 @@ impl Discv5 {
                         tgt
                     };
 
+                    let sleep =
+                        if boost_bootstrap > 0 { Duration::from_secs(5) } else { lookup_interval };
+
                     trace!(target: "net::discv5",
                         target=format!("{:#?}", target),
-                        lookup_interval=format!("{:#?}", lookup_interval),
+                        lookup_interval=format!("{:#?}", sleep),
                         "starting periodic lookup query"
                     );
 
                     match discv5.find_node(target).await {
                         Err(err) => trace!(target: "net::discv5",
-                            lookup_interval=format!("{:#?}", lookup_interval),
+                            lookup_interval=format!("{:#?}", sleep),
                             %err,
                             "periodic lookup query failed"
                         ),
                         Ok(peers) => trace!(target: "net::discv5",
                             target=format!("{:#?}", target),
-                            lookup_interval=format!("{:#?}", lookup_interval),
+                            lookup_interval=format!("{:#?}", sleep),
                             peers_count=peers.len(),
                             peers=format!("[{:#}]", peers.iter()
                                 .map(|enr| enr.node_id()
@@ -363,8 +366,7 @@ impl Discv5 {
                         connected_peers=discv5.connected_peers(),
                         "connected peers in routing table"
                     );
-                    let sleep =
-                        if boost_bootstrap > 0 { Duration::from_secs(5) } else { lookup_interval };
+
                     tokio::time::sleep(sleep).await;
                 }
             }
