@@ -2,14 +2,6 @@
 
 //! Ethereum block executor.
 
-use std::sync::Arc;
-
-use revm_primitives::{
-    db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
-};
-use tracing::debug;
-
 use reth_evm::{
     execute::{
         BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor,
@@ -18,23 +10,31 @@ use reth_evm::{
     ConfigureEvm, ConfigureEvmEnv,
 };
 use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
+    executor::{BlockExecutionError, BlockValidationError, OptimismBlockExecutionError},
     provider::ProviderError,
 };
 use reth_primitives::{
-    BlockWithSenders, Bytes, ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt,
-    Receipts, Withdrawals, U256,
+    proofs::calculate_receipt_root_optimism, BlockWithSenders, Bloom, Bytes, ChainSpec,
+    GotExpected, Hardfork, Header, PruneModes, Receipt, ReceiptWithBloom, Receipts, TxType,
+    Withdrawals, B256, U256,
 };
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    processor::verify_receipt,
+    optimism::ensure_create2_deployer,
+    processor::compare_receipts_root_and_logs_bloom,
     stack::InspectorStack,
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
-    Evm, State, StateBuilder,
+    Evm, State,
 };
+use revm_primitives::{
+    db::{Database, DatabaseCommit},
+    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
+};
+use std::sync::Arc;
+use tracing::{debug, trace};
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
@@ -67,13 +67,13 @@ impl<EvmConfig> OpExecutorProvider<EvmConfig> {
 impl<EvmConfig> OpExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
+    EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
 {
-    fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
+    fn op_executor<DB>(&self, db: DB) -> OpBlockExecutor<EvmConfig, DB>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit,
     {
-        EthBlockExecutor::new(
+        OpBlockExecutor::new(
             self.chain_spec.clone(),
             self.evm_config.clone(),
             State::builder().with_database(db).with_bundle_update().without_state_clear().build(),
@@ -85,13 +85,13 @@ where
 impl<EvmConfig> ExecutorProvider for OpExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
+    EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
 {
     fn batch_executor<DB>(&self, db: DB) -> impl BatchExecutor
     where
         DB: Database<Error = ProviderError> + DatabaseCommit,
     {
-        let executor = self.eth_executor(db);
+        let executor = self.op_executor(db);
         OpBatchExecutor {
             executor,
             batch_record: BlockBatchRecord::new(self.prune_modes.clone()),
@@ -103,7 +103,7 @@ where
     where
         DB: Database<Error = ProviderError> + DatabaseCommit,
     {
-        self.eth_executor(db)
+        self.op_executor(db)
     }
 }
 
@@ -129,12 +129,12 @@ where
     fn execute_pre_and_transactions<Ext, DB>(
         &mut self,
         block: &BlockWithSenders,
-        mut evm: Evm<'_, Ext, DB>,
+        mut evm: Evm<'_, Ext, &mut State<DB>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit,
     {
-        //  apply pre execution changes
+        // apply pre execution changes
         apply_beacon_root_contract_call(
             &self.chain_spec,
             block.timestamp,
@@ -143,20 +143,62 @@ where
             &mut evm,
         )?;
 
-        // 4. execute transactions
+        // execute transactions
+        let is_regolith =
+            self.chain_spec.fork(Hardfork::Regolith).active_at_timestamp(block.timestamp);
+
+        // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
+        // blocks will always have at least a single transaction in them (the L1 info transaction),
+        // so we can safely assume that this will always be triggered upon the transition and that
+        // the above check for empty blocks will never be hit on OP chains.
+        ensure_create2_deployer(self.chain_spec.clone(), block.timestamp, evm.db_mut()).map_err(
+            |_| {
+                BlockExecutionError::OptimismBlockExecution(
+                    OptimismBlockExecutionError::ForceCreate2DeployerFail,
+                )
+            },
+        )?;
+
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas {
+            if transaction.gas_limit() > block_available_gas &&
+                (is_regolith || !transaction.is_system_transaction())
+            {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
                 .into())
             }
+
+            // An optimism block should never contain blob transactions.
+            if matches!(transaction.tx_type(), TxType::Eip4844) {
+                return Err(BlockExecutionError::OptimismBlockExecution(
+                    OptimismBlockExecutionError::BlobTransactionRejected,
+                ))
+            }
+
+            // Cache the depositor account prior to the state transition for the deposit nonce.
+            //
+            // Note that this *only* needs to be done post-regolith hardfork, as deposit nonces
+            // were not introduced in Bedrock. In addition, regular transactions don't have deposit
+            // nonces, so we don't need to touch the DB for those.
+            let depositor = (is_regolith && transaction.is_deposit())
+                .then(|| {
+                    evm.db_mut()
+                        .load_cache_account(*sender)
+                        .map(|acc| acc.account_info().unwrap_or_default())
+                })
+                .transpose()
+                .map_err(|_| {
+                    BlockExecutionError::OptimismBlockExecution(
+                        OptimismBlockExecutionError::AccountLoadFailed(*sender),
+                    )
+                })?;
 
             let mut buf = Vec::with_capacity(transaction.length_without_header());
             transaction.encode_enveloped(&mut buf);
@@ -170,25 +212,35 @@ where
                     error: err.into(),
                 }
             })?;
+
+            trace!(
+                target: "evm",
+                ?transaction,
+                "Executed transaction"
+            );
+
             evm.db_mut().commit(state);
 
             // append gas used
             cumulative_gas_used += result.gas_used();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(
-                #[allow(clippy::needless_update)] // side-effect of optimism fields
-                Receipt {
-                    tx_type: transaction.tx_type(),
-                    // Success flag was added in `EIP-658: Embedding transaction status code in
-                    // receipts`.
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    // convert to reth log
-                    logs: result.into_logs(),
-                    ..Default::default()
-                },
-            );
+            receipts.push(Receipt {
+                tx_type: transaction.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: result.is_success(),
+                cumulative_gas_used,
+                logs: result.into_logs(),
+                deposit_nonce: depositor.map(|account| account.nonce),
+                // The deposit receipt version was introduced in Canyon to indicate an update to how
+                // receipt hashes should be computed when set. The state transition process ensures
+                // this is only set for post-Canyon deposit transactions.
+                deposit_receipt_version: (transaction.is_deposit() &&
+                    self.chain_spec
+                        .is_fork_active_at_timestamp(Hardfork::Canyon, block.timestamp))
+                .then_some(1),
+            });
         }
         drop(evm);
 
@@ -212,7 +264,7 @@ where
 /// - Create a new instance of the executor.
 /// - Execute the block.
 #[derive(Debug)]
-pub struct EthBlockExecutor<EvmConfig, DB> {
+pub struct OpBlockExecutor<EvmConfig, DB> {
     /// Chain specific evm config
     evm_spec: OpEvmExecutor<EvmConfig>,
     /// The state to use for execution
@@ -221,7 +273,7 @@ pub struct EthBlockExecutor<EvmConfig, DB> {
     inspector: Option<InspectorStack>,
 }
 
-impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
+impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
         Self { evm_spec: OpEvmExecutor { chain_spec, evm_config }, state, inspector: None }
@@ -239,11 +291,11 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     }
 }
 
-impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB>
+impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
     // TODO: get rid of this
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
+    EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
     DB: Database<Error = ProviderError> + DatabaseCommit,
 {
     /// Configures a new evm configuration and block environment for the given block.
@@ -300,9 +352,13 @@ where
         // transaction This was replaced with is_success flag.
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec().is_byzantium_active_at_block(block.header.number) {
-            if let Err(error) =
-                verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
-            {
+            if let Err(error) = verify_receipt_optimism(
+                block.header.receipts_root,
+                block.header.logs_bloom,
+                receipts.iter(),
+                self.chain_spec(),
+                block.timestamp,
+            ) {
                 debug!(target: "evm", %error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
@@ -358,10 +414,10 @@ where
     }
 }
 
-impl<EvmConfig, DB> Executor for EthBlockExecutor<EvmConfig, DB>
+impl<EvmConfig, DB> Executor for OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
+    EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
     DB: Database<Error = ProviderError> + DatabaseCommit,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
@@ -392,7 +448,7 @@ where
 #[derive(Debug)]
 pub struct OpBatchExecutor<EvmConfig, DB> {
     /// The executor used to execute blocks.
-    executor: EthBlockExecutor<EvmConfig, DB>,
+    executor: OpBlockExecutor<EvmConfig, DB>,
     /// Keeps track of the batch and record receipts based on the configured prune mode
     batch_record: BlockBatchRecord,
     stats: BlockExecutorStats,
@@ -433,4 +489,30 @@ where
             self.batch_record.first_block().unwrap_or_default(),
         )
     }
+}
+
+/// Verify the calculated receipts root against the expected receipts root.
+pub fn verify_receipt_optimism<'a>(
+    expected_receipts_root: B256,
+    expected_logs_bloom: Bloom,
+    receipts: impl Iterator<Item = &'a Receipt> + Clone,
+    chain_spec: &ChainSpec,
+    timestamp: u64,
+) -> Result<(), BlockExecutionError> {
+    // Calculate receipts root.
+    let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
+    let receipts_root =
+        calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
+
+    // Create header log bloom.
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
+
+    compare_receipts_root_and_logs_bloom(
+        receipts_root,
+        logs_bloom,
+        expected_receipts_root,
+        expected_logs_bloom,
+    )?;
+
+    Ok(())
 }
