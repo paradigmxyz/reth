@@ -23,7 +23,7 @@ use reth_revm::{
     processor::verify_receipt,
     stack::InspectorStack,
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
-    Evm, State, StateBuilder,
+    Evm, State,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
