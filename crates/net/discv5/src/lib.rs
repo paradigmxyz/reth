@@ -56,7 +56,7 @@ pub const MAX_KBUCKET_INDEX: usize = 255;
 
 /// Default lowest kbucket index to attempt filling, in periodic look up query to populate kbuckets.
 ///
-/// Default is 127th kbucket.
+/// Default is 128th kbucket (index 127).
 pub const DEFAULT_MIN_TARGET_KBUCKET_INDEX: usize = MAX_KBUCKET_INDEX / 2;
 
 /// Transparent wrapper around [`discv5::Discv5`].
