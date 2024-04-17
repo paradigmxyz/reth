@@ -316,7 +316,7 @@ impl Discv5 {
             async move {
                 // make many fast lookup queries at bootstrap, trying to fill kbuckets at furthest
                 // log2distance from local node
-                for i in DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP..0 {
+                for i in (0..DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP).rev() {
                     let target = discv5::enr::NodeId::random();
 
                     trace!(target: "net::discv5",
