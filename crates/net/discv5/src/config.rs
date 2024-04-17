@@ -19,7 +19,7 @@ pub const ETH2: &[u8] = b"eth2";
 /// Optimism
 pub const OPSTACK: &[u8] = b"opstack";
 
-/// Default interval in seconds at which to run a self-lookup up query.
+/// Default interval in seconds at which to run a lookup up query.
 ///
 /// Default is 60 seconds.
 const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 60;
