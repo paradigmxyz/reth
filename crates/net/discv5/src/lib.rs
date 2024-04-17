@@ -39,7 +39,7 @@ pub use config::{BootNode, Config, ConfigBuilder};
 pub use enr::enr_to_discv4_id;
 pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
-use metrics::Discv5Metrics;
+use metrics::{DiscoveredPeersMetrics, Discv5Metrics};
 
 /// Default number of times to do pulse lookup queries, at bootstrap (5 second intervals).
 ///
@@ -305,79 +305,55 @@ impl Discv5 {
         metrics: Discv5Metrics,
         discv5: Arc<discv5::Discv5>,
     ) {
-        // initiate regular lookups to populate kbuckets
         task::spawn({
             let local_node_id = discv5.local_enr().node_id();
             let lookup_interval = Duration::from_secs(lookup_interval);
-            let mut metrics = metrics.discovered_peers;
+            let metrics = metrics.discovered_peers;
             let mut log2_distance = 0usize;
-            let mut boost_bootstrap_count_down = DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP;
             let pulse_lookup_interval = Duration::from_secs(DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL);
             // todo: graceful shutdown
 
             async move {
-                loop {
-                    metrics.set_total_sessions(discv5.metrics().active_sessions);
-                    metrics.set_total_kbucket_peers(
-                        discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
-                    );
-
-                    let (target, sleep) = if boost_bootstrap_count_down > 0 {
-                        let tgt = discv5::enr::NodeId::random();
-
-                        boost_bootstrap_count_down -= 1;
-
-                        (tgt, pulse_lookup_interval)
-                    } else {
-                        // make sure node is connected to each subtree in the network by target
-                        // selection (ref kademlia)
-                        let tgt = get_lookup_target(log2_distance, local_node_id);
-
-                        if log2_distance < MAX_LOG2_DISTANCE {
-                            // try to populate bucket one step further away
-                            log2_distance += 1
-                        } else {
-                            // start over with self lookup
-                            log2_distance = 0
-                        }
-
-                        (tgt, lookup_interval)
-                    };
+                // make many fast lookup queries at bootstrap, trying to fill kbuckets at furthest
+                // log2distance from local node
+                for i in DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP..0 {
+                    let target = discv5::enr::NodeId::random();
 
                     trace!(target: "net::discv5",
                         target=format!("{:#?}", target),
-                        lookup_interval=format!("{:#?}", sleep),
-                        boost_bootstrap_count_down,
+                        bootstrap_boost_runs_count_down=i,
+                        lookup_interval=format!("{:#?}", pulse_lookup_interval),
+                        "starting bootstrap boost lookup query"
+                    );
+
+                    lookup(target, &discv5, &metrics).await;
+
+                    tokio::time::sleep(pulse_lookup_interval).await;
+                }
+
+                // initiate regular lookups to populate kbuckets
+                loop {
+                    // make sure node is connected to each subtree in the network by target
+                    // selection (ref kademlia)
+                    let target = get_lookup_target(log2_distance, local_node_id);
+
+                    trace!(target: "net::discv5",
+                        target=format!("{:#?}", target),
+                        lookup_interval=format!("{:#?}", lookup_interval),
                         "starting periodic lookup query"
                     );
 
-                    match discv5.find_node(target).await {
-                        Err(err) => trace!(target: "net::discv5",
-                            lookup_interval=format!("{:#?}", sleep),
-                            %err,
-                            "periodic lookup query failed"
-                        ),
-                        Ok(peers) => trace!(target: "net::discv5",
-                            target=format!("{:#?}", target),
-                            lookup_interval=format!("{:#?}", sleep),
-                            boost_bootstrap_count_down,
-                            peers_count=peers.len(),
-                            peers=format!("[{:#}]", peers.iter()
-                                .map(|enr| enr.node_id()
-                            ).format(", ")),
-                            "peers returned by periodic lookup query"
-                        ),
+                    lookup(target, &discv5, &metrics).await;
+
+                    if log2_distance < MAX_LOG2_DISTANCE {
+                        // try to populate bucket one step further away
+                        log2_distance += 1
+                    } else {
+                        // start over with self lookup
+                        log2_distance = 0
                     }
 
-                    // `Discv5::connected_peers` can be subset of sessions, not all peers make it
-                    // into kbuckets, e.g. incoming sessions from peers with
-                    // unreachable enrs
-                    debug!(target: "net::discv5",
-                        connected_peers=discv5.connected_peers(),
-                        "connected peers in routing table"
-                    );
-
-                    tokio::time::sleep(sleep).await;
+                    tokio::time::sleep(lookup_interval).await;
                 }
             }
         });
@@ -569,6 +545,41 @@ pub fn get_lookup_target(
     }
 
     target.into()
+}
+
+/// Runs a [`discv5::Discv5`] lookup query.
+pub async fn lookup(
+    target: discv5::enr::NodeId,
+    discv5: &discv5::Discv5,
+    metrics: &DiscoveredPeersMetrics,
+) {
+    metrics.set_total_sessions(discv5.metrics().active_sessions);
+    metrics.set_total_kbucket_peers(
+        discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
+    );
+
+    match discv5.find_node(target).await {
+        Err(err) => trace!(target: "net::discv5",
+            %err,
+            "lookup query failed"
+        ),
+        Ok(peers) => trace!(target: "net::discv5",
+            target=format!("{:#?}", target),
+            peers_count=peers.len(),
+            peers=format!("[{:#}]", peers.iter()
+                .map(|enr| enr.node_id()
+            ).format(", ")),
+            "peers returned by lookup query"
+        ),
+    }
+
+    // `Discv5::connected_peers` can be subset of sessions, not all peers make it
+    // into kbuckets, e.g. incoming sessions from peers with
+    // unreachable enrs
+    debug!(target: "net::discv5",
+        connected_peers=discv5.connected_peers(),
+        "connected peers in routing table"
+    );
 }
 
 #[cfg(test)]

@@ -52,7 +52,7 @@ pub struct DiscoveredPeersMetrics {
 
 impl DiscoveredPeersMetrics {
     /// Sets current total number of peers in [`discv5::Discv5`]'s kbuckets.
-    pub fn set_total_kbucket_peers(&mut self, num: usize) {
+    pub fn set_total_kbucket_peers(&self, num: usize) {
         self.total_kbucket_peers_raw.set(num as f64)
     }
 
@@ -62,7 +62,7 @@ impl DiscoveredPeersMetrics {
     }
 
     /// Sets current total number of peers connected to [`discv5::Discv5`].
-    pub fn set_total_sessions(&mut self, num: usize) {
+    pub fn set_total_sessions(&self, num: usize) {
         self.total_sessions_raw.set(num as f64)
     }
 
