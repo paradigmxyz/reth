@@ -70,6 +70,7 @@ impl PrunerBuilder {
         self
     }
 
+    /// Sets the receiver for the finished height of all ExEx's.
     pub fn finished_exex_height(
         mut self,
         finished_exex_height: watch::Receiver<FinishedExExHeight>,
