@@ -36,6 +36,7 @@ pub trait BatchExecutor {
     fn finalize(self) -> Self::Output;
 }
 
+/// The output of an executed block in a batch.
 pub struct BatchBlockOutput {
     /// The size hint of the batch's tracked state.
     pub size_hint: Option<usize>,

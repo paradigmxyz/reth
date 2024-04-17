@@ -1,31 +1,33 @@
 //! Ethereum executor.
 
-use std::sync::Arc;
-use revm_primitives::{
-    BlockEnv,
-    CfgEnvWithHandlerCfg, db::{Database, DatabaseCommit}, EnvWithHandlerCfg, ResultAndState,
-};
-use tracing::debug;
 use reth_evm::{
-    ConfigureEvm,
-    ConfigureEvmEnv, execute::{BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor},
+    execute::{BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor},
+    ConfigureEvm, ConfigureEvmEnv,
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
     provider::ProviderError,
 };
-use reth_primitives::{Block, BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, Receipt, Receipts, U256, Withdrawals};
+use reth_primitives::{
+    Block, BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, Receipt, Receipts,
+    Withdrawals, U256,
+};
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
+    db::states::bundle_state::BundleRetention,
+    eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
+    processor::verify_receipt,
     stack::InspectorStack,
+    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
     State,
-    state_change::apply_beacon_root_contract_call,
 };
-use reth_revm::db::states::bundle_state::BundleRetention;
-use reth_revm::eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS};
-use reth_revm::processor::verify_receipt;
-use reth_revm::state_change::post_block_balance_increments;
+use revm_primitives::{
+    db::{Database, DatabaseCommit},
+    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
+};
+use std::sync::Arc;
+use tracing::debug;
 
 /// A basic Ethereum block executor.
 ///
@@ -165,15 +167,14 @@ where
         // 5. apply post execution changes
         self.post_execution(block, total_difficulty)?;
 
-
         // Before Byzantium, receipts contained state root that would mean that expensive
         // operation as hashing that is required for state root got calculated in every
         // transaction This was replaced with is_success flag.
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec.is_byzantium_active_at_block(block.header.number) {
             if let Err(error) =
-                verify_receipt(block.header.receipts_root, block.header.logs_bloom,
-            receipts.iter()) {
+                verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
+            {
                 debug!(target: "evm", %error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
