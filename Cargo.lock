@@ -6608,19 +6608,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-evm-optimism"
-version = "0.2.0-beta.5"
-dependencies = [
- "reth-evm",
- "reth-interfaces",
- "reth-primitives",
- "reth-provider",
- "reth-revm",
- "revm-primitives",
- "tracing",
-]
-
-[[package]]
 name = "reth-exex"
 version = "0.2.0-beta.5"
 dependencies = [
@@ -6996,6 +6983,8 @@ dependencies = [
  "reqwest 0.11.27",
  "reth-basic-payload-builder",
  "reth-db",
+ "reth-evm",
+ "reth-interfaces",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
@@ -7010,9 +6999,11 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "revm",
+ "revm-primitives",
  "serde",
  "serde_json",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

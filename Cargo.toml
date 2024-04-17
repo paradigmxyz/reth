@@ -65,7 +65,6 @@ members = [
     "crates/transaction-pool/",
     "crates/trie/",
     "crates/trie-parallel/",
-    "crates/optimism/evm/",
     "examples/",
     "examples/additional-rpc-namespace-in-cli/",
     "examples/beacon-api-sse/",
@@ -225,7 +224,6 @@ reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/evm-ethereum" }
-reth-optimism-evm = { path = "crates/optimism/evm" }
 reth-exex = { path = "crates/exex" }
 reth-optimism-payload-builder = { path = "crates/payload/optimism" }
 reth-interfaces = { path = "crates/interfaces" }
