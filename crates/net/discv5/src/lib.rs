@@ -311,7 +311,7 @@ impl Discv5 {
             let lookup_interval = Duration::from_secs(lookup_interval);
             let mut metrics = metrics.discovered_peers;
             let mut log2_distance = 0usize;
-            let mut boost_bootstrap = DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP;
+            let mut boost_bootstrap_count_down = DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP;
             let pulse_lookup_interval = Duration::from_secs(DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL);
             // todo: graceful shutdown
 
@@ -322,10 +322,10 @@ impl Discv5 {
                         discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
                     );
 
-                    let (target, sleep) = if boost_bootstrap > 0 {
+                    let (target, sleep) = if boost_bootstrap_count_down > 0 {
                         let tgt = discv5::enr::NodeId::random();
 
-                        boost_bootstrap -= 1;
+                        boost_bootstrap_count_down -= 1;
 
                         (tgt, pulse_lookup_interval)
                     } else {
@@ -347,6 +347,7 @@ impl Discv5 {
                     trace!(target: "net::discv5",
                         target=format!("{:#?}", target),
                         lookup_interval=format!("{:#?}", sleep),
+                        boost_bootstrap_count_down,
                         "starting periodic lookup query"
                     );
 
@@ -359,6 +360,7 @@ impl Discv5 {
                         Ok(peers) => trace!(target: "net::discv5",
                             target=format!("{:#?}", target),
                             lookup_interval=format!("{:#?}", sleep),
+                            boost_bootstrap_count_down,
                             peers_count=peers.len(),
                             peers=format!("[{:#}]", peers.iter()
                                 .map(|enr| enr.node_id()
