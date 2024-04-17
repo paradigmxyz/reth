@@ -766,7 +766,7 @@
             },
             "disableTextWrap": false,
             "editorMode": "builder",
-            "expr": "rate(reth_discv5_total_established_sessions_custom_filtered{instance=\"$instance\"}[$__rate_interval])",
+            "expr": "rate(reth_discv5_total_established_sessions_raw{instance=\"$instance\"}[$__rate_interval]) - rate(reth_discv5_total_established_sessions_custom_filtered{instance=\"$instance\"}[$__rate_interval])",
             "fullMetaSearch": false,
             "hide": false,
             "includeNullMetadata": false,
