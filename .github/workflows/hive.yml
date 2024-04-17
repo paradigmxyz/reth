@@ -116,17 +116,13 @@ jobs:
               - eth_getBlockBy
               - eth_getBlockTransactionCountBy
               - eth_getCode
+              - eth_getProof
               - eth_getStorage
               - eth_getTransactionBy
               - eth_getTransactionCount
               - eth_getTransactionReceipt
               - eth_sendRawTransaction
               - eth_syncing
-            # not running eth_getProof tests because we do not support
-            # eth_getProof yet
-            # - sim: ethereum/rpc-compat
-            #   include: [eth_getProof/get-account-proof-with-storage, eth_getProof/get-account-proof]
-            #   experimental: true
             # debug_ rpc methods
           - sim: ethereum/rpc-compat
             include: [debug_]
