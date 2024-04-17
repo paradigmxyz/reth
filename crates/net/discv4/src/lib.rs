@@ -2560,6 +2560,71 @@ mod tests {
         let _ = discv4.lookup_self().await;
     }
 
+    #[tokio::test]
+    async fn test_requests_timeout() {
+        reth_tracing::init_test_tracing();
+        let fork_id = ForkId { hash: ForkHash(hex!("743f3d89")), next: 16191202 };
+
+        let config = Discv4Config::builder()
+            .request_timeout(Duration::from_millis(200))
+            .ping_expiration(Duration::from_millis(200))
+            .add_eip868_pair("eth", fork_id)
+            .build();
+        let (_disv4, mut service) = create_discv4_with_config(config).await;
+
+        let id = PeerId::random();
+        let key = kad_key(id);
+        let record = NodeRecord::new("0.0.0.0:0".parse().unwrap(), id);
+
+        let _ = service.kbuckets.insert_or_update(
+            &key,
+            NodeEntry::new_proven(record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+
+        service.lookup_self();
+        assert_eq!(service.pending_find_nodes.len(), 1);
+
+        let ctx = service.pending_find_nodes.values().next().unwrap().lookup_context.clone();
+
+        service.pending_lookup.insert(record.id, (Instant::now(), ctx));
+
+        assert_eq!(service.pending_lookup.len(), 1);
+
+        let ping = Ping {
+            from: service.local_node_record.into(),
+            to: record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: service.enr_seq(),
+        };
+        let echo_hash = service.send_packet(Message::Ping(ping), record.udp_addr());
+        let ping_request = PingRequest {
+            sent_at: Instant::now(),
+            node: record,
+            echo_hash,
+            reason: PingReason::InitialInsert,
+        };
+        service.pending_pings.insert(record.id, ping_request);
+
+        assert_eq!(service.pending_pings.len(), 1);
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        poll_fn(|cx| {
+            let _ = service.poll(cx);
+
+            assert_eq!(service.pending_find_nodes.len(), 0);
+            assert_eq!(service.pending_lookup.len(), 0);
+            assert_eq!(service.pending_pings.len(), 0);
+
+            Poll::Ready(())
+        })
+        .await;
+    }
+
     // sends a PING packet with wrong 'to' field and expects a PONG response.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_check_wrong_to() {
