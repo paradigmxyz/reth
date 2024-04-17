@@ -320,7 +320,7 @@ impl Discv5 {
                     let target = discv5::enr::NodeId::random();
 
                     trace!(target: "net::discv5",
-                        target=format!("{:#?}", target),
+                        %target,
                         bootstrap_boost_runs_count_down=i,
                         lookup_interval=format!("{:#?}", pulse_lookup_interval),
                         "starting bootstrap boost lookup query"
@@ -338,7 +338,7 @@ impl Discv5 {
                     let target = get_lookup_target(log2_distance, local_node_id);
 
                     trace!(target: "net::discv5",
-                        target=format!("{:#?}", target),
+                        %target,
                         lookup_interval=format!("{:#?}", lookup_interval),
                         "starting periodic lookup query"
                     );
