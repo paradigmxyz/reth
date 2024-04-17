@@ -122,7 +122,7 @@ where
                 .into())
             }
 
-            EvmConfig::fill_tx_env(evm.tx_mut(), &transaction, *sender, ());
+            EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender, ());
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {
@@ -148,8 +148,6 @@ where
                 cumulative_gas_used,
                 // convert to reth log
                 logs: result.into_logs(),
-
-                ..Default::default()
             });
         }
         drop(evm);
