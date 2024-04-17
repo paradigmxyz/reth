@@ -208,7 +208,6 @@ use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, Variant
 pub use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
-use tower::util::option_layer;
 
 // re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
