@@ -397,7 +397,7 @@ where
 pub struct EthBatchExecutor<EvmConfig, DB> {
     /// The executor used to execute blocks.
     executor: EthBlockExecutor<EvmConfig, DB>,
-    /// Keeps track of the batch and record receipts based on the configured prune mode
+    /// Keeps track of the batch and records receipts based on the configured prune mode
     batch_record: BlockBatchRecord,
     stats: BlockExecutorStats,
 }
