@@ -68,7 +68,7 @@ where
 {
     fn op_executor<DB>(&self, db: DB) -> OpBlockExecutor<EvmConfig, DB>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError>,
     {
         OpBlockExecutor::new(
             self.chain_spec.clone(),
@@ -84,21 +84,19 @@ where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
 {
-    type Executor<DB: Database<Error = ProviderError> + DatabaseCommit> =
-        OpBlockExecutor<EvmConfig, DB>;
+    type Executor<DB: Database<Error = ProviderError>> = OpBlockExecutor<EvmConfig, DB>;
 
-    type BatchExecutor<DB: Database<Error = ProviderError> + DatabaseCommit> =
-        OpBatchExecutor<EvmConfig, DB>;
+    type BatchExecutor<DB: Database<Error = ProviderError>> = OpBatchExecutor<EvmConfig, DB>;
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError>,
     {
         self.op_executor(db)
     }
 
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError>,
     {
         let executor = self.op_executor(db);
         OpBatchExecutor {
@@ -136,7 +134,7 @@ where
         mut evm: Evm<'_, Ext, &mut State<DB>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError>,
     {
         // apply pre execution changes
         apply_beacon_root_contract_call(
@@ -300,7 +298,7 @@ where
     EvmConfig: ConfigureEvm,
     // TODO(mattsse): get rid of this
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
-    DB: Database<Error = ProviderError> + DatabaseCommit,
+    DB: Database<Error = ProviderError>,
 {
     /// Configures a new evm configuration and block environment for the given block.
     ///
@@ -408,7 +406,7 @@ impl<EvmConfig, DB> Executor<DB> for OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
-    DB: Database<Error = ProviderError> + DatabaseCommit,
+    DB: Database<Error = ProviderError>,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
     type Output = EthBlockOutput<Receipt>;
@@ -449,7 +447,7 @@ where
     EvmConfig: ConfigureEvm,
     // TODO: get rid of this
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
-    DB: Database<Error = ProviderError> + DatabaseCommit,
+    DB: Database<Error = ProviderError>,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
     type Output = BundleStateWithReceipts;

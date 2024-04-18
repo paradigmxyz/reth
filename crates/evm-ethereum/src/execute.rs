@@ -67,7 +67,7 @@ where
 {
     fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError>,
     {
         EthBlockExecutor::new(
             self.chain_spec.clone(),
@@ -83,22 +83,20 @@ where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
 {
-    type Executor<DB: Database<Error = ProviderError> + DatabaseCommit> =
-        EthBlockExecutor<EvmConfig, DB>;
+    type Executor<DB: Database<Error = ProviderError>> = EthBlockExecutor<EvmConfig, DB>;
 
-    type BatchExecutor<DB: Database<Error = ProviderError> + DatabaseCommit> =
-        EthBatchExecutor<EvmConfig, DB>;
+    type BatchExecutor<DB: Database<Error = ProviderError>> = EthBatchExecutor<EvmConfig, DB>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError>,
     {
         self.eth_executor(db)
     }
 
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError>,
     {
         let executor = self.eth_executor(db);
         EthBatchExecutor {
@@ -133,10 +131,10 @@ where
     fn execute_pre_and_transactions<Ext, DB>(
         &mut self,
         block: &BlockWithSenders,
-        mut evm: Evm<'_, Ext, DB>,
+        mut evm: Evm<'_, Ext, &mut State<DB>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError>,
     {
         // apply pre execution changes
         apply_beacon_root_contract_call(
@@ -246,7 +244,7 @@ where
     EvmConfig: ConfigureEvm,
     // TODO(mattsse): get rid of this
     EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
-    DB: Database<Error = ProviderError> + DatabaseCommit,
+    DB: Database<Error = ProviderError>,
 {
     /// Configures a new evm configuration and block environment for the given block.
     ///
@@ -366,7 +364,7 @@ impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
-    DB: Database<Error = ProviderError> + DatabaseCommit,
+    DB: Database<Error = ProviderError>,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
     type Output = EthBlockOutput<Receipt>;
@@ -407,7 +405,7 @@ where
     EvmConfig: ConfigureEvm,
     // TODO(mattsse): get rid of this
     EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
-    DB: Database<Error = ProviderError> + DatabaseCommit,
+    DB: Database<Error = ProviderError>,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
     type Output = BundleStateWithReceipts;
@@ -438,18 +436,21 @@ where
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{bytes, constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS}, keccak256, Account, Bytes, ChainSpecBuilder, ForkCondition, Signature, Transaction, TransactionKind, TxEip1559, MAINNET, Block, B256, TransactionSigned, Address};
-    use std::collections::HashMap;
-    use reth_revm::database::StateProviderDatabase;
-    use reth_revm::processor::EVMProcessor;
-    use reth_revm::test_utils::{StateProviderTest};
-    use reth_revm::TransitionState;
     use crate::EthEvmConfig;
+    use reth_primitives::{
+        bytes,
+        constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS},
+        keccak256, Account, Address, Block, Bytes, ChainSpecBuilder, ForkCondition, Signature,
+        Transaction, TransactionKind, TransactionSigned, TxEip1559, B256, MAINNET,
+    };
+    use reth_revm::{
+        database::StateProviderDatabase, processor::EVMProcessor, test_utils::StateProviderTest,
+        TransitionState,
+    };
+    use std::collections::HashMap;
 
     static BEACON_ROOT_CONTRACT_CODE: Bytes = bytes!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
 
@@ -548,8 +549,8 @@ mod tests {
         // // check the actual storage of the contract - it should be:
         // // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
         // // header.timestamp
-        // // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
-        // // should be parent_beacon_block_root
+        // // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH +
+        // HISTORY_BUFFER_LENGTH // should be parent_beacon_block_root
         // let history_buffer_length = 8191u64;
         // let timestamp_index = header.timestamp % history_buffer_length;
         // let parent_beacon_block_root_index =
@@ -557,8 +558,9 @@ mod tests {
         //
         // // get timestamp storage and compare
         // let timestamp_storage =
-        //     executor.db_mut().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
-        // assert_eq!(timestamp_storage, U256::from(header.timestamp));
+        //     executor.db_mut().storage(BEACON_ROOTS_ADDRESS,
+        // U256::from(timestamp_index)).unwrap(); assert_eq!(timestamp_storage,
+        // U256::from(header.timestamp));
         //
         // // get parent beacon block root storage and compare
         // let parent_beacon_block_root_storage = executor
@@ -570,8 +572,8 @@ mod tests {
 
     // #[test]
     // fn eip_4788_no_code_cancun() {
-    //     // This test ensures that we "silently fail" when cancun is active and there is no code at
-    //     // BEACON_ROOTS_ADDRESS
+    //     // This test ensures that we "silently fail" when cancun is active and there is no code
+    // at     // BEACON_ROOTS_ADDRESS
     //     let header = Header {
     //         timestamp: 1,
     //         number: 1,
@@ -624,8 +626,8 @@ mod tests {
     //
     // #[test]
     // fn eip_4788_empty_account_call() {
-    //     // This test ensures that we do not increment the nonce of an empty SYSTEM_ADDRESS account
-    //     // during the pre-block call
+    //     // This test ensures that we do not increment the nonce of an empty SYSTEM_ADDRESS
+    // account     // during the pre-block call
     //
     //     let mut db = create_state_provider_with_beacon_root_contract();
     //
@@ -700,8 +702,8 @@ mod tests {
     //     );
     //     executor.init_env(&header, U256::ZERO);
     //
-    //     // attempt to execute the genesis block with non-zero parent beacon block root, expect err
-    //     header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
+    //     // attempt to execute the genesis block with non-zero parent beacon block root, expect
+    // err     header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
     //     let _err = executor
     //         .execute_and_verify_receipt(
     //             &BlockWithSenders {
@@ -716,8 +718,8 @@ mod tests {
     //             U256::ZERO,
     //         )
     //         .expect_err(
-    //             "Executing genesis cancun block with non-zero parent beacon block root field should fail",
-    //         );
+    //             "Executing genesis cancun block with non-zero parent beacon block root field
+    // should fail",         );
     //
     //     // fix header
     //     header.parent_beacon_block_root = Some(B256::ZERO);
@@ -801,8 +803,8 @@ mod tests {
     //     // check the actual storage of the contract - it should be:
     //     // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
     //     // header.timestamp
-    //     // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
-    //     // should be parent_beacon_block_root
+    //     // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH +
+    // HISTORY_BUFFER_LENGTH     // should be parent_beacon_block_root
     //     let history_buffer_length = 8191u64;
     //     let timestamp_index = header.timestamp % history_buffer_length;
     //     let parent_beacon_block_root_index =
@@ -810,8 +812,9 @@ mod tests {
     //
     //     // get timestamp storage and compare
     //     let timestamp_storage =
-    //         executor.db_mut().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
-    //     assert_eq!(timestamp_storage, U256::from(header.timestamp));
+    //         executor.db_mut().storage(BEACON_ROOTS_ADDRESS,
+    // U256::from(timestamp_index)).unwrap();     assert_eq!(timestamp_storage,
+    // U256::from(header.timestamp));
     //
     //     // get parent beacon block root storage and compare
     //     let parent_beacon_block_root_storage = executor
@@ -859,10 +862,10 @@ mod tests {
     //
     //     // Check the error
     //     match result {
-    //         Err(BlockExecutionError::Validation(BlockValidationError::EVM { hash, error: _ })) => {
-    //             assert_eq!(hash, expected_hash, "The EVM error does not include the correct transaction hash.");
-    //         },
-    //         _ => panic!("Expected a BlockExecutionError::Validation error, but transaction did not fail as expected."),
-    //     }
+    //         Err(BlockExecutionError::Validation(BlockValidationError::EVM { hash, error: _ })) =>
+    // {             assert_eq!(hash, expected_hash, "The EVM error does not include the correct
+    // transaction hash.");         },
+    //         _ => panic!("Expected a BlockExecutionError::Validation error, but transaction did
+    // not fail as expected."),     }
     // }
 }
