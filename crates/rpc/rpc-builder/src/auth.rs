@@ -13,7 +13,6 @@ use jsonrpsee::{
     server::{AlreadyStoppedError, RpcModule},
     Methods,
 };
-use reth_ipc::client::IpcClientBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
 use reth_engine_primitives::EngineTypes;
@@ -445,6 +444,8 @@ impl AuthServerHandle {
     /// Returns an ipc client connected to the server.
     #[cfg(unix)]
     pub async fn ipc_client(&self) -> Option<jsonrpsee::async_client::Client> {
+        use reth_ipc::client::IpcClientBuilder;
+
         if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
             return Some(
                 IpcClientBuilder::default()
