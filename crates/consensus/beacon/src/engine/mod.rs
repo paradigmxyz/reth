@@ -1111,7 +1111,7 @@ where
 
                 // If the error was due to an invalid payload, the payload is added to the invalid
                 // headers cache and `Ok` with [PayloadStatusEnum::Invalid] is returned.
-                let (block, error) = err.split();
+                let (block, error) = error.split();
                 if error.is_invalid_block() {
                     warn!(target: "consensus::engine", invalid_hash=?block.hash(), invalid_number=?block.number, %error, "Invalid block error on new payload");
                     let latest_valid_hash =
