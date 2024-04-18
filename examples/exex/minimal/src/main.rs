@@ -1,5 +1,5 @@
 use futures::Future;
-use reth_exex::ExExContext;
+use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::CanonStateNotification;
@@ -32,6 +32,8 @@ async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Res
                 );
             }
         };
+
+        ctx.events.send(ExExEvent::FinishedHeight(notification.tip().number))?;
     }
     Ok(())
 }
