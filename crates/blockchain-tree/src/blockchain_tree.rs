@@ -278,7 +278,11 @@ where
 
             // get canonical fork.
             let canonical_fork = self.canonical_fork(chain_id)?;
-            return Some(BundleStateData { state, parent_block_hashed, canonical_fork })
+            return Some(BundleStateData {
+                state,
+                parent_block_hashes: parent_block_hashed,
+                canonical_fork,
+            })
         }
 
         // check if there is canonical block
@@ -287,7 +291,7 @@ where
             return Some(BundleStateData {
                 canonical_fork: ForkBlock { number: canonical_number, hash: block_hash },
                 state: BundleStateWithReceipts::default(),
-                parent_block_hashed: canonical_chain.inner().clone(),
+                parent_block_hashes: canonical_chain.inner().clone(),
             })
         }
 
