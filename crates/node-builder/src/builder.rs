@@ -666,6 +666,17 @@ where
         let network_client = network.fetch_client().await?;
         let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
 
+        if let Some(skip_fcu_threshold) = config.debug.skip_fcu {
+            debug!(target: "reth::cli", "spawning skip FCU task");
+            let (skip_fcu_tx, skip_fcu_rx) = unbounded_channel();
+            let engine_skip_fcu = EngineApiSkipFcu::new(skip_fcu_threshold);
+            executor.spawn_critical(
+                "skip FCU interceptor",
+                engine_skip_fcu.intercept(consensus_engine_rx, skip_fcu_tx),
+            );
+            consensus_engine_rx = skip_fcu_rx;
+        }
+
         if let Some(store_path) = config.debug.engine_api_store.clone() {
             debug!(target: "reth::cli", "spawning engine API store");
             let (engine_intercept_tx, engine_intercept_rx) = unbounded_channel();
