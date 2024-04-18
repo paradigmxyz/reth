@@ -288,15 +288,6 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Canonical block number and hashes best known by the tree.
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
 
-    /// Given the parent hash of a block, this tries to find the last ancestor that is part of the
-    /// canonical chain.
-    ///
-    /// In other words, this will walk up the (side) chain starting with the given hash and return
-    /// the first block that's canonical.
-    ///
-    /// Note: this could be the given `parent_hash` if it's already canonical.
-    fn find_canonical_ancestor(&self, parent_hash: BlockHash) -> Option<BlockHash>;
-
     /// Return whether or not the block is known and in the canonical chain.
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError>;
 

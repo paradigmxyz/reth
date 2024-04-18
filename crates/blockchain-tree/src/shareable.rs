@@ -141,21 +141,6 @@ where
         self.tree.read().block_indices().canonical_chain().inner().clone()
     }
 
-    fn find_canonical_ancestor(&self, mut parent: BlockHash) -> Option<BlockHash> {
-        let tree = self.tree.read();
-
-        // walk up the tree and check if the parent is in the sidechain
-        while let Some(block) = tree.block_by_hash(parent) {
-            parent = block.parent_hash;
-        }
-
-        if tree.block_indices().is_block_hash_canonical(&parent) {
-            return Some(parent)
-        }
-
-        None
-    }
-
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
         trace!(target: "blockchain_tree", ?hash, "Checking if block is canonical");
         self.tree.read().is_block_hash_canonical(&hash)
