@@ -77,9 +77,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-mod pipeline;
-mod util;
-
 #[allow(missing_docs)]
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
@@ -91,8 +88,6 @@ pub mod prelude;
 pub mod stages;
 
 pub mod sets;
-
-pub use pipeline::*;
 
 // re-export the stages API
 pub use reth_stages_api::*;

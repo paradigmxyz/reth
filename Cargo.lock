@@ -7391,15 +7391,20 @@ dependencies = [
 name = "reth-stages-api"
 version = "0.2.0-beta.5"
 dependencies = [
+ "assert_matches",
  "auto_impl",
+ "futures-util",
  "metrics",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
+ "reth-static-file",
+ "reth-tokio-util",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 

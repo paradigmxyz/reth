@@ -13,6 +13,10 @@ reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-db.workspace = true
 reth-interfaces.workspace = true
+reth-static-file.workspace = true
+assert_matches.workspace = true
+reth-tokio-util.workspace = true
+
 
 reth-metrics.workspace = true
 metrics.workspace = true
@@ -22,6 +26,8 @@ tokio.workspace = true
 tracing.workspace = true
 
 auto_impl = "1"
+futures-util = "0.3.30"
+tokio-stream = "0.1.15"
 
 [lints]
 workspace = true

@@ -1,7 +1,4 @@
-pub use crate::{
-    pipeline::{Pipeline, PipelineBuilder, StageSet, StageSetBuilder},
-    sets::{
-        DefaultStages, ExecutionStages, HashingStages, HistoryIndexingStages, OfflineStages,
-        OnlineStages,
-    },
+pub use crate::sets::{
+    DefaultStages, ExecutionStages, HashingStages, HistoryIndexingStages, OfflineStages,
+    OnlineStages,
 };

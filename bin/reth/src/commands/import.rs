@@ -33,6 +33,7 @@ use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
+    Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
