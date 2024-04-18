@@ -53,6 +53,7 @@ jsonrpsee.workspace = true
 
 [dev-dependencies]
 reth-db.workspace = true
+reth-revm = { workspace = true, features = ["test-utils"]}
 
 [features]
 optimism = [
