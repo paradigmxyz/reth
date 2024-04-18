@@ -13,7 +13,6 @@ pub mod cli;
 pub mod dirs;
 pub mod engine_api_store;
 pub mod engine_skip_fcu;
-pub mod events;
 pub mod exit;
 pub mod init;
 pub mod metrics;

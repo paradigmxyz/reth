@@ -34,6 +34,7 @@ members = [
     "crates/primitives/",
     "crates/prune/",
     "crates/revm/",
+    "crates/node-events/",
     "crates/rpc/ipc/",
     "crates/rpc/rpc/",
     "crates/rpc/rpc-api/",
@@ -258,6 +259,7 @@ reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
+reth-node-events = {path = "crates/node-events"}
 
 # revm
 revm = { version = "8.0.0", features = [
@@ -304,6 +306,7 @@ thiserror = "1.0"
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 serde_with = "3.3.0"
+humantime = "2.1"
 humantime-serde = "1.1"
 rand = "0.8.5"
 schnellru = "0.2"
