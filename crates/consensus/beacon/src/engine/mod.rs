@@ -677,8 +677,19 @@ where
                             // threshold
                             return Some(state.finalized_block_hash)
                         }
+
                         #[cfg(feature = "optimism")]
-                        {
+                        if self.blockchain.chain_spec().is_optimism() {
+                            // It can happen when the node is doing an
+                            // optimistic sync, where the CL has no knowledge of the finalized hash,
+                            // but is expecting the EL to sync as high
+                            // as possible before finalizing.
+                            //
+                            // This usually doesn't happen on ETH mainnet since CLs use the more
+                            // secure checkpoint syncing.
+                            //
+                            // However, optimism chains will do this. The risk of a reorg is however
+                            // low.
                             return Some(state.head_block_hash)
                         }
                     }
@@ -1633,11 +1644,24 @@ where
             return Ok(())
         }
 
+        #[cfg(feature = "optimism")]
+        let target_block_hash = if sync_target_state.finalized_block_hash.is_zero() &&
+            self.blockchain.chain_spec().is_optimism()
+        {
+            // We are in an optimistic syncing scenario.
+            //
+            // Check fn can_pipeline_sync_to_finalized(..) for more context
+            sync_target_state.head_block_hash
+        } else {
+            sync_target_state.finalized_block_hash
+        };
+
+        #[cfg(not(feature = "optimism"))]
+        let target_block_hash = sync_target_state.finalized_block_hash;
+
         // get the block number of the finalized block, if we have it
-        let newest_finalized = self
-            .blockchain
-            .buffered_header_by_hash(sync_target_state.finalized_block_hash)
-            .map(|header| header.number);
+        let newest_finalized =
+            self.blockchain.buffered_header_by_hash(target_block_hash).map(|header| header.number);
 
         // The block number that the pipeline finished at - if the progress or newest
         // finalized is None then we can't check the distance anyways.
@@ -1657,9 +1681,7 @@ where
         if let Some(target) = pipeline_target {
             // run the pipeline to the target since the distance is sufficient
             self.sync.set_pipeline_sync_target(target);
-        } else if let Some(number) =
-            self.blockchain.block_number(sync_target_state.finalized_block_hash)?
-        {
+        } else if let Some(number) = self.blockchain.block_number(target_block_hash)? {
             // Finalized block is in the database, attempt to restore the tree with
             // the most recent canonical hashes.
             self.blockchain.connect_buffered_blocks_to_canonical_hashes_and_finalize(number).inspect_err(|error| {
@@ -1668,7 +1690,7 @@ where
         } else {
             // We don't have the finalized block in the database, so we need to
             // trigger another pipeline run.
-            self.sync.set_pipeline_sync_target(sync_target_state.finalized_block_hash);
+            self.sync.set_pipeline_sync_target(target_block_hash);
         }
 
         Ok(())
