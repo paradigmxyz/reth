@@ -717,7 +717,7 @@ impl TransactionFetcher {
     /// The request hashes buffer is filled as if it's an eth68 request, i.e. smartly assemble
     /// the request based on expected response size. For any hash missing size metadata, it is
     /// guessed at [`AVERAGE_BYTE_SIZE_TX_ENCODED`].
-
+    /// 
     /// Loops through hashes pending fetch and does:
     ///
     /// 1. Check if a hash pending fetch is seen by peer.
