@@ -95,8 +95,8 @@ pub struct ImportCommand {
     path: PathBuf,
 
     /// Start block number of chain segment to import.
-    #[arg(value_name = "START_BLOCK", verbatim_doc_comment)]
-    start: Option<u64>,
+    #[arg(value_name = "START_BLOCK", verbatim_doc_comment, default_value_t)]
+    start: u64,
 }
 
 impl ImportCommand {
@@ -144,13 +144,11 @@ impl ImportCommand {
 
         let mut start_header: Option<SealedHeader> = None;
 
-        if let Some(block_num) = self.start {
-            if block_num != 0 {
-                start_header = provider_factory
-                    .provider()?
-                    .sealed_header(block_num)
-                    .expect("start block is not canonical with db");
-            }
+        if self.start != 0 {
+            start_header = provider_factory
+                .provider()?
+                .sealed_header(block_num)
+                .expect("start block is not canonical with db");
         }
 
         while let Some(file_client) = reader.next_chunk().await? {
