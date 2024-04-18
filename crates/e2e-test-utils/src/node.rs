@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::{engine_api::EngineApiHelper, network::NetworkHelper, payload::PayloadHelper};
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
@@ -6,15 +8,13 @@ use reth::{
     builder::FullNode,
     providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
-        compat::engine::payload::try_into_block, eth::{error::EthResult, EthTransactions}, types::engine::{ExecutionPayloadEnvelopeV3, PayloadAttributes}
+        eth::{error::EthResult, EthTransactions},
+        types::engine::PayloadAttributes,
     },
 };
-
 use reth_node_ethereum::EthEngineTypes;
-use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadId};
-use reth_primitives::{Address, Block, BlockHash, BlockNumber, Bytes, SealedBlock, B256, U256};
-
-use std::time::{SystemTime, UNIX_EPOCH};
+use reth_payload_builder::EthPayloadBuilderAttributes;
+use reth_primitives::{Address, BlockNumber, Bytes, B256};
 use tokio_stream::StreamExt;
 
 /// An helper struct to handle node actions
@@ -91,7 +91,7 @@ where
         &mut self,
         tip_tx_hash: B256,
         block_hash: B256,
-        block_number: BlockNumber
+        block_number: BlockNumber,
     ) -> eyre::Result<()> {
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
@@ -102,10 +102,12 @@ where
         loop {
             // wait for the block to commit
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            if let Some(latest_block) = self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)? {
+            if let Some(latest_block) =
+                self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?
+            {
                 if latest_block.number == block_number {
-                    // make sure the block hash we submitted via FCU engine api is the new latest block
-                    // using an RPC call
+                    // make sure the block hash we submitted via FCU engine api is the new latest
+                    // block using an RPC call
                     assert_eq!(latest_block.hash_slow(), block_hash);
                     break
                 }

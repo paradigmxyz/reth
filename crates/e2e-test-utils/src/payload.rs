@@ -1,5 +1,3 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use futures_util::StreamExt;
 use reth::{
     api::{EngineTypes, PayloadBuilderAttributes},
@@ -9,14 +7,14 @@ use reth_node_ethereum::EthEngineTypes;
 use reth_payload_builder::{
     EthBuiltPayload, EthPayloadBuilderAttributes, Events, PayloadBuilderHandle, PayloadId,
 };
-use reth_primitives::{Address, ForkTimestamps, B256};
+use reth_primitives::{Address, B256};
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations
 pub struct PayloadHelper<E: EngineTypes + 'static> {
     pub payload_event_stream: BroadcastStream<Events<E>>,
     payload_builder: PayloadBuilderHandle<E>,
-    timestamp: u64
+    timestamp: u64,
 }
 
 impl PayloadHelper<EthEngineTypes> {
@@ -25,7 +23,7 @@ impl PayloadHelper<EthEngineTypes> {
         let payload_events = payload_builder.subscribe().await?;
         let payload_event_stream = payload_events.into_stream();
         // Cancun timestamp
-        Ok(Self { payload_event_stream, payload_builder, timestamp: 1710338135})
+        Ok(Self { payload_event_stream, payload_builder, timestamp: 1710338135 })
     }
 
     /// Creates a new payload job from static attributes

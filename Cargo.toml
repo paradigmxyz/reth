@@ -8,6 +8,7 @@ members = [
     "crates/consensus/beacon-core/",
     "crates/consensus/common/",
     "crates/ethereum-forks/",
+    "crates/e2e-test-utils/",
     "crates/etl/",
     "crates/evm/",
     "crates/evm-ethereum/",
@@ -50,7 +51,6 @@ members = [
     "crates/node-optimism/",
     "crates/node-core/",
     "crates/node-api/",
-    "crates/node-e2e-tests/",
     "crates/stages/",
     "crates/static-file/",
     "crates/storage/codecs/",
@@ -209,6 +209,7 @@ reth-db = { path = "crates/storage/db" }
 reth-discv4 = { path = "crates/net/discv4" }
 reth-discv5 = { path = "crates/net/discv5" }
 reth-dns-discovery = { path = "crates/net/dns" }
+reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-engine-primitives = { path = "crates/engine-primitives" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum-engine-primitives" }
 reth-node-builder = { path = "crates/node-builder" }

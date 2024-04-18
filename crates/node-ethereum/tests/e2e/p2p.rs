@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use node_e2e_tests::{node::NodeHelper, wallet::Wallet};
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
+use reth_e2e_test_utils::{node::NodeHelper, wallet::Wallet};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 
@@ -16,7 +16,7 @@ async fn can_sync() -> eyre::Result<()> {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
 
-    let genesis: Genesis = serde_json::from_str(include_str!("../../assets/genesis.json")).unwrap();
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
