@@ -1,6 +1,7 @@
 //! Prometheus exporter
 
 use crate::metrics::version_metrics::register_version_metrics;
+use reth_tasks::TaskExecutor::spawn_with_graceful_shutdown_signal;
 use eyre::WrapErr;
 use hyper::{
     service::{make_service_fn, service_fn},
@@ -70,11 +71,9 @@ async fn start_endpoint<F: Hook + 'static>(
     let server =
         Server::try_bind(&listen_addr).wrap_err("Could not bind to address")?.serve(make_svc);
 
-    let server = server.with_graceful_shutdown(async {
-        tokio::signal::ctrl_c()
-            .await
-            .wrap_err("Failed to listen for shutdown signal")
-    });
+    let server = server.with_graceful_shutdown(
+        spawn_with_graceful_shutdown_signal().await
+    );
 
     tokio::spawn(async move { server.await.expect("Metrics endpoint crashed") });
 
