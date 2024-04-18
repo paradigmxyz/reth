@@ -34,7 +34,7 @@ members = [
     "crates/primitives/",
     "crates/prune/",
     "crates/revm/",
-    "crates/node-events/",
+    "crates/node/events/",
     "crates/rpc/ipc/",
     "crates/rpc/rpc/",
     "crates/rpc/rpc-api/",
@@ -259,7 +259,7 @@ reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
-reth-node-events = {path = "crates/node-events"}
+reth-node-events = { path = "crates/node/events" }
 
 # revm
 revm = { version = "8.0.0", features = [
