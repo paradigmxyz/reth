@@ -2121,45 +2121,6 @@ impl WsHttpServerKind {
             WsHttpServerKind::WithOptions(server) => server.start(module),
         }
     }
-
-    /// Builds the server according to the given config parameters.
-    ///
-    /// Returns the address of the started server.
-    async fn build(
-        builder: ServerBuilder<Identity, Identity>,
-        socket_addr: SocketAddr,
-        cors_domains: Option<String>,
-        jwt_secret: Option<JwtSecret>,
-        server_kind: ServerKind,
-        metrics: RpcRequestMetrics,
-    ) -> Result<(Self, SocketAddr), RpcError> {
-
-        let mut jl: Option<AuthLayer<JwtAuthValidator>> = None;
-        let mut cl: Option<CorsLayer> = None;
-
-        if let Some(cors) = cors_domains.as_deref().map(cors::create_cors_layer) {
-            let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
-            cl = Some(cors);
-        }
-        if let Some(secret) = jwt_secret {
-            jl = Some(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
-        }
-        // plain server without any middleware
-        let middleware = tower::ServiceBuilder::new()
-            .option_layer(cl)
-            .option_layer(jl);
-
-        let server = builder
-            .set_http_middleware(middleware)
-            .set_rpc_middleware(RpcServiceBuilder::new().layer(metrics))
-            .build(socket_addr)
-            .await
-            .map_err(|err| RpcError::server_error(err, server_kind))?;
-        let local_addr =
-            server.local_addr().map_err(|err| RpcError::server_error(err, server_kind))?;
-        let server = WsHttpServerKind::WithOptions(server);
-        Ok((server, local_addr))
-    }
 }
 
 /// Container type for each transport ie. http, ws, and ipc server
