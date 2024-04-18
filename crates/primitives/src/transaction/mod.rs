@@ -996,6 +996,7 @@ impl TransactionSignedNoHash {
                 return Some(from)
             }
 
+            // NOTE:
             // pre bedrock system transactions were sent from the zero address as legacy
             // transactions with an empty signature Note: this is very hacky and only
             // relevant for op-mainnet pre bedrock
