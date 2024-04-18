@@ -97,10 +97,6 @@ pub struct ImportCommand {
     /// Start block number of chain segment to import.
     #[arg(value_name = "START_BLOCK", verbatim_doc_comment)]
     start: Option<u64>,
-
-    /// End block number of chain segment to import.
-    #[arg(value_name = "END_BLOCK", verbatim_doc_comment)]
-    end: u64,
 }
 
 impl ImportCommand {
