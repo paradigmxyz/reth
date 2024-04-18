@@ -25,7 +25,7 @@ use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
         IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
+        TempManagerHandle, TransactionLookupStage,
     },
     Pipeline, StageSet,
 };
@@ -49,6 +49,7 @@ pub async fn build_networked_pipeline<DB, Client, EvmConfig>(
     max_block: Option<BlockNumber>,
     static_file_producer: StaticFileProducer<DB>,
     evm_config: EvmConfig,
+    exex_manager_handle: Option<Box<dyn TempManagerHandle>>,
 ) -> eyre::Result<Pipeline<DB>>
 where
     DB: Database + Unpin + Clone + 'static,
@@ -76,6 +77,7 @@ where
         prune_config,
         static_file_producer,
         evm_config,
+        exex_manager_handle,
     )
     .await?;
 
@@ -96,6 +98,7 @@ pub async fn build_pipeline<DB, H, B, EvmConfig>(
     prune_config: Option<PruneConfig>,
     static_file_producer: StaticFileProducer<DB>,
     evm_config: EvmConfig,
+    exex_manager_handle: Option<Box<dyn TempManagerHandle>>,
 ) -> eyre::Result<Pipeline<DB>>
 where
     DB: Database + Clone + 'static,
@@ -166,6 +169,7 @@ where
                         .max(stage_config.account_hashing.clean_threshold)
                         .max(stage_config.storage_hashing.clean_threshold),
                     prune_modes.clone(),
+                    exex_manager_handle,
                 )
                 .with_metrics_tx(metrics_tx),
             )

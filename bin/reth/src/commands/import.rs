@@ -273,6 +273,7 @@ impl ImportCommand {
                         .max(config.stages.account_hashing.clean_threshold)
                         .max(config.stages.storage_hashing.clean_threshold),
                     config.prune.map(|prune| prune.segments).unwrap_or_default(),
+                    None,
                 ))
                 .disable_all_if(STATE_STAGES, || no_state),
             )
