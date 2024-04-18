@@ -1,7 +1,3 @@
-use std::{
-    marker::PhantomData,
-    time::{SystemTime, UNIX_EPOCH},
-};
 use crate::{engine_api::EngineApiHelper, network::NetworkHelper, payload::PayloadHelper};
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
@@ -11,18 +7,22 @@ use reth::{
     providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
         eth::{error::EthResult, EthTransactions},
-        types::engine::{ExecutionPayloadEnvelopeV3, PayloadAttributes},
+        types::engine::PayloadAttributes,
     },
 };
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_primitives::{Address, BlockNumber, Bytes, B256};
+use std::{
+    marker::PhantomData,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio_stream::StreamExt;
 
 /// An helper struct to handle node actions
 pub struct NodeHelper<Node, EngineType>
 where
     Node: FullNodeComponents<Engine = EngineType>,
-    EngineType: EngineTypes<ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3> + 'static,
+    EngineType: EngineTypes + 'static,
 {
     pub inner: FullNode<Node>,
     payload: PayloadHelper<Node::Engine>,
@@ -33,7 +33,7 @@ where
 impl<Node, EngineType> NodeHelper<Node, EngineType>
 where
     Node: FullNodeComponents<Engine = EngineType>,
-    EngineType: EngineTypes<ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3> + 'static,
+    EngineType: EngineTypes + 'static,
 {
     /// Creates a new test node
     pub async fn new(node: FullNode<Node>) -> eyre::Result<Self> {
@@ -58,7 +58,7 @@ where
         attributes_generator: impl Fn(u64) -> EngineType::PayloadBuilderAttributes,
     ) -> eyre::Result<(B256, B256)>
     where
-        ExecutionPayloadEnvelopeV3: From<<EngineType as EngineTypes>::BuiltPayload>,
+        EngineType::ExecutionPayloadV3: From<EngineType::BuiltPayload>,
     {
         // push tx into pool via RPC server
         let tx_hash = self.inject_tx(raw_tx).await?;

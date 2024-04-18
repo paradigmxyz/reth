@@ -2,12 +2,9 @@ use std::marker::PhantomData;
 
 use jsonrpsee::http_client::HttpClient;
 use reth::{
-    api::{EngineTypes, PayloadBuilderAttributes},
+    api::{traits::PayloadEnvelopeV3, EngineTypes, PayloadBuilderAttributes},
     providers::CanonStateNotificationStream,
-    rpc::{
-        api::EngineApiClient,
-        types::engine::{ExecutionPayloadEnvelopeV3, ForkchoiceState},
-    },
+    rpc::{api::EngineApiClient, types::engine::ForkchoiceState},
 };
 use reth_payload_builder::PayloadId;
 use reth_primitives::B256;
@@ -15,22 +12,19 @@ use reth_primitives::B256;
 /// Helper for engine api operations
 pub struct EngineApiHelper<E>
 where
-    E: EngineTypes<ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3> + 'static,
+    E: EngineTypes + 'static,
 {
     pub canonical_stream: CanonStateNotificationStream,
     pub engine_api_client: HttpClient,
     pub _marker: PhantomData<E>,
 }
 
-impl<E: EngineTypes<ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3> + 'static> EngineApiHelper<E>
-where
-    ExecutionPayloadEnvelopeV3: From<<E as EngineTypes>::BuiltPayload>,
-{
+impl<E: EngineTypes + 'static> EngineApiHelper<E> {
     /// Retrieves a v3 payload from the engine api
     pub async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> eyre::Result<ExecutionPayloadEnvelopeV3> {
+    ) -> eyre::Result<E::ExecutionPayloadV3> {
         Ok(EngineApiClient::<E>::get_payload_v3(&self.engine_api_client, payload_id).await?)
     }
 
@@ -38,18 +32,20 @@ where
     pub async fn submit_payload(
         &self,
         payload: E::BuiltPayload,
-        eth_attr: E::PayloadBuilderAttributes,
-    ) -> eyre::Result<B256> {
+        payload_builder_attributes: E::PayloadBuilderAttributes,
+    ) -> eyre::Result<B256>
+    where
+        E::ExecutionPayloadV3: From<E::BuiltPayload>,
+    {
         // setup payload for submission
-        let envelope_v3 = ExecutionPayloadEnvelopeV3::from(payload);
-        let payload_v3 = envelope_v3.execution_payload;
+        let envelope_v3: <E as EngineTypes>::ExecutionPayloadV3 = payload.into();
 
         // submit payload to engine api
         let submission = EngineApiClient::<E>::new_payload_v3(
             &self.engine_api_client,
-            payload_v3,
+            envelope_v3.execution_payload(),
             vec![],
-            eth_attr.parent_beacon_block_root().unwrap(),
+            payload_builder_attributes.parent_beacon_block_root().unwrap(),
         )
         .await?;
         assert!(submission.is_valid(), "{}", submission);
