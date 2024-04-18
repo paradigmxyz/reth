@@ -1,5 +1,5 @@
 use futures::Future;
-use reth_exex::ExExContext;
+use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::CanonStateNotification;
@@ -16,8 +16,8 @@ async fn exex_init<Node: FullNodeComponents>(
 
 /// An ExEx is just a future, which means you can implement all of it in an async function!
 ///
-/// This ExEx just prints out whenever a state transition happens, either a new chain segment being
-/// added, or a chain segment being re-orged.
+/// This ExEx just prints out whenever either a new chain of blocks being added, or a chain of
+/// blocks being re-orged. After processing the chain, emits an [ExExEvent::FinishedHeight] event.
 async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.recv().await {
         match &notification {
@@ -32,6 +32,8 @@ async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Res
                 );
             }
         };
+
+        ctx.events.send(ExExEvent::FinishedHeight(notification.tip().number))?;
     }
     Ok(())
 }
