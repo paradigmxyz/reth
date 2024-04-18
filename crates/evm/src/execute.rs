@@ -46,7 +46,7 @@ pub struct BatchBlockOutput {
 
 /// The output of an ethereum block.
 ///
-/// Contains the receipts of the transactions in the block and the total gas used.
+/// Contains the state changes, transaction receipts, and total gas used in the block.
 ///
 /// TODO(mattsse): combine with BundleStateWithReceipts
 #[derive(Debug)]
