@@ -1,6 +1,6 @@
 //! Support for handling events emitted by node components.
 
-use crate::events::cl::ConsensusLayerHealthEvent;
+use crate::cl::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
@@ -15,7 +15,6 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_prune::PrunerEvent;
-use reth_stages_api::{ExecOutput, PipelineEvent};
 use reth_static_file::StaticFileProducerEvent;
 use std::{
     fmt::{Display, Formatter},
@@ -26,6 +25,7 @@ use std::{
 };
 use tokio::time::Interval;
 use tracing::{debug, info, warn};
+use reth_stages::{ExecOutput, PipelineEvent};
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);

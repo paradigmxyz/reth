@@ -91,7 +91,7 @@ mod tests {
                 message: GetReceipts(vec![
                     hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
                     hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
-                ])
+                ]),
             }
         );
     }
@@ -109,14 +109,14 @@ mod tests {
                         tx_type: TxType::Legacy,
                         cumulative_gas_used: 0x1u64,
                         logs: vec![
-                            Log {
-                                address: hex!("0000000000000000000000000000000000000011").into(),
-                                topics: vec![
+                            Log::new_unchecked(
+                                hex!("0000000000000000000000000000000000000011").into(),
+                                vec![
                                     hex!("000000000000000000000000000000000000000000000000000000000000dead").into(),
                                     hex!("000000000000000000000000000000000000000000000000000000000000beef").into(),
                                 ],
-                                data: hex!("0100ff")[..].into(),
-                            },
+                                hex!("0100ff")[..].into(),
+                            ),
                         ],
                         success: false,
                         #[cfg(feature = "optimism")]
@@ -148,14 +148,14 @@ mod tests {
                                 tx_type: TxType::Legacy,
                                 cumulative_gas_used: 0x1u64,
                                 logs: vec![
-                                    Log {
-                                        address: hex!("0000000000000000000000000000000000000011").into(),
-                                        topics: vec![
+                                    Log::new_unchecked(
+                                        hex!("0000000000000000000000000000000000000011").into(),
+                                        vec![
                                             hex!("000000000000000000000000000000000000000000000000000000000000dead").into(),
                                             hex!("000000000000000000000000000000000000000000000000000000000000beef").into(),
                                         ],
-                                        data: hex!("0100ff")[..].into(),
-                                    },
+                                        hex!("0100ff")[..].into(),
+                                    ),
                                 ],
                                 success: false,
                                 #[cfg(feature = "optimism")]

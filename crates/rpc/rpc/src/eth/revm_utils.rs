@@ -217,7 +217,7 @@ pub(crate) fn create_txn_env(
     request: TransactionRequest,
 ) -> EthResult<TxEnv> {
     // Ensure that if versioned hashes are set, they're not empty
-    if request.has_empty_blob_hashes() {
+    if request.blob_versioned_hashes.as_ref().map_or(false, |hashes| hashes.is_empty()) {
         return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
     }
 

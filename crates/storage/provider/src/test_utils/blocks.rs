@@ -1,14 +1,15 @@
 //! Dummy blocks and data for tests
 use crate::{BundleStateWithReceipts, DatabaseProviderRW};
+use alloy_primitives::Log;
 use alloy_rlp::Decodable;
 use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_primitives::{
-    b256,
+    alloy_primitives, b256,
     hex_literal::hex,
     proofs::{state_root_unhashed, storage_root_unhashed},
     revm::compat::into_reth_acc,
-    Address, BlockNumber, Bytes, Header, Log, Receipt, Receipts, SealedBlock,
-    SealedBlockWithSenders, TxType, Withdrawal, Withdrawals, B256, U256,
+    Address, BlockNumber, Bytes, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
+    TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use revm::{
     db::BundleState,
@@ -150,11 +151,11 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             tx_type: TxType::Eip2930,
             success: true,
             cumulative_gas_used: 300,
-            logs: vec![Log {
-                address: Address::new([0x60; 20]),
-                topics: vec![B256::with_last_byte(1), B256::with_last_byte(2)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x60; 20]),
+                vec![B256::with_last_byte(1), B256::with_last_byte(2)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -208,11 +209,11 @@ fn block2(
             tx_type: TxType::Eip1559,
             success: false,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -266,7 +267,9 @@ fn block3(
                         .clone()
                         .map(|slot| (U256::from(slot), (U256::ZERO, U256::from(slot)))),
                 ),
-            );
+            )
+            .revert_account_info(number, address, Some(None))
+            .revert_storage(number, address, Vec::new());
     }
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),
@@ -274,11 +277,11 @@ fn block3(
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -363,11 +366,11 @@ fn block4(
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -447,11 +450,11 @@ fn block5(
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
