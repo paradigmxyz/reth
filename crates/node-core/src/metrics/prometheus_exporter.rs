@@ -71,11 +71,9 @@ async fn start_endpoint<F: Hook + 'static>(
         Server::try_bind(&listen_addr).wrap_err("Could not bind to address")?.serve(make_svc);
 
     let server = server.with_graceful_shutdown(async {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        tokio::signal::ctrl_c().await?;
-        let _ = tx.send(());
-        rx.await.ok();
-        Ok(())
+        tokio::signal::ctrl_c()
+            .await
+            .wrap_err("Failed to listen for shutdown signal")
     });
 
     tokio::spawn(async move { server.await.expect("Metrics endpoint crashed") });
