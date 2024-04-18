@@ -1108,7 +1108,21 @@ where
             }
             Err(error) => {
                 warn!(target: "consensus::engine", %error, "Error while processing payload");
-                self.map_insert_error(error)
+
+                // If the error was due to an invalid payload, the payload is added to the invalid
+                // headers cache and `Ok` with [PayloadStatusEnum::Invalid] is returned.
+                let (block, error) = err.split();
+                if error.is_invalid_block() {
+                    warn!(target: "consensus::engine", invalid_hash=?block.hash(), invalid_number=?block.number, %error, "Invalid block error on new payload");
+                    let latest_valid_hash =
+                        self.latest_valid_hash_for_invalid_payload(block.parent_hash, Some(&error));
+                    // keep track of the invalid header
+                    self.invalid_headers.insert(block.header);
+                    let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
+                    Ok(PayloadStatus::new(status, latest_valid_hash))
+                } else {
+                    Err(BeaconOnNewPayloadError::Internal(Box::new(error)))
+                }
             }
         };
 
@@ -1288,37 +1302,6 @@ where
             }
         };
         Ok(PayloadStatus::new(status, latest_valid_hash))
-    }
-
-    /// Maps the error, that occurred while inserting a payload into the tree to its corresponding
-    /// result type.
-    ///
-    /// If the error was due to an invalid payload, the payload is added to the invalid headers
-    /// cache and `Ok` with [PayloadStatusEnum::Invalid] is returned.
-    ///
-    /// This returns an error if the error was internal and assumed not be related to the payload.
-    fn map_insert_error(
-        &mut self,
-        err: InsertBlockError,
-    ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        let (block, error) = err.split();
-
-        if error.is_invalid_block() {
-            warn!(target: "consensus::engine", invalid_hash=?block.hash(), invalid_number=?block.number, %error, "Invalid block error on new payload");
-
-            // all of these occurred if the payload is invalid
-            let parent_hash = block.parent_hash;
-
-            // keep track of the invalid header
-            self.invalid_headers.insert(block.header);
-
-            let latest_valid_hash =
-                self.latest_valid_hash_for_invalid_payload(parent_hash, Some(&error));
-            let status = PayloadStatusEnum::Invalid { validation_error: error.to_string() };
-            Ok(PayloadStatus::new(status, latest_valid_hash))
-        } else {
-            Err(BeaconOnNewPayloadError::Internal(Box::new(error)))
-        }
     }
 
     /// Invoked if we successfully downloaded a new block from the network.
