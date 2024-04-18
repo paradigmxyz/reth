@@ -2,7 +2,7 @@
 
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_engine_primitives::EngineTypes;
-use reth_primitives::fs::{self};
+use reth_primitives::fs;
 use reth_rpc_types::{
     engine::{CancunPayloadFields, ForkchoiceState},
     ExecutionPayload,
