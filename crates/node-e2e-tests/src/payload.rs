@@ -9,13 +9,14 @@ use reth_node_ethereum::EthEngineTypes;
 use reth_payload_builder::{
     EthBuiltPayload, EthPayloadBuilderAttributes, Events, PayloadBuilderHandle, PayloadId,
 };
-use reth_primitives::{Address, B256};
+use reth_primitives::{Address, ForkTimestamps, B256};
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations
 pub struct PayloadHelper<E: EngineTypes + 'static> {
     pub payload_event_stream: BroadcastStream<Events<E>>,
     payload_builder: PayloadBuilderHandle<E>,
+    timestamp: u64
 }
 
 impl PayloadHelper<EthEngineTypes> {
@@ -23,12 +24,14 @@ impl PayloadHelper<EthEngineTypes> {
     pub async fn new(payload_builder: PayloadBuilderHandle<EthEngineTypes>) -> eyre::Result<Self> {
         let payload_events = payload_builder.subscribe().await?;
         let payload_event_stream = payload_events.into_stream();
-        Ok(Self { payload_event_stream, payload_builder })
+        // Cancun timestamp
+        Ok(Self { payload_event_stream, payload_builder, timestamp: 1710338135})
     }
 
     /// Creates a new payload job from static attributes
-    pub async fn new_payload(&self) -> eyre::Result<EthPayloadBuilderAttributes> {
-        let attributes = eth_payload_attributes();
+    pub async fn new_payload(&mut self) -> eyre::Result<EthPayloadBuilderAttributes> {
+        self.timestamp += 1;
+        let attributes = eth_payload_attributes(self.timestamp);
         self.payload_builder.new_payload(attributes.clone()).await.unwrap();
         Ok(attributes)
     }
@@ -52,7 +55,7 @@ impl PayloadHelper<EthEngineTypes> {
         loop {
             let payload = self.payload_builder.best_payload(payload_id).await.unwrap().unwrap();
             if payload.block().body.is_empty() {
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 continue;
             }
             break;
@@ -71,9 +74,7 @@ impl PayloadHelper<EthEngineTypes> {
 }
 
 /// Helper function to create a new eth payload attributes
-fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-
+fn eth_payload_attributes(timestamp: u64) -> EthPayloadBuilderAttributes {
     let attributes = PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
