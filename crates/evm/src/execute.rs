@@ -86,8 +86,9 @@ pub trait ExecutorProvider: Send + Sync + Clone {
     /// An executor that can execute a single block given a database.
     type Executor<DB: Database<Error = ProviderError> + DatabaseCommit>: Executor<DB>;
     /// An executor that can execute a batch of block given a database.
+
     type BatchExecutor<DB: Database<Error = ProviderError> + DatabaseCommit>: BatchExecutor<DB>;
-    /// Returns a new executor for single block execution.
+    /// Creates a new executor for single block execution.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit;
