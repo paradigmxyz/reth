@@ -1,7 +1,6 @@
 //! Prometheus exporter
 
 use crate::metrics::version_metrics::register_version_metrics;
-use reth_tasks::TaskExecutor::spawn_with_graceful_shutdown_signal;
 use eyre::WrapErr;
 use hyper::{
     service::{make_service_fn, service_fn},
@@ -13,6 +12,7 @@ use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
 use reth_provider::providers::StaticFileProvider;
+use reth_tasks::{shutdown::GracefulShutdown, TaskExecutor};
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
@@ -72,7 +72,7 @@ async fn start_endpoint<F: Hook + 'static>(
         Server::try_bind(&listen_addr).wrap_err("Could not bind to address")?.serve(make_svc);
 
     let server = server.with_graceful_shutdown(
-        spawn_with_graceful_shutdown_signal().await
+        TaskExecutor::spawn_with_graceful_shutdown_signal(&self, GracefulShutdown)
     );
 
     tokio::spawn(async move { server.await.expect("Metrics endpoint crashed") });
