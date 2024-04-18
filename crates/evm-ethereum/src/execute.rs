@@ -437,3 +437,432 @@ where
         )
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_primitives::{bytes, constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS}, keccak256, Account, Bytes, ChainSpecBuilder, ForkCondition, Signature, Transaction, TransactionKind, TxEip1559, MAINNET, Block, B256, TransactionSigned, Address};
+    use std::collections::HashMap;
+    use reth_revm::database::StateProviderDatabase;
+    use reth_revm::processor::EVMProcessor;
+    use reth_revm::test_utils::{StateProviderTest};
+    use reth_revm::TransitionState;
+    use crate::EthEvmConfig;
+
+    static BEACON_ROOT_CONTRACT_CODE: Bytes = bytes!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
+
+    fn create_state_provider_with_beacon_root_contract() -> StateProviderTest {
+        let mut db = StateProviderTest::default();
+
+        let beacon_root_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
+            nonce: 1,
+        };
+
+        db.insert_account(
+            BEACON_ROOTS_ADDRESS,
+            beacon_root_contract_account,
+            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
+            HashMap::new(),
+        );
+
+        db
+    }
+
+    fn executor_provider(chain_spec: Arc<ChainSpec>) -> EthExecutorProvider<EthEvmConfig> {
+        EthExecutorProvider {
+            chain_spec,
+            evm_config: Default::default(),
+            inspector: None,
+            prune_modes: Default::default(),
+        }
+    }
+
+    #[test]
+    fn eip_4788_non_genesis_call() {
+        let mut header =
+            Header { timestamp: 1, number: 1, excess_blob_gas: Some(0), ..Header::default() };
+
+        let db = create_state_provider_with_beacon_root_contract();
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        let executor = executor_provider(chain_spec).executor(StateProviderDatabase::new(db));
+
+        // // execute invalid header (no parent beacon block root)
+        // let mut executor = EVMProcessor::new_with_db(
+        //     chain_spec,
+        //     StateProviderDatabase::new(db),
+        //     EthEvmConfig::default(),
+        // );
+        //
+        // // attempt to execute a block without parent beacon block root, expect err
+        // let err = executor
+        //     .execute_and_verify_receipt(
+        //         &BlockWithSenders {
+        //             block: Block {
+        //                 header: header.clone(),
+        //                 body: vec![],
+        //                 ommers: vec![],
+        //                 withdrawals: None,
+        //             },
+        //             senders: vec![],
+        //         },
+        //         U256::ZERO,
+        //     )
+        //     .expect_err(
+        //         "Executing cancun block without parent beacon block root field should fail",
+        //     );
+        // assert_eq!(
+        //     err,
+        //     BlockExecutionError::Validation(BlockValidationError::MissingParentBeaconBlockRoot)
+        // );
+        //
+        // // fix header, set a gas limit
+        // header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
+        //
+        // // Now execute a block with the fixed header, ensure that it does not fail
+        // executor
+        //     .execute_and_verify_receipt(
+        //         &BlockWithSenders {
+        //             block: Block {
+        //                 header: header.clone(),
+        //                 body: vec![],
+        //                 ommers: vec![],
+        //                 withdrawals: None,
+        //             },
+        //             senders: vec![],
+        //         },
+        //         U256::ZERO,
+        //     )
+        //     .unwrap();
+        //
+        // // check the actual storage of the contract - it should be:
+        // // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
+        // // header.timestamp
+        // // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
+        // // should be parent_beacon_block_root
+        // let history_buffer_length = 8191u64;
+        // let timestamp_index = header.timestamp % history_buffer_length;
+        // let parent_beacon_block_root_index =
+        //     timestamp_index % history_buffer_length + history_buffer_length;
+        //
+        // // get timestamp storage and compare
+        // let timestamp_storage =
+        //     executor.db_mut().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
+        // assert_eq!(timestamp_storage, U256::from(header.timestamp));
+        //
+        // // get parent beacon block root storage and compare
+        // let parent_beacon_block_root_storage = executor
+        //     .db_mut()
+        //     .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
+        //     .expect("storage value should exist");
+        // assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
+    }
+
+    // #[test]
+    // fn eip_4788_no_code_cancun() {
+    //     // This test ensures that we "silently fail" when cancun is active and there is no code at
+    //     // BEACON_ROOTS_ADDRESS
+    //     let header = Header {
+    //         timestamp: 1,
+    //         number: 1,
+    //         parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
+    //         excess_blob_gas: Some(0),
+    //         ..Header::default()
+    //     };
+    //
+    //     let db = StateProviderTest::default();
+    //
+    //     // DON'T deploy the contract at genesis
+    //     let chain_spec = Arc::new(
+    //         ChainSpecBuilder::from(&*MAINNET)
+    //             .shanghai_activated()
+    //             .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+    //             .build(),
+    //     );
+    //
+    //     let mut executor = EVMProcessor::new_with_db(
+    //         chain_spec,
+    //         StateProviderDatabase::new(db),
+    //         EthEvmConfig::default(),
+    //     );
+    //     executor.init_env(&header, U256::ZERO);
+    //
+    //     // get the env
+    //     let previous_env = executor.evm.context.evm.env.clone();
+    //
+    //     // attempt to execute an empty block with parent beacon block root, this should not fail
+    //     executor
+    //         .execute_and_verify_receipt(
+    //             &BlockWithSenders {
+    //                 block: Block {
+    //                     header: header.clone(),
+    //                     body: vec![],
+    //                     ommers: vec![],
+    //                     withdrawals: None,
+    //                 },
+    //                 senders: vec![],
+    //             },
+    //             U256::ZERO,
+    //         )
+    //         .expect(
+    //             "Executing a block with no transactions while cancun is active should not fail",
+    //         );
+    //
+    //     // ensure that the env has not changed
+    //     assert_eq!(executor.evm.context.evm.env, previous_env);
+    // }
+    //
+    // #[test]
+    // fn eip_4788_empty_account_call() {
+    //     // This test ensures that we do not increment the nonce of an empty SYSTEM_ADDRESS account
+    //     // during the pre-block call
+    //
+    //     let mut db = create_state_provider_with_beacon_root_contract();
+    //
+    //     // insert an empty SYSTEM_ADDRESS
+    //     db.insert_account(SYSTEM_ADDRESS, Account::default(), None, HashMap::new());
+    //
+    //     let chain_spec = Arc::new(
+    //         ChainSpecBuilder::from(&*MAINNET)
+    //             .shanghai_activated()
+    //             .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+    //             .build(),
+    //     );
+    //
+    //     let mut executor = EVMProcessor::new_with_db(
+    //         chain_spec,
+    //         StateProviderDatabase::new(db),
+    //         EthEvmConfig::default(),
+    //     );
+    //
+    //     // construct the header for block one
+    //     let header = Header {
+    //         timestamp: 1,
+    //         number: 1,
+    //         parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
+    //         excess_blob_gas: Some(0),
+    //         ..Header::default()
+    //     };
+    //
+    //     executor.init_env(&header, U256::ZERO);
+    //
+    //     // attempt to execute an empty block with parent beacon block root, this should not fail
+    //     executor
+    //         .execute_and_verify_receipt(
+    //             &BlockWithSenders {
+    //                 block: Block {
+    //                     header: header.clone(),
+    //                     body: vec![],
+    //                     ommers: vec![],
+    //                     withdrawals: None,
+    //                 },
+    //                 senders: vec![],
+    //             },
+    //             U256::ZERO,
+    //         )
+    //         .expect(
+    //             "Executing a block with no transactions while cancun is active should not fail",
+    //         );
+    //
+    //     // ensure that the nonce of the system address account has not changed
+    //     let nonce = executor.db_mut().basic(SYSTEM_ADDRESS).unwrap().unwrap().nonce;
+    //     assert_eq!(nonce, 0);
+    // }
+    //
+    // #[test]
+    // fn eip_4788_genesis_call() {
+    //     let db = create_state_provider_with_beacon_root_contract();
+    //
+    //     // activate cancun at genesis
+    //     let chain_spec = Arc::new(
+    //         ChainSpecBuilder::from(&*MAINNET)
+    //             .shanghai_activated()
+    //             .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(0))
+    //             .build(),
+    //     );
+    //
+    //     let mut header = chain_spec.genesis_header();
+    //
+    //     let mut executor = EVMProcessor::new_with_db(
+    //         chain_spec,
+    //         StateProviderDatabase::new(db),
+    //         EthEvmConfig::default(),
+    //     );
+    //     executor.init_env(&header, U256::ZERO);
+    //
+    //     // attempt to execute the genesis block with non-zero parent beacon block root, expect err
+    //     header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
+    //     let _err = executor
+    //         .execute_and_verify_receipt(
+    //             &BlockWithSenders {
+    //                 block: Block {
+    //                     header: header.clone(),
+    //                     body: vec![],
+    //                     ommers: vec![],
+    //                     withdrawals: None,
+    //                 },
+    //                 senders: vec![],
+    //             },
+    //             U256::ZERO,
+    //         )
+    //         .expect_err(
+    //             "Executing genesis cancun block with non-zero parent beacon block root field should fail",
+    //         );
+    //
+    //     // fix header
+    //     header.parent_beacon_block_root = Some(B256::ZERO);
+    //
+    //     // now try to process the genesis block again, this time ensuring that a system contract
+    //     // call does not occur
+    //     executor
+    //         .execute_and_verify_receipt(
+    //             &BlockWithSenders {
+    //                 block: Block {
+    //                     header: header.clone(),
+    //                     body: vec![],
+    //                     ommers: vec![],
+    //                     withdrawals: None,
+    //                 },
+    //                 senders: vec![],
+    //             },
+    //             U256::ZERO,
+    //         )
+    //         .unwrap();
+    //
+    //     // there is no system contract call so there should be NO STORAGE CHANGES
+    //     // this means we'll check the transition state
+    //     let state = executor.evm.context.evm.inner.db;
+    //     let transition_state =
+    //         state.transition_state.expect("the evm should be initialized with bundle updates");
+    //
+    //     // assert that it is the default (empty) transition state
+    //     assert_eq!(transition_state, TransitionState::default());
+    // }
+    //
+    // #[test]
+    // fn eip_4788_high_base_fee() {
+    //     // This test ensures that if we have a base fee, then we don't return an error when the
+    //     // system contract is called, due to the gas price being less than the base fee.
+    //     let header = Header {
+    //         timestamp: 1,
+    //         number: 1,
+    //         parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
+    //         base_fee_per_gas: Some(u64::MAX),
+    //         excess_blob_gas: Some(0),
+    //         ..Header::default()
+    //     };
+    //
+    //     let db = create_state_provider_with_beacon_root_contract();
+    //
+    //     let chain_spec = Arc::new(
+    //         ChainSpecBuilder::from(&*MAINNET)
+    //             .shanghai_activated()
+    //             .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+    //             .build(),
+    //     );
+    //
+    //     // execute header
+    //     let mut executor = EVMProcessor::new_with_db(
+    //         chain_spec,
+    //         StateProviderDatabase::new(db),
+    //         EthEvmConfig::default(),
+    //     );
+    //     executor.init_env(&header, U256::ZERO);
+    //
+    //     // ensure that the env is configured with a base fee
+    //     assert_eq!(executor.evm.block().basefee, U256::from(u64::MAX));
+    //
+    //     // Now execute a block with the fixed header, ensure that it does not fail
+    //     executor
+    //         .execute_and_verify_receipt(
+    //             &BlockWithSenders {
+    //                 block: Block {
+    //                     header: header.clone(),
+    //                     body: vec![],
+    //                     ommers: vec![],
+    //                     withdrawals: None,
+    //                 },
+    //                 senders: vec![],
+    //             },
+    //             U256::ZERO,
+    //         )
+    //         .unwrap();
+    //
+    //     // check the actual storage of the contract - it should be:
+    //     // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
+    //     // header.timestamp
+    //     // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH + HISTORY_BUFFER_LENGTH
+    //     // should be parent_beacon_block_root
+    //     let history_buffer_length = 8191u64;
+    //     let timestamp_index = header.timestamp % history_buffer_length;
+    //     let parent_beacon_block_root_index =
+    //         timestamp_index % history_buffer_length + history_buffer_length;
+    //
+    //     // get timestamp storage and compare
+    //     let timestamp_storage =
+    //         executor.db_mut().storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap();
+    //     assert_eq!(timestamp_storage, U256::from(header.timestamp));
+    //
+    //     // get parent beacon block root storage and compare
+    //     let parent_beacon_block_root_storage = executor
+    //         .db_mut()
+    //         .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
+    //         .unwrap();
+    //     assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
+    // }
+    //
+    // #[test]
+    // fn test_transact_error_includes_correct_hash() {
+    //     let chain_spec = Arc::new(
+    //         ChainSpecBuilder::from(&*MAINNET)
+    //             .shanghai_activated()
+    //             .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+    //             .build(),
+    //     );
+    //
+    //     let db = StateProviderTest::default();
+    //     let chain_id = chain_spec.chain.id();
+    //
+    //     // execute header
+    //     let mut executor = EVMProcessor::new_with_db(
+    //         chain_spec,
+    //         StateProviderDatabase::new(db),
+    //         EthEvmConfig::default(),
+    //     );
+    //
+    //     // Create a test transaction that gonna fail
+    //     let transaction = TransactionSigned::from_transaction_and_signature(
+    //         Transaction::Eip1559(TxEip1559 {
+    //             chain_id,
+    //             nonce: 1,
+    //             gas_limit: 21_000,
+    //             to: TransactionKind::Call(Address::ZERO),
+    //             max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
+    //             ..Default::default()
+    //         }),
+    //         Signature::default(),
+    //     );
+    //
+    //     let result = executor.transact(&transaction, Address::random());
+    //
+    //     let expected_hash = transaction.recalculate_hash();
+    //
+    //     // Check the error
+    //     match result {
+    //         Err(BlockExecutionError::Validation(BlockValidationError::EVM { hash, error: _ })) => {
+    //             assert_eq!(hash, expected_hash, "The EVM error does not include the correct transaction hash.");
+    //         },
+    //         _ => panic!("Expected a BlockExecutionError::Validation error, but transaction did not fail as expected."),
+    //     }
+    // }
+}

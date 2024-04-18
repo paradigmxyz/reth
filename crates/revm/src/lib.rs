@@ -38,7 +38,7 @@ pub mod stack;
 pub mod optimism;
 
 /// Common test helpers
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
 // Convenience re-exports.
