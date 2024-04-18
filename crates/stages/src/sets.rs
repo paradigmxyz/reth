@@ -149,11 +149,7 @@ where
     DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
-        Self::add_offline_stages(
-            self.online.builder(),
-            self.executor_factory,
-            self.etl_config.clone(),
-        )
+        Self::add_offline_stages(self.online.builder(), self.executor_factory, self.etl_config)
     }
 }
 
@@ -274,7 +270,7 @@ impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for OfflineStages<EF> {
         ExecutionStages::new(self.executor_factory)
             .builder()
             .add_set(HashingStages { etl_config: self.etl_config.clone() })
-            .add_set(HistoryIndexingStages { etl_config: self.etl_config.clone() })
+            .add_set(HistoryIndexingStages { etl_config: self.etl_config })
     }
 }
 
@@ -314,7 +310,7 @@ impl<DB: Database> StageSet<DB> for HashingStages {
         StageSetBuilder::default()
             .add_stage(MerkleStage::default_unwind())
             .add_stage(AccountHashingStage::default().with_etl_config(self.etl_config.clone()))
-            .add_stage(StorageHashingStage::default().with_etl_config(self.etl_config.clone()))
+            .add_stage(StorageHashingStage::default().with_etl_config(self.etl_config))
             .add_stage(MerkleStage::default_execution())
     }
 }
@@ -332,6 +328,6 @@ impl<DB: Database> StageSet<DB> for HistoryIndexingStages {
         StageSetBuilder::default()
             .add_stage(TransactionLookupStage::default().with_etl_config(self.etl_config.clone()))
             .add_stage(IndexStorageHistoryStage::default().with_etl_config(self.etl_config.clone()))
-            .add_stage(IndexAccountHistoryStage::default().with_etl_config(self.etl_config.clone()))
+            .add_stage(IndexAccountHistoryStage::default().with_etl_config(self.etl_config))
     }
 }
