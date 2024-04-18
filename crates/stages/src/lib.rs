@@ -93,3 +93,6 @@ pub mod stages;
 pub mod sets;
 
 pub use pipeline::*;
+
+// re-export the stages API
+pub use reth_stages_api::*;

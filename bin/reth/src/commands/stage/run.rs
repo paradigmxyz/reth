@@ -20,12 +20,14 @@ use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::ChainSpec;
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
-use reth_stages::stages::{
-    AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
-    IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-    StorageHashingStage, TransactionLookupStage,
+use reth_stages::{
+    stages::{
+        AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
+        StorageHashingStage, TransactionLookupStage,
+    },
+    ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use reth_stages_api::{ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput};
 use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
 use tracing::*;
 

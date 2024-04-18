@@ -10,8 +10,7 @@ use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::stage::StageCheckpoint;
 use reth_provider::{ChainSpecProvider, ProviderFactory};
 use reth_revm::EvmProcessorFactory;
-use reth_stages::stages::ExecutionStage;
-use reth_stages_api::{Stage, UnwindInput};
+use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use tracing::info;
 
 pub(crate) async fn dump_execution_stage<DB: Database>(
@@ -169,10 +168,8 @@ async fn dry_run<DB: Database>(
         EthEvmConfig::default(),
     ));
 
-    let input = reth_stages_api::ExecInput {
-        target: Some(to),
-        checkpoint: Some(StageCheckpoint::new(from)),
-    };
+    let input =
+        reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
     exec_stage.execute(&output_provider_factory.provider_rw()?, input)?;
 
     info!(target: "reth::cli", "Success");

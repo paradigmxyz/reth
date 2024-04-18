@@ -5,8 +5,7 @@ use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::{stage::StageCheckpoint, BlockNumber};
 use reth_provider::ProviderFactory;
-use reth_stages::stages::AccountHashingStage;
-use reth_stages_api::{Stage, UnwindInput};
+use reth_stages::{stages::AccountHashingStage, Stage, UnwindInput};
 use tracing::info;
 
 pub(crate) async fn dump_hashing_account_stage<DB: Database>(
@@ -85,7 +84,7 @@ async fn dry_run<DB: Database>(
     };
 
     loop {
-        let input = reth_stages_api::ExecInput {
+        let input = reth_stages::ExecInput {
             target: Some(to),
             checkpoint: Some(StageCheckpoint::new(from)),
         };

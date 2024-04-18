@@ -72,8 +72,7 @@ use crate::hooks::{EngineHookEvent, EngineHooks, PolledHook};
 pub use forkchoice::ForkchoiceStatus;
 use reth_interfaces::blockchain_tree::BlockValidationKind;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_stages::Pipeline;
-use reth_stages_api::{ControlFlow, PipelineError};
+use reth_stages::{ControlFlow, Pipeline, PipelineError};
 
 mod metrics;
 
