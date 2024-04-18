@@ -6,17 +6,6 @@ use std::{
     fmt::{Debug, Formatter},
 };
 
-/// Stages that require state.
-const STATE_STAGES: [StageId; 7] = [
-    StageId::Execution,
-    StageId::MerkleUnwind,
-    StageId::AccountHashing,
-    StageId::StorageHashing,
-    StageId::MerkleExecute,
-    StageId::IndexStorageHistory,
-    StageId::IndexAccountHistory,
-];
-
 /// Combines multiple [`Stage`]s into a single unit.
 ///
 /// A [`StageSet`] is a logical chunk of stages that depend on each other. It is up to the
@@ -198,12 +187,12 @@ where
         self
     }
 
-    /// Disables stages requiring state. See [`disable`](Self::disable).
-    pub fn disable_state(mut self) -> Self {
-        for stage_id in STATE_STAGES {
+    /// Disables all given stages. See [`disable`](Self::disable).
+    pub fn disable_all(mut self, stages: &[StageId]) -> Self {
+        for stage_id in stages {
             let entry = self
                 .stages
-                .get_mut(&stage_id)
+                .get_mut(stage_id)
                 .expect("Cannot disable a stage that is not in the set.");
             entry.enabled = false;
         }
@@ -223,15 +212,15 @@ where
         self
     }
 
-    /// Disables stages requiring stage if the given closure returns true.
+    /// Disables all given stages if the given closure returns true.
     ///
     /// See [Self::disable]
-    pub fn disable_state_if<F>(self, f: F) -> Self
+    pub fn disable_all_if<F>(self, stages: &[StageId], f: F) -> Self
     where
         F: FnOnce() -> bool,
     {
         if f() {
-            return self.disable_state()
+            return self.disable_all(stages)
         }
         self
     }

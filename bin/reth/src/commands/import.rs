@@ -39,6 +39,17 @@ use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
 
+/// Stages that require state.
+const STATE_STAGES: &[StageId] = &[
+    StageId::Execution,
+    StageId::MerkleUnwind,
+    StageId::AccountHashing,
+    StageId::StorageHashing,
+    StageId::MerkleExecute,
+    StageId::IndexStorageHistory,
+    StageId::IndexAccountHistory,
+];
+
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
 pub struct ImportCommand {
@@ -256,7 +267,7 @@ impl ImportCommand {
                         .max(config.stages.storage_hashing.clean_threshold),
                     config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
                 ))
-                .disable_state_if(|| no_state),
+                .disable_all_if(STATE_STAGES, || no_state),
             )
             .build(provider_factory, static_file_producer);
 
