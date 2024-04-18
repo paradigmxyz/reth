@@ -298,7 +298,7 @@ impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    // TODO: get rid of this
+    // TODO(mattsse): get rid of this
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
     DB: Database<Error = ProviderError> + DatabaseCommit,
 {
