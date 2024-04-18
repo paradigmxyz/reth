@@ -86,7 +86,7 @@ impl<'a, Block> From<(&'a Block, U256)> for EthBlockExecutionInput<'a, Block> {
 pub trait ExecutorProvider: Send + Sync + Clone {
     /// An executor that can execute a single block given a database.
     type Executor<DB: Database<Error = ProviderError>>: Executor<DB>;
-    /// An executor that can execute a batch of block given a database.
+    /// An executor that can execute a batch of blocks given a database.
 
     type BatchExecutor<DB: Database<Error = ProviderError>>: BatchExecutor<DB>;
     /// Creates a new executor for single block execution.
