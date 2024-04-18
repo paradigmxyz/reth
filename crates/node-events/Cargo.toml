@@ -18,8 +18,8 @@ reth-network-api.workspace = true
 reth-stages.workspace = true
 reth-prune.workspace = true
 reth-static-file.workspace = true
-reth-interfaces = { workspace = true, features = ["clap"] }
-reth-db = { workspace = true, features = ["mdbx"] }
+reth-interfaces.workspace = true
+reth-db.workspace = true
 reth-primitives.workspace = true
 
 # async
@@ -32,4 +32,4 @@ tracing.workspace = true
 
 #misc
 pin-project.workspace = true
-humantime = "2.1.0"
+humantime.workspace = true

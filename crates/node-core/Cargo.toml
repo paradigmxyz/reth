@@ -53,7 +53,7 @@ reth-metrics.workspace = true
 # misc
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
-humantime = "2.1.0"
+humantime.workspace = true
 thiserror.workspace = true
 const-str = "0.5.6"
 rand.workspace = true
