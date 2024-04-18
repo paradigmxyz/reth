@@ -1861,7 +1861,7 @@ mod tests {
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::try_block_to_payload_v1;
-    use reth_stages_api::{ExecOutput, PipelineError, StageError};
+    use reth_stages::{ExecOutput, PipelineError, StageError};
     use std::{collections::VecDeque, sync::Arc};
     use tokio::sync::oneshot::error::TryRecvError;
 

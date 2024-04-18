@@ -7,11 +7,13 @@ use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, PruneModes};
 use reth_provider::ProviderFactory;
-use reth_stages::stages::{
-    AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
-    StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+use reth_stages::{
+    stages::{
+        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
+        StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+    },
+    Stage, UnwindInput,
 };
-use reth_stages::{Stage, UnwindInput};
 use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(
@@ -72,10 +74,8 @@ async fn unwind_and_copy<DB: Database>(
         checkpoint: StageCheckpoint::new(tip_block_number),
         bad_block: None,
     };
-    let execute_input = reth_stages::ExecInput {
-        target: Some(to),
-        checkpoint: Some(StageCheckpoint::new(from)),
-    };
+    let execute_input =
+        reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
 
     // Unwind hashes all the way to FROM
 

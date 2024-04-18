@@ -1,7 +1,7 @@
-use super::{TestStage, TEST_STAGE_ID};
+use super::TEST_STAGE_ID;
 use crate::{StageSet, StageSetBuilder};
 use reth_db::database::Database;
-use reth_stages_api::{ExecOutput, StageError, UnwindOutput};
+use reth_stages_api::{test_utils::TestStage, ExecOutput, StageError, UnwindOutput};
 use std::collections::VecDeque;
 
 #[derive(Default, Debug)]

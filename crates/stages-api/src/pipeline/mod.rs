@@ -22,8 +22,15 @@ use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
+// (todo) remove it
+#[allow(missing_docs)]
 pub mod builder;
+
+// (todo) remove it
+#[allow(missing_docs)]
 pub mod progress;
+// (todo) remove it
+#[allow(missing_docs)]
 pub mod set;
 
 use crate::{
@@ -551,7 +558,7 @@ impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::TestStage;
+    use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_interfaces::{
         consensus,
@@ -561,7 +568,6 @@ mod tests {
     use reth_primitives::PruneModes;
     use reth_provider::test_utils::create_test_provider_factory;
     use tokio_stream::StreamExt;
-    use crate::UnwindOutput;
 
     #[test]
     fn record_progress_calculates_outliers() {

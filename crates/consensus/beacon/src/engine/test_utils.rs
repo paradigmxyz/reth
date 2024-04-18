@@ -33,8 +33,7 @@ use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
-use reth_stages::{sets::DefaultStages, test_utils::TestStages, Pipeline};
-use reth_stages_api::{ExecOutput, StageError};
+use reth_stages::{sets::DefaultStages, test_utils::TestStages, ExecOutput, Pipeline, StageError};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};

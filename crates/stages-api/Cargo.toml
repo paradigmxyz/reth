@@ -22,12 +22,15 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 thiserror.workspace = true
-tokio.workspace = true
 tracing.workspace = true
-
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream.workspace = true
+futures-util.workspace = true
 auto_impl = "1"
-futures-util = "0.3.30"
-tokio-stream = "0.1.15"
+
+[features]
+test-utils = []
 
 [lints]
 workspace = true
+

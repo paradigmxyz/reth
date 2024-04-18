@@ -23,7 +23,7 @@ reth-tokio-util.workspace = true
 reth-etl.workspace = true
 reth-static-file.workspace = true
 reth-config.workspace = true
-reth-stages-api.workspace = true
+reth-stages-api = {workspace = true , features = ["test-utils"]}
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -79,7 +79,7 @@ serde_json.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
-test-utils = ["reth-interfaces/test-utils", "reth-db/test-utils", "reth-provider/test-utils"]
+test-utils = ["reth-interfaces/test-utils", "reth-db/test-utils", "reth-provider/test-utils", "reth-stages-api/test-utils"]
 
 [[bench]]
 name = "criterion"

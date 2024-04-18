@@ -15,6 +15,7 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_prune::PrunerEvent;
+use reth_stages::{ExecOutput, PipelineEvent};
 use reth_static_file::StaticFileProducerEvent;
 use std::{
     fmt::{Display, Formatter},
@@ -25,7 +26,6 @@ use std::{
 };
 use tokio::time::Interval;
 use tracing::{debug, info, warn};
-use reth_stages::{ExecOutput, PipelineEvent};
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);

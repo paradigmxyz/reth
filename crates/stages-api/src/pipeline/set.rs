@@ -1,10 +1,10 @@
+use crate::Stage;
 use reth_db::database::Database;
 use reth_primitives::stage::StageId;
 use std::{
     collections::HashMap,
     fmt::{Debug, Formatter},
 };
-use crate::Stage;
 
 /// Combines multiple [`Stage`]s into a single unit.
 ///
