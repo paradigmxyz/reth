@@ -126,7 +126,7 @@ impl Command {
             let provider = provider_factory.provider_rw()?;
 
             let _ = provider
-                .take_block_and_execution_range(&self.chain, range.clone())
+                .take_block_and_execution_range(range.clone())
                 .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
             provider.commit()?;
