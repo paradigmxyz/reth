@@ -221,8 +221,8 @@ where
 /// - Execute the block.
 #[derive(Debug)]
 pub struct EthBlockExecutor<EvmConfig, DB> {
-    /// Chain specific evm config
-    evm_spec: EthEvmExecutor<EvmConfig>,
+    /// Chain specific evm config that's used to execute a block.
+    executor: EthEvmExecutor<EvmConfig>,
     /// The state to use for execution
     state: State<DB>,
     /// Optional inspector stack for debugging
@@ -232,7 +232,7 @@ pub struct EthBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
-        Self { evm_spec: EthEvmExecutor { chain_spec, evm_config }, state, inspector: None }
+        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state, inspector: None }
     }
 
     /// Sets the inspector stack for debugging.
@@ -243,7 +243,7 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 
     #[inline]
     fn chain_spec(&self) -> &ChainSpec {
-        &self.evm_spec.chain_spec
+        &self.executor.chain_spec
     }
 
     /// Returns mutable reference to the state that wraps the underlying database.
@@ -297,16 +297,16 @@ where
 
         let (receipts, gas_used) = {
             if let Some(inspector) = self.inspector.as_mut() {
-                let evm = self.evm_spec.evm_config.evm_with_env_and_inspector(
+                let evm = self.executor.evm_config.evm_with_env_and_inspector(
                     &mut self.state,
                     env,
                     inspector,
                 );
-                self.evm_spec.execute_pre_and_transactions(block, evm)?
+                self.executor.execute_pre_and_transactions(block, evm)?
             } else {
-                let evm = self.evm_spec.evm_config.evm_with_env(&mut self.state, env);
+                let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
 
-                self.evm_spec.execute_pre_and_transactions(block, evm)?
+                self.executor.execute_pre_and_transactions(block, evm)?
             }
         };
 
