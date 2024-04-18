@@ -158,6 +158,10 @@ pub mod rpc {
     }
 }
 
+// re-export for convenience
+#[doc(inline)]
+pub use reth_cli_runner::{CliRunner, CliContext, tokio_runtime};
+
 #[cfg(all(unix, any(target_env = "gnu", target_os = "macos")))]
 pub mod sigsegv_handler;
 

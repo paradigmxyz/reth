@@ -6,13 +6,13 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
     utils::get_single_header,
 };
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
+use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_downloaders::{
