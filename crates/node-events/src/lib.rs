@@ -1,7 +1,5 @@
 //! Various event handlers for the node.
 
-//! Standalone crate for ethereum-specific Reth configuration and builder types.
-
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
