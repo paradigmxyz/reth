@@ -282,6 +282,8 @@ where
     /// Execute a single block and apply the state changes to the internal state.
     ///
     /// Returns the receipts of the transactions in the block and the total gas used.
+    ///
+    /// Returns an error if execution fails or receipt verification fails.
     fn execute_and_verify(
         &mut self,
         block: &BlockWithSenders,
