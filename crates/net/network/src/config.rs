@@ -9,7 +9,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
-use reth_discv5::{OptimismForkId, ENR_FORK_KEY_ETH, ENR_FORK_KEY_OPSTACK};
+use reth_discv5::network_key;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
@@ -122,15 +122,16 @@ impl<C> NetworkConfig<C> {
     ) -> Self {
         let rlpx_port = self.listener_addr.port();
         let chain = self.chain_spec.chain;
+        let fork_id = self.chain_spec.latest_fork_id();
         let boot_nodes = self.boot_nodes.clone();
 
         let mut builder =
             reth_discv5::Config::builder(rlpx_port).add_unsigned_boot_nodes(boot_nodes.into_iter()); // todo: store discv5 peers in separate file
 
         if chain.is_optimism() {
-            builder = builder.fork(ENR_FORK_KEY_OPSTACK, OptimismForkId::new(chain.id()))
+            builder = builder.fork(network_key::OPSTACK, fork_id)
         } else if chain.named() == Some(NamedChain::Mainnet) {
-            builder = builder.fork(ENR_FORK_KEY_ETH, self.status.forkid)
+            builder = builder.fork(network_key::ETH, fork_id)
         }
 
         self.set_discovery_v5(f(builder))
