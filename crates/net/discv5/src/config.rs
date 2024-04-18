@@ -9,12 +9,9 @@ use std::{
 use derive_more::Display;
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{NodeRecord, MAINNET};
+use reth_primitives::{ForkId, NodeRecord, MAINNET};
 
-use crate::{
-    enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, fork_id::ENR_FORK_KEY_ETH2,
-    ENR_FORK_KEY_ETH,
-};
+use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, network_key};
 
 /// Default interval in seconds at which to run a self-lookup up query.
 ///
@@ -32,7 +29,7 @@ pub struct ConfigBuilder {
     /// belongs, e.g. (b"opstack", ChainId) or (b"eth", ForkId).
     ///
     /// Defaults to L1 mainnet if not set.
-    fork: Option<(&'static [u8], Box<dyn EnrValue>)>,
+    fork: Option<(&'static [u8], ForkId)>,
     /// RLPx TCP port to advertise. Note: so long as `reth_network` handles [`NodeRecord`]s as
     /// opposed to [`Enr`](enr::Enr)s, TCP is limited to same IP address as UDP, since
     /// [`NodeRecord`] doesn't supply an extra field for and alternative TCP address.
@@ -120,12 +117,8 @@ impl ConfigBuilder {
 
     /// Set fork ID kv-pair to set in local [`Enr`](discv5::enr::Enr). This lets peers on discovery
     /// network know which chain this node belongs to.
-    pub fn fork(
-        mut self,
-        key: &'static [u8],
-        value: impl alloy_rlp::Encodable + Debug + Send + 'static,
-    ) -> Self {
-        self.fork = Some((key, Box::new(value)));
+    pub fn fork(mut self, network_key: &'static [u8], fork_id: ForkId) -> Self {
+        self.fork = Some((network_key, fork_id));
         self
     }
 
@@ -170,12 +163,12 @@ impl ConfigBuilder {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let fork = fork.unwrap_or((ENR_FORK_KEY_ETH, Box::new(MAINNET.latest_fork_id())));
+        let fork = fork.unwrap_or((network_key::ETH, MAINNET.latest_fork_id()));
 
         let lookup_interval = lookup_interval.unwrap_or(DEFAULT_SECONDS_LOOKUP_INTERVAL);
 
         let discovered_peer_filter =
-            discovered_peer_filter.unwrap_or_else(|| MustNotIncludeKeys::new(&[ENR_FORK_KEY_ETH2]));
+            discovered_peer_filter.unwrap_or_else(|| MustNotIncludeKeys::new(&[network_key::ETH2]));
 
         Config {
             discv5_config,
@@ -199,7 +192,7 @@ pub struct Config {
     pub(super) bootstrap_nodes: HashSet<BootNode>,
     /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
     /// belongs, e.g. (b"opstack", ChainId) or (b"eth", ForkId).
-    pub(super) fork: (&'static [u8], Box<dyn EnrValue>),
+    pub(super) fork: (&'static [u8], ForkId),
     /// RLPx TCP port to advertise.
     pub(super) tcp_port: u16,
     /// Additional kv-pairs (asides tcp port, udp port and fork) that should be advertised to
