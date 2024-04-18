@@ -285,7 +285,7 @@ impl Command {
             {
                 provider_factory
                     .provider_rw()?
-                    .take_block_and_execution_range(&self.chain, next_block..=target_block)?;
+                    .take_block_and_execution_range(next_block..=target_block)?;
             }
 
             // Update latest block
