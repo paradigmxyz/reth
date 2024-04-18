@@ -1713,7 +1713,7 @@ impl RpcServerConfig {
             let addr = server
                 .local_addr()
                 .map_err(|err| RpcError::server_error(err, ServerKind::WsHttp(http_socket_addr)))?;
-            let server = WsHttpServerKind::WithOptions(server);
+            //let server = WsHttpServerKind::WithOptions(server);
 
             // let (server, addr) = WsHttpServerKind::build(
             //     builder,
@@ -1780,7 +1780,7 @@ impl RpcServerConfig {
             let addr = server
                 .local_addr()
                 .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
-            let server = WsHttpServerKind::WithOptions(server);
+            //let server = WsHttpServerKind::WithOptions(server);
 
             ws_local_addr = Some(addr);
             ws_server = Some(server);
@@ -1823,7 +1823,7 @@ impl RpcServerConfig {
             let local_addr = server
                 .local_addr()
                 .map_err(|err| RpcError::server_error(err, ServerKind::Http(http_socket_addr)))?;
-            let server = WsHttpServerKind::WithOptions(server);
+            //let server = WsHttpServerKind::WithOptions(server);
             http_local_addr = Some(local_addr);
             http_server = Some(server);
         }
@@ -2055,9 +2055,27 @@ struct WsHttpServer {
 /// Enum for holding the http and ws servers in all possible combinations.
 enum WsHttpServers {
     /// Both servers are on the same port
-    SamePort(WsHttpServerKind),
+    SamePort(Server<
+        Stack<
+            tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
+            Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
+        >,
+        Stack<RpcRequestMetrics, Identity>,
+    >),
     /// Servers are on different ports
-    DifferentPort { http: Option<WsHttpServerKind>, ws: Option<WsHttpServerKind> },
+    DifferentPort { http: Option<Server<
+        Stack<
+            tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
+            Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
+        >,
+        Stack<RpcRequestMetrics, Identity>,
+    >>, ws: Option<Server<
+    Stack<
+        tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
+        Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
+    >,
+    Stack<RpcRequestMetrics, Identity>,
+>> },
 }
 
 // === impl WsHttpServers ===
@@ -2073,13 +2091,13 @@ impl WsHttpServers {
         let mut http_handle = None;
         let mut ws_handle = None;
         match self {
-            WsHttpServers::SamePort(both) => {
+            WsHttpServers::SamePort(server) => {
                 // Make sure http and ws modules are identical, since we currently can't run
                 // different modules on same server
                 config.ensure_ws_http_identical()?;
 
                 if let Some(module) = http_module.or(ws_module) {
-                    let handle = both.start(module).await;
+                    let handle = server.start(module);
                     http_handle = Some(handle.clone());
                     ws_handle = Some(handle);
                 }
@@ -2088,12 +2106,12 @@ impl WsHttpServers {
                 if let Some((server, module)) =
                     http.and_then(|server| http_module.map(|module| (server, module)))
                 {
-                    http_handle = Some(server.start(module).await);
+                    http_handle = Some(server.start(module));
                 }
                 if let Some((server, module)) =
                     ws.and_then(|server| ws_module.map(|module| (server, module)))
                 {
-                    ws_handle = Some(server.start(module).await);
+                    ws_handle = Some(server.start(module));
                 }
             }
         }
@@ -2105,32 +2123,6 @@ impl WsHttpServers {
 impl Default for WsHttpServers {
     fn default() -> Self {
         Self::DifferentPort { http: None, ws: None }
-    }
-}
-
-/// Http Servers Enum
-#[allow(clippy::type_complexity)]
-enum WsHttpServerKind {
-    /// Options
-    WithOptions(
-        Server<
-            Stack<
-                tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
-                Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
-            >,
-            Stack<RpcRequestMetrics, Identity>,
-        >,
-    ),
-}
-
-// === impl WsHttpServerKind ===
-
-impl WsHttpServerKind {
-    /// Starts the server and returns the handle
-    async fn start(self, module: RpcModule<()>) -> ServerHandle {
-        match self {
-            WsHttpServerKind::WithOptions(server) => server.start(module),
-        }
     }
 }
 
