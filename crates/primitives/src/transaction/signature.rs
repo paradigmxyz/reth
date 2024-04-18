@@ -85,12 +85,6 @@ impl Signature {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
             self.odd_y_parity as u64 + chain_id * 2 + 35
         } else {
-            #[cfg(feature = "optimism")]
-            if std::env::var_os(OP_RETH_MAINNET_BELOW_BEDROCK).as_deref() == Some("true".as_ref()) &&
-                *self == Self::optimism_deposit_tx_signature()
-            {
-                return 0
-            }
             self.odd_y_parity as u64 + 27
         }
     }
