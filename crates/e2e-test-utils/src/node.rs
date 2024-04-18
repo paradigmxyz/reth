@@ -1,36 +1,39 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
+use std::{
+    marker::PhantomData,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use crate::{engine_api::EngineApiHelper, network::NetworkHelper, payload::PayloadHelper};
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use reth::{
-    api::FullNodeComponents,
+    api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
     builder::FullNode,
     providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
         eth::{error::EthResult, EthTransactions},
-        types::engine::PayloadAttributes,
+        types::engine::{ExecutionPayloadEnvelopeV3, PayloadAttributes},
     },
 };
-use reth_node_ethereum::EthEngineTypes;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_primitives::{Address, BlockNumber, Bytes, B256};
 use tokio_stream::StreamExt;
 
 /// An helper struct to handle node actions
-pub struct NodeHelper<Node>
+pub struct NodeHelper<Node, EngineType>
 where
-    Node: FullNodeComponents<Engine = EthEngineTypes>,
+    Node: FullNodeComponents<Engine = EngineType>,
+    EngineType: EngineTypes<ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3> + 'static,
 {
     pub inner: FullNode<Node>,
     payload: PayloadHelper<Node::Engine>,
     pub network: NetworkHelper,
-    pub engine_api: EngineApiHelper,
+    pub engine_api: EngineApiHelper<EngineType>,
 }
 
-impl<Node> NodeHelper<Node>
+impl<Node, EngineType> NodeHelper<Node, EngineType>
 where
-    Node: FullNodeComponents<Engine = EthEngineTypes>,
+    Node: FullNodeComponents<Engine = EngineType>,
+    EngineType: EngineTypes<ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3> + 'static,
 {
     /// Creates a new test node
     pub async fn new(node: FullNode<Node>) -> eyre::Result<Self> {
@@ -43,17 +46,25 @@ where
             engine_api: EngineApiHelper {
                 engine_api_client: node.auth_server_handle().http_client(),
                 canonical_stream: node.provider.canonical_state_stream(),
+                _marker: PhantomData::<EngineType>::default(),
             },
         })
     }
 
     /// Advances the node forward
-    pub async fn advance(&mut self, raw_tx: Bytes) -> eyre::Result<(B256, B256)> {
+    pub async fn advance(
+        &mut self,
+        raw_tx: Bytes,
+        attributes_generator: impl Fn(u64) -> EngineType::PayloadBuilderAttributes,
+    ) -> eyre::Result<(B256, B256)>
+    where
+        ExecutionPayloadEnvelopeV3: From<<EngineType as EngineTypes>::BuiltPayload>,
+    {
         // push tx into pool via RPC server
         let tx_hash = self.inject_tx(raw_tx).await?;
 
         // trigger new payload building draining the pool
-        let eth_attr = self.payload.new_payload().await.unwrap();
+        let eth_attr = self.payload.new_payload(attributes_generator).await.unwrap();
 
         // first event is the payload attributes
         self.payload.expect_attr_event(eth_attr.clone()).await?;

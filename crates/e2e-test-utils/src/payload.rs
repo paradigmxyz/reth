@@ -1,13 +1,6 @@
 use futures_util::StreamExt;
-use reth::{
-    api::{EngineTypes, PayloadBuilderAttributes},
-    rpc::types::engine::PayloadAttributes,
-};
-use reth_node_ethereum::EthEngineTypes;
-use reth_payload_builder::{
-    EthBuiltPayload, EthPayloadBuilderAttributes, Events, PayloadBuilderHandle, PayloadId,
-};
-use reth_primitives::{Address, B256};
+use reth::api::{BuiltPayload, EngineTypes, PayloadBuilderAttributes};
+use reth_payload_builder::{Events, PayloadBuilderHandle, PayloadId};
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations
@@ -17,9 +10,9 @@ pub struct PayloadHelper<E: EngineTypes + 'static> {
     timestamp: u64,
 }
 
-impl PayloadHelper<EthEngineTypes> {
+impl<E: EngineTypes + 'static> PayloadHelper<E> {
     /// Creates a new payload helper
-    pub async fn new(payload_builder: PayloadBuilderHandle<EthEngineTypes>) -> eyre::Result<Self> {
+    pub async fn new(payload_builder: PayloadBuilderHandle<E>) -> eyre::Result<Self> {
         let payload_events = payload_builder.subscribe().await?;
         let payload_event_stream = payload_events.into_stream();
         // Cancun timestamp
@@ -27,9 +20,12 @@ impl PayloadHelper<EthEngineTypes> {
     }
 
     /// Creates a new payload job from static attributes
-    pub async fn new_payload(&mut self) -> eyre::Result<EthPayloadBuilderAttributes> {
+    pub async fn new_payload(
+        &mut self,
+        attributes_generator: impl Fn(u64) -> E::PayloadBuilderAttributes,
+    ) -> eyre::Result<E::PayloadBuilderAttributes> {
         self.timestamp += 1;
-        let attributes = eth_payload_attributes(self.timestamp);
+        let attributes: E::PayloadBuilderAttributes = attributes_generator(self.timestamp);
         self.payload_builder.new_payload(attributes.clone()).await.unwrap();
         Ok(attributes)
     }
@@ -37,11 +33,11 @@ impl PayloadHelper<EthEngineTypes> {
     /// Asserts that the next event is a payload attributes event
     pub async fn expect_attr_event(
         &mut self,
-        attrs: EthPayloadBuilderAttributes,
+        attrs: E::PayloadBuilderAttributes,
     ) -> eyre::Result<()> {
         let first_event = self.payload_event_stream.next().await.unwrap()?;
         if let reth::payload::Events::Attributes(attr) = first_event {
-            assert_eq!(attrs.timestamp, attr.timestamp());
+            assert_eq!(attrs.timestamp(), attr.timestamp());
         } else {
             panic!("Expect first event as payload attributes.")
         }
@@ -61,7 +57,7 @@ impl PayloadHelper<EthEngineTypes> {
     }
 
     /// Expects the next event to be a built payload event or panics
-    pub async fn expect_built_payload(&mut self) -> eyre::Result<EthBuiltPayload> {
+    pub async fn expect_built_payload(&mut self) -> eyre::Result<E::BuiltPayload> {
         let second_event = self.payload_event_stream.next().await.unwrap()?;
         if let reth::payload::Events::BuiltPayload(payload) = second_event {
             Ok(payload)
@@ -69,16 +65,4 @@ impl PayloadHelper<EthEngineTypes> {
             panic!("Expect a built payload event.");
         }
     }
-}
-
-/// Helper function to create a new eth payload attributes
-fn eth_payload_attributes(timestamp: u64) -> EthPayloadBuilderAttributes {
-    let attributes = PayloadAttributes {
-        timestamp,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Address::ZERO,
-        withdrawals: Some(vec![]),
-        parent_beacon_block_root: Some(B256::ZERO),
-    };
-    EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
