@@ -1690,7 +1690,7 @@ impl RpcServerConfig {
                 cl = Some(cors);
             }
             if let Some(secret) = jwt_secret {
-                jl = Some(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+                jl = Some(AuthLayer::new(JwtAuthValidator::new(secret)));
             }
             // plain server without any middleware
             let middleware = tower::ServiceBuilder::new()
@@ -1763,7 +1763,7 @@ impl RpcServerConfig {
                 cl = Some(cors);
             }
             if let Some(secret) = jwt_secret {
-                jl = Some(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+                jl = Some(AuthLayer::new(JwtAuthValidator::new(secret)));
             }
             // plain server without any middleware
             let middleware = tower::ServiceBuilder::new()
@@ -1802,7 +1802,7 @@ impl RpcServerConfig {
             }
             let mut jl: Option<AuthLayer<JwtAuthValidator>> = None;
             if let Some(secret) = self.jwt_secret.clone() {
-                jl = Some(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+                jl = Some(AuthLayer::new(JwtAuthValidator::new(secret)));
             }
             let middleware = tower::ServiceBuilder::new()
             .option_layer(cl)
