@@ -147,7 +147,7 @@ where
             &mut evm,
         )?;
 
-        // 4. execute transactions
+        // execute transactions
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
         for (sender, transaction) in block.transactions_with_sender() {
