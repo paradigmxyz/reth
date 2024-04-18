@@ -6096,7 +6096,6 @@ dependencies = [
  "reth-discv4",
  "reth-downloaders",
  "reth-ethereum-payload-builder",
- "reth-events",
  "reth-interfaces",
  "reth-network",
  "reth-network-api",
@@ -6105,6 +6104,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-ethereum",
+ "reth-node-events",
  "reth-node-optimism",
  "reth-payload-builder",
  "reth-payload-validator",
@@ -6587,27 +6587,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-events"
-version = "0.2.0-beta.5"
-dependencies = [
- "futures",
- "humantime",
- "pin-project",
- "reth-beacon-consensus",
- "reth-db",
- "reth-interfaces",
- "reth-network",
- "reth-network-api",
- "reth-primitives",
- "reth-provider",
- "reth-prune",
- "reth-stages",
- "reth-static-file",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "reth-evm"
 version = "0.2.0-beta.5"
 dependencies = [
@@ -6881,12 +6860,12 @@ dependencies = [
  "reth-config",
  "reth-db",
  "reth-downloaders",
- "reth-events",
  "reth-exex",
  "reth-interfaces",
  "reth-network",
  "reth-node-api",
  "reth-node-core",
+ "reth-node-events",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -6980,6 +6959,27 @@ dependencies = [
  "reth-provider",
  "reth-tracing",
  "reth-transaction-pool",
+]
+
+[[package]]
+name = "reth-node-events"
+version = "0.2.0-beta.5"
+dependencies = [
+ "futures",
+ "humantime",
+ "pin-project",
+ "reth-beacon-consensus",
+ "reth-db",
+ "reth-interfaces",
+ "reth-network",
+ "reth-network-api",
+ "reth-primitives",
+ "reth-provider",
+ "reth-prune",
+ "reth-stages",
+ "reth-static-file",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

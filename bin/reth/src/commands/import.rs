@@ -19,7 +19,6 @@ use reth_downloaders::{
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_events::node::NodeEvent;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
@@ -29,6 +28,7 @@ use reth_interfaces::{
 };
 use reth_node_core::init::init_genesis;
 use reth_node_ethereum::EthEvmConfig;
+use reth_node_events::node::NodeEvent;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256, OP_RETH_MAINNET_BELOW_BEDROCK};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
@@ -169,7 +169,7 @@ impl ImportCommand {
 
             let latest_block_number =
                 provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-            tokio::spawn(reth_events::node::handle_events(
+            tokio::spawn(reth_node_events::node::handle_events(
                 None,
                 latest_block_number,
                 events,

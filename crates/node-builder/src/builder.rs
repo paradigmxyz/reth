@@ -37,14 +37,16 @@ use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     engine_api_store::EngineApiStore,
+    engine_skip_fcu::EngineApiSkipFcu,
     exit::NodeExitFuture,
     init::init_genesis,
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
 };
+use reth_node_events::node;
 
-use reth_events::cl::ConsensusLayerHealthEvents;
+use reth_node_events::cl::ConsensusLayerHealthEvents;
 use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, format_ether, ChainSpec};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
@@ -816,12 +818,7 @@ where
         );
         executor.spawn_critical(
             "events task",
-            reth_events::node::handle_events(
-                Some(network.clone()),
-                Some(head.number),
-                events,
-                database.clone(),
-            ),
+            node::handle_events(Some(network.clone()), Some(head.number), events, database.clone()),
         );
 
         let engine_api = EngineApi::new(
