@@ -23,7 +23,7 @@ pub trait Executor<DB> {
 /// An executor that can execute multiple blocks in a row and keep track of the state over the
 /// entire batch.
 pub trait BatchExecutor<DB> {
-    /// Input
+    /// The input type for the executor.
     type Input<'a>;
     /// The output type for the executor.
     type Output;
