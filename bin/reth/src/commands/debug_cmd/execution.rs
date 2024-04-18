@@ -260,7 +260,7 @@ impl Command {
         );
         ctx.task_executor.spawn_critical(
             "events task",
-            reth_node_core::events::node::handle_events(
+            reth_node_events::node::handle_events(
                 Some(network.clone()),
                 latest_block_number,
                 events,
