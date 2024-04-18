@@ -1,6 +1,6 @@
 //! Support for handling events emitted by node components.
 
-use crate::events::cl::ConsensusLayerHealthEvent;
+use crate::cl::ConsensusLayerHealthEvent;
 use futures::Stream;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
