@@ -1,7 +1,6 @@
 use crate::{
     engine::{
         forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker},
-        message::OnForkChoiceUpdated,
         metrics::EngineMetrics,
     },
     hooks::{EngineHookContext, EngineHooksController},
@@ -51,7 +50,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 mod message;
-pub use message::BeaconEngineMessage;
+pub use message::{BeaconEngineMessage, OnForkChoiceUpdated};
 
 mod error;
 pub use error::{
