@@ -138,7 +138,7 @@ where
     where
         DB: Database<Error = ProviderError> + DatabaseCommit,
     {
-        //  apply pre execution changes
+        // apply pre execution changes
         apply_beacon_root_contract_call(
             &self.chain_spec,
             block.timestamp,
