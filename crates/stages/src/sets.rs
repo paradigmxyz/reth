@@ -90,6 +90,8 @@ pub struct DefaultStages<Provider, H, B, EF> {
     online: OnlineStages<Provider, H, B>,
     /// Executor factory needs for execution stage
     executor_factory: EF,
+    /// ETL configuration
+    etl_config: EtlConfig,
 }
 
 impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
@@ -113,9 +115,10 @@ impl<Provider, H, B, EF> DefaultStages<Provider, H, B, EF> {
                 consensus,
                 header_downloader,
                 body_downloader,
-                etl_config,
+                etl_config.clone(),
             ),
             executor_factory,
+            etl_config,
         }
     }
 }
@@ -128,10 +131,11 @@ where
     pub fn add_offline_stages<DB: Database>(
         default_offline: StageSetBuilder<DB>,
         executor_factory: EF,
+        etl_config: EtlConfig,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_set(default_offline)
-            .add_set(OfflineStages::new(executor_factory))
+            .add_set(OfflineStages::new(executor_factory, etl_config))
             .add_stage(FinishStage)
     }
 }
@@ -145,7 +149,11 @@ where
     DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
-        Self::add_offline_stages(self.online.builder(), self.executor_factory)
+        Self::add_offline_stages(
+            self.online.builder(),
+            self.executor_factory,
+            self.etl_config.clone(),
+        )
     }
 }
 
@@ -250,12 +258,14 @@ where
 pub struct OfflineStages<EF: ExecutorFactory> {
     /// Executor factory needs for execution stage
     pub executor_factory: EF,
+    /// ETL configuration
+    etl_config: EtlConfig,
 }
 
 impl<EF: ExecutorFactory> OfflineStages<EF> {
     /// Create a new set of offline stages with default values.
-    pub fn new(executor_factory: EF) -> Self {
-        Self { executor_factory }
+    pub fn new(executor_factory: EF, etl_config: EtlConfig) -> Self {
+        Self { executor_factory, etl_config }
     }
 }
 
@@ -263,8 +273,8 @@ impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for OfflineStages<EF> {
     fn builder(self) -> StageSetBuilder<DB> {
         ExecutionStages::new(self.executor_factory)
             .builder()
-            .add_set(HashingStages)
-            .add_set(HistoryIndexingStages)
+            .add_set(HashingStages { etl_config: self.etl_config.clone() })
+            .add_set(HistoryIndexingStages { etl_config: self.etl_config.clone() })
     }
 }
 
@@ -294,14 +304,17 @@ impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for ExecutionStages<EF> {
 /// A set containing all stages that hash account state.
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct HashingStages;
+pub struct HashingStages {
+    /// ETL configuration
+    etl_config: EtlConfig,
+}
 
 impl<DB: Database> StageSet<DB> for HashingStages {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(MerkleStage::default_unwind())
-            .add_stage(AccountHashingStage::default())
-            .add_stage(StorageHashingStage::default())
+            .add_stage(AccountHashingStage::default().with_etl_config(self.etl_config.clone()))
+            .add_stage(StorageHashingStage::default().with_etl_config(self.etl_config.clone()))
             .add_stage(MerkleStage::default_execution())
     }
 }
@@ -309,13 +322,16 @@ impl<DB: Database> StageSet<DB> for HashingStages {
 /// A set containing all stages that do additional indexing for historical state.
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct HistoryIndexingStages;
+pub struct HistoryIndexingStages {
+    /// ETL configuration
+    etl_config: EtlConfig,
+}
 
 impl<DB: Database> StageSet<DB> for HistoryIndexingStages {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(TransactionLookupStage::default())
-            .add_stage(IndexStorageHistoryStage::default())
-            .add_stage(IndexAccountHistoryStage::default())
+            .add_stage(TransactionLookupStage::default().with_etl_config(self.etl_config.clone()))
+            .add_stage(IndexStorageHistoryStage::default().with_etl_config(self.etl_config.clone()))
+            .add_stage(IndexAccountHistoryStage::default().with_etl_config(self.etl_config.clone()))
     }
 }
