@@ -2028,10 +2028,7 @@ enum WsHttpServers {
     /// Both servers are on the same port
     SamePort(WsHttpServerKind),
     /// Servers are on different ports
-    DifferentPort {
-        http: Option<WsHttpServerKind>,
-        ws: Option<WsHttpServerKind>,
-    },
+    DifferentPort { http: Option<WsHttpServerKind>, ws: Option<WsHttpServerKind> },
 }
 
 // === impl WsHttpServers ===
