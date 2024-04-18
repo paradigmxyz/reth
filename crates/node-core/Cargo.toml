@@ -35,9 +35,6 @@ reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
-reth-stages.workspace = true
-reth-prune.workspace = true
-reth-static-file.workspace = true
 
 # ethereum
 discv5.workspace = true
@@ -56,11 +53,10 @@ reth-metrics.workspace = true
 # misc
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
-humantime = "2.1.0"
+humantime.workspace = true
 thiserror.workspace = true
 const-str = "0.5.6"
 rand.workspace = true
-pin-project.workspace = true
 derive_more.workspace = true
 
 # io

@@ -396,8 +396,8 @@ impl ExExManagerHandle {
     }
 
     /// The finished height of all ExEx's.
-    pub fn finished_height(&mut self) -> FinishedExExHeight {
-        *self.finished_height.borrow_and_update()
+    pub fn finished_height(&self) -> watch::Receiver<FinishedExExHeight> {
+        self.finished_height.clone()
     }
 
     /// Wait until the manager is ready for new notifications.

@@ -125,7 +125,7 @@ impl<C> NetworkConfig<C> {
         let boot_nodes = self.boot_nodes.clone();
 
         let mut builder =
-            reth_discv5::Config::builder(rlpx_port).add_unsigned_boot_nodes(boot_nodes.into_iter()); // todo: store discv5 peers in separate file
+            reth_discv5::Config::builder(rlpx_port).add_unsigned_boot_nodes(boot_nodes.into_iter());
 
         if chain.is_optimism() {
             builder = builder.fork(ENR_FORK_KEY_OPSTACK, OptimismForkId::new(chain.id()))
