@@ -6090,6 +6090,7 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
+ "reth-cli-runner",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
@@ -6240,6 +6241,16 @@ dependencies = [
  "reth-stages",
  "reth-trie",
  "reth-trie-parallel",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "reth-cli-runner"
+version = "0.2.0-beta.5"
+dependencies = [
+ "futures",
+ "reth-tasks",
  "tokio",
  "tracing",
 ]
