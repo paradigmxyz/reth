@@ -310,21 +310,8 @@ pub trait TempManagerHandle: Send + Sync + 'static {
         notification: CanonStateNotification,
     ) -> Result<(), SendError<CanonStateNotification>>;
 
-    /// Get the current capacity of the ExEx manager's internal notification buffer.
-    fn capacity(&self) -> usize;
-
     /// Returns `true` if there are ExEx's installed in the node.
     fn has_exexs(&self) -> bool;
-
-    /// The finished height of all ExEx's.
-    ///
-    /// This is the lowest common denominator between all ExEx's. If an ExEx has not emitted a
-    /// `FinishedHeight` event, it will be `None`.
-    ///
-    /// This block is used to (amongst other things) determine what blocks are safe to prune.
-    ///
-    /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
-    fn finished_height(&mut self) -> Option<BlockNumber>;
 
     /// Wait until the manager is ready for new notifications.
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()>;

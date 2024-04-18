@@ -442,16 +442,8 @@ impl TempManagerHandle for ExExManagerHandle {
         self.send(notification)
     }
 
-    fn capacity(&self) -> usize {
-        self.capacity()
-    }
-
     fn has_exexs(&self) -> bool {
         self.has_exexs()
-    }
-
-    fn finished_height(&mut self) -> Option<BlockNumber> {
-        self.finished_height()
     }
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
