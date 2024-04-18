@@ -5,7 +5,8 @@ use reth_primitives::U256;
 use revm::db::BundleState;
 use revm_primitives::db::{Database, DatabaseCommit};
 
-/// A general purpose executor trait that executes on an input (e.g. blocks) and produces an output (e.g. state changes and receipts).
+/// A general purpose executor trait that executes on an input (e.g. blocks) and produces an output
+/// (e.g. state changes and receipts).
 pub trait Executor<DB> {
     /// The input type for the executor.
     type Input<'a>;
