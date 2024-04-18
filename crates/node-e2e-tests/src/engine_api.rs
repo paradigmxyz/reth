@@ -44,7 +44,7 @@ impl EngineApiHelper {
             eth_attr.parent_beacon_block_root.unwrap(),
         )
         .await?;
-        assert!(submission.is_valid());
+        assert!(submission.is_valid(), "{}", submission);
         Ok(submission.latest_valid_hash.unwrap())
     }
 

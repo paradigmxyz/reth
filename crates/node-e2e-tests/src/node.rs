@@ -6,14 +6,13 @@ use reth::{
     builder::FullNode,
     providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
-        eth::{error::EthResult, EthTransactions},
-        types::engine::PayloadAttributes,
+        compat::engine::payload::try_into_block, eth::{error::EthResult, EthTransactions}, types::engine::{ExecutionPayloadEnvelopeV3, PayloadAttributes}
     },
 };
 
 use reth_node_ethereum::EthEngineTypes;
-use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_primitives::{Address, Bytes, B256};
+use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadId};
+use reth_primitives::{Address, Block, BlockHash, BlockNumber, Bytes, SealedBlock, B256, U256};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_stream::StreamExt;
@@ -69,13 +68,14 @@ where
         let payload = self.payload.expect_built_payload().await?;
 
         // submit payload via engine api
+        let block_number = payload.block().number;
         let block_hash = self.engine_api.submit_payload(payload, eth_attr.clone()).await?;
 
         // trigger forkchoice update via engine api to commit the block to the blockchain
         self.engine_api.update_forkchoice(block_hash).await?;
 
         // assert the block has been committed to the blockchain
-        self.assert_new_block(tx_hash, block_hash).await?;
+        self.assert_new_block(tx_hash, block_hash, block_number).await?;
         Ok((block_hash, tx_hash))
     }
 
@@ -91,6 +91,7 @@ where
         &mut self,
         tip_tx_hash: B256,
         block_hash: B256,
+        block_number: BlockNumber
     ) -> eyre::Result<()> {
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
@@ -98,14 +99,18 @@ where
         let tx = head.tip().transactions().next();
         assert_eq!(tx.unwrap().hash().as_slice(), tip_tx_hash.as_slice());
 
-        // wait for the block to commit
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-        // make sure the block hash we submitted via FCU engine api is the new latest block
-        // using an RPC call
-        let latest_block =
-            self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap();
-        assert_eq!(latest_block.hash_slow(), block_hash);
+        loop {
+            // wait for the block to commit
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if let Some(latest_block) = self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)? {
+                if latest_block.number == block_number {
+                    // make sure the block hash we submitted via FCU engine api is the new latest block
+                    // using an RPC call
+                    assert_eq!(latest_block.hash_slow(), block_hash);
+                    break
+                }
+            }
+        }
         Ok(())
     }
 }
