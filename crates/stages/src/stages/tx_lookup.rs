@@ -48,6 +48,12 @@ impl TransactionLookupStage {
     pub fn new(chunk_size: u64, etl_config: EtlConfig, prune_mode: Option<PruneMode>) -> Self {
         Self { chunk_size, etl_config, prune_mode }
     }
+
+    /// Set the ETL configuration to use.
+    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
+        self.etl_config = etl_config;
+        self
+    }
 }
 
 impl<DB: Database> Stage<DB> for TransactionLookupStage {
