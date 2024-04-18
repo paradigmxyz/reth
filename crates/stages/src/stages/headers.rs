@@ -320,17 +320,15 @@ where
     ) -> Result<UnwindOutput, StageError> {
         self.sync_gap.take();
 
-        let unwind_target = input.unwind_to + 1;
-
         // First unwind the db tables, until the unwind_to block number. use the walker to unwind
         // HeaderNumbers based on the index in CanonicalHeaders
         provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
-            unwind_target,
+            input.unwind_to,
         )?;
-        provider.unwind_table_by_num::<tables::CanonicalHeaders>(unwind_target)?;
-        provider.unwind_table_by_num::<tables::HeaderTerminalDifficulties>(unwind_target)?;
+        provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
+        provider.unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
         let unfinalized_headers_unwound =
-            provider.unwind_table_by_num::<tables::Headers>(unwind_target)?;
+            provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         // determine how many headers to unwind from the static files based on the highest block and
         // the unwind_to block
