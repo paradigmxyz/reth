@@ -720,10 +720,9 @@ where
             return Some(B256::ZERO)
         }
 
-        // If this is sent from new payload then the parent hash could be in a side chain, and is
-        // not necessarily canonical
-        if self.blockchain.header_by_hash(parent_hash).is_some() {
-            // parent is in side-chain: validated but not canonical yet
+        // Check if parent exists in side chain or in canonical chain.
+        if matches!(self.blockchain.find_block_by_hash(parent_hash, BlockSource::Any), Ok(Some(_)))
+        {
             Some(parent_hash)
         } else {
             // TODO: attempt to iterate over ancestors in the invalid cache
