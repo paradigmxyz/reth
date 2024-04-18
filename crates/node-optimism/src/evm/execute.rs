@@ -125,7 +125,9 @@ where
 {
     /// Executes the transactions in the block and returns the receipts.
     ///
-    /// This applies the pre-execution changes, executes the transactions.
+    /// This applies the pre-execution changes, and executes the transactions.
+    ///
+    /// # Note
     ///
     /// It does __not__ apply post-execution changes.
     fn execute_pre_and_transactions<Ext, DB>(
