@@ -48,7 +48,7 @@ pub struct BatchBlockOutput {
 ///
 /// Contains the receipts of the transactions in the block and the total gas used.
 ///
-/// TODO combine with BundleStateWithReceipts
+/// TODO(mattsse): combine with BundleStateWithReceipts
 #[derive(Debug)]
 pub struct EthBlockOutput<T> {
     /// The changed state of the block after execution.
