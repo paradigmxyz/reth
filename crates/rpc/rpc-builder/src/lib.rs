@@ -2014,38 +2014,23 @@ struct WsHttpServer {
     jwt_secret: Option<JwtSecret>,
 }
 
+// Define the type alias with detailed type complexity
+type WsHttpServerKind = Server<
+    Stack<
+        tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
+        Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
+    >,
+    Stack<RpcRequestMetrics, Identity>,
+>;
+
 /// Enum for holding the http and ws servers in all possible combinations.
 enum WsHttpServers {
     /// Both servers are on the same port
-    SamePort(
-        Server<
-            Stack<
-                tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
-                Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
-            >,
-            Stack<RpcRequestMetrics, Identity>,
-        >,
-    ),
+    SamePort(WsHttpServerKind),
     /// Servers are on different ports
     DifferentPort {
-        http: Option<
-            Server<
-                Stack<
-                    tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
-                    Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
-                >,
-                Stack<RpcRequestMetrics, Identity>,
-            >,
-        >,
-        ws: Option<
-            Server<
-                Stack<
-                    tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
-                    Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
-                >,
-                Stack<RpcRequestMetrics, Identity>,
-            >,
-        >,
+        http: Option<WsHttpServerKind>,
+        ws: Option<WsHttpServerKind>,
     },
 }
 
