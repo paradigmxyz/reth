@@ -250,7 +250,9 @@ where
 {
     /// Configures a new evm configuration and block environment for the given block.
     ///
-    /// Caution: this does not initialize the tx environment.
+    /// # Caution
+    ///
+    /// This does not initialize the tx environment.
     fn evm_env_for_block(&self, header: &Header, total_difficulty: U256) -> EnvWithHandlerCfg {
         let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
         let mut block_env = BlockEnv::default();
