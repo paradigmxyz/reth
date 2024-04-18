@@ -13,7 +13,7 @@ use crate::{
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
-use reth_config::Config;
+use reth_config::{config::EtlConfig, Config};
 use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -200,10 +200,16 @@ impl Command {
 
     /// Execute `execution-debug` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let config = Config::default();
+        let mut config = Config::default();
 
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
+
+        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
+        if config.stages.etl.dir.is_none() {
+            config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+        }
+
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         let provider_factory =

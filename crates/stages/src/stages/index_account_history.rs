@@ -37,6 +37,12 @@ impl IndexAccountHistoryStage {
     ) -> Self {
         Self { commit_threshold, prune_mode, etl_config }
     }
+
+    /// Set the ETL configuration to use.
+    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
+        self.etl_config = etl_config;
+        self
+    }
 }
 
 impl Default for IndexAccountHistoryStage {
