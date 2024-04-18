@@ -1,5 +1,6 @@
 //! Ethereum block executor.
 
+use crate::EthEvmConfig;
 use reth_evm::{
     execute::{
         BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor,
@@ -39,6 +40,13 @@ pub struct EthExecutorProvider<EvmConfig> {
     evm_config: EvmConfig,
     inspector: Option<InspectorStack>,
     prune_modes: PruneModes,
+}
+
+impl EthExecutorProvider<EthEvmConfig> {
+    /// Creates a new default ethereum executor provider.
+    pub fn ethereum(chain_spec: Arc<ChainSpec>) -> Self {
+        Self::new(chain_spec, Default::default())
+    }
 }
 
 impl<EvmConfig> EthExecutorProvider<EvmConfig> {

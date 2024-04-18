@@ -1,5 +1,6 @@
 //! Optimism block executor.
 
+use crate::OptimismEvmConfig;
 use reth_evm::{
     execute::{
         BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor,
@@ -40,6 +41,13 @@ pub struct OpExecutorProvider<EvmConfig> {
     evm_config: EvmConfig,
     inspector: Option<InspectorStack>,
     prune_modes: PruneModes,
+}
+
+impl OpExecutorProvider<OptimismEvmConfig> {
+    /// Creates a new default optimism executor provider.
+    pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
+        Self::new(chain_spec, Default::default())
+    }
 }
 
 impl<EvmConfig> OpExecutorProvider<EvmConfig> {
