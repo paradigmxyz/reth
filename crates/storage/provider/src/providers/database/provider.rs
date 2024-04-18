@@ -709,7 +709,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// Return range of blocks and its execution result
     fn get_take_block_range<const TAKE: bool>(
         &self,
-        chain_spec: &ChainSpec,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
         // For block we need Headers, Bodies, Uncles, withdrawals, Transactions, Signers
@@ -768,7 +767,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             };
 
             // withdrawal can be missing
-            let shanghai_is_active = chain_spec.is_shanghai_active_at_timestamp(header.timestamp);
+            let shanghai_is_active =
+                self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp);
             let mut withdrawals = Some(Withdrawals::default());
             if shanghai_is_active {
                 if let Some((block_number, _)) = block_withdrawals.as_ref() {
@@ -2376,7 +2376,6 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
     /// Return range of blocks and its execution result
     fn get_or_take_block_and_execution_range<const TAKE: bool>(
         &self,
-        chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain> {
         if TAKE {
@@ -2447,7 +2446,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
         }
 
         // get blocks
-        let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;
+        let blocks = self.get_take_block_range::<TAKE>(range.clone())?;
         let unwind_to = blocks.first().map(|b| b.number.saturating_sub(1));
         // get execution res
         let execution_state = self.unwind_or_peek_state::<TAKE>(range.clone())?;

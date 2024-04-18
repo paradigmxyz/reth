@@ -1213,10 +1213,7 @@ where
         info!(target: "blockchain_tree", "REORG: revert canonical from database by unwinding chain blocks {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = provider_rw
-            .take_block_and_execution_range(
-                self.externals.provider_factory.chain_spec().as_ref(),
-                revert_range,
-            )
+            .take_block_and_execution_range(revert_range)
             .map_err(|e| CanonicalError::CanonicalRevert(e.to_string()))?;
 
         provider_rw.commit()?;
