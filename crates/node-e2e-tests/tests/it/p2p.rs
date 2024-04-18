@@ -52,7 +52,7 @@ async fn can_sync() -> eyre::Result<()> {
 
     let mut second_node = NodeHelper::new(node).await?;
 
-    let wallet = Wallet::default();
+    let mut wallet = Wallet::default();
     let raw_tx = wallet.transfer_tx().await;
 
     // Make them peer
@@ -70,7 +70,7 @@ async fn can_sync() -> eyre::Result<()> {
     second_node.engine_api.update_forkchoice(block_hash).await?;
 
     // expect second node advanced via p2p gossip
-    second_node.assert_new_block(tx_hash, block_hash).await?;
+    second_node.assert_new_block(tx_hash, block_hash, 1).await?;
 
     Ok(())
 }

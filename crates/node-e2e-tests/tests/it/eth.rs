@@ -40,7 +40,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let mut node = NodeHelper::new(node).await?;
 
     // Configure wallet from test mnemonic and create dummy transfer tx
-    let wallet = Wallet::default();
+    let mut wallet = Wallet::default();
     let raw_tx = wallet.transfer_tx().await;
 
     // make the node advance
@@ -79,7 +79,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     let mut node = NodeHelper::new(node).await?;
 
     // Configure wallet from test mnemonic and create dummy transfer tx
-    let wallet = Wallet::default();
+    let mut wallet = Wallet::default();
     let raw_tx = wallet.transfer_tx().await;
 
     // make the node advance
