@@ -1,18 +1,13 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use num_traits::Zero;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::Database,
-    models::BlockNumberAddress,
-    static_file::HeaderMask,
-    tables,
-    transaction::{DbTx, DbTxMut},
+    cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, PruneModes, StaticFileSegment, U256,
+    BlockNumber, Header, PruneModes, StaticFileSegment,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -460,73 +455,34 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let tx = provider.tx_ref();
-        // Acquire changeset cursors
-        let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
-        let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
-
         let (range, unwind_to, _) =
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
-
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
             })
         }
 
-        // get all batches for account change
-        // Check if walk and walk_dup would do the same thing
-        let account_changeset_batch =
-            account_changeset.walk_range(range.clone())?.collect::<Result<Vec<_>, _>>()?;
+        // Unwind account and storage changesets, as well as receipts.
+        //
+        // This also updates `PlainStorageState` and `PlainAccountState`.
+        let bundle_state_with_receipts = provider.unwind_or_peek_state::<true>(range.clone())?;
 
-        // revert all changes to PlainState
-        for (_, changeset) in account_changeset_batch.into_iter().rev() {
-            if let Some(account_info) = changeset.info {
-                tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
-            } else {
-                tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
-            }
+        // Construct a `CanonStateNotification` if we have ExEx's installed.
+        if self.exex_manager_handle.as_ref().is_some_and(|handle| handle.has_exexs()) {
+            let handle = self.exex_manager_handle.as_ref().unwrap();
+
+            // Get the blocks for the unwound range. This is needed for `CanonStateNotification`.
+            let blocks = provider.get_take_block_range::<false>(range.clone())?;
+            let chain = Chain::new(blocks, bundle_state_with_receipts, None);
+
+            // NOTE: We can ignore the error here, since an error means that the channel is closed,
+            // which means the manager has died, which then in turn means the node is shutting down.
+            let _ = handle.send(CanonStateNotification::Reorg {
+                old: Arc::new(chain),
+                new: Arc::new(Chain::default()),
+            });
         }
-
-        // get all batches for storage change
-        let storage_changeset_batch = storage_changeset
-            .walk_range(BlockNumberAddress::range(range.clone()))?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // revert all changes to PlainStorage
-        let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-
-        for (key, storage) in storage_changeset_batch.into_iter().rev() {
-            let address = key.address();
-            if let Some(v) = plain_storage_cursor.seek_by_key_subkey(address, storage.key)? {
-                if v.key == storage.key {
-                    plain_storage_cursor.delete_current()?;
-                }
-            }
-            if storage.value != U256::ZERO {
-                plain_storage_cursor.upsert(address, storage)?;
-            }
-        }
-
-        // Discard unwinded changesets
-        provider.unwind_table_by_num::<tables::AccountChangeSets>(unwind_to)?;
-
-        let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
-        while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
-            if key.block_number() < *range.start() {
-                break
-            }
-            // delete all changesets
-            rev_storage_changeset_walker.delete_current()?;
-        }
-
-        // Look up the start index for the transaction range
-        let first_tx_num = provider
-            .block_body_indices(*range.start())?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(*range.start()))?
-            .first_tx_num();
-
-        let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
 
         // Unwind all receipts for transactions in the block range
         if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
@@ -536,34 +492,24 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             // if the expected highest receipt in the files is higher than the database.
             // Which is essentially what happens here when we unwind this stage.
             let _static_file_producer = prepare_static_file_producer(provider, *range.start())?;
-
-            // Update the checkpoint.
-            if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
-                for block_number in range {
-                    stage_checkpoint.progress.processed -= provider
-                        .block_by_number(block_number)?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
-                        .gas_used;
-                }
-            }
         } else {
-            // We use database for Receipts, if there is any kind of receipt pruning/filtering,
-            // since it is not supported by static files.
-            let mut cursor = tx.cursor_write::<tables::Receipts>()?;
-            let mut reverse_walker = cursor.walk_back(None)?;
-
-            while let Some(Ok((tx_number, receipt))) = reverse_walker.next() {
-                if tx_number < first_tx_num {
-                    break
-                }
-                reverse_walker.delete_current()?;
-
-                if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
-                    stage_checkpoint.progress.processed -= receipt.cumulative_gas_used;
-                }
-            }
+            // If there is any kind of receipt pruning/filtering we use the database, since static
+            // files do not support filters.
+            //
+            // If we hit this case, the receipts have already been unwound by the call to
+            // `unwind_or_peek_state`.
         }
 
+        // Update the checkpoint.
+        let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
+        if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
+            for block_number in range {
+                stage_checkpoint.progress.processed -= provider
+                    .block_by_number(block_number)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
+                    .gas_used;
+            }
+        }
         let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {
             StageCheckpoint::new(unwind_to).with_execution_stage_checkpoint(stage_checkpoint)
         } else {
