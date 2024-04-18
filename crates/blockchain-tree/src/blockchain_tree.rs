@@ -267,18 +267,18 @@ where
             let state = chain.state_at_block(block_number)?;
 
             // get parent hashes
-            let mut parent_block_hashed = self.all_chain_hashes(chain_id);
+            let mut parent_block_hashes = self.all_chain_hashes(chain_id);
             let first_pending_block_number =
-                *parent_block_hashed.first_key_value().expect("There is at least one block hash").0;
+                *parent_block_hashes.first_key_value().expect("There is at least one block hash").0;
             let canonical_chain = canonical_chain
                 .iter()
                 .filter(|&(key, _)| key < first_pending_block_number)
                 .collect::<Vec<_>>();
-            parent_block_hashed.extend(canonical_chain);
+            parent_block_hashes.extend(canonical_chain);
 
             // get canonical fork.
             let canonical_fork = self.canonical_fork(chain_id)?;
-            return Some(BundleStateData { state, parent_block_hashed, canonical_fork })
+            return Some(BundleStateData { state, parent_block_hashes, canonical_fork })
         }
 
         // check if there is canonical block
@@ -287,7 +287,7 @@ where
             return Some(BundleStateData {
                 canonical_fork: ForkBlock { number: canonical_number, hash: block_hash },
                 state: BundleStateWithReceipts::default(),
-                parent_block_hashed: canonical_chain.inner().clone(),
+                parent_block_hashes: canonical_chain.inner().clone(),
             })
         }
 

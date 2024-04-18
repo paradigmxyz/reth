@@ -1,7 +1,6 @@
 use crate::{
     engine::{
         forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker},
-        message::OnForkChoiceUpdated,
         metrics::EngineMetrics,
     },
     hooks::{EngineHookContext, EngineHooksController},
@@ -51,7 +50,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 mod message;
-pub use message::BeaconEngineMessage;
+pub use message::{BeaconEngineMessage, OnForkChoiceUpdated};
 
 mod error;
 pub use error::{
@@ -988,42 +987,38 @@ where
             }
         }
 
-        // we assume the FCU is valid and at least the head is missing, so we need to start syncing
-        // to it
-        let target = if self.forkchoice_state_tracker.is_empty() {
-            // find the appropriate target to sync to, if we don't have the safe block hash then we
-            // start syncing to the safe block via pipeline first
-            let target = if !state.safe_block_hash.is_zero() &&
-                self.blockchain.block_number(state.safe_block_hash).ok().flatten().is_none()
-            {
-                state.safe_block_hash
-            } else {
-                state.head_block_hash
-            };
-
-            // we need to first check the buffer for the head and its ancestors
-            let lowest_unknown_hash = self.lowest_buffered_ancestor_or(target);
-            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering full block download for missing ancestors of the new head");
-            lowest_unknown_hash
+        // we assume the FCU is valid and at least the head is missing,
+        // so we need to start syncing to it
+        //
+        // find the appropriate target to sync to, if we don't have the safe block hash then we
+        // start syncing to the safe block via pipeline first
+        let target = if self.forkchoice_state_tracker.is_empty() &&
+            // check that safe block is valid and missing
+            !state.safe_block_hash.is_zero() &&
+            self.blockchain.block_number(state.safe_block_hash).ok().flatten().is_none()
+        {
+            state.safe_block_hash
         } else {
-            // we need to first check the buffer for the head and its ancestors
-            let lowest_unknown_hash = self.lowest_buffered_ancestor_or(state.head_block_hash);
-            trace!(target: "consensus::engine", request=?lowest_unknown_hash, "Triggering full block download for missing ancestors of the new head");
-            lowest_unknown_hash
+            state.head_block_hash
         };
+
+        // we need to first check the buffer for the target and its ancestors
+        let target = self.lowest_buffered_ancestor_or(target);
 
         // if the threshold is zero, we should not download the block first, and just use the
         // pipeline. Otherwise we use the tree to insert the block first
         if self.pipeline_run_threshold == 0 {
             // use the pipeline to sync to the target
+            trace!(target: "consensus::engine", %target, "Triggering pipeline run to sync missing ancestors of the new head");
             self.sync.set_pipeline_sync_target(target);
         } else {
             // trigger a full block download for missing hash, or the parent of its lowest buffered
             // ancestor
+            trace!(target: "consensus::engine", request=%target, "Triggering full block download for missing ancestors of the new head");
             self.sync.download_full_block(target);
         }
 
-        debug!(target: "consensus::engine", ?target, "Syncing to new target");
+        debug!(target: "consensus::engine", %target, "Syncing to new target");
         PayloadStatus::from_status(PayloadStatusEnum::Syncing)
     }
 
@@ -1335,25 +1330,6 @@ where
         }
     }
 
-    /// Attempt to restore the tree with the given block hash.
-    ///
-    /// This is invoked after a full pipeline to update the tree with the most recent canonical
-    /// hashes.
-    ///
-    /// If the given block is missing from the database, this will return `false`. Otherwise, `true`
-    /// is returned: the database contains the hash and the tree was updated.
-    fn update_tree_on_finished_pipeline(&mut self, block_hash: B256) -> RethResult<bool> {
-        let synced_to_finalized = match self.blockchain.block_number(block_hash)? {
-            Some(number) => {
-                // Attempt to restore the tree.
-                self.blockchain.connect_buffered_blocks_to_canonical_hashes_and_finalize(number)?;
-                true
-            }
-            None => false,
-        };
-        Ok(synced_to_finalized)
-    }
-
     /// Invoked if we successfully downloaded a new block from the network.
     ///
     /// This will attempt to insert the block into the tree.
@@ -1592,8 +1568,7 @@ where
     /// Updates the internal sync state depending on the pipeline configuration,
     /// the outcome of the pipeline run and the last observed forkchoice state.
     fn on_pipeline_outcome(&mut self, ctrl: ControlFlow) -> RethResult<()> {
-        // Pipeline unwound, memorize the invalid block and
-        // wait for CL for further sync instructions.
+        // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
         if let ControlFlow::Unwind { bad_block, .. } = ctrl {
             warn!(target: "consensus::engine", invalid_hash=?bad_block.hash(), invalid_number=?bad_block.number, "Bad block detected in unwind");
             // update the `invalid_headers` cache with the new invalid header
@@ -1678,17 +1653,18 @@ where
         if let Some(target) = pipeline_target {
             // run the pipeline to the target since the distance is sufficient
             self.sync.set_pipeline_sync_target(target);
-        } else {
-            // Update the state and hashes of the blockchain tree if possible.
-            let synced =  self.update_tree_on_finished_pipeline(sync_target_state.finalized_block_hash).inspect_err(|error| {
+        } else if let Some(number) =
+            self.blockchain.block_number(sync_target_state.finalized_block_hash)?
+        {
+            // Finalized block is in the database, attempt to restore the tree with
+            // the most recent canonical hashes.
+            self.blockchain.connect_buffered_blocks_to_canonical_hashes_and_finalize(number).inspect_err(|error| {
                 error!(target: "consensus::engine", %error, "Error restoring blockchain tree state");
             })?;
-
-            if !synced {
-                // We don't have the finalized block in the database, so
-                // we need to run another pipeline.
-                self.sync.set_pipeline_sync_target(sync_target_state.finalized_block_hash);
-            }
+        } else {
+            // We don't have the finalized block in the database, so we need to
+            // trigger another pipeline run.
+            self.sync.set_pipeline_sync_target(sync_target_state.finalized_block_hash);
         }
 
         Ok(())
