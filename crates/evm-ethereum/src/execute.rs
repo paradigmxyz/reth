@@ -403,7 +403,7 @@ pub struct EthBatchExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> BatchExecutor<DB> for EthBatchExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    // TODO: get rid of this
+    // TODO(mattsse): get rid of this
     EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
     DB: Database<Error = ProviderError> + DatabaseCommit,
 {
