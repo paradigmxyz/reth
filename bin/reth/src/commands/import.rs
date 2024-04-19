@@ -21,18 +21,14 @@ use reth_downloaders::{
 };
 use reth_interfaces::{
     consensus::Consensus,
-    p2p::{
-        bodies::downloader::BodyDownloader,
-        headers::downloader::{HeaderDownloader, SyncTarget},
-    },
 };
 use reth_node_core::init::init_genesis;
 use reth_node_ethereum::EthEvmConfig;
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{
-    stage::StageId, ChainSpec, PruneModes, SealedHeader, B256, OP_RETH_MAINNET_BELOW_BEDROCK,
+    stage::StageId, ChainSpec, PruneModes, B256, OP_RETH_MAINNET_BELOW_BEDROCK,
 };
-use reth_provider::{HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
+use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
@@ -93,10 +89,6 @@ pub struct ImportCommand {
     /// remaining stages are executed.
     #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
     path: PathBuf,
-
-    /// Start block number of chain segment to import.
-    #[arg(value_name = "START_BLOCK", verbatim_doc_comment, default_value_t)]
-    start: u64,
 }
 
 impl ImportCommand {
@@ -142,31 +134,14 @@ impl ImportCommand {
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
-        let mut start_header: Option<SealedHeader> = None;
-
-        if self.start != 0 {
-            start_header = provider_factory
-                .provider()?
-                .sealed_header(block_num)
-                .expect("start block is not canonical with db");
-        }
-
         while let Some(file_client) = reader.next_chunk().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
             );
 
-            // override the tip
             let tip = file_client.tip().expect("file client has no tip");
             info!(target: "reth::cli", "Chain file chunk read");
-            // this will be start header of next chunk
-            let tip_header = file_client.tip_header().unwrap();
-
-            if start_header.is_none() {
-                // start header is genesis block
-                start_header = file_client.start_header();
-            }
 
             let (mut pipeline, events) = self
                 .build_import_pipeline(
@@ -180,11 +155,8 @@ impl ImportCommand {
                         PruneModes::default(),
                     ),
                     self.disable_execution,
-                    start_header.unwrap(),
                 )
                 .await?;
-
-            start_header = Some(tip_header);
 
             // override the tip
             pipeline.set_tip(tip);
@@ -222,7 +194,6 @@ impl ImportCommand {
         file_client: Arc<FileClient>,
         static_file_producer: StaticFileProducer<DB>,
         disable_execution: bool,
-        start_header: SealedHeader,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,
@@ -232,18 +203,13 @@ impl ImportCommand {
             eyre::bail!("unable to import non canonical blocks");
         }
 
-        let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
+        let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
             .build(file_client.clone(), consensus.clone())
             .into_task();
-        header_downloader.update_local_head(start_header);
-        header_downloader.update_sync_target(SyncTarget::Tip(file_client.tip().unwrap()));
 
-        let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
+        let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
             .build(file_client.clone(), consensus.clone(), provider_factory.clone())
             .into_task();
-        body_downloader
-            .set_download_range(file_client.min_block().unwrap()..=file_client.max_block().unwrap())
-            .expect("failed to set download range");
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let factory =
