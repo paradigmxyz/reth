@@ -1681,19 +1681,15 @@ impl RpcServerConfig {
             modules.config.ensure_ws_http_identical()?;
 
             let builder = self.http_server_config.take().expect("http_server_config is Some");
-
-            let mut jl: Option<AuthLayer<JwtAuthValidator>> = None;
-            let mut cl: Option<CorsLayer> = None;
-
-            if let Some(cors) = cors.as_deref().map(cors::create_cors_layer) {
-                let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
-                cl = Some(cors);
-            }
-            if let Some(secret) = jwt_secret {
-                jl = Some(AuthLayer::new(JwtAuthValidator::new(secret)));
-            }
-            // plain server without any middleware
-            let middleware = tower::ServiceBuilder::new().option_layer(cl).option_layer(jl);
+            let cors_layer: Option<CorsLayer> = cors
+                .as_deref()
+                .map(cors::create_cors_layer)
+                .and_then(|res| res.ok())
+                .or_else(|| None);
+            let jwt_auth: Option<AuthLayer<JwtAuthValidator>> =
+                jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)));
+            let middleware =
+                tower::ServiceBuilder::new().option_layer(cors_layer).option_layer(jwt_auth);
 
             let server = builder
                 .set_http_middleware(middleware)
@@ -1729,18 +1725,16 @@ impl RpcServerConfig {
         if let Some(builder) = self.ws_server_config.take() {
             let builder = builder.ws_only();
 
-            let mut jl: Option<AuthLayer<JwtAuthValidator>> = None;
-            let mut cl: Option<CorsLayer> = None;
-
-            if let Some(cors) = self.ws_cors_domains.as_deref().map(cors::create_cors_layer) {
-                let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
-                cl = Some(cors);
-            }
-            if let Some(secret) = jwt_secret {
-                jl = Some(AuthLayer::new(JwtAuthValidator::new(secret)));
-            }
-            // plain server without any middleware
-            let middleware = tower::ServiceBuilder::new().option_layer(cl).option_layer(jl);
+            let cors_layer: Option<CorsLayer> = self
+                .ws_cors_domains
+                .as_deref()
+                .map(cors::create_cors_layer)
+                .and_then(|res| res.ok())
+                .or_else(|| None);
+            let jwt_auth: Option<AuthLayer<JwtAuthValidator>> =
+                jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)));
+            let middleware =
+                tower::ServiceBuilder::new().option_layer(cors_layer).option_layer(jwt_auth);
 
             let server = builder
                 .set_http_middleware(middleware)
@@ -1761,16 +1755,21 @@ impl RpcServerConfig {
 
         if let Some(builder) = self.http_server_config.take() {
             let builder = builder.http_only();
-            let mut cl: Option<CorsLayer> = None;
-            if let Some(cors) =
-                self.http_cors_domains.take().as_deref().map(cors::create_cors_layer)
-            {
-                let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
-                cl = Some(cors);
-            }
-            let jwt_auth: Option<AuthLayer<JwtAuthValidator>> =
-                self.jwt_secret.clone().map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)));
-            let middleware = tower::ServiceBuilder::new().option_layer(cl).option_layer(jwt_auth);
+
+            let cors_layer: Option<CorsLayer> = self
+                .http_cors_domains
+                .take()
+                .as_deref()
+                .map(cors::create_cors_layer)
+                .and_then(|res| res.ok())
+                .or_else(|| None);
+            let jwt_auth: Option<AuthLayer<JwtAuthValidator>> = self
+                .jwt_secret
+                .as_ref()
+                .map(|secret| AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+
+            let middleware =
+                tower::ServiceBuilder::new().option_layer(cors_layer).option_layer(jwt_auth);
 
             let server = builder
                 .set_http_middleware(middleware)
