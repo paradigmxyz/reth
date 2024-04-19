@@ -15,7 +15,6 @@ use metrics::Gauge;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::{BlockNumber, FinishedExExHeight};
 use reth_provider::CanonStateNotification;
-use reth_stages::stages::TempManagerHandle;
 use reth_tracing::tracing::debug;
 use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
@@ -356,6 +355,26 @@ pub struct ExExManagerHandle {
 }
 
 impl ExExManagerHandle {
+    /// Creates an empty manager handle.
+    ///
+    /// Use this if there is no manager present.
+    ///
+    /// The handle will always be ready, and have a capacity of 0.
+    pub fn empty() -> Self {
+        let (exex_tx, _) = mpsc::unbounded_channel();
+        let (_, is_ready_rx) = watch::channel(true);
+        let (_, finished_height_rx) = watch::channel(FinishedExExHeight::NoExExs);
+
+        Self {
+            exex_tx,
+            num_exexs: 0,
+            is_ready_receiver: is_ready_rx.clone(),
+            is_ready: WatchStream::new(is_ready_rx),
+            current_capacity: Arc::new(AtomicUsize::new(0)),
+            finished_height: finished_height_rx,
+        }
+    }
+
     /// Synchronously send a notification over the channel to all execution extensions.
     ///
     /// Senders should call [`Self::has_capacity`] first.
@@ -431,23 +450,6 @@ impl Clone for ExExManagerHandle {
             current_capacity: self.current_capacity.clone(),
             finished_height: self.finished_height.clone(),
         }
-    }
-}
-
-impl TempManagerHandle for ExExManagerHandle {
-    fn send(
-        &self,
-        notification: CanonStateNotification,
-    ) -> Result<(), SendError<CanonStateNotification>> {
-        self.send(notification)
-    }
-
-    fn has_exexs(&self) -> bool {
-        self.has_exexs()
-    }
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        self.poll_ready(cx)
     }
 }
 

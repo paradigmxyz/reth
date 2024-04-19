@@ -19,6 +19,7 @@ use reth_downloaders::{
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_exex::ExExManagerHandle;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
@@ -272,8 +273,8 @@ impl ImportCommand {
                         .clean_threshold
                         .max(config.stages.account_hashing.clean_threshold)
                         .max(config.stages.storage_hashing.clean_threshold),
-                    config.prune.map(|prune| prune.segments).unwrap_or_default(),
-                    None,
+                    config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
+                    ExExManagerHandle::empty(),
                 ))
                 .disable_all_if(STATE_STAGES, || no_state),
             )

@@ -19,9 +19,6 @@ reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
-# TODO(onbjerg): remove this
-# it is temporarily imported because of a circular dependency, see the docs for TempManagerHandle in reth-stages
-reth-stages.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
 

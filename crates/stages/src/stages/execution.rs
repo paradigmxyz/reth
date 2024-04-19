@@ -3,6 +3,7 @@ use num_traits::Zero;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
+use reth_exex::ExExManagerHandle;
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
@@ -23,10 +24,9 @@ use std::{
     cmp::Ordering,
     ops::RangeInclusive,
     sync::Arc,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
-use tokio::sync::mpsc::error::SendError;
 use tracing::*;
 
 /// The execution stage executes all transactions and
@@ -74,9 +74,7 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     /// Pruning configuration.
     prune_modes: PruneModes,
     /// Handle to communicate with ExEx manager.
-    ///
-    /// TODO(onbjerg): Unbox this when we can remove the temporary trait
-    exex_manager_handle: Option<Box<dyn TempManagerHandle>>,
+    exex_manager_handle: ExExManagerHandle,
 }
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
@@ -86,7 +84,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         prune_modes: PruneModes,
-        exex_manager_handle: Option<Box<dyn TempManagerHandle>>,
+        exex_manager_handle: ExExManagerHandle,
     ) -> Self {
         Self {
             metrics_tx: None,
@@ -107,7 +105,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
-            None,
+            ExExManagerHandle::empty(),
         )
     }
 
@@ -201,7 +199,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             stage_checkpoint.progress.processed += block.gas_used;
 
             // If we have ExEx's we need to save the block in memory for later
-            if self.exex_manager_handle.as_ref().is_some_and(|handle| handle.has_exexs()) {
+            if self.exex_manager_handle.has_exexs() {
                 blocks.push(block);
             }
 
@@ -222,10 +220,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Check if we should send a [`CanonStateNotification`] to execution extensions.
         //
-        // Note: Since we only write to `blocks` if there are any ExEx's (and thus a handle), we can
-        // safely unwrap if there are any blocks in the Vec.
+        // Note: Since we only write to `blocks` if there are any ExEx's we don't need to perform
+        // the `has_exexs` check here as well
         if !blocks.is_empty() {
-            let handle = self.exex_manager_handle.as_ref().unwrap();
             let chain = Arc::new(Chain::new(
                 blocks.into_iter().map(|block| {
                     let hash = block.header.hash_slow();
@@ -237,7 +234,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             // NOTE: We can ignore the error here, since an error means that the channel is closed,
             // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = handle.send(CanonStateNotification::Commit { new: chain });
+            let _ = self.exex_manager_handle.send(CanonStateNotification::Commit { new: chain });
         }
 
         let time = Instant::now();
@@ -293,28 +290,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         }
         Ok(prune_modes)
     }
-}
-
-/// Temporary workaround trait for ExExManagerHandle not being importable in this crate due to a
-/// circular dependency.
-///
-/// The circular dependency is:
-///     reth-exex depends on reth-node-core for some config types which depends on reth-stages
-///     reth-stages depends on reth-exex for the handle
-///
-/// TODO(onbjerg): Remove this as soon as possible
-pub trait TempManagerHandle: Send + Sync + 'static {
-    /// Synchronously send a notification over the channel to all execution extensions.t.
-    fn send(
-        &self,
-        notification: CanonStateNotification,
-    ) -> Result<(), SendError<CanonStateNotification>>;
-
-    /// Returns `true` if there are ExEx's installed in the node.
-    fn has_exexs(&self) -> bool;
-
-    /// Wait until the manager is ready for new notifications.
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()>;
 }
 
 fn execution_checkpoint(
@@ -418,11 +393,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         cx: &mut Context<'_>,
         _: ExecInput,
     ) -> Poll<Result<(), StageError>> {
-        if let Some(handle) = self.exex_manager_handle.as_mut() {
-            if handle.poll_ready(cx) == Poll::Pending {
-                return Poll::Pending
-            }
-        }
+        ready!(self.exex_manager_handle.poll_ready(cx));
 
         Poll::Ready(Ok(()))
     }
@@ -456,16 +427,14 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         let bundle_state_with_receipts = provider.unwind_or_peek_state::<true>(range.clone())?;
 
         // Construct a `CanonStateNotification` if we have ExEx's installed.
-        if self.exex_manager_handle.as_ref().is_some_and(|handle| handle.has_exexs()) {
-            let handle = self.exex_manager_handle.as_ref().unwrap();
-
+        if self.exex_manager_handle.has_exexs() {
             // Get the blocks for the unwound range. This is needed for `CanonStateNotification`.
             let blocks = provider.get_take_block_range::<false>(range.clone())?;
             let chain = Chain::new(blocks, bundle_state_with_receipts, None);
 
             // NOTE: We can ignore the error here, since an error means that the channel is closed,
             // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = handle.send(CanonStateNotification::Reorg {
+            let _ = self.exex_manager_handle.send(CanonStateNotification::Reorg {
                 old: Arc::new(chain),
                 new: Arc::new(Chain::default()),
             });
