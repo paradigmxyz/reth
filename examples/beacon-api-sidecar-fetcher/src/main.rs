@@ -5,15 +5,20 @@
 
 use std::{
     collections::VecDeque,
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr},
     pin::Pin,
     task::{ready, Context, Poll},
 };
 
-use futures_util::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
-use reqwest::Error;
+use futures_util::{
+    future::BoxFuture, stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt,
+};
+use reqwest::{Error, Request, Response};
 use reth::{
-    primitives::{BlobTransaction, BlobTransactionSidecar, BlockHash, BlockNumber, Transaction},
+    primitives::{
+        alloy_primitives::TxHash, BlobTransaction, BlobTransactionSidecar, BlockHash, BlockNumber,
+        Transaction, B256,
+    },
     providers::CanonStateNotification,
     transaction_pool::TransactionPoolExt,
 };
@@ -21,8 +26,6 @@ use reth::{
 use serde::{self, Deserialize, Serialize};
 use tracing::debug;
 
-//TODO look at PeersManager.
-//TODO Figure out pending_requests/queued_actions
 //TODO Figure out error handling
 //TODO Pass (tx, + blockhash/number + sidecar) alongside value
 //TODO Seperate Default CL URL logic/function
@@ -33,12 +36,19 @@ async fn main() -> eyre::Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct MinedSidecar {
-    tx: Transaction,
+    tx_hash: TxHash,
     block_hash: BlockHash,
     block_number: BlockNumber,
     sidecar: BlobTransactionSidecar,
+}
+
+struct PendingMinedSidecar {
+    cl_request: Pin<Box<dyn Future<Output = Result<Response, Error>> + Send>>,
+    tx_hash: TxHash,
+    block_hash: BlockHash,
+    block_number: BlockNumber,
 }
 
 #[derive(Debug)]
@@ -49,10 +59,9 @@ where
     events: St,
     pool: P,
     client: reqwest::Client,
-    pending_requests:
-        FuturesUnordered<Pin<Box<dyn Future<Output = Result<reqwest::Response, reqwest::Error>>>>>, /* will contant CL queries. */
-    queued_actions: VecDeque<BlobTransactionSidecar>, /* Buffer for
-                                                       * ready items */
+    pending_requests: FuturesUnordered<Pin<Box<dyn Future<Output = PendingMinedSidecar>>>>, /* will contant CL queries. */
+    queued_actions: VecDeque<MinedSidecar>, /* Buffer for
+                                             * ready items */
 }
 
 impl<St, P> Stream for MinedSidecarStream<St, P>
@@ -62,31 +71,47 @@ where
 {
     //TODO Change to custom type
     //type Item = Result<MinedSidecar, SideCarError<E>>;
-    type Item = Result<BlobTransactionSidecar, reqwest::Error>;
+    type Item = Result<MinedSidecar, reqwest::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this: &mut MinedSidecarStream<St, P> = self.get_mut();
 
         // return any buffered result
-        if let Some(blob_sidecar) = this.queued_actions.pop_front() {
-            return Poll::Ready(Some(Ok(blob_sidecar)));
+        if let Some(mined_sidecar) = this.queued_actions.pop_front() {
+            return Poll::Ready(Some(Ok(mined_sidecar)));
         }
 
         // Check if any pending reqwests are ready.
         // TODO Response/Type for CL Request
-        while let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx) {
-            match result {
-                // is this array that we than need to loop through?
-                Ok(response) => {
-                    if response.status().is_success() {
-                        // do something with response.
-                        //return Poll::Ready(Some(Ok(blob_sidecar)))
-                    }
+        while let Poll::Ready(Some(pending_result)) = this.pending_requests.poll_next_unpin(cx) {
+            match pending_result {
+                Ok(mut pending_sidecar) => {
+                    // Now poll the future inside PendingMinedSidecar
+                    return match pending_sidecar.cl_request.poll_unpin(cx) {
+                        Poll::Ready(Ok(response)) => {
+                            if response.status().is_success() {
+                                // TODO add logic to decode json to side car
+                                Poll::Ready(Some(Ok(MinedSidecar {
+                                    tx_hash: pending_sidecar.tx_hash,
+                                    block_hash: pending_sidecar.block_hash,
+                                    block_number: pending_sidecar.block_number,
+                                    sidecar: todo!(),
+                                })));
+                            } else {
+                                // Handle HTTP errors
+                                return Poll::Ready(Some(Err(todo!())));
+                            }
+                        }
+                        Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
+                        Poll::Pending => Poll::Pending,
+                    };
                 }
-                Err(e) => debug!(error = %e, "Error processing a pending consensus layer request."),
+                Err(e) => {
+                    // Handle errors in fetching the future itself
+                    return Poll::Ready(Some(Err(e)));
+                }
             }
         }
-
         // TODO: Add fetching logic here.
         loop {
             match this.events.poll_next_unpin(cx) {
@@ -95,7 +120,12 @@ where
                         match this.pool.get_blob(tx.hash) {
                             Ok(Some(blob)) => {
                                 // If get_blob returns Ok(Some(blob)), the blob exists
-                                this.queued_actions.push_back(blob);
+                                this.queued_actions.push_back(MinedSidecar {
+                                    tx_hash: tx.hash,
+                                    block_hash: notification.tip().block.hash(),
+                                    block_number: notification.tip().block.number,
+                                    sidecar: blob,
+                                });
                             }
                             Ok(None) => {
                                 // TODO Move this to default unless specified ot herwise logic?
@@ -107,17 +137,21 @@ where
                                 );
 
                                 // add logic here to get response?
-                                let boxed_future = Box::pin(async move {
-                                    client_clone
-                                        .get(&url)
-                                        .header("Accept", "application/json")
-                                        .send()
-                                        .await
-                                });
 
-                                this.pending_requests.push(boxed_future);
-                                //TODO send along with MinedSideCar
-                                // Return tx with block/etc/with sidecar
+                                let pending_request = PendingMinedSidecar {
+                                    cl_request: Box::pin(async move {
+                                        client_clone
+                                            .get(&url)
+                                            .header("Accept", "application/json")
+                                            .send()
+                                            .await
+                                    }),
+                                    tx_hash: tx.hash.clone(),
+                                    block_hash: notification.tip().block.hash().clone(),
+                                    block_number: notification.tip().block.number,
+                                };
+
+                                this.pending_requests.push(pending_request);
                             }
 
                             // change this
