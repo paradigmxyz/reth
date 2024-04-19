@@ -35,7 +35,7 @@ pub struct RethRpcServerHandles {
 }
 
 /// Contains hooks that are called during the rpc setup.
-pub struct RpcHooks<Node: FullNodeComponents> {
+pub struct RpcHooks<Node> {
     /// The event hook that can be run once the rpc server is started.
     pub(crate) on_rpc_started: Box<dyn OnRpcStarted<Node>>,
     /// The event hook that can be run once the rpc server is started.

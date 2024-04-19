@@ -8,7 +8,7 @@ use std::fmt;
 /// method.
 ///
 /// See [DefaultLauncher](crate::DefaultLauncher) for an example.
-pub struct NodeHooks<Node: FullNodeComponents> {
+pub struct NodeHooks<Node> {
     /// The event hook that can be called once the node's components are initialized.
     pub(crate) on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
     /// The event hook that can be called once the [FullNodeComponents] are available.

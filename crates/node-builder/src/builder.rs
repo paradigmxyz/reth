@@ -1071,7 +1071,7 @@ where
 ///
 /// Additionally, this state captures additional hooks that are called at specific points in the
 /// node's launch lifecycle.
-pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
+pub struct ComponentsState<Types, Components, FullNode> {
     /// The types of the node.
     pub types: Types,
     /// Type that builds the components of the node.

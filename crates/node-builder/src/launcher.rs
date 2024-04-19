@@ -4,7 +4,7 @@
 use crate::{
     components::{
         NodeComponents, NodeComponentsBuilder, PoolBuilder,
-    }, hooks::NodeHooks, BuilderContext, ComponentsState, FullNode, Node, NodeBuilder, NodeHandle, RethFullAdapter, RethFullBuilderState
+    }, hooks::NodeHooks, BuilderContext, ComponentsState, FullNode, Node, NodeBuilder, NodeHandle, RethFullAdapter, RethFullBuilderState, RethFullNodeBuilder
 };
 use eyre::Context;
 use futures::{future, future::Either, stream, stream_select, Future, StreamExt};
@@ -13,7 +13,7 @@ use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
-use reth_exex::{ExExContext, ExExHandle, ExExManager};
+use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
 use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals, BlockchainTree};
 use reth_config::config::EtlConfig;
 use reth_db::{
@@ -22,15 +22,11 @@ use reth_db::{
 };
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
-use reth_node_api::{FullNodeComponents, FullNodeComponentsAdapter, NodeTypes};
+use reth_node_api::{FullNodeComponents, FullNodeComponentsAdapter, FullNodeTypes, NodeTypes};
 use reth_node_core::{
-    cli::config::RethRpcConfig,
-    dirs::{ChainPath, DataDirPath},
-    engine_api_store::EngineApiStore,
-    exit::NodeExitFuture,
-    init::init_genesis,
-    node_config::NodeConfig,
+    cli::config::RethRpcConfig, dirs::{ChainPath, DataDirPath}, engine_api_store::EngineApiStore, engine_skip_fcu::EngineApiSkipFcu, exit::NodeExitFuture, init::init_genesis, node_config::NodeConfig
 };
+use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_revm::EvmProcessorFactory;
 use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory, CanonStateSubscriptions};
@@ -46,11 +42,13 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
 /// Container type for all types needed to launch the node.
 // pub struct LaunchArgs<DB, Types, Components, FullNode: FullNodeComponents> {
-pub struct LaunchArgs<DB, State> {
-    // pub config: NodeConfig,
-    // pub components: ComponentsState<Types, Components, FullNode>,
-    // pub database: DB,
-    pub builder: NodeBuilder<DB, State>,
+pub struct LaunchArgs<DB, Types, Components, Node> {
+    pub components: ComponentsState<Types, Components, Node>,
+    pub config: NodeConfig,
+    pub database: DB,
+    // pub state: State,
+    // pub builder: NodeBuilder<DB, State>,
+    // pub builder: NodeBuilder<DB, State>,
     pub executor: TaskExecutor,
     pub data_dir: ChainPath<DataDirPath>,
     pub reth_config: reth_config::Config,
@@ -70,9 +68,9 @@ pub struct LaunchArgs<DB, State> {
 
 
 /// Trait for launching the node.
-pub trait LaunchNode<DB, Types, Components, State>
+pub trait LaunchNode<Node, State>
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    // DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     // Types: Node<RethFullAdapter<DB, Types>>,
     // Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
     // Types::NetworkBuilder: crate::components::NetworkBuilder<
@@ -83,20 +81,24 @@ where
     //     RethFullAdapter<DB, Types>,
     //     <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
     // >,
-    Components: NodeComponentsBuilder<RethFullAdapter<DB, Types>>,
-    Types: NodeTypes,
+    // Components: NodeComponentsBuilder<RethFullAdapter<DB, Types>>,
+    // Types: NodeTypes,
     // FullNode: FullNodeComponents,
     // State: 
+    Node: FullNodeComponents + FullNodeTypes,
+    State: NodeComponentsBuilder<Node>,
+    // Types: FullNodeTypes,
 {
     /// Launches the node and returns a handle to it.
     ///
     /// Returns a [NodeHandle] that can be used to interact with the node.
     fn launch(
         self,
-        args: LaunchArgs<DB, State>,
+        args: LaunchArgs<Node::DB, Node, State, Node>,
     ) -> impl Future<
         Output = eyre::Result<
-            NodeHandle<FullNodeComponentsAdapter<RethFullAdapter<DB, Types>, Components::Pool>>,
+            // NodeHandle<FullNodeComponentsAdapter<RethFullAdapter<DB, Types>, Components::Pool>>,
+            NodeHandle<Node>,
         >,
     >;
 }
@@ -105,30 +107,37 @@ where
 #[derive(Default)]
 pub struct DefaultLauncher;
 
-impl<DB, Types, Components, FullNode> LaunchNode<DB, Types, Components, FullNode> for DefaultLauncher
+impl<Node, State> LaunchNode<Node, State> for DefaultLauncher
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    Types: Node<RethFullAdapter<DB, Types>>,
-    Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
-    Types::NetworkBuilder: crate::components::NetworkBuilder<
-        RethFullAdapter<DB, Types>,
-        <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
-    >,
-    Types::PayloadBuilder: crate::components::PayloadServiceBuilder<
-        RethFullAdapter<DB, Types>,
-        <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
-    >,
-    Components: NodeComponentsBuilder<RethFullAdapter<DB, Types>>,
-    FullNode: FullNodeComponents,
+    Node::DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    // Types: Node<RethFullAdapter<DB, Types>>,
+    // Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
+    // Types::NetworkBuilder: crate::components::NetworkBuilder<
+    //     RethFullAdapter<DB, Types>,
+    //     <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
+    // >,
+    // Types::PayloadBuilder: crate::components::PayloadServiceBuilder<
+    //     RethFullAdapter<DB, Types>,
+    //     <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
+    // >,
+    // Components: NodeComponentsBuilder<RethFullAdapter<DB, Types>>,
+    // FullNode: FullNodeComponents,
+    Node: FullNodeComponents + FullNodeTypes,
+    State: NodeComponentsBuilder<Node>,
+    // Builder: NodeComponentsBuilder<Node>,
+    // State: ComponentsState<>,
 {
     async fn launch(
         self,
-        args: LaunchArgs<DB, State>,
+        args: LaunchArgs<Node::DB, Node, State, Node>,
     ) -> eyre::Result<
-        NodeHandle<FullNodeComponentsAdapter<RethFullAdapter<DB, Types>, Components::Pool>>,
+        NodeHandle<FullNodeComponentsAdapter<RethFullAdapter<Node::DB, Node>, Node::Pool>>,
+        // NodeHandle<<Node as FullNodeComponentsAdapter<Node, Node::Pool>>>,
     > {
         // deconstruct state from builder
-        let LaunchArgs { config, components, database, executor, data_dir, reth_config, builder } = args;
+        let LaunchArgs { config, components, database, executor, data_dir, reth_config } = args;
+        // let NodeBuilder { config, state, database } = builder;
+        // let Builder { config, database, state } = builder;
         let ComponentsState { types, components_builder, hooks, rpc, exexs } = components;
  // Raise the fd limit of the process.
  // Does not do anything on windows.
@@ -238,9 +247,9 @@ where
  on_component_initialized.on_event(node_components.clone())?;
 
  // spawn exexs
- let mut exex_handles = Vec::with_capacity(state.exexs.len());
- let mut exexs = Vec::with_capacity(self.state.exexs.len());
- for (id, exex) in self.state.exexs {
+ let mut exex_handles = Vec::with_capacity(exexs.len());
+ let mut exexs = Vec::with_capacity(exexs.len());
+ for (id, exex) in exexs {
      // create a new exex handle
      let (handle, events, notifications) = ExExHandle::new(id.clone());
      exex_handles.push(handle);
