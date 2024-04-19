@@ -541,18 +541,14 @@ pub fn get_lookup_target(
     let mut target = local_node_id.raw();
 
     // make sure target has a 'log2distance'-long suffix that differs from local node id
-    if kbucket_index != 0 {
-        let suffix_bit_offset = MAX_KBUCKET_INDEX.saturating_sub(kbucket_index);
-        let suffix_byte_offset = suffix_bit_offset / 8;
-        // todo: flip the precise bit
-        // let rel_suffix_bit_offset = suffix_bit_offset % 8;
-        target[suffix_byte_offset] = !target[suffix_byte_offset];
+    let suffix_bit_offset = MAX_KBUCKET_INDEX.saturating_sub(kbucket_index);
+    let suffix_byte_offset = suffix_bit_offset / 8;
+    // todo: flip the precise bit
+    // let rel_suffix_bit_offset = suffix_bit_offset % 8;
+    target[suffix_byte_offset] = !target[suffix_byte_offset];
 
-        if suffix_byte_offset != 31 {
-            for b in target.iter_mut().take(31).skip(suffix_byte_offset + 1) {
-                *b = rand::random::<u8>();
-            }
-        }
+    for b in target.iter_mut().skip(suffix_byte_offset + 1) {
+        *b = rand::random::<u8>();
     }
 
     target.into()
