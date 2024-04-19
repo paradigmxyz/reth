@@ -12,7 +12,7 @@ use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
 use reth_provider::providers::StaticFileProvider;
-use reth_tasks::{shutdown::GracefulShutdown, TaskExecutor, TaskManager};
+use reth_tasks::TaskExecutor;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
@@ -40,13 +40,19 @@ pub(crate) async fn serve_with_hooks<F: Hook + 'static>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
     hooks: impl IntoIterator<Item = F>,
+    task_executor: TaskExecutor,
 ) -> eyre::Result<()> {
     let hooks: Vec<_> = hooks.into_iter().collect();
 
     // Start endpoint
-    start_endpoint(listen_addr, handle, Arc::new(move || hooks.iter().for_each(|hook| hook())))
-        .await
-        .wrap_err("Could not start Prometheus endpoint")?;
+    start_endpoint(
+        listen_addr,
+        handle,
+        Arc::new(move || hooks.iter().for_each(|hook| hook())),
+        task_executor,
+    )
+    .await
+    .wrap_err("Could not start Prometheus endpoint")?;
 
     Ok(())
 }
@@ -56,6 +62,7 @@ async fn start_endpoint<F: Hook + 'static>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
     hook: Arc<F>,
+    task_executor: TaskExecutor,
 ) -> eyre::Result<()> {
     let make_svc = make_service_fn(move |_| {
         let handle = handle.clone();
@@ -68,17 +75,18 @@ async fn start_endpoint<F: Hook + 'static>(
             }))
         }
     });
-    
+
     let server =
         Server::try_bind(&listen_addr).wrap_err("Could not bind to address")?.serve(make_svc);
 
-    let task_executor = TaskExecutor::clone(&self::TaskManager::current());
-    
     task_executor.spawn_with_graceful_shutdown_signal(move |signal| async move {
-        server.with_graceful_shutdown_signal(signal).await.expect("Metrics endpoint crashed")
+        server
+            .with_graceful_shutdown(async move {
+                let _ = signal.await;
+            })
+            .await
+            .expect("Metrics endpoint crashed")
     });
-
-    tokio::spawn(async move { server.await.expect("Metrics endpoint crashed") });
 
     Ok(())
 }
@@ -90,6 +98,7 @@ pub async fn serve<Metrics>(
     db: Metrics,
     static_file_provider: StaticFileProvider,
     process: metrics_process::Collector,
+    task_executor: TaskExecutor,
 ) -> eyre::Result<()>
 where
     Metrics: DatabaseMetrics + 'static + Send + Sync,
@@ -110,7 +119,7 @@ where
         Box::new(collect_memory_stats),
         Box::new(collect_io_stats),
     ];
-    serve_with_hooks(listen_addr, handle, hooks).await?;
+    serve_with_hooks(listen_addr, handle, hooks, task_executor).await?;
 
     // We describe the metrics after the recorder is installed, otherwise this information is not
     // registered

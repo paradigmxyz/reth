@@ -516,6 +516,7 @@ where
                 prometheus_handle,
                 database.clone(),
                 provider_factory.static_file_provider(),
+                executor.clone(),
             )
             .await?;
 

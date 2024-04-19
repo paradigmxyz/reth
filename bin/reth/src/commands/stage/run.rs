@@ -28,6 +28,7 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
 };
+use reth_tasks::TaskManager;
 use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
 use tracing::*;
 
@@ -146,6 +147,8 @@ impl Command {
         let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
+            let task_manager = TaskManager::current();
+            let task_executor = task_manager.executor();
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::serve(
                 listen_addr,
@@ -153,8 +156,12 @@ impl Command {
                 Arc::clone(&db),
                 factory.static_file_provider(),
                 metrics_process::Collector::default(),
+                task_executor,
             )
             .await?;
+            tokio::spawn(async move {
+                task_manager.await;
+            });
         }
 
         let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
