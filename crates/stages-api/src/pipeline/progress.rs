@@ -1,5 +1,4 @@
-use super::ctrl::ControlFlow;
-use crate::util::opt;
+use crate::{util::opt, ControlFlow};
 use reth_primitives::BlockNumber;
 
 #[derive(Debug, Default)]

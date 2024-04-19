@@ -109,11 +109,6 @@ impl BlockIndices {
         self.canonical_chain.get_canonical_block_number(self.last_finalized_block, block_hash)
     }
 
-    /// Check if block hash belongs to canonical chain.
-    pub(crate) fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
-        self.get_canonical_block_number(block_hash).is_some()
-    }
-
     /// Last finalized block
     pub fn last_finalized_block(&self) -> BlockNumber {
         self.last_finalized_block

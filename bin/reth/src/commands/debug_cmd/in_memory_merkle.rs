@@ -6,12 +6,12 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
     utils::{get_single_body, get_single_header},
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
+use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_db::{init_db, DatabaseEnv};
 use reth_interfaces::executor::BlockValidationError;
