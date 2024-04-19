@@ -1,6 +1,5 @@
 use node_e2e_tests::{node::NodeHelper, wallet::Wallet};
 use reth::{
-    self,
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
