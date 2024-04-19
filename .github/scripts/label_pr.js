@@ -1,3 +1,12 @@
+// Filter function for labels we do not want on PRs automatically.
+function shouldIncludeLabel (label) {
+    const isStatus = label.startsWith('S-');
+    const isTrackingIssue = label === 'C-tracking-issue';
+    const isPreventStale = label === 'M-prevent-stale';
+
+    return !isStatus && !isTrackingIssue && !isPreventStale;
+}
+
 module.exports = async ({ github, context }) => {
     try {
         const prNumber = context.payload.pull_request.number;
@@ -20,7 +29,9 @@ module.exports = async ({ github, context }) => {
             issue_number: issueNumber,
         });
 
-        const issueLabels = issue.data.labels.map(label => label.name);
+        const issueLabels = issue.data.labels
+            .map(label => label.name)
+            .filter(shouldIncludeLabel);
         if (issueLabels.length > 0) {
             await github.rest.issues.addLabels({
                 ...repo,
