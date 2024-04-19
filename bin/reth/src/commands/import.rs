@@ -187,7 +187,7 @@ impl ImportCommand {
                         PruneModes::default(),
                     ),
                     self.no_state,
-                    start_header.unwrap(),
+                    start_header.take().unwrap(),
                 )
                 .await?;
 
