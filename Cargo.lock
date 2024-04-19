@@ -6090,6 +6090,7 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
+ "reth-cli-runner",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
@@ -6146,7 +6147,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-stages",
+ "reth-stages-api",
  "reth-transaction-pool",
  "tokio",
  "tokio-stream",
@@ -6237,9 +6238,19 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-stages",
+ "reth-stages-api",
  "reth-trie",
  "reth-trie-parallel",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "reth-cli-runner"
+version = "0.2.0-beta.5"
+dependencies = [
+ "futures",
+ "reth-tasks",
  "tokio",
  "tracing",
 ]
@@ -6590,6 +6601,7 @@ dependencies = [
 name = "reth-evm"
 version = "0.2.0-beta.5"
 dependencies = [
+ "reth-interfaces",
  "reth-primitives",
  "revm",
  "revm-primitives",
@@ -6600,7 +6612,12 @@ name = "reth-evm-ethereum"
 version = "0.2.0-beta.5"
 dependencies = [
  "reth-evm",
+ "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "revm-primitives",
+ "tracing",
 ]
 
 [[package]]
@@ -6997,6 +7014,8 @@ dependencies = [
  "reqwest 0.11.27",
  "reth-basic-payload-builder",
  "reth-db",
+ "reth-evm",
+ "reth-interfaces",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
@@ -7011,9 +7030,11 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "revm",
+ "revm-primitives",
  "serde",
  "serde_json",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -7406,11 +7427,34 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-stages-api",
  "reth-static-file",
  "reth-tokio-util",
  "reth-trie",
  "serde_json",
  "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
+name = "reth-stages-api"
+version = "0.2.0-beta.5"
+dependencies = [
+ "aquamarine",
+ "assert_matches",
+ "auto_impl",
+ "futures-util",
+ "metrics",
+ "reth-db",
+ "reth-interfaces",
+ "reth-metrics",
+ "reth-primitives",
+ "reth-provider",
+ "reth-static-file",
+ "reth-tokio-util",
  "thiserror",
  "tokio",
  "tokio-stream",

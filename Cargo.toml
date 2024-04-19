@@ -2,6 +2,7 @@
 members = [
     "bin/reth/",
     "crates/blockchain-tree/",
+    "crates/cli/runner/",
     "crates/config/",
     "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
@@ -47,11 +48,12 @@ members = [
     "crates/ethereum-engine-primitives/",
     "crates/node-ethereum/",
     "crates/node-builder/",
-    "crates/node-optimism/",
+    "crates/optimism/node/",
     "crates/node-core/",
     "crates/node-api/",
     "crates/node-e2e-tests/",
     "crates/stages/",
+    "crates/stages-api",
     "crates/static-file/",
     "crates/storage/codecs/",
     "crates/storage/codecs/derive/",
@@ -94,9 +96,9 @@ resolver = "2"
 rust.missing_debug_implementations = "warn"
 rust.missing_docs = "warn"
 rust.unreachable_pub = "warn"
-rustdoc.all = "warn"
 rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
+rustdoc.all = "warn"
 
 [workspace.lints.clippy]
 # These are some of clippy's nursery (i.e., experimental) lints that we like.
@@ -202,6 +204,7 @@ reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
 reth-beacon-consensus-core = { path = "crates/consensus/beacon-core" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
+reth-cli-runner = { path = "crates/cli/runner" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-config = { path = "crates/config" }
 reth-consensus-common = { path = "crates/consensus/common" }
@@ -213,7 +216,7 @@ reth-engine-primitives = { path = "crates/engine-primitives" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum-engine-primitives" }
 reth-node-builder = { path = "crates/node-builder" }
 reth-node-ethereum = { path = "crates/node-ethereum" }
-reth-node-optimism = { path = "crates/node-optimism" }
+reth-node-optimism = { path = "crates/optimism/node" }
 reth-node-core = { path = "crates/node-core" }
 reth-node-api = { path = "crates/node-api" }
 reth-downloaders = { path = "crates/net/downloaders" }
@@ -252,6 +255,7 @@ reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages" }
+reth-stages-api = { path = "crates/stages-api" }
 reth-static-file = { path = "crates/static-file" }
 reth-tasks = { path = "crates/tasks" }
 reth-tokio-util = { path = "crates/tokio-util" }

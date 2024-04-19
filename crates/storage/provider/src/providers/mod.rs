@@ -714,10 +714,6 @@ where
         self.tree.canonical_blocks()
     }
 
-    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {
-        self.tree.find_canonical_ancestor(hash)
-    }
-
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
         self.tree.is_canonical(hash)
     }

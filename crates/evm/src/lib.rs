@@ -12,6 +12,8 @@ use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Tra
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
 
+pub mod execute;
+
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Returns new EVM with the given database

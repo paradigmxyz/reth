@@ -45,7 +45,8 @@ pub enum MetricEvent {
 #[derive(Debug)]
 pub struct MetricsListener {
     events_rx: UnboundedReceiver<MetricEvent>,
-    pub(crate) sync_metrics: SyncMetrics,
+    /// underline metrics of stages
+    pub sync_metrics: SyncMetrics,
 }
 
 impl MetricsListener {

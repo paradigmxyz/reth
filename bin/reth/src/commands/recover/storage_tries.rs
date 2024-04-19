@@ -1,9 +1,9 @@
 use crate::{
     args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
+use reth_cli_runner::CliContext;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
     init_db, tables,
