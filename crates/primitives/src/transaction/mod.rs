@@ -1205,7 +1205,8 @@ impl TransactionSigned {
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
+    /// Returns `None` if the transaction's signature is invalid, see also
+    /// [Signature::recover_signer].
     pub fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -1221,7 +1222,7 @@ impl TransactionSigned {
     /// value_.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [Self::recover_signer_unchecked].
+    /// [Signature::recover_signer_unchecked].
     pub fn recover_signer_unchecked(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
