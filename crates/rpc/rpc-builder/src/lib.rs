@@ -1768,7 +1768,8 @@ impl RpcServerConfig {
                 let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
                 cl = Some(cors);
             }
-            let jwt_auth: Option<AuthLayer<JwtAuthValidator>> = self.jwt_secret.clone().map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)));
+            let jwt_auth: Option<AuthLayer<JwtAuthValidator>> =
+                self.jwt_secret.clone().map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)));
             let middleware = tower::ServiceBuilder::new().option_layer(cl).option_layer(jwt_auth);
 
             let server = builder
