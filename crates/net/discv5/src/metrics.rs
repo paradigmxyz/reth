@@ -91,13 +91,14 @@ impl DiscoveredPeersMetrics {
 #[derive(Metrics, Clone)]
 #[metrics(scope = "discv5")]
 pub struct AdvertisedChainMetrics {
-    /// Frequency of node records with a kv-pair with [`network_key::OPSTACK`] as key.
+    /// Frequency of node records with a kv-pair with [`OPSTACK`](crate::network_key) as
+    /// key.
     opstack: Counter,
 
-    /// Frequency of node records with a kv-pair with [`network_key::ETH`] as key.
+    /// Frequency of node records with a kv-pair with [`ETH`](crate::network_key) as key.
     eth: Counter,
 
-    /// Frequency of node records with a kv-pair with [`network_key::ETH2`] as key.
+    /// Frequency of node records with a kv-pair with [`ETH2`](crate::network_key) as key.
     eth2: Counter,
 }
 
