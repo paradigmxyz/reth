@@ -20,7 +20,7 @@ module.exports = async ({ github, context }) => {
         const issueNumber = re?.groups?.issue_number;
 
         if (!issueNumber) {
-            console.log("No issue reference found in PR description.");
+            console.log('No issue reference found in PR description.');
             return;
         }
 
@@ -40,7 +40,7 @@ module.exports = async ({ github, context }) => {
             });
         }
     } catch (err) {
-        console.error(`Failed to label PR`);
+        console.error('Failed to label PR');
         console.error(err);
     }
 }
