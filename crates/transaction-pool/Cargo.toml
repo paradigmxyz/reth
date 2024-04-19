@@ -39,7 +39,7 @@ schnellru.workspace = true
 serde = { workspace = true, features = ["derive", "rc"], optional = true }
 fnv = "1.0.7"
 bitflags.workspace = true
-auto_impl = "1.0"
+auto_impl.workspace = true
 smallvec.workspace = true
 itertools.workspace = true
 

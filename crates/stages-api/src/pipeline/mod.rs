@@ -2,7 +2,6 @@ mod ctrl;
 mod event;
 pub use crate::pipeline::ctrl::ControlFlow;
 pub use event::*;
-
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
