@@ -45,7 +45,7 @@ use metrics::{DiscoveredPeersMetrics, Discv5Metrics};
 
 /// Default number of times to do pulse lookup queries, at bootstrap (5 second intervals).
 ///
-/// Default is 200 seconds.
+/// Default is 100 seconds.
 pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 100;
 
 /// Default duration of look up interval, for pulse look ups at bootstrap.
@@ -53,8 +53,17 @@ pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 100;
 /// Default is 5 seconds.
 pub const DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL: u64 = 5;
 
-/// The max log2 distance, is equivalent to the index of the last bit in a discv5 node id.
-const MAX_LOG2_DISTANCE: usize = 255;
+/// Max kbucket index.
+///
+/// This is the max log2distance for 32 byte [`NodeId`](discv5::enr::NodeId) - 1. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
+pub const MAX_KBUCKET_INDEX: usize = 255;
+
+/// Default lowest kbucket index to attempt filling, in periodic look up query to populate kbuckets.
+///
+/// The peer at the 0th kbucket index is at log2distance 1 from the local node ID. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
+///
+/// Default is 0th index.
+pub const DEFAULT_MIN_TARGET_KBUCKET_INDEX: usize = 0;
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Clone)]
@@ -312,7 +321,7 @@ impl Discv5 {
             let local_node_id = discv5.local_enr().node_id();
             let lookup_interval = Duration::from_secs(lookup_interval);
             let metrics = metrics.discovered_peers;
-            let mut log2_distance = 0usize;
+            let mut kbucket_index = MAX_KBUCKET_INDEX;
             let pulse_lookup_interval = Duration::from_secs(DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL);
             // todo: graceful shutdown
 
@@ -338,7 +347,7 @@ impl Discv5 {
                 loop {
                     // make sure node is connected to each subtree in the network by target
                     // selection (ref kademlia)
-                    let target = get_lookup_target(log2_distance, local_node_id);
+                    let target = get_lookup_target(kbucket_index, local_node_id);
 
                     trace!(target: "net::discv5",
                         %target,
@@ -348,12 +357,12 @@ impl Discv5 {
 
                     lookup(target, &discv5, &metrics).await;
 
-                    if log2_distance < MAX_LOG2_DISTANCE {
-                        // try to populate bucket one step further away
-                        log2_distance += 1
+                    if kbucket_index > DEFAULT_MIN_TARGET_KBUCKET_INDEX {
+                        // try to populate bucket one step closer
+                        kbucket_index -= 1
                     } else {
-                        // start over with self lookup
-                        log2_distance = 0
+                        // start over with bucket furthest away
+                        kbucket_index = MAX_KBUCKET_INDEX
                     }
 
                     tokio::time::sleep(lookup_interval).await;
@@ -526,15 +535,17 @@ pub struct DiscoveredPeer {
     pub fork_id: Option<ForkId>,
 }
 
-/// Gets the next lookup target, based on which distance is currently being targeted.
+/// Gets the next lookup target, based on which bucket is currently being targeted.
 pub fn get_lookup_target(
-    log2_distance: usize,
+    kbucket_index: usize,
     local_node_id: discv5::enr::NodeId,
 ) -> discv5::enr::NodeId {
+    // init target
     let mut target = local_node_id.raw();
-    //make sure target has a 'distance'-long suffix that differs from local node id
-    if log2_distance != 0 {
-        let suffix_bit_offset = MAX_LOG2_DISTANCE.saturating_sub(log2_distance);
+
+    // make sure target has a 'log2distance'-long suffix that differs from local node id
+    if kbucket_index != 0 {
+        let suffix_bit_offset = MAX_KBUCKET_INDEX.saturating_sub(kbucket_index);
         let suffix_byte_offset = suffix_bit_offset / 8;
         // todo: flip the precise bit
         // let rel_suffix_bit_offset = suffix_bit_offset % 8;
@@ -800,25 +811,31 @@ mod tests {
 
     #[test]
     fn select_lookup_target() {
-        // distance ceiled to the next byte
-        const fn expected_log2_distance(log2_distance: usize) -> u64 {
-            let log2_distance = log2_distance / 8;
-            ((log2_distance + 1) * 8) as u64
+        // bucket index ceiled to the next multiple of 4
+        const fn expected_bucket_index(kbucket_index: usize) -> u64 {
+            let log2distance = kbucket_index + 1;
+            let log2distance = log2distance / 8;
+            ((log2distance + 1) * 8) as u64
         }
 
-        let log2_distance = rand::thread_rng().gen_range(0..=MAX_LOG2_DISTANCE);
+        let bucket_index = rand::thread_rng().gen_range(0..=MAX_KBUCKET_INDEX);
 
         let sk = CombinedKey::generate_secp256k1();
         let local_node_id = discv5::enr::NodeId::from(sk.public());
-        let target = get_lookup_target(log2_distance, local_node_id);
+        let target = get_lookup_target(bucket_index, local_node_id);
 
         let local_node_id = sigp::Key::from(local_node_id);
         let target = sigp::Key::from(target);
 
-        assert_eq!(
-            expected_log2_distance(log2_distance),
-            local_node_id.log2_distance(&target).unwrap()
-        );
+        if bucket_index == 0 {
+            // log2distance undef (inf)
+            assert!(local_node_id.log2_distance(&target).is_none())
+        } else {
+            assert_eq!(
+                expected_bucket_index(bucket_index),
+                local_node_id.log2_distance(&target).unwrap()
+            );
+        }
     }
 
     #[test]

@@ -14,7 +14,7 @@
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_revm::EvmProcessorFactory;
 //! # use reth_primitives::{PruneModes, MAINNET};
-//! # use reth_node_ethereum::EthEvmConfig;
+//! # use reth_evm_ethereum::EthEvmConfig;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::EtlConfig;

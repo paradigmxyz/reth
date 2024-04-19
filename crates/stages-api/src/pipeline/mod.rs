@@ -2,7 +2,6 @@ mod ctrl;
 mod event;
 pub use crate::pipeline::ctrl::ControlFlow;
 pub use event::*;
-
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
@@ -22,16 +21,9 @@ use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
-// (todo) remove it
-#[allow(missing_docs)]
-pub mod builder;
-
-// (todo) remove it
-#[allow(missing_docs)]
-pub mod progress;
-// (todo) remove it
-#[allow(missing_docs)]
-pub mod set;
+mod builder;
+mod progress;
+mod set;
 
 use crate::{
     BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, PipelineError, Stage,

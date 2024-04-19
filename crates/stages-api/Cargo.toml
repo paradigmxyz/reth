@@ -6,7 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-exclude.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 # reth
@@ -15,7 +17,6 @@ reth-provider.workspace = true
 reth-db.workspace = true
 reth-interfaces.workspace = true
 reth-static-file.workspace = true
-assert_matches.workspace = true
 reth-tokio-util.workspace = true
 
 # metrics
@@ -28,13 +29,15 @@ tokio-stream.workspace = true
 futures-util.workspace = true
 
 # misc
+aquamarine.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-auto_impl = "1"
-aquamarine.workspace = true
+auto_impl.workspace = true
+
+[dev-dependencies]
+assert_matches.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-interfaces = { workspace = true, features = ["test-utils"] }
 
 [features]
 test-utils = []
-
-[lints]
-workspace = true
