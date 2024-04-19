@@ -12,13 +12,14 @@ use clap::Parser;
 use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
-use reth_config::Config;
+use reth_config::{config::EtlConfig, Config};
 use reth_db::{database::Database, init_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_exex::ExExManagerHandle;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
@@ -29,18 +30,28 @@ use reth_interfaces::{
 use reth_node_core::init::init_genesis;
 use reth_node_ethereum::EthEvmConfig;
 use reth_node_events::node::NodeEvent;
-use reth_primitives::{
-    stage::StageId, ChainSpec, PruneModes, SealedHeader, B256, OP_RETH_MAINNET_BELOW_BEDROCK,
-};
+use reth_primitives::{stage::StageId, ChainSpec, PruneModes, SealedHeader, B256};
 use reth_provider::{HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
+    Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
+
+/// Stages that require state.
+const STATE_STAGES: &[StageId] = &[
+    StageId::Execution,
+    StageId::MerkleUnwind,
+    StageId::AccountHashing,
+    StageId::StorageHashing,
+    StageId::MerkleExecute,
+    StageId::IndexStorageHistory,
+    StageId::IndexAccountHistory,
+];
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
@@ -71,13 +82,13 @@ pub struct ImportCommand {
     )]
     chain: Arc<ChainSpec>,
 
-    /// Disables execution stage.
+    /// Disables stages that require state.
     #[arg(long, verbatim_doc_comment)]
-    disable_execution: bool,
+    no_state: bool,
 
     /// Import OP Mainnet chain below Bedrock. Caution! Flag must be set as env var, since the env
     /// var is read by another process too, in order to make below Bedrock import work.
-    #[arg(long, verbatim_doc_comment, env = OP_RETH_MAINNET_BELOW_BEDROCK)]
+    #[arg(long, verbatim_doc_comment, env = "OP_RETH_MAINNET_BELOW_BEDROCK")]
     op_mainnet_below_bedrock: bool,
 
     /// Chunk byte length.
@@ -105,12 +116,12 @@ impl ImportCommand {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         if self.op_mainnet_below_bedrock {
-            self.disable_execution = true;
+            self.no_state = true;
             debug!(target: "reth::cli", "Importing OP mainnet below bedrock");
         }
 
-        if self.disable_execution {
-            debug!(target: "reth::cli", "Execution stage disabled");
+        if self.no_state {
+            debug!(target: "reth::cli", "Stages requiring state disabled");
         }
 
         debug!(target: "reth::cli",
@@ -121,8 +132,13 @@ impl ImportCommand {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
 
-        let config: Config = self.load_config(config_path.clone())?;
+        let mut config: Config = self.load_config(config_path.clone())?;
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
+
+        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
+        if config.stages.etl.dir.is_none() {
+            config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+        }
 
         let db_path = data_dir.db_path();
 
@@ -147,7 +163,7 @@ impl ImportCommand {
         if self.start != 0 {
             start_header = provider_factory
                 .provider()?
-                .sealed_header(block_num)
+                .sealed_header(self.start)
                 .expect("start block is not canonical with db");
         }
 
@@ -179,7 +195,7 @@ impl ImportCommand {
                         provider_factory.static_file_provider(),
                         PruneModes::default(),
                     ),
-                    self.disable_execution,
+                    self.no_state,
                     start_header.unwrap(),
                 )
                 .await?;
@@ -221,7 +237,7 @@ impl ImportCommand {
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
         static_file_producer: StaticFileProducer<DB>,
-        disable_execution: bool,
+        no_state: bool,
         start_header: SealedHeader,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
@@ -282,9 +298,10 @@ impl ImportCommand {
                         .clean_threshold
                         .max(config.stages.account_hashing.clean_threshold)
                         .max(config.stages.storage_hashing.clean_threshold),
-                    config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
+                    config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
+                    ExExManagerHandle::empty(),
                 ))
-                .disable_if(StageId::Execution, || disable_execution),
+                .disable_all_if(STATE_STAGES, || no_state),
             )
             .build(provider_factory, static_file_producer);
 

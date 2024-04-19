@@ -187,6 +187,18 @@ where
         self
     }
 
+    /// Disables all given stages. See [`disable`](Self::disable).
+    pub fn disable_all(mut self, stages: &[StageId]) -> Self {
+        for stage_id in stages {
+            let entry = self
+                .stages
+                .get_mut(stage_id)
+                .expect("Cannot disable a stage that is not in the set.");
+            entry.enabled = false;
+        }
+        self
+    }
+
     /// Disables the given stage if the given closure returns true.
     ///
     /// See [Self::disable]
@@ -196,6 +208,19 @@ where
     {
         if f() {
             return self.disable(stage_id)
+        }
+        self
+    }
+
+    /// Disables all given stages if the given closure returns true.
+    ///
+    /// See [Self::disable]
+    pub fn disable_all_if<F>(self, stages: &[StageId], f: F) -> Self
+    where
+        F: FnOnce() -> bool,
+    {
+        if f() {
+            return self.disable_all(stages)
         }
         self
     }

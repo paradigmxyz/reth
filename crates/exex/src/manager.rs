@@ -1,3 +1,9 @@
+use crate::ExExEvent;
+use metrics::Gauge;
+use reth_metrics::{metrics::Counter, Metrics};
+use reth_primitives::{BlockNumber, FinishedExExHeight};
+use reth_provider::CanonStateNotification;
+use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,
     future::{poll_fn, Future},
@@ -8,14 +14,6 @@ use std::{
     },
     task::{Context, Poll},
 };
-
-use crate::ExExEvent;
-use futures::StreamExt;
-use metrics::Gauge;
-use reth_metrics::{metrics::Counter, Metrics};
-use reth_primitives::{BlockNumber, FinishedExExHeight};
-use reth_provider::CanonStateNotification;
-use reth_tracing::tracing::debug;
 use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
     watch,
@@ -347,6 +345,7 @@ pub struct ExExManagerHandle {
     /// otherwise unused.
     is_ready_receiver: watch::Receiver<bool>,
     /// A stream of bools denoting whether the manager is ready for new notifications.
+    #[allow(unused)]
     is_ready: WatchStream<bool>,
     /// The current capacity of the manager's internal notification buffer.
     current_capacity: Arc<AtomicUsize>,
@@ -355,6 +354,26 @@ pub struct ExExManagerHandle {
 }
 
 impl ExExManagerHandle {
+    /// Creates an empty manager handle.
+    ///
+    /// Use this if there is no manager present.
+    ///
+    /// The handle will always be ready, and have a capacity of 0.
+    pub fn empty() -> Self {
+        let (exex_tx, _) = mpsc::unbounded_channel();
+        let (_, is_ready_rx) = watch::channel(true);
+        let (_, finished_height_rx) = watch::channel(FinishedExExHeight::NoExExs);
+
+        Self {
+            exex_tx,
+            num_exexs: 0,
+            is_ready_receiver: is_ready_rx.clone(),
+            is_ready: WatchStream::new(is_ready_rx),
+            current_capacity: Arc::new(AtomicUsize::new(0)),
+            finished_height: finished_height_rx,
+        }
+    }
+
     /// Synchronously send a notification over the channel to all execution extensions.
     ///
     /// Senders should call [`Self::has_capacity`] first.
@@ -396,8 +415,8 @@ impl ExExManagerHandle {
     }
 
     /// The finished height of all ExEx's.
-    pub fn finished_height(&mut self) -> FinishedExExHeight {
-        *self.finished_height.borrow_and_update()
+    pub fn finished_height(&self) -> watch::Receiver<FinishedExExHeight> {
+        self.finished_height.clone()
     }
 
     /// Wait until the manager is ready for new notifications.
@@ -406,15 +425,14 @@ impl ExExManagerHandle {
     }
 
     /// Wait until the manager is ready for new notifications.
+    #[allow(clippy::needless_pass_by_ref_mut)]
     pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        // if this returns `Poll::Ready(None)` the stream is exhausted, which means the underlying
-        // channel is closed.
-        //
-        // this can only happen if the manager died, and the node is shutting down, so we ignore it
-        let mut pinned = std::pin::pin!(&mut self.is_ready);
-        if pinned.poll_next_unpin(cx) == Poll::Ready(Some(true)) {
+        use futures as _;
+        // FIXME: if not ready this must be polled
+        if *self.is_ready_receiver.borrow() {
             Poll::Ready(())
         } else {
+            cx.waker().wake_by_ref();
             Poll::Pending
         }
     }

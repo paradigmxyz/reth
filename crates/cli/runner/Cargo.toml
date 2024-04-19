@@ -1,5 +1,5 @@
 [package]
-name = "reth-evm-ethereum"
+name = "reth-cli-runner"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,12 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-evm.workspace = true
-reth-primitives.workspace = true
+# reth
+reth-tasks.workspace = true
 
+# async
+futures.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+
+# misc
+tracing.workspace = true

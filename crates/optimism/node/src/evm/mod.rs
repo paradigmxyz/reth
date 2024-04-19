@@ -6,6 +6,9 @@ use reth_primitives::{
 };
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 
+mod execute;
+pub use execute::*;
+
 /// Optimism-related EVM configuration.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
