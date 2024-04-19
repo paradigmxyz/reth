@@ -21,7 +21,7 @@ futures.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
 # misc
-auto_impl = "1.0"
+auto_impl.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 secp256k1 = { workspace = true, default-features = false, features = [

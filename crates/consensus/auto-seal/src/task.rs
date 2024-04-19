@@ -6,7 +6,7 @@ use reth_evm::ConfigureEvm;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
-use reth_stages::PipelineEvent;
+use reth_stages_api::PipelineEvent;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,

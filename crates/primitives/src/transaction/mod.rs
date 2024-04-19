@@ -20,7 +20,9 @@ pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::TxEip4844;
 
-pub use error::{InvalidTransactionError, TransactionConversionError};
+pub use error::{
+    InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+};
 pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 #[cfg(feature = "c-kzg")]
@@ -30,7 +32,7 @@ pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
 
-pub use signature::{Signature, OP_RETH_MAINNET_BELOW_BEDROCK};
+pub use signature::Signature;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
@@ -618,8 +620,12 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
     type Error = ConversionError;
 
     fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        match tx.transaction_type {
-            None | Some(0) => {
+        match tx.transaction_type.map(TryInto::try_into).transpose().map_err(|_| {
+            ConversionError::Eip2718Error(Eip2718Error::UnexpectedType(
+                tx.transaction_type.unwrap(),
+            ))
+        })? {
+            None | Some(TxType::Legacy) => {
                 // legacy
                 if tx.max_fee_per_gas.is_some() || tx.max_priority_fee_per_gas.is_some() {
                     return Err(ConversionError::Eip2718Error(
@@ -640,7 +646,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                     input: tx.input,
                 }))
             }
-            Some(1u8) => {
+            Some(TxType::Eip2930) => {
                 // eip2930
                 Ok(Transaction::Eip2930(TxEip2930 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
@@ -652,11 +658,11 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                     to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
                     value: tx.value,
                     input: tx.input,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
                 }))
             }
-            Some(2u8) => {
+            Some(TxType::Eip1559) => {
                 // EIP-1559
                 Ok(Transaction::Eip1559(TxEip1559 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
@@ -673,11 +679,11 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
                     to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
                     value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     input: tx.input,
                 }))
             }
-            Some(3u8) => {
+            Some(TxType::Eip4844) => {
                 // EIP-4844
                 Ok(Transaction::Eip4844(TxEip4844 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
@@ -694,7 +700,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
                     to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
                     value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?.into(),
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     input: tx.input,
                     blob_versioned_hashes: tx
                         .blob_versioned_hashes
@@ -704,7 +710,8 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .ok_or(ConversionError::MissingMaxFeePerBlobGas)?,
                 }))
             }
-            Some(tx_type) => Err(Eip2718Error::UnexpectedType(tx_type).into()),
+            #[cfg(feature = "optimism")]
+            Some(TxType::Deposit) => todo!(),
         }
     }
 }
@@ -972,6 +979,11 @@ impl TransactionSignedNoHash {
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
     /// [Signature::recover_signer_unchecked].
+    ///
+    /// # Optimism
+    ///
+    /// For optimism this will return [Address::ZERO] if the Signature is empty, this is because pre bedrock (on OP mainnet), relay messages to the L2 Cross Domain Messenger were sent as legacy transactions from the zero address with an empty signature, e.g.: <https://optimistic.etherscan.io/tx/0x1bb352ff9215efe5a4c102f45d730bae323c3288d2636672eb61543ddd47abad>
+    /// This makes it possible to import pre bedrock transactions via the sender recovery stage.
     pub fn encode_and_recover_unchecked(&self, buffer: &mut Vec<u8>) -> Option<Address> {
         buffer.clear();
         self.transaction.encode_without_signature(buffer);
@@ -979,8 +991,17 @@ impl TransactionSignedNoHash {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+        {
+            if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+                return Some(from)
+            }
+
+            // pre bedrock system transactions were sent from the zero address as legacy
+            // transactions with an empty signature Note: this is very hacky and only
+            // relevant for op-mainnet pre bedrock
+            if self.is_legacy() && self.signature == Signature::optimism_deposit_tx_signature() {
+                return Some(Address::ZERO)
+            }
         }
 
         self.signature.recover_signer_unchecked(keccak256(buffer))
@@ -1083,7 +1104,7 @@ impl Compact for TransactionSignedNoHash {
         to_compact_ztd_unaware(self, buf)
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         from_compact_zstd_unaware(buf, _len)
     }
 }
@@ -1184,7 +1205,13 @@ impl TransactionSigned {
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
+    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [Signature::recover_signer].
+    ///
+    /// Note:
+    ///
+    /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
+    /// [Self::recover_signer_unchecked] if you want to recover the signer without ensuring that the
+    /// signature has a low `s` value.
     pub fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -1200,7 +1227,7 @@ impl TransactionSigned {
     /// value_.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [Self::recover_signer_unchecked].
+    /// [Signature::recover_signer_unchecked].
     pub fn recover_signer_unchecked(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -1491,9 +1518,9 @@ impl TransactionSigned {
 
     /// Decodes the "raw" format of transaction (similar to `eth_sendRawTransaction`).
     ///
-    /// This should be used for any RPC method that accepts a raw transaction, **excluding** raw
-    /// EIP-4844 transactions in `eth_sendRawTransaction`. Currently, this includes:
-    /// * `eth_sendRawTransaction` for non-EIP-4844 transactions.
+    /// This should be used for any RPC method that accepts a raw transaction.
+    /// Currently, this includes:
+    /// * `eth_sendRawTransaction`.
     /// * All versions of `engine_newPayload`, in the `transactions` field.
     ///
     /// A raw transaction is either a legacy transaction or EIP-2718 typed transaction.
@@ -1503,9 +1530,6 @@ impl TransactionSigned {
     ///
     /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
     /// followed by the rlp of the transaction: `type || rlp(tx-data)`.
-    ///
-    /// To decode EIP-4844 transactions from `eth_sendRawTransaction`, use
-    /// [PooledTransactionsElement::decode_enveloped].
     pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if data.is_empty() {
             return Err(RlpError::InputTooShort)
@@ -1744,16 +1768,30 @@ impl Decodable for TransactionSignedEcRecovered {
 ///
 /// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
 /// transaction type that the transaction pool uses.
-pub trait FromRecoveredTransaction {
+pub trait TryFromRecoveredTransaction {
+    /// The error type returned by the transaction.
+    type Error;
     /// Converts to this type from the given [`TransactionSignedEcRecovered`].
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self;
+    fn try_from_recovered_transaction(
+        tx: TransactionSignedEcRecovered,
+    ) -> Result<Self, Self::Error>
+    where
+        Self: Sized;
 }
 
 // Noop conversion
-impl FromRecoveredTransaction for TransactionSignedEcRecovered {
+impl TryFromRecoveredTransaction for TransactionSignedEcRecovered {
+    type Error = TryFromRecoveredTransactionError;
+
     #[inline]
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        tx
+    fn try_from_recovered_transaction(
+        tx: TransactionSignedEcRecovered,
+    ) -> Result<Self, Self::Error> {
+        if tx.is_eip4844() {
+            Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
+        } else {
+            Ok(tx)
+        }
     }
 }
 
@@ -1768,7 +1806,7 @@ pub trait FromRecoveredPooledTransaction {
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
 }
 
-/// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
+/// The inverse of [TryFromRecoveredTransaction] that ensure the transaction can be sent over the
 /// network
 pub trait IntoRecoveredTransaction {
     /// Converts to this type into a [`TransactionSignedEcRecovered`].
@@ -2130,6 +2168,19 @@ mod tests {
         assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
         let encoded = tx.envelope_encoded();
         assert_eq!(encoded.as_ref(), data.as_slice());
+    }
+
+    // <https://github.com/paradigmxyz/reth/issues/7750>
+    // <https://etherscan.io/tx/0x2084b8144eea4031c2fa7dfe343498c5e665ca85ed17825f2925f0b5b01c36ac>
+    #[test]
+    fn recover_pre_eip2() {
+        let data = hex!("f8ea0c850ba43b7400832dc6c0942935aa0a2d2fbb791622c29eb1c117b65b7a908580b884590528a9000000000000000000000001878ace42092b7f1ae1f28d16c1272b1aa80ca4670000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000d02ab486cedc0000000000000000000000000000000000000000000000000000557fe293cabc08cf1ca05bfaf3fda0a56b49cc78b22125feb5ae6a99d2b4781f00507d8b02c173771c85a0b5da0dbe6c5bc53740d0071fc83eb17ba0f709e49e9ae7df60dee625ef51afc5");
+        let tx = TransactionSigned::decode_enveloped(&mut data.as_slice()).unwrap();
+        let sender = tx.recover_signer();
+        assert!(sender.is_none());
+        let sender = tx.recover_signer_unchecked().unwrap();
+
+        assert_eq!(sender, address!("7e9e359edf0dbacf96a9952fa63092d919b0842b"));
     }
 
     #[test]

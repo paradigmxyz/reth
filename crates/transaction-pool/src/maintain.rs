@@ -13,8 +13,8 @@ use futures_util::{
 };
 use reth_primitives::{
     fs::FsPathError, Address, BlockHash, BlockNumber, BlockNumberOrTag,
-    FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, TransactionSigned,
+    FromRecoveredPooledTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
+    TransactionSigned, TryFromRecoveredTransaction,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
@@ -333,9 +333,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     <P as TransactionPool>::Transaction::from_recovered_pooled_transaction,
                                 )
                         } else {
-                            Some(<P as TransactionPool>::Transaction::from_recovered_transaction(
+                            <P as TransactionPool>::Transaction::try_from_recovered_transaction(
                                 tx,
-                            ))
+                            ).ok()
                         }
                     })
                     .collect::<Vec<_>>();
@@ -584,8 +584,13 @@ where
 
     let pool_transactions = txs_signed
         .into_iter()
-        .filter_map(|tx| tx.try_ecrecovered().map(<P::Transaction>::from_recovered_transaction))
+        .filter_map(|tx| tx.try_ecrecovered())
+        .filter_map(|tx| {
+            // Filter out errors
+            <P as TransactionPool>::Transaction::try_from_recovered_transaction(tx).ok()
+        })
         .collect::<Vec<_>>();
+
     let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
 
     info!(target: "txpool", txs_file =?file_path, num_txs=%outcome.len(), "Successfully reinserted local transactions from file");

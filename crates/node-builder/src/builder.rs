@@ -22,7 +22,7 @@ use reth_db::{
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
-use reth_exex::{ExExContext, ExExHandle, ExExManager};
+use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_api::{
@@ -31,10 +31,15 @@ use reth_node_api::{
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+    engine_api_store::EngineApiStore,
+    engine_skip_fcu::EngineApiSkipFcu,
+    exit::NodeExitFuture,
+    init::init_genesis,
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
 };
+use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, format_ether, ChainSpec};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
@@ -496,7 +501,7 @@ where
         >,
     >
     where
-        L: LaunchNode<DB, Types, Components, ComponentsState<Types, DB>>,
+        // L: LaunchNode<DB, Types, Components, ComponentsState<Types, DB>>,
         // F: FullNodeComponents,
     //     Types: Node<
             // F: FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>,
@@ -516,16 +521,18 @@ where
 
         // deconstruct self to launch node
         let Self { config, state, database } = self;
-        let args = LaunchArgs {
-            // config,
-            // components: state,
-            // database,
-            builder: self,
-            executor,
-            data_dir,
-            reth_config,
-        };
-        launcher.launch(args).await
+        // let args = LaunchArgs {
+        //     // config,
+        //     // components: state,
+        //     // database,
+        //     builder: self,
+        //     executor,
+        //     data_dir,
+        //     reth_config,
+        // };
+
+        todo!()
+        // launcher.launch(args).await
     }
 
     /// Check that the builder can be launched
@@ -852,19 +859,19 @@ where
         >,
     >
     where
-        L: LaunchNode<DB, Types, Components>,
-        Types: Node<
-            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>,
-        >,
-        Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
-        Types::NetworkBuilder: crate::components::NetworkBuilder<
-            RethFullAdapter<DB, Types>,
-            <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
-        >,
-        Types::PayloadBuilder: crate::components::PayloadServiceBuilder<
-            RethFullAdapter<DB, Types>,
-            <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
-        >,
+        // L: LaunchNode<DB, Types, Components, >,
+        // Types: Node<
+        //     FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, <Types as NodeTypes>::Evm>>,
+        // >,
+        // Types::PoolBuilder: PoolBuilder<RethFullAdapter<DB, Types>>,
+        // Types::NetworkBuilder: crate::components::NetworkBuilder<
+        //     RethFullAdapter<DB, Types>,
+        //     <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
+        // >,
+        // Types::PayloadBuilder: crate::components::PayloadServiceBuilder<
+        //     RethFullAdapter<DB, Types>,
+        //     <Types::PoolBuilder as PoolBuilder<RethFullAdapter<DB, Types>>>::Pool,
+        // >,
     {
         // deconstruct self for launch node params
         let Self { builder, task_executor, data_dir } = self;
@@ -874,7 +881,8 @@ where
 
         // deconstruct node builder to launch node
         let NodeBuilder { config, state, database } = builder;
-        launcher.launch(config, state, database, task_executor, data_dir, reth_config).await
+        // launcher.launch(config, state, database, task_executor, data_dir, reth_config).await
+        todo!()
     }
 
     /// Check that the builder can be launched
