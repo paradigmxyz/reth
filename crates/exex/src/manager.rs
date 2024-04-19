@@ -1,3 +1,9 @@
+use crate::ExExEvent;
+use metrics::Gauge;
+use reth_metrics::{metrics::Counter, Metrics};
+use reth_primitives::{BlockNumber, FinishedExExHeight};
+use reth_provider::CanonStateNotification;
+use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,
     future::{poll_fn, Future},
@@ -8,14 +14,6 @@ use std::{
     },
     task::{Context, Poll},
 };
-
-use crate::ExExEvent;
-use futures::StreamExt;
-use metrics::Gauge;
-use reth_metrics::{metrics::Counter, Metrics};
-use reth_primitives::{BlockNumber, FinishedExExHeight};
-use reth_provider::CanonStateNotification;
-use reth_tracing::tracing::debug;
 use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
     watch,
@@ -347,6 +345,7 @@ pub struct ExExManagerHandle {
     /// otherwise unused.
     is_ready_receiver: watch::Receiver<bool>,
     /// A stream of bools denoting whether the manager is ready for new notifications.
+    #[allow(unused)]
     is_ready: WatchStream<bool>,
     /// The current capacity of the manager's internal notification buffer.
     current_capacity: Arc<AtomicUsize>,
@@ -426,15 +425,14 @@ impl ExExManagerHandle {
     }
 
     /// Wait until the manager is ready for new notifications.
+    #[allow(clippy::needless_pass_by_ref_mut)]
     pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        // if this returns `Poll::Ready(None)` the stream is exhausted, which means the underlying
-        // channel is closed.
-        //
-        // this can only happen if the manager died, and the node is shutting down, so we ignore it
-        let mut pinned = std::pin::pin!(&mut self.is_ready);
-        if pinned.poll_next_unpin(cx) == Poll::Ready(Some(true)) {
+        use futures as _;
+        // FIXME: if not ready this must be polled
+        if *self.is_ready_receiver.borrow() {
             Poll::Ready(())
         } else {
+            cx.waker().wake_by_ref();
             Poll::Pending
         }
     }
