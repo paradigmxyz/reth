@@ -6222,7 +6222,6 @@ version = "0.2.0-beta.5"
 dependencies = [
  "reth-consensus-api",
  "reth-consensus-common",
- "reth-interfaces",
  "reth-primitives",
 ]
 
@@ -6671,7 +6670,6 @@ dependencies = [
  "reth-eth-wire-types",
  "reth-network-api",
  "reth-primitives",
- "reth-rpc-types",
  "secp256k1 0.27.0",
  "thiserror",
  "tokio",
@@ -7010,7 +7008,6 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-consensus-api",
  "reth-db",
- "reth-interfaces",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
