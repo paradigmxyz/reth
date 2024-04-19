@@ -156,6 +156,9 @@ pub trait EngineApi<Engine: EngineTypes> {
     ) -> RpcResult<TransitionConfiguration>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md#engine_getclientversionv1>
+    /// When connected to a single execution client, the consensus client MUST receive an array with a single ClientVersionV1 object.
+    /// When connected to multiple execution clients via a multiplexer, the multiplexer MUST concatenate the responses from each execution client into a single, 
+    /// flat array before returning the response to the consensus client.
     #[method(name = "getClientVersionV1")]
     async fn get_client_version_v1(&self, client_version:ClientVersionV1) -> RpcResult<Vec<ClientVersionV1>>;
 
