@@ -47,6 +47,8 @@ struct EngineApiInner<Provider, EngineT: EngineTypes> {
     task_spawner: Box<dyn TaskSpawner>,
     /// The metrics for engine api calls
     metrics: EngineApiMetrics,
+    ///For identification of the consensus client 
+    client: ClientVersionV1,
 }
 
 impl<Provider, EngineT> EngineApi<Provider, EngineT>
@@ -61,6 +63,7 @@ where
         beacon_consensus: BeaconConsensusEngineHandle<EngineT>,
         payload_store: PayloadStore<EngineT>,
         task_spawner: Box<dyn TaskSpawner>,
+        client: ClientVersionV1,
     ) -> Self {
         let inner = Arc::new(EngineApiInner {
             provider,
@@ -69,6 +72,7 @@ where
             payload_store,
             task_spawner,
             metrics: EngineApiMetrics::default(),
+            client,
         });
         Self { inner }
     }
