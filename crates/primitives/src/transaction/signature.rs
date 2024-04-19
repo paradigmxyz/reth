@@ -14,9 +14,6 @@ const SECP256K1N_HALF: U256 = U256::from_be_bytes([
     0x5D, 0x57, 0x6E, 0x73, 0x57, 0xA4, 0x50, 0x1D, 0xDF, 0xE9, 0x2F, 0x46, 0x68, 0x1B, 0x20, 0xA0,
 ]);
 
-/// Running OP Mainnet migration for chain below bedrock.]
-pub const OP_RETH_MAINNET_BELOW_BEDROCK: &str = "OP_RETH_MAINNET_BELOW_BEDROCK";
-
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
@@ -101,10 +98,6 @@ impl Signature {
         if v < 35 {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
             if v != 27 && v != 28 {
-                #[cfg(feature = "optimism")]
-                if std::env::var(OP_RETH_MAINNET_BELOW_BEDROCK) == Ok(true.to_string()) && v == 0 {
-                    return Ok((Signature { r, s, odd_y_parity: false }, None))
-                }
                 return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
             }
             let odd_y_parity = v == 28;

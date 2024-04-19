@@ -11,18 +11,19 @@ use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, Payload
 use reth_primitives::B256;
 
 /// Helper for engine api operations
-pub struct EngineApiHelper {
+pub struct EngineApiTestContext {
     pub canonical_stream: CanonStateNotificationStream,
     pub engine_api_client: HttpClient,
 }
 
-impl EngineApiHelper {
+impl EngineApiTestContext {
     /// Retrieves a v3 payload from the engine api
-    pub async fn get_payload_v3(&self, payload_id: PayloadId) -> eyre::Result<()> {
-        let _ =
-            EngineApiClient::<EthEngineTypes>::get_payload_v3(&self.engine_api_client, payload_id)
-                .await?;
-        Ok(())
+    pub async fn get_payload_v3(
+        &self,
+        payload_id: PayloadId,
+    ) -> eyre::Result<ExecutionPayloadEnvelopeV3> {
+        Ok(EngineApiClient::<EthEngineTypes>::get_payload_v3(&self.engine_api_client, payload_id)
+            .await?)
     }
 
     /// Submits a payload to the engine api
@@ -30,6 +31,7 @@ impl EngineApiHelper {
         &self,
         payload: EthBuiltPayload,
         eth_attr: EthPayloadBuilderAttributes,
+        versioned_hashes: Vec<B256>,
     ) -> eyre::Result<B256> {
         // setup payload for submission
         let envelope_v3 = ExecutionPayloadEnvelopeV3::from(payload);
@@ -39,7 +41,7 @@ impl EngineApiHelper {
         let submission = EngineApiClient::<EthEngineTypes>::new_payload_v3(
             &self.engine_api_client,
             payload_v3,
-            vec![],
+            versioned_hashes,
             eth_attr.parent_beacon_block_root.unwrap(),
         )
         .await?;

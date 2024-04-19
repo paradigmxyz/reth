@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
-use node_e2e_tests::{node::NodeHelper, wallet::Wallet};
+use node_e2e_tests::{node::NodeTestContext, wallet::Wallet};
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
-    builder::NodeConfig,
+    builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
+use reth_node_ethereum::EthereumNode;
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 
 #[tokio::test]
@@ -15,7 +16,8 @@ async fn can_sync() -> eyre::Result<()> {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
 
-    let genesis: Genesis = serde_json::from_str(include_str!("../../assets/genesis.json")).unwrap();
+    let genesis: Genesis =
+        serde_json::from_str(include_str!("../../../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
@@ -35,8 +37,21 @@ async fn can_sync() -> eyre::Result<()> {
         .with_unused_ports()
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
 
-    let mut first_node = NodeHelper::new(node_config.clone(), exec.clone()).await?;
-    let mut second_node = NodeHelper::new(node_config, exec).await?;
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
+        .testing_node(exec.clone())
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    let mut first_node = NodeTestContext::new(node.clone()).await?;
+
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+        .testing_node(exec)
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    let mut second_node = NodeTestContext::new(node).await?;
 
     let wallet = Wallet::default();
     let raw_tx = wallet.transfer_tx().await;
@@ -49,8 +64,12 @@ async fn can_sync() -> eyre::Result<()> {
     first_node.network.expect_session().await;
     second_node.network.expect_session().await;
 
+    let tx_hash = first_node.inject_tx(raw_tx).await?;
+
     // Make the first node advance
-    let (block_hash, tx_hash) = first_node.advance(raw_tx.clone()).await?;
+    let block_hash = first_node.advance(vec![]).await?;
+    // assert the block has been committed to the blockchain
+    first_node.assert_new_block(tx_hash, block_hash).await?;
 
     // only send forkchoice update to second node
     second_node.engine_api.update_forkchoice(block_hash).await?;

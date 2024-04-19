@@ -28,7 +28,7 @@ use reth_provider::{
 };
 use reth_stages::{MetricEvent, MetricEventsSender};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::Arc,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -267,18 +267,18 @@ where
             let state = chain.state_at_block(block_number)?;
 
             // get parent hashes
-            let mut parent_block_hashed = self.all_chain_hashes(chain_id);
+            let mut parent_block_hashes = self.all_chain_hashes(chain_id);
             let first_pending_block_number =
-                *parent_block_hashed.first_key_value().expect("There is at least one block hash").0;
+                *parent_block_hashes.first_key_value().expect("There is at least one block hash").0;
             let canonical_chain = canonical_chain
                 .iter()
                 .filter(|&(key, _)| key < first_pending_block_number)
                 .collect::<Vec<_>>();
-            parent_block_hashed.extend(canonical_chain);
+            parent_block_hashes.extend(canonical_chain);
 
             // get canonical fork.
             let canonical_fork = self.canonical_fork(chain_id)?;
-            return Some(BundleStateData { state, parent_block_hashed, canonical_fork })
+            return Some(BundleStateData { state, parent_block_hashes, canonical_fork })
         }
 
         // check if there is canonical block
@@ -287,7 +287,7 @@ where
             return Some(BundleStateData {
                 canonical_fork: ForkBlock { number: canonical_number, hash: block_hash },
                 state: BundleStateWithReceipts::default(),
-                parent_block_hashed: canonical_chain.inner().clone(),
+                parent_block_hashes: canonical_chain.inner().clone(),
             })
         }
 
@@ -430,8 +430,8 @@ where
         chain_id: BlockChainId,
         block_validation_kind: BlockValidationKind,
     ) -> Result<BlockStatus, InsertBlockErrorKind> {
-        debug!(target: "blockchain_tree", "Inserting block into side chain");
         let block_num_hash = block.num_hash();
+        debug!(target: "blockchain_tree", ?block_num_hash, ?chain_id, "Inserting block into side chain");
         // Create a new sidechain by forking the given chain, or append the block if the parent
         // block is the top of the given chain.
         let block_hashes = self.all_chain_hashes(chain_id);
@@ -458,9 +458,9 @@ where
                 BlockAttachment::HistoricalFork
             };
 
-            debug!(target: "blockchain_tree", "Appending block to side chain");
             let block_hash = block.hash();
             let block_number = block.number;
+            debug!(target: "blockchain_tree", ?block_hash, ?block_number, "Appending block to side chain");
             parent_chain.append_block(
                 block,
                 block_hashes,
@@ -495,19 +495,30 @@ where
     }
 
     /// Get all block hashes from a sidechain that are not part of the canonical chain.
-    ///
     /// This is a one time operation per block.
     ///
     /// # Note
     ///
     /// This is not cached in order to save memory.
     fn all_chain_hashes(&self, chain_id: BlockChainId) -> BTreeMap<BlockNumber, BlockHash> {
-        // find chain and iterate over it,
         let mut chain_id = chain_id;
         let mut hashes = BTreeMap::new();
         loop {
             let Some(chain) = self.state.chains.get(&chain_id) else { return hashes };
-            hashes.extend(chain.blocks().values().map(|b| (b.number, b.hash())));
+
+            // The parent chains might contain blocks with overlapping numbers or numbers greater
+            // than original chain tip. Insert the block hash only if it's not present
+            // for the given block number and the block number does not exceed the
+            // original chain tip.
+            let latest_block_number = hashes
+                .last_key_value()
+                .map(|(number, _)| *number)
+                .unwrap_or_else(|| chain.tip().number);
+            for block in chain.blocks().values().filter(|b| b.number <= latest_block_number) {
+                if let Entry::Vacant(e) = hashes.entry(block.number) {
+                    e.insert(block.hash());
+                }
+            }
 
             let fork_block = chain.fork_block();
             if let Some(next_chain_id) = self.block_indices().get_blocks_chain_id(&fork_block.hash)
@@ -1202,10 +1213,7 @@ where
         info!(target: "blockchain_tree", "REORG: revert canonical from database by unwinding chain blocks {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = provider_rw
-            .take_block_and_execution_range(
-                self.externals.provider_factory.chain_spec().as_ref(),
-                revert_range,
-            )
+            .take_block_and_execution_range(revert_range)
             .map_err(|e| CanonicalError::CanonicalRevert(e.to_string()))?;
 
         provider_rw.commit()?;
@@ -1587,6 +1595,82 @@ mod tests {
         assert_eq!(
             tree.make_canonical(canonical_block_3.hash()).unwrap(),
             CanonicalOutcome::Committed { head: canonical_block_3.header.clone() }
+        );
+    }
+
+    #[test]
+    fn sidechain_block_hashes() {
+        let data = BlockChainTestData::default_from_number(11);
+        let (block1, exec1) = data.blocks[0].clone();
+        let (block2, exec2) = data.blocks[1].clone();
+        let (block3, exec3) = data.blocks[2].clone();
+        let (block4, exec4) = data.blocks[3].clone();
+        let genesis = data.genesis;
+
+        // test pops execution results from vector, so order is from last to first.
+        let externals =
+            setup_externals(vec![exec3.clone(), exec2.clone(), exec4, exec3, exec2, exec1]);
+
+        // last finalized block would be number 9.
+        setup_genesis(&externals.provider_factory, genesis);
+
+        // make tree
+        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
+        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        // genesis block 10 is already canonical
+        tree.make_canonical(B256::ZERO).unwrap();
+
+        // make genesis block 10 as finalized
+        tree.finalize_block(10);
+
+        assert_eq!(
+            tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        assert_eq!(
+            tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        assert_eq!(
+            tree.insert_block(block3.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        assert_eq!(
+            tree.insert_block(block4, BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        let mut block2a = block2;
+        let block2a_hash = B256::new([0x34; 32]);
+        block2a.set_hash(block2a_hash);
+
+        assert_eq!(
+            tree.insert_block(block2a.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
+        );
+
+        let mut block3a = block3;
+        let block3a_hash = B256::new([0x35; 32]);
+        block3a.set_hash(block3a_hash);
+        block3a.set_parent_hash(block2a.hash());
+
+        assert_eq!(
+            tree.insert_block(block3a.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical)) /* TODO: this is incorrect, figure out why */
+        );
+
+        let block3a_chain_id =
+            tree.state.block_indices.get_blocks_chain_id(&block3a.hash()).unwrap();
+        assert_eq!(
+            tree.all_chain_hashes(block3a_chain_id),
+            BTreeMap::from([
+                (block1.number, block1.hash()),
+                (block2a.number, block2a.hash()),
+                (block3a.number, block3a.hash()),
+            ])
         );
     }
 

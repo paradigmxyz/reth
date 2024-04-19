@@ -48,7 +48,7 @@ pub trait EngineHook: Send + Sync + 'static {
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
-        ctx: EngineContext,
+        ctx: EngineHookContext,
     ) -> Poll<RethResult<EngineHookEvent>>;
 
     /// Returns [db access level][`EngineHookDBAccessLevel`] the hook needs.
@@ -57,7 +57,7 @@ pub trait EngineHook: Send + Sync + 'static {
 
 /// Engine context passed to the [hook polling function][`EngineHook::poll`].
 #[derive(Copy, Clone, Debug)]
-pub struct EngineContext {
+pub struct EngineHookContext {
     /// Tip block number.
     pub tip_block_number: BlockNumber,
     /// Finalized block number, if known.

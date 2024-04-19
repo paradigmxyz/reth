@@ -18,9 +18,12 @@ use std::{
 pub use alloy_eips::eip1559::BaseFeeParams;
 
 #[cfg(feature = "optimism")]
-pub(crate) use crate::constants::{
-    OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
-    OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+pub(crate) use crate::{
+    constants::{
+        OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
+        OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+    },
+    net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes},
 };
 
 /// The Ethereum mainnet spec
@@ -574,6 +577,12 @@ impl ChainSpec {
         self.chain.is_optimism()
     }
 
+    /// Returns `true` if this chain is Optimism mainnet.
+    #[inline]
+    pub fn is_optimism_mainnet(&self) -> bool {
+        self.chain == Chain::optimism_mainnet()
+    }
+
     /// Get the genesis block specification.
     ///
     /// To get the header for the genesis block, use [`Self::genesis_header`] instead.
@@ -773,10 +782,29 @@ impl ChainSpec {
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
     }
 
+    /// Convenience method to check if [Hardfork::Byzantium] is active at a given block number.
+    #[inline]
+    pub fn is_byzantium_active_at_block(&self, block_number: u64) -> bool {
+        self.fork(Hardfork::Byzantium).active_at_block(block_number)
+    }
+
+    /// Convenience method to check if [Hardfork::SpuriousDragon] is active at a given block number.
+    #[inline]
+    pub fn is_spurious_dragon_active_at_block(&self, block_number: u64) -> bool {
+        self.fork(Hardfork::SpuriousDragon).active_at_block(block_number)
+    }
+
     /// Convenience method to check if [Hardfork::Homestead] is active at a given block number.
     #[inline]
     pub fn is_homestead_active_at_block(&self, block_number: u64) -> bool {
         self.fork(Hardfork::Homestead).active_at_block(block_number)
+    }
+
+    /// Convenience method to check if [Hardfork::Bedrock] is active at a given block number.
+    #[cfg(feature = "optimism")]
+    #[inline]
+    pub fn is_bedrock_active_at_block(&self, block_number: u64) -> bool {
+        self.fork(Hardfork::Bedrock).active_at_block(block_number)
     }
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
@@ -913,6 +941,14 @@ impl ChainSpec {
             C::Goerli => Some(goerli_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
+            #[cfg(feature = "optimism")]
+            C::Base => Some(base_nodes()),
+            #[cfg(feature = "optimism")]
+            C::Optimism => Some(op_nodes()),
+            #[cfg(feature = "optimism")]
+            C::BaseGoerli | C::BaseSepolia => Some(base_testnet_nodes()),
+            #[cfg(feature = "optimism")]
+            C::OptimismSepolia | C::OptimismGoerli | C::OptimismKovan => Some(op_testnet_nodes()),
             _ => None,
         }
     }
@@ -3175,5 +3211,11 @@ Post-merge hard forks (timestamp based):
             ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 0 },
             BASE_MAINNET.latest_fork_id()
         )
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn is_bedrock_active() {
+        assert!(!OP_MAINNET.is_bedrock_active_at_block(1))
     }
 }

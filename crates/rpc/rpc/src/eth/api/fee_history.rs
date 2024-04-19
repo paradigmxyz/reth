@@ -7,7 +7,7 @@ use futures::{
 };
 use metrics::atomics::AtomicU64;
 use reth_primitives::{
-    basefee::calculate_next_block_base_fee,
+    basefee::calc_next_block_base_fee,
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     ChainSpec, Receipt, SealedBlock, TransactionSigned, B256,
 };
@@ -370,12 +370,12 @@ impl FeeHistoryEntry {
 
     /// Returns the base fee for the next block according to the EIP-1559 spec.
     pub fn next_block_base_fee(&self, chain_spec: &ChainSpec) -> u64 {
-        calculate_next_block_base_fee(
-            self.gas_used,
-            self.gas_limit,
-            self.base_fee_per_gas,
+        calc_next_block_base_fee(
+            self.gas_used as u128,
+            self.gas_limit as u128,
+            self.base_fee_per_gas as u128,
             chain_spec.base_fee_params(self.timestamp),
-        )
+        ) as u64
     }
 
     /// Returns the blob fee for the next block according to the EIP-4844 spec.

@@ -12,10 +12,11 @@ use clap::Parser;
 use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
-use reth_config::Config;
+use reth_config::{config::EtlConfig, Config};
 use reth_db::{database::Database, init_db};
 use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder, file_client::FileClient,
+    bodies::bodies::BodiesDownloaderBuilder,
+    file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::{
@@ -25,9 +26,10 @@ use reth_interfaces::{
         headers::downloader::{HeaderDownloader, SyncTarget},
     },
 };
-use reth_node_core::{events::node::NodeEvent, init::init_genesis};
+use reth_node_core::init::init_genesis;
 use reth_node_ethereum::EthEvmConfig;
-use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256, OP_RETH_MAINNET_BELOW_BEDROCK};
+use reth_node_events::node::NodeEvent;
+use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
@@ -73,8 +75,12 @@ pub struct ImportCommand {
 
     /// Import OP Mainnet chain below Bedrock. Caution! Flag must be set as env var, since the env
     /// var is read by another process too, in order to make below Bedrock import work.
-    #[arg(long, verbatim_doc_comment, env = OP_RETH_MAINNET_BELOW_BEDROCK)]
+    #[arg(long, verbatim_doc_comment, env = "OP_RETH_MAINNET_BELOW_BEDROCK")]
     op_mainnet_below_bedrock: bool,
+
+    /// Chunk byte length.
+    #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
+    chunk_len: Option<u64>,
 
     #[command(flatten)]
     db: DatabaseArgs,
@@ -101,12 +107,21 @@ impl ImportCommand {
             debug!(target: "reth::cli", "Execution stage disabled");
         }
 
+        debug!(target: "reth::cli",
+            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE), "Chunking chain import"
+        );
+
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
 
-        let config: Config = self.load_config(config_path.clone())?;
+        let mut config: Config = self.load_config(config_path.clone())?;
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
+
+        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
+        if config.stages.etl.dir.is_none() {
+            config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+        }
 
         let db_path = data_dir.db_path();
 
@@ -123,49 +138,55 @@ impl ImportCommand {
         let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");
 
-        // create a new FileClient
-        info!(target: "reth::cli", "Importing chain file");
-        let file_client = Arc::new(FileClient::new(&self.path).await?);
+        // open file
+        let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
-        // override the tip
-        let tip = file_client.tip().expect("file client has no tip");
-        info!(target: "reth::cli", "Chain file read");
+        while let Some(file_client) = reader.next_chunk().await? {
+            // create a new FileClient from chunk read from file
+            info!(target: "reth::cli",
+                "Importing chain file chunk"
+            );
 
-        let (mut pipeline, events) = self
-            .build_import_pipeline(
-                config,
-                provider_factory.clone(),
-                &consensus,
-                file_client,
-                StaticFileProducer::new(
+            // override the tip
+            let tip = file_client.tip().expect("file client has no tip");
+            info!(target: "reth::cli", "Chain file chunk read");
+
+            let (mut pipeline, events) = self
+                .build_import_pipeline(
+                    &config,
                     provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
-                self.disable_execution,
-            )
-            .await?;
+                    &consensus,
+                    Arc::new(file_client),
+                    StaticFileProducer::new(
+                        provider_factory.clone(),
+                        provider_factory.static_file_provider(),
+                        PruneModes::default(),
+                    ),
+                    self.disable_execution,
+                )
+                .await?;
 
-        // override the tip
-        pipeline.set_tip(tip);
-        debug!(target: "reth::cli", ?tip, "Tip manually set");
+            // override the tip
+            pipeline.set_tip(tip);
+            debug!(target: "reth::cli", ?tip, "Tip manually set");
 
-        let provider = provider_factory.provider()?;
+            let provider = provider_factory.provider()?;
 
-        let latest_block_number =
-            provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-        tokio::spawn(reth_node_core::events::node::handle_events(
-            None,
-            latest_block_number,
-            events,
-            db.clone(),
-        ));
+            let latest_block_number =
+                provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
+            tokio::spawn(reth_node_events::node::handle_events(
+                None,
+                latest_block_number,
+                events,
+                db.clone(),
+            ));
 
-        // Run pipeline
-        info!(target: "reth::cli", "Starting sync pipeline");
-        tokio::select! {
-            res = pipeline.run() => res?,
-            _ = tokio::signal::ctrl_c() => {},
+            // Run pipeline
+            info!(target: "reth::cli", "Starting sync pipeline");
+            tokio::select! {
+                res = pipeline.run() => res?,
+                _ = tokio::signal::ctrl_c() => {},
+            }
         }
 
         info!(target: "reth::cli", "Chain file imported");
@@ -174,7 +195,7 @@ impl ImportCommand {
 
     async fn build_import_pipeline<DB, C>(
         &self,
-        config: Config,
+        config: &Config,
         provider_factory: ProviderFactory<DB>,
         consensus: &Arc<C>,
         file_client: Arc<FileClient>,
@@ -192,8 +213,8 @@ impl ImportCommand {
         let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
             .build(file_client.clone(), consensus.clone())
             .into_task();
-        header_downloader.update_local_head(file_client.tip_header().unwrap());
-        header_downloader.update_sync_target(SyncTarget::Tip(file_client.start().unwrap()));
+        header_downloader.update_local_head(file_client.start_header().unwrap());
+        header_downloader.update_sync_target(SyncTarget::Tip(file_client.tip().unwrap()));
 
         let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
             .build(file_client.clone(), consensus.clone(), provider_factory.clone())
@@ -220,7 +241,7 @@ impl ImportCommand {
                     header_downloader,
                     body_downloader,
                     factory.clone(),
-                    config.stages.etl,
+                    config.stages.etl.clone(),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
@@ -239,7 +260,7 @@ impl ImportCommand {
                         .clean_threshold
                         .max(config.stages.account_hashing.clean_threshold)
                         .max(config.stages.storage_hashing.clean_threshold),
-                    config.prune.map(|prune| prune.segments).unwrap_or_default(),
+                    config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
                 ))
                 .disable_if(StageId::Execution, || disable_execution),
             )

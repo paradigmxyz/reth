@@ -25,13 +25,13 @@ impl Wallet {
     /// Creates a static tx
     fn tx(&self) -> TransactionRequest {
         TransactionRequest {
-            transaction_type: Some(TxType::Eip4844 as u8),
             nonce: Some(0),
             value: Some(U256::from(100)),
             to: Some(Address::random()),
-            gas_price: Some(20e9 as u128),
             gas: Some(21000),
             chain_id: Some(1),
+            max_priority_fee_per_gas: Some(1500000000),
+            max_fee_per_gas: Some(1500000000),
             ..Default::default()
         }
     }
@@ -44,19 +44,13 @@ impl Wallet {
         builder.ingest(b"dummy blob");
         let sidecar: BlobTransactionSidecar = builder.build()?;
         tx.set_blob_sidecar(sidecar);
+        tx.set_max_fee_per_blob_gas(1);
         tx.clone().transaction_type(TxType::Eip4844 as u8);
 
         let signer = EthereumSigner::from(self.inner.clone());
-        let built_tx = tx.clone().build(&signer).await.unwrap();
-        let built_tx_2 = tx.build_unsigned().unwrap();
+        let signed = tx.clone().build(&signer).await.unwrap();
 
-        println!("is_legacy: {}", built_tx.is_legacy());
-        println!("is_legacy_2: {:?}", built_tx_2);
-
-        assert!(!built_tx.is_legacy()); // legacy -> true
-
-        assert!(!built_tx.type_flag().is_none()); // type_flag -> None
-        Ok(built_tx.encoded_2718().into())
+        Ok(signed.encoded_2718().into())
     }
 }
 

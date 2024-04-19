@@ -25,7 +25,7 @@ reth-payload-validator.workspace = true
 reth-prune.workspace = true
 reth-static-file.workspace = true
 reth-tokio-util.workspace = true
-reth-node-api.workspace = true
+reth-engine-primitives.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -65,4 +65,5 @@ optimism = [
     "reth-interfaces/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
+    "reth-beacon-consensus-core/optimism"
 ]

@@ -24,6 +24,7 @@ reth-interfaces = { workspace = true, features = ["clap"] }
 reth-transaction-pool.workspace = true
 reth-beacon-consensus.workspace = true
 reth-auto-seal-consensus.workspace = true
+reth-cli-runner.workspace = true
 reth-consensus-common.workspace = true
 reth-blockchain-tree.workspace = true
 reth-rpc-engine-api.workspace = true
@@ -51,6 +52,7 @@ reth-node-ethereum.workspace = true
 reth-node-optimism = { workspace = true, optional = true, features = ["optimism"] }
 reth-node-core.workspace = true
 reth-node-builder.workspace = true
+reth-node-events.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
@@ -93,6 +95,9 @@ itertools.workspace = true
 rayon.workspace = true
 boyer-moore-magiclen = "0.2.16"
 ahash = "0.8"
+
+# p2p
+discv5.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }

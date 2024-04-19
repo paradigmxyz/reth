@@ -59,6 +59,10 @@ pub struct DebugArgs {
     )]
     pub hook_all: bool,
 
+    /// If provided, the engine will skip `n` consecutive FCUs.
+    #[arg(long = "debug.skip-fcu", help_heading = "Debug")]
+    pub skip_fcu: Option<usize>,
+
     /// The path to store engine API messages at.
     /// If specified, all of the intercepted engine API messages
     /// will be written to specified location.

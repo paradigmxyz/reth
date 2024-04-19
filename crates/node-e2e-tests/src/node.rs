@@ -1,56 +1,51 @@
-use crate::{engine_api::EngineApiHelper, network::NetworkHelper, payload::PayloadHelper};
+use crate::{
+    engine_api::EngineApiTestContext, network::NetworkTestContext, payload::PayloadTestContext,
+};
+use alloy_consensus::{TxEip4844Variant, TxEnvelope};
+use alloy_network::eip2718::Decodable2718;
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use reth::{
-    api::FullNodeComponentsAdapter,
-    blockchain_tree::ShareableBlockchainTree,
-    builder::{FullNode, FullNodeTypesAdapter, NodeBuilder, NodeHandle},
-    providers::{providers::BlockchainProvider, BlockReaderIdExt, CanonStateSubscriptions},
-    revm::EvmProcessorFactory,
+    api::FullNodeComponents,
+    builder::FullNode,
+    providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
+        api::DebugApiServer,
         eth::{error::EthResult, EthTransactions},
         types::engine::PayloadAttributes,
     },
-    tasks::TaskExecutor,
-    transaction_pool::{
-        blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPooledTransaction,
-        EthTransactionValidator, Pool, TransactionValidationTaskExecutor,
-    },
 };
-use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-use reth_node_core::node_config::NodeConfig;
-use reth_node_ethereum::{EthEvmConfig, EthereumNode};
+use reth_node_ethereum::EthEngineTypes;
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_primitives::{Address, Bytes, B256};
+use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, Address, Bytes, B256};
 
-use std::{
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_stream::StreamExt;
 
 /// An helper struct to handle node actions
-pub struct NodeHelper {
-    pub inner: TestNode,
-    payload: PayloadHelper,
-    pub network: NetworkHelper,
-    pub engine_api: EngineApiHelper,
+pub struct NodeTestContext<Node>
+where
+    Node: FullNodeComponents<Engine = EthEngineTypes>,
+{
+    pub inner: FullNode<Node>,
+    payload: PayloadTestContext<Node::Engine>,
+    pub network: NetworkTestContext,
+    pub engine_api: EngineApiTestContext,
 }
 
-impl NodeHelper {
+impl<Node> NodeTestContext<Node>
+where
+    Node: FullNodeComponents<Engine = EthEngineTypes>,
+{
     /// Creates a new test node
-    pub async fn new(node_config: NodeConfig, task_exec: TaskExecutor) -> eyre::Result<Self> {
-        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-            .testing_node(task_exec)
-            .node(EthereumNode::default())
-            .launch()
-            .await?;
+    pub async fn new(node: FullNode<Node>) -> eyre::Result<Self> {
+        let builder = node.payload_builder.clone();
 
         Ok(Self {
             inner: node.clone(),
-            network: NetworkHelper::new(node.network.clone()),
-            payload: PayloadHelper::new(node.payload_builder.clone()).await?,
-            engine_api: EngineApiHelper {
+            network: NetworkTestContext::new(node.network.clone()),
+            payload: PayloadTestContext::new(builder).await?,
+            engine_api: EngineApiTestContext {
                 engine_api_client: node.auth_server_handle().http_client(),
                 canonical_stream: node.provider.canonical_state_stream(),
             },
@@ -58,10 +53,7 @@ impl NodeHelper {
     }
 
     /// Advances the node forward
-    pub async fn advance(&mut self, raw_tx: Bytes) -> eyre::Result<(B256, B256)> {
-        // push tx into pool via RPC server
-        let tx_hash = self.inject_tx(raw_tx).await?;
-
+    pub async fn advance(&mut self, versioned_hashes: Vec<B256>) -> eyre::Result<B256> {
         // trigger new payload building draining the pool
         let eth_attr = self.payload.new_payload().await.unwrap();
 
@@ -78,20 +70,39 @@ impl NodeHelper {
         let payload = self.payload.expect_built_payload().await?;
 
         // submit payload via engine api
-        let block_hash = self.engine_api.submit_payload(payload, eth_attr.clone()).await?;
+        let block_hash =
+            self.engine_api.submit_payload(payload, eth_attr.clone(), versioned_hashes).await?;
 
         // trigger forkchoice update via engine api to commit the block to the blockchain
         self.engine_api.update_forkchoice(block_hash).await?;
 
-        // assert the block has been committed to the blockchain
-        self.assert_new_block(tx_hash, block_hash).await?;
-        Ok((block_hash, tx_hash))
+        Ok(block_hash)
     }
 
     /// Injects a raw transaction into the node tx pool via RPC server
-    async fn inject_tx(&mut self, raw_tx: Bytes) -> EthResult<B256> {
+    pub async fn inject_tx(&mut self, raw_tx: Bytes) -> EthResult<B256> {
         let eth_api = self.inner.rpc_registry.eth_api();
         eth_api.send_raw_transaction(raw_tx).await
+    }
+
+    pub async fn envelope_by_hash(&mut self, hash: B256) -> eyre::Result<TxEnvelope> {
+        let tx = self.inner.rpc_registry.debug_api().raw_transaction(hash).await?.unwrap();
+        let tx = tx.to_vec();
+        Ok(TxEnvelope::decode_2718(&mut tx.as_ref()).unwrap())
+    }
+    pub fn validate_sidecar(&self, tx: TxEnvelope) -> Vec<B256> {
+        let proof_setting = MAINNET_KZG_TRUSTED_SETUP.clone();
+
+        match tx {
+            TxEnvelope::Eip4844(signed) => match signed.tx() {
+                TxEip4844Variant::TxEip4844WithSidecar(tx) => {
+                    tx.validate_blob(&proof_setting).unwrap();
+                    tx.sidecar.versioned_hashes().collect()
+                }
+                _ => panic!("Expected Eip4844 transaction with sidecar"),
+            },
+            _ => panic!("Expected Eip4844 transaction"),
+        }
     }
 
     /// Asserts that a new block has been added to the blockchain
@@ -104,10 +115,8 @@ impl NodeHelper {
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
         let head = self.engine_api.canonical_stream.next().await.unwrap();
-        let tx = head.tip().transactions().next().unwrap();
-        let new_tx = tx.as_eip4844().unwrap();
-        println!("tx: {:?}", new_tx);
-        assert_eq!(tx.hash().as_slice(), tip_tx_hash.as_slice());
+        let tx = head.tip().transactions().next();
+        assert_eq!(tx.unwrap().hash().as_slice(), tip_tx_hash.as_slice());
 
         // wait for the block to commit
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -134,35 +143,3 @@ pub fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
     };
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
-
-type TestNode = FullNode<
-    FullNodeComponentsAdapter<
-        FullNodeTypesAdapter<
-            EthereumNode,
-            Arc<TempDatabase<DatabaseEnv>>,
-            BlockchainProvider<
-                Arc<TempDatabase<DatabaseEnv>>,
-                ShareableBlockchainTree<
-                    Arc<TempDatabase<DatabaseEnv>>,
-                    EvmProcessorFactory<EthEvmConfig>,
-                >,
-            >,
-        >,
-        Pool<
-            TransactionValidationTaskExecutor<
-                EthTransactionValidator<
-                    BlockchainProvider<
-                        Arc<TempDatabase<DatabaseEnv>>,
-                        ShareableBlockchainTree<
-                            Arc<TempDatabase<DatabaseEnv>>,
-                            EvmProcessorFactory<EthEvmConfig>,
-                        >,
-                    >,
-                    EthPooledTransaction,
-                >,
-            >,
-            CoinbaseTipOrdering<EthPooledTransaction>,
-            DiskFileBlobStore,
-        >,
-    >,
->;

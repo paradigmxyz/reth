@@ -256,8 +256,14 @@ impl Command {
                     Box::new(MerkleStage::default_execution()),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
-                StageEnum::AccountHistory => (Box::<IndexAccountHistoryStage>::default(), None),
-                StageEnum::StorageHistory => (Box::<IndexStorageHistoryStage>::default(), None),
+                StageEnum::AccountHistory => (
+                    Box::new(IndexAccountHistoryStage::default().with_etl_config(etl_config)),
+                    None,
+                ),
+                StageEnum::StorageHistory => (
+                    Box::new(IndexStorageHistoryStage::default().with_etl_config(etl_config)),
+                    None,
+                ),
                 _ => return Ok(()),
             };
         if let Some(unwind_stage) = &unwind_stage {
