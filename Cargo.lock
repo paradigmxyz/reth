@@ -7555,6 +7555,7 @@ dependencies = [
  "auto_impl",
  "criterion",
  "derive_more",
+ "itertools 0.12.1",
  "metrics",
  "once_cell",
  "proptest",

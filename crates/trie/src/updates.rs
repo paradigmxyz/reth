@@ -186,3 +186,193 @@ impl TrieUpdates {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        hashed_cursor::HashedPostStateCursorFactory, test_utils::storage_root_prehashed,
+        HashedPostState, HashedStorage, StorageRoot,
+    };
+    use itertools::Itertools;
+    use reth_primitives::{keccak256, Address, StorageEntry, U256};
+    use reth_provider::test_utils::create_test_provider_factory;
+    use std::collections::BTreeMap;
+
+    fn compute_storage_root<TX: DbTx>(
+        address: Address,
+        tx: &TX,
+        post_state: &HashedPostState,
+    ) -> (B256, TrieUpdates) {
+        let (root, _, updates) = StorageRoot::from_tx(tx, address)
+            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
+                tx,
+                &post_state.clone().into_sorted(),
+            ))
+            .with_prefix_set(
+                post_state
+                    .construct_prefix_sets()
+                    .storage_prefix_sets
+                    .remove(&keccak256(address))
+                    .unwrap(),
+            )
+            .root_with_updates()
+            .unwrap();
+        (root, updates)
+    }
+
+    fn print_trie_updates(updates: &TrieUpdates) {
+        for (key, op) in updates.iter().sorted_unstable_by_key(|(key, _)| (*key).clone()) {
+            match key {
+                TrieKey::StorageNode(_, StoredNibblesSubKey(nibbles)) => match op {
+                    TrieOp::Update(node) => {
+                        println!(
+                            "Updated node at key {nibbles:?}: state {:?} tree {:?} hash {:?} hashes len {}",
+                            node.state_mask, node.tree_mask, node.hash_mask, node.hashes.len()
+                        );
+                    }
+                    TrieOp::Delete => {
+                        println!("Deleting node at key {nibbles:?}");
+                    }
+                },
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn trie_updates_across_multiple_iterations() {
+        let address = Address::random();
+        let hashed_address = keccak256(address);
+
+        // Generate initial storage with prefixes from 0xa to 0xf down to specified depth
+        let mut hashed_storage = BTreeMap::default();
+        // let max_depth = 4;
+        // for depth in 1..=max_depth {
+        //     for mut prefix in CHILD_INDEX_RANGE.permutations(depth) {
+        //         prefix.resize(64, 0);
+        //         let hashed_slot = B256::from_slice(&Nibbles::from_nibbles(prefix).pack());
+        //         hashed_storage.insert(hashed_slot, U256::from(1));
+        //     }
+        // }
+
+        let factory = create_test_provider_factory();
+
+        let mut post_state = HashedPostState::default().with_storages([(
+            hashed_address,
+            HashedStorage::from_iter(false, hashed_storage.clone()),
+        )]);
+
+        println!("Computing initial storage root");
+        let (storage_root, initial_updates) =
+            compute_storage_root(address, factory.provider().unwrap().tx_ref(), &post_state);
+        assert_eq!(storage_root, storage_root_prehashed(hashed_storage.clone()));
+
+        println!("Initial updates");
+        print_trie_updates(&initial_updates);
+
+        let mut modified_storage = BTreeMap::default();
+
+        // 0x0fff...
+        let mut modified_key_prefix = vec![0x0, 0xf, 0xf, 0xf];
+        modified_key_prefix.resize(64, 0);
+
+        // 0x0fff...0aa000000000000
+        let mut modified_entry1 = modified_key_prefix.clone();
+        modified_entry1[50] = 0xa;
+        modified_entry1[51] = 0xa;
+        modified_storage.insert(
+            B256::from_slice(&Nibbles::from_nibbles(&modified_entry1).pack()),
+            U256::from(1),
+        );
+
+        // 0x0fff...0aaa00000000000
+        let mut modified_entry2 = modified_key_prefix.clone();
+        modified_entry2[50] = 0xa;
+        modified_entry2[51] = 0xa;
+        modified_entry2[52] = 0xa;
+        modified_storage.insert(
+            B256::from_slice(&Nibbles::from_nibbles(&modified_entry2).pack()),
+            U256::from(1),
+        );
+
+        // 0x0fff...0ab000000000000
+        let mut modified_entry3 = modified_key_prefix.clone();
+        modified_entry3[50] = 0xa;
+        modified_entry3[51] = 0xb;
+        let modified_entry3_key = B256::from_slice(&Nibbles::from_nibbles(&modified_entry3).pack());
+        modified_storage.insert(modified_entry3_key, U256::from(1));
+
+        // 0x0fff...0ba000000000000
+        let mut modified_entry4 = modified_key_prefix.clone();
+        modified_entry4[50] = 0xb;
+        modified_entry4[51] = 0xa;
+        modified_storage.insert(
+            B256::from_slice(&Nibbles::from_nibbles(&modified_entry4).pack()),
+            U256::from(1),
+        );
+
+        // Update main hashed storage.
+        hashed_storage.extend(modified_storage.clone());
+
+        // let post_state = HashedPostState::default().with_storages([(
+        //     hashed_address,
+        //     HashedStorage::from_iter(false, modified_storage.clone()),
+        // )]);
+        post_state
+            .storages
+            .get_mut(&hashed_address)
+            .unwrap()
+            .storage
+            .extend(modified_storage.clone());
+
+        println!("Computing storage root");
+        let (storage_root, modified_updates) =
+            compute_storage_root(address, factory.provider().unwrap().tx_ref(), &post_state);
+        assert_eq!(storage_root, storage_root_prehashed(hashed_storage.clone()));
+
+        println!("New updates");
+        print_trie_updates(&modified_updates);
+
+        modified_storage.insert(modified_entry3_key, U256::ZERO);
+
+        // Update main hashed storage.
+        hashed_storage.remove(&modified_entry3_key);
+
+        post_state
+            .storages
+            .get_mut(&hashed_address)
+            .unwrap()
+            .storage
+            .extend(modified_storage.clone());
+
+        println!("Computing storage root 2");
+        let (storage_root, modified_updates2) =
+            compute_storage_root(address, factory.provider().unwrap().tx_ref(), &post_state);
+        assert_eq!(storage_root, storage_root_prehashed(hashed_storage.clone()));
+
+        println!("New updates 2");
+        print_trie_updates(&modified_updates2);
+
+        {
+            let mut updates = initial_updates.clone();
+            updates.extend(modified_updates);
+            updates.extend(modified_updates2);
+
+            let provider_rw = factory.provider_rw().unwrap();
+            let mut hashed_storage_cursor =
+                provider_rw.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+            for (hashed_slot, value) in &hashed_storage {
+                hashed_storage_cursor
+                    .upsert(hashed_address, StorageEntry { key: *hashed_slot, value: *value })
+                    .unwrap();
+            }
+            updates.flush(provider_rw.tx_ref()).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let storage_root =
+            StorageRoot::from_tx(factory.provider().unwrap().tx_ref(), address).root().unwrap();
+        assert_eq!(storage_root, storage_root_prehashed(hashed_storage.clone()));
+    }
+}

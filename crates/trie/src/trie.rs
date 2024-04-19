@@ -505,10 +505,12 @@ where
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 StorageNode::Branch(node) => {
+                    println!("branch node {node:?}");
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 StorageNode::Leaf(hashed_slot, value) => {
+                    println!("leaf node {hashed_slot} {value}");
                     tracker.inc_leaf();
                     hash_builder.add_leaf(
                         Nibbles::unpack(hashed_slot),
