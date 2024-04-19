@@ -712,7 +712,7 @@ where
 
         // Configure the pipeline
         let pipeline_exex_handle =
-            exex_manager_handle.clone().unwrap_or_else(|| ExExManagerHandle::empty());
+            exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
         let (mut pipeline, client) = if config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
 
