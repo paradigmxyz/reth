@@ -22,7 +22,7 @@ module.exports = async ({ github, context }) => {
 
         const issueLabels = issue.data.labels.map(label => label.name);
         if (issueLabels.length > 0) {
-            await github.rest.issues.setLabels({
+            await github.rest.issues.addLabels({
                 ...repo,
                 issue_number: prNumber,
                 labels: issueLabels,
