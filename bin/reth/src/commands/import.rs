@@ -98,6 +98,9 @@ pub struct ImportCommand {
     #[command(flatten)]
     db: DatabaseArgs,
 
+    #[arg(value_name = "START", verbatim_doc_comment, default_value_t)]
+    start: u64,
+
     /// The path to a block file for import.
     ///
     /// The online stages (headers and bodies) are replaced by a file import, after which the
