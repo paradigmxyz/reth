@@ -19,3 +19,4 @@ tracing.workspace = true
 futures-util.workspace = true
 tokio = { workspace = true, features = ["time"] }
 eyre.workspace = true
+thiserror.workspace = true
