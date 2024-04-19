@@ -20,14 +20,18 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
-use reth_interfaces::consensus::Consensus;
+use reth_interfaces::{
+    consensus::Consensus,
+    p2p::{
+        bodies::downloader::BodyDownloader,
+        headers::downloader::{HeaderDownloader, SyncTarget},
+    },
+};
 use reth_node_core::init::init_genesis;
 use reth_node_ethereum::EthEvmConfig;
 use reth_node_events::node::NodeEvent;
-use reth_primitives::{
-    stage::StageId, ChainSpec, PruneModes, B256,
-};
-use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
+use reth_primitives::{stage::StageId, ChainSpec, PruneModes, SealedHeader, B256};
+use reth_provider::{HeaderProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
@@ -150,6 +154,15 @@ impl ImportCommand {
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
+        let mut start_header: Option<SealedHeader> = None;
+
+        if self.start != 0 {
+            start_header = provider_factory
+                .provider()?
+                .sealed_header(self.start)
+                .expect("start block is not canonical with db");
+        }
+
         while let Some(file_client) = reader.next_chunk().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
@@ -171,6 +184,7 @@ impl ImportCommand {
                         PruneModes::default(),
                     ),
                     self.no_state,
+                    start_header.unwrap(),
                 )
                 .await?;
 
@@ -210,6 +224,7 @@ impl ImportCommand {
         file_client: Arc<FileClient>,
         static_file_producer: StaticFileProducer<DB>,
         no_state: bool,
+        start_header: SealedHeader,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,
