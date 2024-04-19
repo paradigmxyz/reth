@@ -72,14 +72,13 @@ async fn start_endpoint<F: Hook + 'static>(
     let server =
         Server::try_bind(&listen_addr).wrap_err("Could not bind to address")?.serve(make_svc);
 
-    let task_manager = TaskManager::new(PrometheusHandle);
-    let task_executor = TaskManager::executor(&task_manager);
+    let task_executor = TaskExecutor::clone(&self::TaskManager::current());
     
     task_executor.spawn_with_graceful_shutdown_signal(move |signal| async move {
-        server.with_graceful_shutdown(signal).await.expect("Metrics endpoint crashed")
+        server.with_graceful_shutdown_signal(signal).await.expect("Metrics endpoint crashed")
     });
 
-    // tokio::spawn(async move { server.await.expect("Metrics endpoint crashed") });
+    tokio::spawn(async move { server.await.expect("Metrics endpoint crashed") });
 
     Ok(())
 }
