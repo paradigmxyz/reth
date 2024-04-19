@@ -128,11 +128,13 @@ impl<C> NetworkConfig<C> {
         let mut builder =
             reth_discv5::Config::builder(rlpx_port).add_unsigned_boot_nodes(boot_nodes.into_iter());
 
-        if chain.is_optimism() {
-            builder = builder.fork(network_key::OPSTACK, fork_id)
-        } else if chain.named() == Some(NamedChain::Mainnet) {
+        if chain.named() == Some(NamedChain::Mainnet) {
             builder = builder.fork(network_key::ETH, fork_id)
         }
+        // todo: set op EL fork id
+        /*if chain.is_optimism() {
+            builder = builder.fork(network_key::, fork_id)
+        }*/
 
         self.set_discovery_v5(f(builder))
     }
