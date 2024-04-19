@@ -33,7 +33,7 @@ use reth_provider::{
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use reth_stages::{ControlFlow, Pipeline};
+use reth_stages_api::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventListeners;
 use std::{
