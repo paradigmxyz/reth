@@ -237,13 +237,18 @@ impl ImportCommand {
             eyre::bail!("unable to import non canonical blocks");
         }
 
-        let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
+        let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
             .build(file_client.clone(), consensus.clone())
             .into_task();
+        header_downloader.update_local_head(start_header);
+        header_downloader.update_sync_target(SyncTarget::Tip(file_client.tip().unwrap()));
 
-        let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
+        let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
             .build(file_client.clone(), consensus.clone(), provider_factory.clone())
             .into_task();
+        body_downloader
+            .set_download_range(file_client.min_block().unwrap()..=file_client.max_block().unwrap())
+            .expect("failed to set download range");
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let factory =
