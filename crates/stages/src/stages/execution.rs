@@ -60,7 +60,7 @@ use tracing::*;
 /// to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
-pub struct ExecutionStage<EF: ExecutorFactory> {
+pub struct ExecutionStage<EF> {
     metrics_tx: Option<MetricEventsSender>,
     /// The stage's internal executor
     executor_factory: EF,
@@ -77,7 +77,7 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     exex_manager_handle: ExExManagerHandle,
 }
 
-impl<EF: ExecutorFactory> ExecutionStage<EF> {
+impl<EF> ExecutionStage<EF> {
     /// Create new execution stage with specified config.
     pub fn new(
         executor_factory: EF,
@@ -115,6 +115,37 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         self
     }
 
+    /// Adjusts the prune modes related to changesets.
+    ///
+    /// This function verifies whether the [`super::MerkleStage`] or Hashing stages will run from
+    /// scratch. If at least one stage isn't starting anew, it implies that pruning of
+    /// changesets cannot occur. This is determined by checking the highest clean threshold
+    /// (`self.external_clean_threshold`) across the stages.
+    ///
+    /// Given that `start_block` changes with each checkpoint, it's necessary to inspect
+    /// [`tables::AccountsTrie`] to ensure that [`super::MerkleStage`] hasn't
+    /// been previously executed.
+    fn adjust_prune_modes<DB: Database>(
+        &self,
+        provider: &DatabaseProviderRW<DB>,
+        start_block: u64,
+        max_block: u64,
+    ) -> Result<PruneModes, StageError> {
+        let mut prune_modes = self.prune_modes.clone();
+
+        // If we're not executing MerkleStage from scratch (by threshold or first-sync), then erase
+        // changeset related pruning configurations
+        if !(max_block - start_block > self.external_clean_threshold ||
+            provider.count_entries::<tables::AccountsTrie>()?.is_zero())
+        {
+            prune_modes.account_history = None;
+            prune_modes.storage_history = None;
+        }
+        Ok(prune_modes)
+    }
+}
+
+impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
         &mut self,
@@ -260,35 +291,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 .with_execution_stage_checkpoint(stage_checkpoint),
             done,
         })
-    }
-
-    /// Adjusts the prune modes related to changesets.
-    ///
-    /// This function verifies whether the [`super::MerkleStage`] or Hashing stages will run from
-    /// scratch. If at least one stage isn't starting anew, it implies that pruning of
-    /// changesets cannot occur. This is determined by checking the highest clean threshold
-    /// (`self.external_clean_threshold`) across the stages.
-    ///
-    /// Given that `start_block` changes with each checkpoint, it's necessary to inspect
-    /// [`tables::AccountsTrie`] to ensure that [`super::MerkleStage`] hasn't
-    /// been previously executed.
-    fn adjust_prune_modes<DB: Database>(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        start_block: u64,
-        max_block: u64,
-    ) -> Result<PruneModes, StageError> {
-        let mut prune_modes = self.prune_modes.clone();
-
-        // If we're not executing MerkleStage from scratch (by threshold or first-sync), then erase
-        // changeset related pruning configurations
-        if !(max_block - start_block > self.external_clean_threshold ||
-            provider.count_entries::<tables::AccountsTrie>()?.is_zero())
-        {
-            prune_modes.account_history = None;
-            prune_modes.storage_history = None;
-        }
-        Ok(prune_modes)
     }
 }
 
