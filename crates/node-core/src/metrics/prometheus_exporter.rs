@@ -12,7 +12,7 @@ use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
 use reth_provider::providers::StaticFileProvider;
-use reth_tasks::{shutdown::GracefulShutdown, TaskExecutor};
+use reth_tasks::{shutdown::GracefulShutdown, TaskExecutor, TaskManager};
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
@@ -72,13 +72,13 @@ async fn start_endpoint<F: Hook + 'static>(
     let server =
         Server::try_bind(&listen_addr).wrap_err("Could not bind to address")?.serve(make_svc);
 
-    let task_executor = TaskExecutor::new();
+    let task_executor = TaskManager::executor(&self);
     
     task_executor.spawn_with_graceful_shutdown_signal(move |signal| async move {
-        server.with_graceful_shutdown_signal(signal).await.expect("Metrics endpoint crashed")
+        server.with_graceful_shutdown(signal).await.expect("Metrics endpoint crashed")
     });
 
-    tokio::spawn(async move { server.await.expect("Metrics endpoint crashed") });
+    // tokio::spawn(async move { server.await.expect("Metrics endpoint crashed") });
 
     Ok(())
 }
