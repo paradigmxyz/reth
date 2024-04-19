@@ -11,6 +11,18 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# Reth
 reth-evm.workspace = true
 reth-primitives.workspace = true
+reth-revm.workspace = true
+reth-interfaces.workspace = true
+reth-provider.workspace = true
 
+# Ethereum
+revm-primitives.workspace = true
+
+# misc
+tracing.workspace = true
+
+[dev-dependencies]
+reth-revm = { workspace = true, features = ["test-utils"] }
