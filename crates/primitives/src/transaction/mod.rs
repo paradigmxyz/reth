@@ -1820,7 +1820,7 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
     type Error = ConversionError;
 
     fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        Ok(tx.signature.ok_or(ConversionError::MissingSignature).and_then(|signature| {
+        tx.signature.ok_or(ConversionError::MissingSignature).and_then(|signature| {
             TransactionSigned::from_transaction_and_signature(
                 tx.try_into()?,
                 Signature {
@@ -1838,7 +1838,7 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
             .map_err(|_| {
                 ConversionError::SignatureError(alloy_primitives::SignatureError::InvalidParity(0))
             })
-        })?)
+        })
     }
 }
 
