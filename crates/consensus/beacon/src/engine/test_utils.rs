@@ -181,13 +181,6 @@ where
             EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
         }
     }
-
-    fn chain_spec(&self) -> &ChainSpec {
-        match self {
-            EitherExecutorFactory::Left(a) => a.chain_spec(),
-            EitherExecutorFactory::Right(b) => b.chain_spec(),
-        }
-    }
 }
 
 /// The basic configuration for a `TestConsensusEngine`, without generics for the client or
