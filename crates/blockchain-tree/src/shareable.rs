@@ -25,18 +25,14 @@ use std::{
 };
 use tracing::trace;
 
-/// Shareable blockchain tree that is behind tokio::RwLock
+/// Shareable blockchain tree that is behind a RwLock
 #[derive(Clone, Debug)]
-pub struct ShareableBlockchainTree<DB: Database + Clone, EF: ExecutorFactory> {
+pub struct ShareableBlockchainTree<DB, EF> {
     /// BlockchainTree
     pub tree: Arc<RwLock<BlockchainTree<DB, EF>>>,
 }
 
-impl<DB, EF> ShareableBlockchainTree<DB, EF>
-where
-    DB: Database + Clone,
-    EF: ExecutorFactory,
-{
+impl<DB, EF> ShareableBlockchainTree<DB, EF> {
     /// Create a new shareable database.
     pub fn new(tree: BlockchainTree<DB, EF>) -> Self {
         Self { tree: Arc::new(RwLock::new(tree)) }
@@ -202,8 +198,8 @@ where
 
 impl<DB, EF> CanonStateSubscriptions for ShareableBlockchainTree<DB, EF>
 where
-    DB: Database + Clone,
-    EF: ExecutorFactory,
+    DB: Send + Sync,
+    EF: Send + Sync,
 {
     fn subscribe_to_canonical_state(&self) -> reth_provider::CanonStateNotifications {
         trace!(target: "blockchain_tree", "Registered subscriber for canonical state");

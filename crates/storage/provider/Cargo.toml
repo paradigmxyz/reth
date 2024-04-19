@@ -35,7 +35,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-auto_impl = "1.0"
+auto_impl.workspace = true
 itertools.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true

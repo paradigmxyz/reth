@@ -11,7 +11,7 @@ members = [
     "crates/ethereum-forks/",
     "crates/etl/",
     "crates/evm/",
-    "crates/evm-ethereum/",
+    "crates/ethereum/evm",
     "crates/exex/",
     "crates/interfaces/",
     "crates/metrics/",
@@ -48,11 +48,12 @@ members = [
     "crates/ethereum-engine-primitives/",
     "crates/node-ethereum/",
     "crates/node-builder/",
-    "crates/node-optimism/",
+    "crates/optimism/node/",
     "crates/node-core/",
-    "crates/node-api/",
+    "crates/node/api/",
     "crates/node-e2e-tests/",
     "crates/stages/",
+    "crates/stages-api",
     "crates/static-file/",
     "crates/storage/codecs/",
     "crates/storage/codecs/derive/",
@@ -95,9 +96,9 @@ resolver = "2"
 rust.missing_debug_implementations = "warn"
 rust.missing_docs = "warn"
 rust.unreachable_pub = "warn"
-rustdoc.all = "warn"
 rust.unused_must_use = "deny"
 rust.rust_2018_idioms = "deny"
+rustdoc.all = "warn"
 
 [workspace.lints.clippy]
 # These are some of clippy's nursery (i.e., experimental) lints that we like.
@@ -215,9 +216,9 @@ reth-engine-primitives = { path = "crates/engine-primitives" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum-engine-primitives" }
 reth-node-builder = { path = "crates/node-builder" }
 reth-node-ethereum = { path = "crates/node-ethereum" }
-reth-node-optimism = { path = "crates/node-optimism" }
+reth-node-optimism = { path = "crates/optimism/node" }
 reth-node-core = { path = "crates/node-core" }
-reth-node-api = { path = "crates/node-api" }
+reth-node-api = { path = "crates/node/api" }
 reth-downloaders = { path = "crates/net/downloaders" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
@@ -226,7 +227,7 @@ reth-ethereum-forks = { path = "crates/ethereum-forks" }
 reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
-reth-evm-ethereum = { path = "crates/evm-ethereum" }
+reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-exex = { path = "crates/exex" }
 reth-optimism-payload-builder = { path = "crates/payload/optimism" }
 reth-interfaces = { path = "crates/interfaces" }
@@ -254,6 +255,7 @@ reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages" }
+reth-stages-api = { path = "crates/stages-api" }
 reth-static-file = { path = "crates/static-file" }
 reth-tasks = { path = "crates/tasks" }
 reth-tokio-util = { path = "crates/tokio-util" }
@@ -296,6 +298,7 @@ alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "188c4f8" }
 alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "188c4f8" }
 
 # misc
+auto_impl = "1"
 aquamarine = "0.5"
 bytes = "1.5"
 bitflags = "2.4"

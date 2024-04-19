@@ -1,7 +1,4 @@
-use crate::{
-    stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, BlockErrorKind, ExecInput, ExecOutput,
-    MetricEvent, MetricEventsSender, Stage, StageError, UnwindInput, UnwindOutput,
-};
+use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use num_traits::Zero;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -21,6 +18,10 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
+};
+use reth_stages_api::{
+    BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
+    UnwindInput, UnwindOutput,
 };
 use std::{
     cmp::Ordering,
@@ -621,8 +622,8 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_db::models::AccountBeforeTx;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_interfaces::executor::BlockValidationError;
-    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
         Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,

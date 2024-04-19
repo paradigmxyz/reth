@@ -40,7 +40,7 @@ use utils::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{stage::Stage, test_utils::TestStageDB, ExecInput};
+    use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use reth_db::{
         cursor::DbCursorRO,
@@ -50,8 +50,8 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         AccountsHistory, DatabaseEnv,
     };
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_interfaces::test_utils::generators::{self, random_block};
-    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
         PruneModes, SealedBlock, StaticFileSegment, U256,
@@ -61,6 +61,7 @@ mod tests {
         StorageReader,
     };
     use reth_revm::EvmProcessorFactory;
+    use reth_stages_api::{ExecInput, Stage};
     use std::sync::Arc;
 
     #[tokio::test]

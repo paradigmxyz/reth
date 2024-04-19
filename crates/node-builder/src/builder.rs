@@ -44,9 +44,7 @@ use reth_node_core::{
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
 };
-use reth_node_events::node;
-
-use reth_node_events::cl::ConsensusLayerHealthEvents;
+use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, format_ether, ChainSpec};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
