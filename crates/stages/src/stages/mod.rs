@@ -50,8 +50,9 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         AccountsHistory, DatabaseEnv,
     };
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_exex::ExExManagerHandle;
     use reth_interfaces::test_utils::generators::{self, random_block};
-    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
         PruneModes, SealedBlock, StaticFileSegment, U256,
@@ -151,6 +152,7 @@ mod tests {
                 },
                 MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
                 prune_modes.clone(),
+                ExExManagerHandle::empty(),
             );
 
             execution_stage.execute(&provider, input).unwrap();

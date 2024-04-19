@@ -355,6 +355,26 @@ pub struct ExExManagerHandle {
 }
 
 impl ExExManagerHandle {
+    /// Creates an empty manager handle.
+    ///
+    /// Use this if there is no manager present.
+    ///
+    /// The handle will always be ready, and have a capacity of 0.
+    pub fn empty() -> Self {
+        let (exex_tx, _) = mpsc::unbounded_channel();
+        let (_, is_ready_rx) = watch::channel(true);
+        let (_, finished_height_rx) = watch::channel(FinishedExExHeight::NoExExs);
+
+        Self {
+            exex_tx,
+            num_exexs: 0,
+            is_ready_receiver: is_ready_rx.clone(),
+            is_ready: WatchStream::new(is_ready_rx),
+            current_capacity: Arc::new(AtomicUsize::new(0)),
+            finished_height: finished_height_rx,
+        }
+    }
+
     /// Synchronously send a notification over the channel to all execution extensions.
     ///
     /// Senders should call [`Self::has_capacity`] first.
