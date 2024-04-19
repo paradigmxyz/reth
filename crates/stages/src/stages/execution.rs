@@ -635,7 +635,7 @@ mod tests {
             },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
-            None,
+            ExExManagerHandle::empty(),
         )
     }
 
