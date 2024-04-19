@@ -1707,7 +1707,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     let mut logs = Vec::with_capacity(receipt.logs.len());
     for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
         let rpclog = Log {
-            inner: log.into(),
+            inner: log,
             block_hash: Some(meta.block_hash),
             block_number: Some(meta.block_number),
             block_timestamp: Some(meta.timestamp),

@@ -6,7 +6,6 @@ use reth_rpc::eth::{
     error::{EthApiError, EthResult, ToRpcError},
     traits::RawTransactionForwarder,
 };
-use reth_tracing::tracing;
 use std::sync::{atomic::AtomicUsize, Arc};
 
 /// Error type when interacting with the Sequencer

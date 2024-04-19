@@ -215,7 +215,7 @@ fn decode_chain_into_events(
         .flat_map(|(block, tx, receipt)| receipt.logs.iter().map(move |log| (block, tx, log)))
         // Decode and filter bridge events
         .filter_map(|(block, tx, log)| {
-            L1StandardBridgeEvents::decode_raw_log(&log.topics, &log.data, true)
+            L1StandardBridgeEvents::decode_raw_log(log.topics(), &log.data.data, true)
                 .ok()
                 .map(|event| (block, tx, log, event))
         })

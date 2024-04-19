@@ -1,5 +1,11 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use std::{
+    cmp::Ordering,
+    task::{ready, Context, Poll},
+};
+
 use futures_util::TryStreamExt;
+use tracing::*;
+
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -19,11 +25,9 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, StatsReader,
 };
-use std::{
-    cmp::Ordering,
-    task::{ready, Context, Poll},
-};
-use tracing::*;
+use reth_stages_api::{ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
+
+use reth_stages_api::Stage;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
@@ -374,13 +378,16 @@ fn stage_checkpoint<DB: Database>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use assert_matches::assert_matches;
+
+    use reth_primitives::stage::StageUnitCheckpoint;
+    use test_utils::*;
+
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
-    use assert_matches::assert_matches;
-    use reth_primitives::stage::StageUnitCheckpoint;
-    use test_utils::*;
+
+    use super::*;
 
     stage_test_suite_ext!(BodyTestRunner, body);
 
@@ -588,15 +595,16 @@ mod tests {
     }
 
     mod test_utils {
-        use crate::{
-            stages::bodies::BodyStage,
-            test_utils::{
-                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
-                UnwindStageTestRunner,
-            },
-            ExecInput, ExecOutput, UnwindInput,
+        use std::{
+            collections::{HashMap, VecDeque},
+            ops::RangeInclusive,
+            pin::Pin,
+            sync::Arc,
+            task::{Context, Poll},
         };
+
         use futures_util::Stream;
+
         use reth_db::{
             cursor::DbCursorRO,
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
@@ -626,12 +634,14 @@ mod tests {
         use reth_provider::{
             providers::StaticFileWriter, HeaderProvider, ProviderFactory, TransactionsProvider,
         };
-        use std::{
-            collections::{HashMap, VecDeque},
-            ops::RangeInclusive,
-            pin::Pin,
-            sync::Arc,
-            task::{Context, Poll},
+        use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
+
+        use crate::{
+            stages::bodies::BodyStage,
+            test_utils::{
+                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
+                UnwindStageTestRunner,
+            },
         };
 
         /// The block hash of the genesis block.

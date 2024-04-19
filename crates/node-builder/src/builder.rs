@@ -37,13 +37,14 @@ use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     engine_api_store::EngineApiStore,
-    events::cl::ConsensusLayerHealthEvents,
+    engine_skip_fcu::EngineApiSkipFcu,
     exit::NodeExitFuture,
     init::init_genesis,
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
 };
+use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, format_ether, ChainSpec};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
@@ -638,20 +639,21 @@ where
         future::join_all(exexs).await;
 
         // spawn exex manager
-        if !exex_handles.is_empty() {
+        let exex_manager_handle = if !exex_handles.is_empty() {
             debug!(target: "reth::cli", "spawning exex manager");
             // todo(onbjerg): rm magic number
             let exex_manager = ExExManager::new(exex_handles, 1024);
-            let mut exex_manager_handle = exex_manager.handle();
+            let exex_manager_handle = exex_manager.handle();
             executor.spawn_critical("exex manager", async move {
                 exex_manager.await.expect("exex manager crashed");
             });
 
             // send notifications from the blockchain tree to exex manager
             let mut canon_state_notifications = blockchain_tree.subscribe_to_canonical_state();
+            let mut handle = exex_manager_handle.clone();
             executor.spawn_critical("exex manager blockchain tree notifications", async move {
                 while let Ok(notification) = canon_state_notifications.recv().await {
-                    exex_manager_handle
+                    handle
                         .send_async(notification)
                         .await
                         .expect("blockchain tree notification could not be sent to exex manager");
@@ -659,11 +661,26 @@ where
             });
 
             info!(target: "reth::cli", "ExEx Manager started");
-        }
+
+            Some(exex_manager_handle)
+        } else {
+            None
+        };
 
         // create pipeline
         let network_client = network.fetch_client().await?;
         let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
+
+        if let Some(skip_fcu_threshold) = config.debug.skip_fcu {
+            debug!(target: "reth::cli", "spawning skip FCU task");
+            let (skip_fcu_tx, skip_fcu_rx) = unbounded_channel();
+            let engine_skip_fcu = EngineApiSkipFcu::new(skip_fcu_threshold);
+            executor.spawn_critical(
+                "skip FCU interceptor",
+                engine_skip_fcu.intercept(consensus_engine_rx, skip_fcu_tx),
+            );
+            consensus_engine_rx = skip_fcu_rx;
+        }
 
         if let Some(store_path) = config.debug.engine_api_store.clone() {
             debug!(target: "reth::cli", "spawning engine API store");
@@ -759,11 +776,16 @@ where
         let initial_target = config.initial_pipeline_target(genesis_hash);
 
         let prune_config = prune_config.unwrap_or_default();
-        let mut pruner = PrunerBuilder::new(prune_config.clone())
+        let mut pruner_builder = PrunerBuilder::new(prune_config.clone())
             .max_reorg_depth(tree_config.max_reorg_depth() as usize)
             .prune_delete_limit(config.chain.prune_delete_limit)
-            .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
-            .build(provider_factory.clone());
+            .timeout(PrunerBuilder::DEFAULT_TIMEOUT);
+        if let Some(exex_manager_handle) = &exex_manager_handle {
+            pruner_builder =
+                pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
+        }
+
+        let mut pruner = pruner_builder.build(provider_factory.clone());
 
         let pruner_events = pruner.events();
         hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
@@ -804,12 +826,7 @@ where
         );
         executor.spawn_critical(
             "events task",
-            reth_node_core::events::node::handle_events(
-                Some(network.clone()),
-                Some(head.number),
-                events,
-                database.clone(),
-            ),
+            node::handle_events(Some(network.clone()), Some(head.number), events, database.clone()),
         );
 
         let engine_api = EngineApi::new(
