@@ -159,12 +159,10 @@ impl ImportCommand {
 
         let mut start_header: Option<SealedHeader> = None;
 
-        if self.start != 0 {
-            start_header = provider_factory
-                .provider()?
-                .sealed_header(self.start)
-                .expect("start block is not canonical with db");
-        }
+        start_header = provider_factory
+            .provider()?
+            .sealed_header(self.start)
+            .expect("start block is not canonical with db");
 
         while let Some(file_client) = reader.next_chunk().await? {
             // create a new FileClient from chunk read from file
