@@ -390,7 +390,7 @@ where
     fn forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
-        mut attrs: Option<EngineT::PayloadAttributes>,
+        attrs: Option<EngineT::PayloadAttributes>,
     ) -> RethResult<OnForkChoiceUpdated> {
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
 
@@ -404,46 +404,57 @@ where
         let make_canonical_result = self.blockchain.make_canonical(state.head_block_hash);
         let elapsed = self.record_make_canonical_latency(start, &make_canonical_result);
 
-        let status = match make_canonical_result {
+        let status = self.on_forkchoice_updated_make_canonical_result(
+            state,
+            attrs,
+            make_canonical_result,
+            elapsed,
+        )?;
+        trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
+        Ok(status)
+    }
+
+    /// Process the result of attempting to make forkchoice state head hash canonical.
+    ///
+    /// # Returns
+    ///
+    /// A forkchoice state update outcome or fatal error.
+    fn on_forkchoice_updated_make_canonical_result(
+        &mut self,
+        state: ForkchoiceState,
+        mut attrs: Option<EngineT::PayloadAttributes>,
+        make_canonical_result: Result<CanonicalOutcome, CanonicalError>,
+        elapsed: Duration,
+    ) -> RethResult<OnForkChoiceUpdated> {
+        match make_canonical_result {
             Ok(outcome) => {
-                match &outcome {
+                let should_update_head = match &outcome {
                     CanonicalOutcome::AlreadyCanonical { header } => {
-                        if self.on_head_already_canonical(header, &mut attrs) {
-                            let _ = self.update_head(header.clone());
-                            self.listeners.notify(
-                                BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                                    Box::new(header.clone()),
-                                    elapsed,
-                                ),
-                            );
-                        }
+                        self.on_head_already_canonical(header, &mut attrs)
                     }
                     CanonicalOutcome::Committed { head } => {
-                        debug!(
-                            target: "consensus::engine",
-                            hash=?state.head_block_hash,
-                            number=head.number,
-                            "Canonicalized new head"
-                        );
-
                         // new VALID update that moved the canonical chain forward
-                        let _ = self.update_head(head.clone());
-                        self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
-                            Box::new(head.clone()),
-                            elapsed,
-                        ));
+                        debug!(target: "consensus::engine", hash=?state.head_block_hash, number=head.number, "Canonicalized new head");
+                        true
                     }
                 };
 
-                // Validate that the forkchoice state is consistent.
-                if let Some(invalid_fcu_response) =
-                    self.ensure_consistent_forkchoice_state(state)?
-                {
-                    trace!(target: "consensus::engine", ?state, "Forkchoice state is inconsistent, returning invalid response");
-                    return Ok(invalid_fcu_response)
+                if should_update_head {
+                    let head = outcome.header();
+                    let _ = self.update_head(head.clone());
+                    self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                        Box::new(head.clone()),
+                        elapsed,
+                    ));
                 }
 
-                if let Some(attrs) = attrs {
+                // Validate that the forkchoice state is consistent.
+                let on_updated = if let Some(invalid_fcu_response) =
+                    self.ensure_consistent_forkchoice_state(state)?
+                {
+                    trace!(target: "consensus::engine", ?state, "Forkchoice state is inconsistent");
+                    invalid_fcu_response
+                } else if let Some(attrs) = attrs {
                     // the CL requested to build a new payload on top of this new VALID head
                     let head = outcome.into_header().unseal();
                     self.process_payload_attributes(attrs, head, state)
@@ -452,20 +463,20 @@ where
                         PayloadStatusEnum::Valid,
                         Some(state.head_block_hash),
                     ))
-                }
+                };
+                Ok(on_updated)
             }
             Err(err) => {
                 if err.is_fatal() {
                     error!(target: "consensus::engine", %err, "Encountered fatal error");
-                    return Err(err.into())
+                    Err(err.into())
+                } else {
+                    Ok(OnForkChoiceUpdated::valid(
+                        self.on_failed_canonical_forkchoice_update(&state, err),
+                    ))
                 }
-
-                OnForkChoiceUpdated::valid(self.on_failed_canonical_forkchoice_update(&state, err))
             }
-        };
-
-        trace!(target: "consensus::engine", ?status, ?state, "Returning forkchoice status");
-        Ok(status)
+        }
     }
 
     /// Invoked when head hash references a `VALID` block that is already canonical.
