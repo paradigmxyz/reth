@@ -26,7 +26,7 @@ use reth_provider::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
     ChainSpecProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider, ProviderError,
 };
-use reth_stages::{MetricEvent, MetricEventsSender};
+use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::Arc,
