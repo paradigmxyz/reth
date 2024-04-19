@@ -3,8 +3,9 @@ function shouldIncludeLabel (label) {
     const isStatus = label.startsWith('S-');
     const isTrackingIssue = label === 'C-tracking-issue';
     const isPreventStale = label === 'M-prevent-stale';
+    const isDifficulty = label.startsWith('D-');
 
-    return !isStatus && !isTrackingIssue && !isPreventStale;
+    return !isStatus && !isTrackingIssue && !isPreventStale && !isDifficulty;
 }
 
 module.exports = async ({ github, context }) => {
