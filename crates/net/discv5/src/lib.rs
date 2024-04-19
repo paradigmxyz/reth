@@ -803,7 +803,7 @@ mod tests {
 
     #[test]
     fn select_lookup_target() {
-        // bucket index ceiled to the next multiple of 4
+        // bucket index ceiled to the next multiple of 8
         const fn expected_bucket_index(kbucket_index: usize) -> u64 {
             let log2distance = kbucket_index + 1;
             if log2distance % 8 == 0 {
