@@ -1,3 +1,4 @@
+use crate::utils::eth_payload_attributes;
 use reth::{
     self,
     args::RpcServerArgs,
@@ -8,7 +9,6 @@ use reth_e2e_test_utils::{node::NodeHelper, wallet::Wallet};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 use std::sync::Arc;
-use crate::utils::eth_payload_attributes;
 
 #[tokio::test]
 async fn can_run_eth_node() -> eyre::Result<()> {

@@ -7001,8 +7001,10 @@ dependencies = [
  "jsonrpsee",
  "parking_lot 0.12.1",
  "reqwest 0.11.27",
+ "reth",
  "reth-basic-payload-builder",
  "reth-db",
+ "reth-e2e-test-utils",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
@@ -7020,6 +7022,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
