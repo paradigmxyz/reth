@@ -336,35 +336,30 @@ where
         })
     }
 
-    /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
-    /// valid chain.
+    /// Pre-validate forkchoice update and check whether it can be processed.
     ///
-    /// These responses should adhere to the [Engine API Spec for
-    /// `engine_forkchoiceUpdated`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1).
-    ///
-    /// Returns an error if an internal error occurred like a database error.
-    fn forkchoice_updated(
+    /// This method returns the update outcome if validation fails or
+    /// the node is syncing and the update cannot be processed at the moment.
+    fn pre_validate_forkchoice_update(
         &mut self,
         state: ForkchoiceState,
-        mut attrs: Option<EngineT::PayloadAttributes>,
-    ) -> RethResult<OnForkChoiceUpdated> {
-        trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
+    ) -> Option<OnForkChoiceUpdated> {
         if state.head_block_hash.is_zero() {
-            return Ok(OnForkChoiceUpdated::invalid_state())
+            return Some(OnForkChoiceUpdated::invalid_state())
         }
 
         // check if the new head hash is connected to any ancestor that we previously marked as
         // invalid
         let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
         if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu) {
-            return Ok(OnForkChoiceUpdated::with_invalid(status))
+            return Some(OnForkChoiceUpdated::with_invalid(status))
         }
 
         if self.sync.is_pipeline_active() {
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
-            return Ok(OnForkChoiceUpdated::syncing())
+            return Some(OnForkChoiceUpdated::syncing())
         }
 
         if let Some(hook) = self.hooks.active_db_write_hook() {
@@ -379,7 +374,30 @@ where
                 "Hook is in progress, skipping forkchoice update. \
                 This may affect the performance of your node as a validator."
             );
-            return Ok(OnForkChoiceUpdated::syncing())
+            return Some(OnForkChoiceUpdated::syncing())
+        }
+
+        None
+    }
+
+    /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
+    /// valid chain.
+    ///
+    /// These responses should adhere to the [Engine API Spec for
+    /// `engine_forkchoiceUpdated`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1).
+    ///
+    /// Returns an error if an internal error occurred like a database error.
+    fn forkchoice_updated(
+        &mut self,
+        state: ForkchoiceState,
+        mut attrs: Option<EngineT::PayloadAttributes>,
+    ) -> RethResult<OnForkChoiceUpdated> {
+        trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
+
+        // Pre-validate forkchoice state update and return if it's invalid or
+        // cannot be processed at the moment.
+        if let Some(on_updated) = self.pre_validate_forkchoice_update(state) {
+            return Ok(on_updated)
         }
 
         let start = Instant::now();
