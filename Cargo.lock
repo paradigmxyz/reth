@@ -7421,6 +7421,7 @@ dependencies = [
 name = "reth-stages-api"
 version = "0.2.0-beta.5"
 dependencies = [
+ "aquamarine",
  "assert_matches",
  "auto_impl",
  "futures-util",

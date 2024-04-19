@@ -9,6 +9,7 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
+# reth
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-db.workspace = true
@@ -17,20 +18,23 @@ reth-static-file.workspace = true
 assert_matches.workspace = true
 reth-tokio-util.workspace = true
 
-
+# metrics
 reth-metrics.workspace = true
 metrics.workspace = true
 
-thiserror.workspace = true
-tracing.workspace = true
+# async
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 futures-util.workspace = true
+
+# misc
+thiserror.workspace = true
+tracing.workspace = true
 auto_impl = "1"
+aquamarine.workspace = true
 
 [features]
 test-utils = []
 
 [lints]
 workspace = true
-
