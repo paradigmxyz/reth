@@ -17,10 +17,10 @@ use reth_interfaces::{
         BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
         InsertPayloadOk,
     },
-    consensus::ForkchoiceState,
     provider::ProviderResult,
     RethResult,
 };
+use reth_consensus_api::ForkchoiceState;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,

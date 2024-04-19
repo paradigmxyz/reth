@@ -6,9 +6,7 @@ use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
 use reth_config::config::HeadersConfig;
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{
+use reth_interfaces::p2p::{
         error::{DownloadError, DownloadResult, PeerRequestResult},
         headers::{
             client::{HeadersClient, HeadersRequest},
@@ -16,8 +14,8 @@ use reth_interfaces::{
             error::{HeadersDownloaderError, HeadersDownloaderResult},
         },
         priority::Priority,
-    },
-};
+    };
+use reth_consensus_api::Consensus;
 use reth_primitives::{
     BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, PeerId, SealedHeader,
     B256,

@@ -6,7 +6,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawValue,
 };
-use reth_interfaces::consensus;
+use reth_consensus_api::ConsensusError;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,
@@ -209,7 +209,7 @@ fn recover_range<DB: Database>(
                             Err(StageError::Block {
                                 block: Box::new(sealed_header),
                                 error: BlockErrorKind::Validation(
-                                    consensus::ConsensusError::TransactionSignerRecoveryError,
+                                    ConsensusError::TransactionSignerRecoveryError,
                                 ),
                             })
                         }

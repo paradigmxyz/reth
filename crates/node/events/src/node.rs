@@ -6,7 +6,7 @@ use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
 };
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
-use reth_interfaces::consensus::ForkchoiceState;
+use reth_consensus_api::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::{

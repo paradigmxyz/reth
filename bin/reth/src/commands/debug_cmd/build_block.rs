@@ -19,7 +19,8 @@ use reth_blockchain_tree::{
 };
 use reth_cli_runner::CliContext;
 use reth_db::{init_db, DatabaseEnv};
-use reth_interfaces::{consensus::Consensus, RethResult};
+use reth_interfaces::RethResult;
+use reth_consensus_api::Consensus;
 use reth_node_api::PayloadBuilderAttributes;
 #[cfg(not(feature = "optimism"))]
 use reth_node_ethereum::EthEvmConfig;

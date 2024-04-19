@@ -1,4 +1,4 @@
-use reth_interfaces::consensus::ForkchoiceState;
+use reth_consensus_api::ForkchoiceState;
 use reth_primitives::SealedHeader;
 use std::time::Instant;
 

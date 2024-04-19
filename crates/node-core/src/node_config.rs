@@ -16,7 +16,8 @@ use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
-use reth_interfaces::{consensus::Consensus, p2p::headers::client::HeadersClient, RethResult};
+use reth_interfaces::{p2p::headers::client::HeadersClient, RethResult};
+use reth_consensus_api::Consensus;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,

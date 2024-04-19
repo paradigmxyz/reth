@@ -1,3 +1,5 @@
+//! Consensus API 
+
 use reth_primitives::{
     BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, HeaderValidationError,
     InvalidTransactionError, SealedBlock, SealedHeader, B256, U256,

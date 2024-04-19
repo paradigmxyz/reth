@@ -8,13 +8,11 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{
+use reth_interfaces::p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         headers::{client::HeadersClient, downloader::HeaderDownloader},
-    },
-};
+    };
+use reth_consensus_api::Consensus;
 use reth_node_core::{
     node_config::NodeConfig,
     primitives::{BlockNumber, B256},

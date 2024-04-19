@@ -6091,6 +6091,7 @@ dependencies = [
  "reth-blockchain-tree",
  "reth-cli-runner",
  "reth-config",
+ "reth-consensus-api",
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
@@ -6141,6 +6142,7 @@ version = "0.2.0-beta.5"
 dependencies = [
  "futures-util",
  "reth-beacon-consensus",
+ "reth-consensus-api",
  "reth-engine-primitives",
  "reth-evm",
  "reth-interfaces",
@@ -6186,6 +6188,7 @@ dependencies = [
  "reth-beacon-consensus-core",
  "reth-blockchain-tree",
  "reth-config",
+ "reth-consensus-api",
  "reth-db",
  "reth-downloaders",
  "reth-engine-primitives",
@@ -6217,6 +6220,7 @@ dependencies = [
 name = "reth-beacon-consensus-core"
 version = "0.2.0-beta.5"
 dependencies = [
+ "reth-consensus-api",
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",
@@ -6232,6 +6236,7 @@ dependencies = [
  "lru",
  "metrics",
  "parking_lot 0.12.1",
+ "reth-consensus-api",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
@@ -6301,10 +6306,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-consensus-api"
+version = "0.2.0-beta.5"
+dependencies = [
+ "auto_impl",
+ "reth-primitives",
+ "reth-rpc-types",
+ "thiserror",
+]
+
+[[package]]
 name = "reth-consensus-common"
 version = "0.2.0-beta.5"
 dependencies = [
  "mockall",
+ "reth-consensus-api",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -6431,6 +6447,7 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-config",
+ "reth-consensus-api",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
@@ -6650,6 +6667,7 @@ dependencies = [
  "futures",
  "parking_lot 0.12.1",
  "rand 0.8.5",
+ "reth-consensus-api",
  "reth-eth-wire-types",
  "reth-network-api",
  "reth-primitives",
@@ -6782,6 +6800,7 @@ dependencies = [
  "pin-project",
  "pprof",
  "rand 0.8.5",
+ "reth-consensus-api",
  "reth-discv4",
  "reth-discv5",
  "reth-dns-discovery",
@@ -6876,6 +6895,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-config",
+ "reth-consensus-api",
  "reth-db",
  "reth-downloaders",
  "reth-exex",
@@ -6925,6 +6945,7 @@ dependencies = [
  "reth-auto-seal-consensus",
  "reth-beacon-consensus",
  "reth-config",
+ "reth-consensus-api",
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
@@ -6987,6 +7008,7 @@ dependencies = [
  "humantime",
  "pin-project",
  "reth-beacon-consensus",
+ "reth-consensus-api",
  "reth-db",
  "reth-interfaces",
  "reth-network",
@@ -7158,6 +7180,7 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-codecs",
+ "reth-consensus-api",
  "reth-db",
  "reth-evm",
  "reth-interfaces",
@@ -7339,6 +7362,7 @@ dependencies = [
  "jsonrpsee-types",
  "metrics",
  "reth-beacon-consensus",
+ "reth-consensus-api",
  "reth-engine-primitives",
  "reth-interfaces",
  "reth-metrics",
@@ -7413,6 +7437,7 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-config",
+ "reth-consensus-api",
  "reth-db",
  "reth-downloaders",
  "reth-etl",
@@ -7441,6 +7466,7 @@ dependencies = [
  "auto_impl",
  "futures-util",
  "metrics",
+ "reth-consensus-api",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",

@@ -11,9 +11,9 @@ use reth_interfaces::{
         error::{BlockchainTreeError, InsertBlockErrorKind},
         BlockAttachment, BlockValidationKind,
     },
-    consensus::{Consensus, ConsensusError},
     RethResult,
 };
+use reth_consensus_api::{Consensus,ConsensusError};
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };

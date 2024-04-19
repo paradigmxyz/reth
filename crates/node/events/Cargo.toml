@@ -21,6 +21,7 @@ reth-static-file.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
 reth-primitives.workspace = true
+reth-consensus-api.workspace = true
 
 # async
 tokio.workspace = true

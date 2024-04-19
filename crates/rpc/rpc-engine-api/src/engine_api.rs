@@ -6,7 +6,7 @@ use reth_engine_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, EngineTypes, PayloadAttributes,
     PayloadBuilderAttributes, PayloadOrAttributes,
 };
-use reth_interfaces::consensus::ForkchoiceState;
+use reth_consensus_api::ForkchoiceState;
 use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};

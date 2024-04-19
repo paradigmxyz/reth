@@ -4,7 +4,8 @@ use crate::{
 };
 use futures::{future::Either, FutureExt};
 use reth_engine_primitives::EngineTypes;
-use reth_interfaces::{consensus::ForkchoiceState, RethResult};
+use reth_interfaces::RethResult;
+use reth_consensus_api::ForkchoiceState;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceUpdateError,

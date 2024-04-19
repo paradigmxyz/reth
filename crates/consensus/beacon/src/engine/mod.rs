@@ -14,13 +14,13 @@ use reth_interfaces::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
         BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
-    consensus::ForkchoiceState,
     executor::BlockValidationError,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
     provider::ProviderResult,
     sync::{NetworkSyncUpdater, SyncState},
     RethError, RethResult,
 };
+use reth_consensus_api::ForkchoiceState;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,

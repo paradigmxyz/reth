@@ -16,7 +16,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
-use reth_interfaces::consensus::Consensus;
+use reth_consensus_api::Consensus;
 use reth_node_core::{
     args::{get_secret_key, NetworkArgs},
     dirs::ChainPath,

@@ -26,6 +26,7 @@ reth-prune.workspace = true
 reth-static-file.workspace = true
 reth-tokio-util.workspace = true
 reth-engine-primitives.workspace = true
+reth-consensus-api.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }

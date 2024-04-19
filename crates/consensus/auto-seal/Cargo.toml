@@ -22,6 +22,7 @@ reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
 reth-engine-primitives.workspace = true
+reth-consensus-api.workspace = true
 
 # async
 futures-util.workspace = true

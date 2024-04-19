@@ -1,12 +1,11 @@
 use super::headers::client::HeadersRequest;
-use crate::{
-    consensus::{Consensus, ConsensusError},
-    p2p::{
+use crate::p2p::
+    {
         bodies::client::{BodiesClient, SingleBodyRequest},
         error::PeerRequestResult,
         headers::client::{HeadersClient, SingleHeaderRequest},
-    },
-};
+    };
+use reth_consensus_api::{Consensus,ConsensusError};
 use futures::Stream;
 use reth_primitives::{
     BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, WithPeerId, B256,

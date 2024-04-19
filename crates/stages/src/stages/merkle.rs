@@ -4,7 +4,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::consensus;
+use reth_consensus_api::ConsensusError;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
@@ -327,7 +327,7 @@ fn validate_state_root(
     } else {
         warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root");
         Err(StageError::Block {
-            error: BlockErrorKind::Validation(consensus::ConsensusError::BodyStateRootDiff(
+            error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(
                 GotExpected { got, expected: expected.state_root }.into(),
             )),
             block: Box::new(expected),
