@@ -51,13 +51,17 @@ pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 100;
 /// Default is 5 seconds.
 pub const DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL: u64 = 5;
 
-/// Max kbucket index (max log2distance - 1).
+/// Max kbucket index.
+///
+/// This is the max log2distance for 32 byte [`NodeId`](discv5::enr::NodeId) - 1. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
 pub const MAX_KBUCKET_INDEX: usize = 255;
 
 /// Default lowest kbucket index to attempt filling, in periodic look up query to populate kbuckets.
 ///
-/// Default is 128th kbucket (index 127).
-pub const DEFAULT_MIN_TARGET_KBUCKET_INDEX: usize = MAX_KBUCKET_INDEX / 2;
+/// The peer at the 0th kbucket index is at log2distance 1 from the local node ID. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
+///
+/// Default is 0th index.
+pub const DEFAULT_MIN_TARGET_KBUCKET_INDEX: usize = 0;
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Clone)]
