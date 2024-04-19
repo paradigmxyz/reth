@@ -43,4 +43,3 @@ metrics.workspace = true
 reth-tracing.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 secp256k1 = { workspace = true, features = ["rand-std"] }
-reth-primitives = { workspace = true, features = ["optimism"]}

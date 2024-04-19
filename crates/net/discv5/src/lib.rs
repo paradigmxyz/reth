@@ -589,7 +589,7 @@ pub async fn lookup(
 mod tests {
     use ::enr::{CombinedKey, EnrKey};
     use rand::Rng;
-    use reth_primitives::OP_MAINNET;
+    use reth_primitives::MAINNET;
     use secp256k1::rand::thread_rng;
     use tracing::trace;
 
@@ -822,17 +822,19 @@ mod tests {
     }
 
     #[test]
-    fn op_chain_id_enr() {
-        let fork_id = OP_MAINNET.latest_fork_id();
+    fn build_enr_from_config() {
+        const TCP_PORT: u16 = 30303;
+        let fork_id = MAINNET.latest_fork_id();
 
-        let config = Config::builder(30303).add_enr_kv_pair(network_key::OPSTACK, fork_id).build();
+        let config = Config::builder(TCP_PORT).add_enr_kv_pair(network_key::ETH, fork_id).build();
 
         let sk = SecretKey::new(&mut thread_rng());
         let (enr, _, _, _) = Discv5::build_local_enr(&sk, &config);
 
         let decoded_fork_id =
-            ForkId::decode(&mut enr.get_raw_rlp(network_key::OPSTACK).unwrap()).unwrap();
+            ForkId::decode(&mut enr.get_raw_rlp(network_key::ETH).unwrap()).unwrap();
 
         assert_eq!(fork_id, decoded_fork_id);
+        assert_eq!(TCP_PORT, enr.tcp4().unwrap()); // listen config is defaulting to ip mode ipv4
     }
 }
