@@ -1104,7 +1104,7 @@ impl Compact for TransactionSignedNoHash {
         to_compact_ztd_unaware(self, buf)
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         from_compact_zstd_unaware(buf, _len)
     }
 }
