@@ -68,12 +68,15 @@ async fn start_endpoint<F: Hook + 'static>(
             }))
         }
     });
+    
     let server =
         Server::try_bind(&listen_addr).wrap_err("Could not bind to address")?.serve(make_svc);
 
-    let server = server.with_graceful_shutdown(
-        TaskExecutor::spawn_with_graceful_shutdown_signal(&self, GracefulShutdown)
-    );
+    let task_executor = TaskExecutor::new();
+    
+    task_executor.spawn_with_graceful_shutdown_signal(move |signal| async move {
+        server.with_graceful_shutdown_signal(signal).await.expect("Metrics endpoint crashed")
+    });
 
     tokio::spawn(async move { server.await.expect("Metrics endpoint crashed") });
 
