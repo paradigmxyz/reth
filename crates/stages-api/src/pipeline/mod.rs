@@ -21,16 +21,9 @@ use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
-// (todo) remove it
-#[allow(missing_docs)]
-pub mod builder;
-
-// (todo) remove it
-#[allow(missing_docs)]
-pub mod progress;
-// (todo) remove it
-#[allow(missing_docs)]
-pub mod set;
+mod builder;
+mod progress;
+mod set;
 
 use crate::{
     BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, PipelineError, Stage,
