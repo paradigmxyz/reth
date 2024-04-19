@@ -363,7 +363,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     }
 
     // TODO(joshie) TEMPORARY should be moved to trait providers
-
     /// Unwind or peek at last N blocks of state recreating the [`BundleStateWithReceipts`].
     ///
     /// If UNWIND it set to true tip and latest state will be unwind
@@ -388,7 +387,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    fn unwind_or_peek_state<const UNWIND: bool>(
+    pub fn unwind_or_peek_state<const UNWIND: bool>(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BundleStateWithReceipts> {
@@ -706,8 +705,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(block_tx)
     }
 
-    /// Return range of blocks and its execution result
-    fn get_take_block_range<const TAKE: bool>(
+    /// Get or unwind the given range of blocks.
+    pub fn get_take_block_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {

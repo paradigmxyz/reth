@@ -2,13 +2,13 @@ use crate::{util::opt, ControlFlow};
 use reth_primitives::BlockNumber;
 
 #[derive(Debug, Default)]
-pub struct PipelineProgress {
+pub(crate) struct PipelineProgress {
     /// Block number reached by the stage.
-    pub block_number: Option<BlockNumber>,
+    pub(crate) block_number: Option<BlockNumber>,
     /// The maximum block number achieved by any stage during the execution of the pipeline.
-    pub maximum_block_number: Option<BlockNumber>,
+    pub(crate) maximum_block_number: Option<BlockNumber>,
     /// The minimum block number achieved by any stage during the execution of the pipeline.
-    pub minimum_block_number: Option<BlockNumber>,
+    pub(crate) minimum_block_number: Option<BlockNumber>,
 }
 
 impl PipelineProgress {

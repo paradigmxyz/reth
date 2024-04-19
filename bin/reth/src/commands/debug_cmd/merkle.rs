@@ -15,6 +15,7 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
+use reth_exex::ExExManagerHandle;
 use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
@@ -211,6 +212,7 @@ impl Command {
             },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::all(),
+            ExExManagerHandle::empty(),
         );
 
         let mut account_hashing_stage = AccountHashingStage::default();
