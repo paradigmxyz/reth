@@ -5,34 +5,20 @@
 
 use std::{
     collections::VecDeque,
-    net::{IpAddr, Ipv4Addr},
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 
 use thiserror::Error;
 
-use futures_util::{
-    future::BoxFuture, stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt,
-};
-use reqwest::{Error, Request, Response, StatusCode};
+use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
+use reqwest::{Error, StatusCode};
 use reth::{
-    network::error,
-    primitives::{
-        alloy_primitives::TxHash, BlobTransaction, BlobTransactionSidecar, BlockHash, BlockNumber,
-        Transaction, B256,
-    },
+    primitives::{alloy_primitives::TxHash, BlobTransactionSidecar, BlockHash, BlockNumber},
     providers::CanonStateNotification,
     rpc::types::engine::BlobsBundleV1,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
-use serde::{self, Deserialize, Serialize};
-use tracing::debug;
-
-//TODO Figure out error handling
-//TODO Pass (tx, + blockhash/number + sidecar) alongside value
-//TODO Seperate Default CL URL logic/function
-//TODO Add Tests.
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -163,9 +149,6 @@ where
                     if all_blobs_available {
                         this.queued_actions.extend(actions_to_queue);
                     } else {
-                        // TODO Change this to grab all into vec
-                        // Loop all sidecars
-                        // Send them in a vec
                         let client_clone = this.client.clone();
                         let block_hash = notification.tip().block.hash();
                         let block_number = notification.tip().block.number;
