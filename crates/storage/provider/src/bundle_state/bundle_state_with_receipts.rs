@@ -218,13 +218,11 @@ impl BundleStateWithReceipts {
         self.first_block
     }
 
-    /// Revert the state to the given block number.
+    /// Revert to given block number.
     ///
-    /// Returns false if the block number is not in the bundle state.
+    /// If number is in future, or in the past return false
     ///
-    /// # Note
-    ///
-    /// The provided block number will stay inside the bundle state.
+    /// NOTE: Provided block number will stay inside the bundle state.
     pub fn revert_to(&mut self, block_number: BlockNumber) -> bool {
         let Some(index) = self.block_number_to_index(block_number) else { return false };
 

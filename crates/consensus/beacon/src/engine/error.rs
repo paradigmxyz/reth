@@ -1,7 +1,7 @@
 use crate::engine::hooks::EngineHookError;
 use reth_interfaces::RethError;
 use reth_rpc_types::engine::ForkchoiceUpdateError;
-use reth_stages_api::PipelineError;
+use reth_stages::PipelineError;
 
 /// Beacon engine result.
 pub type BeaconEngineResult<Ok> = Result<Ok, BeaconConsensusEngineError>;

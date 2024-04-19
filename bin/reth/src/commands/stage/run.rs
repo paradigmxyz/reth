@@ -17,7 +17,6 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_exex::ExExManagerHandle;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::ChainSpec;
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
@@ -240,7 +239,6 @@ impl Command {
                             },
                             config.stages.merkle.clean_threshold,
                             config.prune.map(|prune| prune.segments).unwrap_or_default(),
-                            ExExManagerHandle::empty(),
                         )),
                         None,
                     )

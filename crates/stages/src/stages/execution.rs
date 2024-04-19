@@ -1,20 +1,23 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use num_traits::Zero;
 use reth_db::{
-    cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    database::Database,
+    models::BlockNumberAddress,
+    static_file::HeaderMask,
+    tables,
+    transaction::{DbTx, DbTxMut},
 };
-use reth_exex::ExExManagerHandle;
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, PruneModes, StaticFileSegment,
+    BlockNumber, Header, PruneModes, StaticFileSegment, U256,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, CanonStateNotification, Chain, DatabaseProviderRW, ExecutorFactory,
-    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader,
-    TransactionVariant,
+    BlockReader, DatabaseProviderRW, ExecutorFactory, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
 };
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
@@ -23,8 +26,6 @@ use reth_stages_api::{
 use std::{
     cmp::Ordering,
     ops::RangeInclusive,
-    sync::Arc,
-    task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
 use tracing::*;
@@ -73,8 +74,6 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     external_clean_threshold: u64,
     /// Pruning configuration.
     prune_modes: PruneModes,
-    /// Handle to communicate with ExEx manager.
-    exex_manager_handle: ExExManagerHandle,
 }
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
@@ -84,7 +83,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         prune_modes: PruneModes,
-        exex_manager_handle: ExExManagerHandle,
     ) -> Self {
         Self {
             metrics_tx: None,
@@ -92,7 +90,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             executor_factory,
             thresholds,
             prune_modes,
-            exex_manager_handle,
         }
     }
 
@@ -105,7 +102,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
-            ExExManagerHandle::empty(),
         )
     }
 
@@ -160,7 +156,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut cumulative_gas = 0;
         let batch_start = Instant::now();
 
-        let mut blocks = Vec::new();
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -196,12 +191,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             }
 
             stage_progress = block_number;
-            stage_checkpoint.progress.processed += block.gas_used;
 
-            // If we have ExEx's we need to save the block in memory for later
-            if self.exex_manager_handle.has_exexs() {
-                blocks.push(block);
-            }
+            stage_checkpoint.progress.processed += block.gas_used;
 
             // Check if we should commit now
             let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
@@ -217,25 +208,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let time = Instant::now();
         let state = executor.take_output_state();
         let write_preparation_duration = time.elapsed();
-
-        // Check if we should send a [`CanonStateNotification`] to execution extensions.
-        //
-        // Note: Since we only write to `blocks` if there are any ExEx's we don't need to perform
-        // the `has_exexs` check here as well
-        if !blocks.is_empty() {
-            let chain = Arc::new(Chain::new(
-                blocks.into_iter().map(|block| {
-                    let hash = block.header.hash_slow();
-                    block.seal(hash)
-                }),
-                state.clone(),
-                None,
-            ));
-
-            // NOTE: We can ignore the error here, since an error means that the channel is closed,
-            // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self.exex_manager_handle.send(CanonStateNotification::Commit { new: chain });
-        }
 
         let time = Instant::now();
         // write output
@@ -388,16 +360,6 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         StageId::Execution
     }
 
-    fn poll_execute_ready(
-        &mut self,
-        cx: &mut Context<'_>,
-        _: ExecInput,
-    ) -> Poll<Result<(), StageError>> {
-        ready!(self.exex_manager_handle.poll_ready(cx));
-
-        Poll::Ready(Ok(()))
-    }
-
     /// Execute the stage
     fn execute(
         &mut self,
@@ -413,32 +375,73 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        let tx = provider.tx_ref();
+        // Acquire changeset cursors
+        let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
+        let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
+
         let (range, unwind_to, _) =
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
+
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
             })
         }
 
-        // Unwind account and storage changesets, as well as receipts.
-        //
-        // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts = provider.unwind_or_peek_state::<true>(range.clone())?;
+        // get all batches for account change
+        // Check if walk and walk_dup would do the same thing
+        let account_changeset_batch =
+            account_changeset.walk_range(range.clone())?.collect::<Result<Vec<_>, _>>()?;
 
-        // Construct a `CanonStateNotification` if we have ExEx's installed.
-        if self.exex_manager_handle.has_exexs() {
-            // Get the blocks for the unwound range. This is needed for `CanonStateNotification`.
-            let blocks = provider.get_take_block_range::<false>(range.clone())?;
-            let chain = Chain::new(blocks, bundle_state_with_receipts, None);
-
-            // NOTE: We can ignore the error here, since an error means that the channel is closed,
-            // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self.exex_manager_handle.send(CanonStateNotification::Reorg {
-                old: Arc::new(chain),
-                new: Arc::new(Chain::default()),
-            });
+        // revert all changes to PlainState
+        for (_, changeset) in account_changeset_batch.into_iter().rev() {
+            if let Some(account_info) = changeset.info {
+                tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
+            } else {
+                tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
+            }
         }
+
+        // get all batches for storage change
+        let storage_changeset_batch = storage_changeset
+            .walk_range(BlockNumberAddress::range(range.clone()))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // revert all changes to PlainStorage
+        let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        for (key, storage) in storage_changeset_batch.into_iter().rev() {
+            let address = key.address();
+            if let Some(v) = plain_storage_cursor.seek_by_key_subkey(address, storage.key)? {
+                if v.key == storage.key {
+                    plain_storage_cursor.delete_current()?;
+                }
+            }
+            if storage.value != U256::ZERO {
+                plain_storage_cursor.upsert(address, storage)?;
+            }
+        }
+
+        // Discard unwinded changesets
+        provider.unwind_table_by_num::<tables::AccountChangeSets>(unwind_to)?;
+
+        let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
+        while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
+            if key.block_number() < *range.start() {
+                break
+            }
+            // delete all changesets
+            rev_storage_changeset_walker.delete_current()?;
+        }
+
+        // Look up the start index for the transaction range
+        let first_tx_num = provider
+            .block_body_indices(*range.start())?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(*range.start()))?
+            .first_tx_num();
+
+        let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
 
         // Unwind all receipts for transactions in the block range
         if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
@@ -448,24 +451,34 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
             // if the expected highest receipt in the files is higher than the database.
             // Which is essentially what happens here when we unwind this stage.
             let _static_file_producer = prepare_static_file_producer(provider, *range.start())?;
-        } else {
-            // If there is any kind of receipt pruning/filtering we use the database, since static
-            // files do not support filters.
-            //
-            // If we hit this case, the receipts have already been unwound by the call to
-            // `unwind_or_peek_state`.
-        }
 
-        // Update the checkpoint.
-        let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
-        if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
-            for block_number in range {
-                stage_checkpoint.progress.processed -= provider
-                    .block_by_number(block_number)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
-                    .gas_used;
+            // Update the checkpoint.
+            if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
+                for block_number in range {
+                    stage_checkpoint.progress.processed -= provider
+                        .block_by_number(block_number)?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
+                        .gas_used;
+                }
+            }
+        } else {
+            // We use database for Receipts, if there is any kind of receipt pruning/filtering,
+            // since it is not supported by static files.
+            let mut cursor = tx.cursor_write::<tables::Receipts>()?;
+            let mut reverse_walker = cursor.walk_back(None)?;
+
+            while let Some(Ok((tx_number, receipt))) = reverse_walker.next() {
+                if tx_number < first_tx_num {
+                    break
+                }
+                reverse_walker.delete_current()?;
+
+                if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
+                    stage_checkpoint.progress.processed -= receipt.cumulative_gas_used;
+                }
             }
         }
+
         let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {
             StageCheckpoint::new(unwind_to).with_execution_stage_checkpoint(stage_checkpoint)
         } else {
@@ -608,17 +621,17 @@ mod tests {
     use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use reth_db::{models::AccountBeforeTx, transaction::DbTxMut};
+    use reth_db::models::AccountBeforeTx;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_interfaces::executor::BlockValidationError;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
         Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,
-        B256, U256,
+        B256,
     };
     use reth_provider::{test_utils::create_test_provider_factory, AccountReader, ReceiptProvider};
     use reth_revm::EvmProcessorFactory;
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
     fn stage() -> ExecutionStage<EvmProcessorFactory<EthEvmConfig>> {
         let executor_factory = EvmProcessorFactory::new(
@@ -635,7 +648,6 @@ mod tests {
             },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
-            ExExManagerHandle::empty(),
         )
     }
 

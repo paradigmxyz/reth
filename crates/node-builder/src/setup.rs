@@ -7,7 +7,6 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_exex::ExExManagerHandle;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
@@ -50,7 +49,6 @@ pub async fn build_networked_pipeline<DB, Client, EvmConfig>(
     max_block: Option<BlockNumber>,
     static_file_producer: StaticFileProducer<DB>,
     evm_config: EvmConfig,
-    exex_manager_handle: ExExManagerHandle,
 ) -> eyre::Result<Pipeline<DB>>
 where
     DB: Database + Unpin + Clone + 'static,
@@ -78,7 +76,6 @@ where
         prune_config,
         static_file_producer,
         evm_config,
-        exex_manager_handle,
     )
     .await?;
 
@@ -99,7 +96,6 @@ pub async fn build_pipeline<DB, H, B, EvmConfig>(
     prune_config: Option<PruneConfig>,
     static_file_producer: StaticFileProducer<DB>,
     evm_config: EvmConfig,
-    exex_manager_handle: ExExManagerHandle,
 ) -> eyre::Result<Pipeline<DB>>
 where
     DB: Database + Clone + 'static,
@@ -170,7 +166,6 @@ where
                         .max(stage_config.account_hashing.clean_threshold)
                         .max(stage_config.storage_hashing.clean_threshold),
                     prune_modes.clone(),
-                    exex_manager_handle,
                 )
                 .with_metrics_tx(metrics_tx),
             )
