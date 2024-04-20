@@ -306,7 +306,7 @@ dependencies = [
  "futures",
  "futures-utils-wasm",
  "lru",
- "reqwest 0.12.3",
+ "reqwest 0.12.4",
  "serde_json",
  "tokio",
  "tracing",
@@ -345,7 +345,7 @@ dependencies = [
  "alloy-transport-http",
  "futures",
  "pin-project",
- "reqwest 0.12.3",
+ "reqwest 0.12.4",
  "serde",
  "serde_json",
  "tokio",
@@ -540,7 +540,7 @@ source = "git+https://github.com/alloy-rs/alloy?rev=188c4f8#188c4f8f6080d4beaaea
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
- "reqwest 0.12.3",
+ "reqwest 0.12.4",
  "serde_json",
  "tower",
  "url",
@@ -3498,7 +3498,7 @@ dependencies = [
  "http 0.2.12",
  "hyper 0.14.28",
  "log",
- "rustls 0.21.10",
+ "rustls 0.21.11",
  "rustls-native-certs 0.6.3",
  "tokio",
  "tokio-rustls 0.24.1",
@@ -5966,7 +5966,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
- "rustls 0.21.10",
+ "rustls 0.21.11",
  "rustls-pemfile 1.0.4",
  "serde",
  "serde_json",
@@ -5988,9 +5988,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.12.3"
+version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e6cc1e89e689536eb5aeede61520e874df5a4707df811cd5da4aa5fbb2aae19"
+checksum = "566cafdd92868e0939d3fb961bd0dc25fcfaaed179291093b3d43e6b3150ea10"
 dependencies = [
  "base64 0.22.0",
  "bytes",
@@ -6062,12 +6062,14 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
+ "reth-cli-runner",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
  "reth-ethereum-payload-builder",
+ "reth-exex",
  "reth-interfaces",
  "reth-network",
  "reth-network-api",
@@ -6118,7 +6120,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-stages",
+ "reth-stages-api",
  "reth-transaction-pool",
  "tokio",
  "tokio-stream",
@@ -6172,6 +6174,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-stages",
+ "reth-stages-api",
  "reth-static-file",
  "reth-tasks",
  "reth-tokio-util",
@@ -6209,9 +6212,19 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-stages",
+ "reth-stages-api",
  "reth-trie",
  "reth-trie-parallel",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "reth-cli-runner"
+version = "0.2.0-beta.5"
+dependencies = [
+ "futures",
+ "reth-tasks",
  "tokio",
  "tracing",
 ]
@@ -6589,6 +6602,7 @@ dependencies = [
 name = "reth-evm"
 version = "0.2.0-beta.5"
 dependencies = [
+ "reth-interfaces",
  "reth-primitives",
  "revm",
  "revm-primitives",
@@ -6599,7 +6613,12 @@ name = "reth-evm-ethereum"
 version = "0.2.0-beta.5"
 dependencies = [
  "reth-evm",
+ "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "revm-primitives",
+ "tracing",
 ]
 
 [[package]]
@@ -6607,7 +6626,6 @@ name = "reth-exex"
 version = "0.2.0-beta.5"
 dependencies = [
  "eyre",
- "futures",
  "metrics",
  "reth-config",
  "reth-metrics",
@@ -6618,7 +6636,6 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "tokio",
- "tokio-stream",
  "tokio-util",
 ]
 
@@ -7005,6 +7022,8 @@ dependencies = [
  "reth-basic-payload-builder",
  "reth-db",
  "reth-e2e-test-utils",
+ "reth-evm",
+ "reth-interfaces",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
@@ -7019,10 +7038,12 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "revm",
+ "revm-primitives",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -7179,6 +7200,7 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "thiserror",
+ "tokio",
  "tokio-stream",
  "tracing",
 ]
@@ -7388,37 +7410,52 @@ name = "reth-stages"
 version = "0.2.0-beta.5"
 dependencies = [
  "alloy-rlp",
- "aquamarine",
  "assert_matches",
- "auto_impl",
  "criterion",
  "futures-util",
  "itertools 0.12.1",
- "metrics",
  "num-traits",
  "paste",
  "pprof",
  "rand 0.8.5",
  "rayon",
- "reth-blockchain-tree",
  "reth-codecs",
  "reth-config",
  "reth-db",
  "reth-downloaders",
- "reth-eth-wire",
  "reth-etl",
+ "reth-evm-ethereum",
+ "reth-exex",
  "reth-interfaces",
- "reth-metrics",
- "reth-node-ethereum",
- "reth-node-optimism",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-stages-api",
  "reth-static-file",
- "reth-tokio-util",
  "reth-trie",
  "serde_json",
  "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "reth-stages-api"
+version = "0.2.0-beta.5"
+dependencies = [
+ "aquamarine",
+ "assert_matches",
+ "auto_impl",
+ "futures-util",
+ "metrics",
+ "reth-db",
+ "reth-interfaces",
+ "reth-metrics",
+ "reth-primitives",
+ "reth-provider",
+ "reth-static-file",
+ "reth-tokio-util",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -7864,9 +7901,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.10"
+version = "0.21.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9d5a6813c0759e4609cd494e8e725babae6a2ca7b62a5536a13daaec6fcb7ba"
+checksum = "7fecbfb7b1444f477b345853b1fce097a2c6fb637b2bfb87e6bc5db0f043fae4"
 dependencies = [
  "log",
  "ring 0.17.8",
@@ -7876,9 +7913,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.22.3"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99008d7ad0bbbea527ec27bddbc0e432c5b87d8175178cee68d2eec9c4a1813c"
+checksum = "bf4ef73721ac7bcd79b2b315da7779d8fc09718c6b3d2d1b2d94850eb8c18432"
 dependencies = [
  "log",
  "ring 0.17.8",
@@ -9035,7 +9072,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
 dependencies = [
- "rustls 0.21.10",
+ "rustls 0.21.11",
  "tokio",
 ]
 
@@ -9045,7 +9082,7 @@ version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "775e0c0f0adb3a2f22a00c4745d728b479985fc15ee7ca6a2608388c5569860f"
 dependencies = [
- "rustls 0.22.3",
+ "rustls 0.22.4",
  "rustls-pki-types",
  "tokio",
 ]
@@ -9087,7 +9124,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.22.10",
+ "toml_edit 0.22.12",
 ]
 
 [[package]]
@@ -9123,9 +9160,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.22.10"
+version = "0.22.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7a2b38d85c01ba55107d028a28ad5bc078e01a516fd9b7d9140bd84f6c39ee4"
+checksum = "d3328d4f68a705b2a4498da1d580585d39a6510f98318a2cec3018a7ec61ddef"
 dependencies = [
  "indexmap 2.2.6",
  "serde",

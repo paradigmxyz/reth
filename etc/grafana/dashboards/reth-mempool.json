@@ -2324,7 +2324,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Frequency of transaction types seen in announcements",
+      "description": "Duration of one call to `TransactionFetcher::on_fetch_pending_hashes`.\n\nFind Peer - find an idle fallback peer for a hash pending fetch.\n\nFill Request - fill `GetPooledTransactions` request, for the found peer, with more hashes from cache of hashes pending fetch. ",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2376,7 +2376,7 @@
               }
             ]
           },
-          "unit": "cps",
+          "unit": "s",
           "unitScale": true
         },
         "overrides": []
@@ -2387,7 +2387,7 @@
         "x": 12,
         "y": 53
       },
-      "id": 214,
+      "id": 215,
       "options": {
         "legend": {
           "calcs": [],
@@ -2408,46 +2408,12 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_network_transaction_fetcher_legacy_sum{instance=\"$instance\"}[$__rate_interval])",
+          "expr": "reth_network_duration_find_idle_fallback_peer_for_any_pending_hash{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
-          "includeNullMetadata": false,
+          "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Legacy",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "rate(reth_network_transaction_fetcher_eip2930_sum{instance=\"$instance\"}[$__rate_interval])",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": false,
-          "instant": false,
-          "legendFormat": "Eip2930",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "rate(reth_network_transaction_fetcher_eip1559_sum{instance=\"$instance\"}[$__rate_interval])",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": false,
-          "instant": false,
-          "legendFormat": "Eip1559",
+          "legendFormat": "Find Idle Peer",
           "range": true,
           "refId": "C",
           "useBackend": false
@@ -2459,18 +2425,18 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_network_transaction_fetcher_eip4844_sum{instance=\"$instance\"}[$__rate_interval])",
+          "expr": "reth_network_duration_fill_request_from_hashes_pending_fetch{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
-          "includeNullMetadata": false,
+          "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Eip4844",
+          "legendFormat": "Fill Request",
           "range": true,
-          "refId": "D",
+          "refId": "B",
           "useBackend": false
         }
       ],
-      "title": "Announced Transactions by Type",
+      "title": "Fetch Hashes Pending Fetch Duration",
       "type": "timeseries"
     },
     {
@@ -2608,6 +2574,160 @@
         }
       ],
       "title": "Network Manager Poll Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Frequency of transaction types seen in announcements",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "cps",
+          "unitScale": true
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 61
+      },
+      "id": 214,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_network_transaction_fetcher_legacy_sum{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Legacy",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_network_transaction_fetcher_eip2930_sum{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Eip2930",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_network_transaction_fetcher_eip1559_sum{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Eip1559",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_network_transaction_fetcher_eip4844_sum{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Eip4844",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        }
+      ],
+      "title": "Announced Transactions by Type",
       "type": "timeseries"
     },
     {

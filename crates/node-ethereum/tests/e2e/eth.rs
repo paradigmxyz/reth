@@ -1,6 +1,5 @@
 use crate::utils::eth_payload_attributes;
 use reth::{
-    self,
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,

@@ -363,7 +363,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     }
 
     // TODO(joshie) TEMPORARY should be moved to trait providers
-
     /// Unwind or peek at last N blocks of state recreating the [`BundleStateWithReceipts`].
     ///
     /// If UNWIND it set to true tip and latest state will be unwind
@@ -388,7 +387,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    fn unwind_or_peek_state<const UNWIND: bool>(
+    pub fn unwind_or_peek_state<const UNWIND: bool>(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BundleStateWithReceipts> {
@@ -706,10 +705,9 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(block_tx)
     }
 
-    /// Return range of blocks and its execution result
-    fn get_take_block_range<const TAKE: bool>(
+    /// Get or unwind the given range of blocks.
+    pub fn get_take_block_range<const TAKE: bool>(
         &self,
-        chain_spec: &ChainSpec,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
         // For block we need Headers, Bodies, Uncles, withdrawals, Transactions, Signers
@@ -768,7 +766,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             };
 
             // withdrawal can be missing
-            let shanghai_is_active = chain_spec.is_shanghai_active_at_timestamp(header.timestamp);
+            let shanghai_is_active =
+                self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp);
             let mut withdrawals = Some(Withdrawals::default());
             if shanghai_is_active {
                 if let Some((block_number, _)) = block_withdrawals.as_ref() {
@@ -2376,7 +2375,6 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
     /// Return range of blocks and its execution result
     fn get_or_take_block_and_execution_range<const TAKE: bool>(
         &self,
-        chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain> {
         if TAKE {
@@ -2447,7 +2445,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
         }
 
         // get blocks
-        let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;
+        let blocks = self.get_take_block_range::<TAKE>(range.clone())?;
         let unwind_to = blocks.first().map(|b| b.number.saturating_sub(1));
         // get execution res
         let execution_state = self.unwind_or_peek_state::<TAKE>(range.clone())?;

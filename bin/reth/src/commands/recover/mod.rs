@@ -1,7 +1,7 @@
 //! `reth recover` command.
 
-use crate::core::cli::runner::CliContext;
 use clap::{Parser, Subcommand};
+use reth_cli_runner::CliContext;
 
 mod storage_tries;
 

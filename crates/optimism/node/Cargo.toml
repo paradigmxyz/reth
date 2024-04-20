@@ -25,8 +25,12 @@ reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
+reth-interfaces.workspace = true
+reth-evm.workspace = true
 reth-revm.workspace = true
+
 revm.workspace = true
+revm-primitives.workspace = true
 
 # async
 async-trait.workspace = true
@@ -36,6 +40,7 @@ http-body = "0.4.5"
 reqwest = { version = "0.11", default-features = false, features = [
     "rustls-tls",
 ]}
+tracing.workspace = true
 
 # misc
 clap.workspace = true
@@ -49,6 +54,7 @@ jsonrpsee.workspace = true
 [dev-dependencies]
 reth.workspace = true
 reth-db.workspace = true
+reth-revm = { workspace = true, features = ["test-utils"]}
 reth-e2e-test-utils.workspace = true
 tokio.workspace = true
 

@@ -1,6 +1,7 @@
-use crate::{
-    error::*, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageExt, UnwindInput,
-};
+mod ctrl;
+mod event;
+pub use crate::pipeline::ctrl::ControlFlow;
+pub use event::*;
 use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::RethResult;
@@ -21,14 +22,14 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 mod builder;
-mod ctrl;
-mod event;
 mod progress;
 mod set;
 
-pub use crate::pipeline::ctrl::ControlFlow;
+use crate::{
+    BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, PipelineError, Stage,
+    StageError, StageExt, UnwindInput,
+};
 pub use builder::*;
-pub use event::*;
 use progress::*;
 pub use set::*;
 
@@ -372,7 +373,7 @@ where
             let exec_input = ExecInput { target, checkpoint: prev_checkpoint };
 
             self.listeners.notify(PipelineEvent::Prepare {
-                pipeline_stages_progress: event::PipelineStagesProgress {
+                pipeline_stages_progress: PipelineStagesProgress {
                     current: stage_index + 1,
                     total: total_stages,
                 },
@@ -390,7 +391,7 @@ where
             }
 
             self.listeners.notify(PipelineEvent::Run {
-                pipeline_stages_progress: event::PipelineStagesProgress {
+                pipeline_stages_progress: PipelineStagesProgress {
                     current: stage_index + 1,
                     total: total_stages,
                 },
@@ -415,7 +416,7 @@ where
                     provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                     self.listeners.notify(PipelineEvent::Ran {
-                        pipeline_stages_progress: event::PipelineStagesProgress {
+                        pipeline_stages_progress: PipelineStagesProgress {
                             current: stage_index + 1,
                             total: total_stages,
                         },
@@ -896,9 +897,9 @@ mod tests {
     ///
     /// - Stage A syncs to block 10
     /// - Stage B triggers an unwind, marking block 5 as bad
-    /// - Stage B unwinds to it's previous progress, block 0 but since it is still at block 0, it is
+    /// - Stage B unwinds to its previous progress, block 0 but since it is still at block 0, it is
     ///   skipped entirely (there is nothing to unwind)
-    /// - Stage A unwinds to it's previous progress, block 0
+    /// - Stage A unwinds to its previous progress, block 0
     /// - Stage A syncs back up to block 10
     /// - Stage B syncs to block 10
     /// - The pipeline finishes

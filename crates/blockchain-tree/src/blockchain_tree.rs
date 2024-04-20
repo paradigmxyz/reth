@@ -26,7 +26,7 @@ use reth_provider::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
     ChainSpecProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider, ProviderError,
 };
-use reth_stages::{MetricEvent, MetricEventsSender};
+use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::Arc,
@@ -57,7 +57,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// * [BlockchainTree::make_canonical]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
-pub struct BlockchainTree<DB: Database, EVM: ExecutorFactory> {
+pub struct BlockchainTree<DB, EVM> {
     /// The state of the tree
     ///
     /// Tracks all the chains, the block indices, and the block buffer.
@@ -73,6 +73,20 @@ pub struct BlockchainTree<DB: Database, EVM: ExecutorFactory> {
     /// Metrics for sync stages.
     sync_metrics_tx: Option<MetricEventsSender>,
     prune_modes: Option<PruneModes>,
+}
+
+impl<DB, EVM> BlockchainTree<DB, EVM> {
+    /// Subscribe to new blocks events.
+    ///
+    /// Note: Only canonical blocks are emitted by the tree.
+    pub fn subscribe_canon_state(&self) -> CanonStateNotifications {
+        self.canon_state_notification_sender.subscribe()
+    }
+
+    /// Returns a clone of the sender for the canonical state notifications.
+    pub fn canon_state_notification_sender(&self) -> CanonStateNotificationSender {
+        self.canon_state_notification_sender.clone()
+    }
 }
 
 impl<DB, EVM> BlockchainTree<DB, EVM>
@@ -1104,18 +1118,6 @@ where
         Ok(outcome)
     }
 
-    /// Subscribe to new blocks events.
-    ///
-    /// Note: Only canonical blocks are emitted by the tree.
-    pub fn subscribe_canon_state(&self) -> CanonStateNotifications {
-        self.canon_state_notification_sender.subscribe()
-    }
-
-    /// Returns a clone of the sender for the canonical state notifications.
-    pub fn canon_state_notification_sender(&self) -> CanonStateNotificationSender {
-        self.canon_state_notification_sender.clone()
-    }
-
     /// Write the given chain to the database as canonical.
     fn commit_canonical_to_database(
         &self,
@@ -1213,10 +1215,7 @@ where
         info!(target: "blockchain_tree", "REORG: revert canonical from database by unwinding chain blocks {:?}", revert_range);
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = provider_rw
-            .take_block_and_execution_range(
-                self.externals.provider_factory.chain_spec().as_ref(),
-                revert_range,
-            )
+            .take_block_and_execution_range(revert_range)
             .map_err(|e| CanonicalError::CanonicalRevert(e.to_string()))?;
 
         provider_rw.commit()?;

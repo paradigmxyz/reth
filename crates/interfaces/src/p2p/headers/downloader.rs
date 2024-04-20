@@ -81,11 +81,16 @@ pub fn validate_header_download(
 ) -> DownloadResult<()> {
     // validate header against parent
     consensus.validate_header_against_parent(header, parent).map_err(|error| {
-        DownloadError::HeaderValidation { hash: parent.hash(), error: Box::new(error) }
+        DownloadError::HeaderValidation {
+            hash: header.hash(),
+            number: header.number,
+            error: Box::new(error),
+        }
     })?;
     // validate header standalone
     consensus.validate_header(header).map_err(|error| DownloadError::HeaderValidation {
-        hash: parent.hash(),
+        hash: header.hash(),
+        number: header.number,
         error: Box::new(error),
     })?;
     Ok(())
