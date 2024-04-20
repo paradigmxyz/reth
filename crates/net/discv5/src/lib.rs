@@ -546,7 +546,7 @@ pub fn get_lookup_target(
     let suffix_byte_offset = suffix_bit_offset / 8;
     target[suffix_byte_offset] ^= 1 << (suffix_bit_offset % 8);
 
-    rand::thread_rng().fill_bytes(&mut target[suffix_byte_offset..]);
+    rand::thread_rng().fill_bytes(&mut target[suffix_byte_offset + 1..]);
 
     target.into()
 }
