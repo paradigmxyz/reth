@@ -775,17 +775,19 @@ impl SealedHeader {
         }
 
         // timestamp in past check
-        if chain_spec.is_optimism_mainnet() {
-            #[cfg(feature = "optimism")]
-            if chain_spec.is_bedrock_active_at_block(self.header.number) &&
+        #[cfg(feature = "optimism")]
+        if !chain_spec.is_optimism_mainnet() ||
+            chain_spec.is_bedrock_active_at_block(self.header.number) &&
                 self.header.is_timestamp_in_past(parent.timestamp)
-            {
-                return Err(HeaderValidationError::TimestampIsInPast {
-                    parent_timestamp: parent.timestamp,
-                    timestamp: self.timestamp,
-                })
-            }
-        } else if self.header.is_timestamp_in_past(parent.timestamp) {
+        {
+            return Err(HeaderValidationError::TimestampIsInPast {
+                parent_timestamp: parent.timestamp,
+                timestamp: self.timestamp,
+            })
+        }
+
+        #[cfg(not(feature = "optimism"))]
+        if self.header.is_timestamp_in_past(parent.timestamp) {
             return Err(HeaderValidationError::TimestampIsInPast {
                 parent_timestamp: parent.timestamp,
                 timestamp: self.timestamp,
