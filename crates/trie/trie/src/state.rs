@@ -4,7 +4,7 @@ use crate::{
     updates::TrieUpdates,
     StateRoot,
 };
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{ParallelBridge, ParallelIterator};
 use reth_db::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
@@ -42,14 +42,14 @@ impl HashedPostState {
 
         let changes = state
             .into_iter()
-            .collect::<Vec<(&'a Address, &'a BundleAccount)>>()
-            .into_par_iter()
+            .par_bridge()
             .map(|(address, account)| {
+                let BundleAccount { info, status, storage, .. } = account;
                 let hashed_address = keccak256(address);
-                let hashed_account = account.info.clone().map(into_reth_acc);
+                let hashed_account = info.clone().map(into_reth_acc);
                 let hashed_storage = HashedStorage::from_iter(
-                    account.status.was_destroyed(),
-                    account.storage.iter().map(|(key, value)| {
+                    status.was_destroyed(),
+                    storage.iter().map(|(key, value)| {
                         (keccak256(B256::new(key.to_be_bytes())), value.present_value)
                     }),
                 );
