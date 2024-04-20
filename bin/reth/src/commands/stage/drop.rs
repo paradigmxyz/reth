@@ -133,7 +133,8 @@ impl Command {
                     StageId::Execution.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_state::<DatabaseEnv>(tx, self.chain.genesis())?;
+                let alloc = &self.chain.genesis().alloc;
+                insert_genesis_state::<DatabaseEnv>(tx, alloc.len(), alloc.iter())?;
             }
             StageEnum::AccountHashing => {
                 tx.clear::<tables::HashedAccounts>()?;
@@ -191,7 +192,7 @@ impl Command {
                     StageId::IndexStorageHistory.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_history(&provider_rw, &self.chain.genesis)?;
+                insert_genesis_history(&provider_rw, self.chain.genesis.alloc.iter())?;
             }
             StageEnum::TxLookup => {
                 tx.clear::<tables::TransactionHashNumbers>()?;
