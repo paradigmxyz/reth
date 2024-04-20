@@ -87,10 +87,6 @@ impl BlockchainTreeViewer for NoopBlockchainTree {
         Default::default()
     }
 
-    fn find_canonical_ancestor(&self, _parent_hash: BlockHash) -> Option<BlockHash> {
-        None
-    }
-
     fn is_canonical(&self, _block_hash: BlockHash) -> Result<bool, ProviderError> {
         Ok(false)
     }
