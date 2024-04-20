@@ -1071,7 +1071,7 @@ mod tests {
         let num_rows = 2;
 
         // (missing_offsets, expected number of rows)
-        // If a row wasnt fully pruned, then it should clear it up as well
+        // If a row wasn't fully pruned, then it should clear it up as well
         let missing_offsets_scenarios = [(1, 1), (2, 1), (3, 0)];
 
         for (missing_offsets, expected_rows) in missing_offsets_scenarios {
