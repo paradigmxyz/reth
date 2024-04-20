@@ -806,11 +806,7 @@ mod tests {
         // bucket index ceiled to the next multiple of 8
         const fn expected_bucket_index(kbucket_index: usize) -> u64 {
             let log2distance = kbucket_index + 1;
-            if log2distance % 8 == 0 {
-                return log2distance as u64;
-            }
-            let log2distance = log2distance / 8;
-            ((log2distance + 1) * 8) as u64
+            (log2distance.div_ceil(8) * 8) as u64
         }
 
         let bucket_index = rand::thread_rng().gen_range(0..=MAX_KBUCKET_INDEX);
