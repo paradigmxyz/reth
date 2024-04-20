@@ -187,11 +187,6 @@ impl Header {
     ///
     /// Note: This check is relevant only pre-merge.
     pub fn is_timestamp_in_past(&self, parent_timestamp: u64) -> bool {
-        #[cfg(feature = "optimism")]
-        // block below bedrock
-        if self.beneficiary == Address::ZERO {
-            return self.timestamp < parent_timestamp
-        }
         self.timestamp <= parent_timestamp
     }
 
@@ -780,7 +775,17 @@ impl SealedHeader {
         }
 
         // timestamp in past check
-        if self.header.is_timestamp_in_past(parent.timestamp) {
+        if chain_spec.is_optimism_mainnet() {
+            #[cfg(feature = "optimism")]
+            if chain_spec.is_bedrock_active_at_block(self.header.number) &&
+                self.header.is_timestamp_in_past(parent.timestamp)
+            {
+                return Err(HeaderValidationError::TimestampIsInPast {
+                    parent_timestamp: parent.timestamp,
+                    timestamp: self.timestamp,
+                })
+            }
+        } else if self.header.is_timestamp_in_past(parent.timestamp) {
             return Err(HeaderValidationError::TimestampIsInPast {
                 parent_timestamp: parent.timestamp,
                 timestamp: self.timestamp,
