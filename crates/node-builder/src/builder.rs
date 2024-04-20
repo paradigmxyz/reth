@@ -27,7 +27,7 @@ use reth_db::{
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
-use reth_exex::{ExExContext, ExExHandle, ExExManager};
+use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_api::{
@@ -514,6 +514,7 @@ where
                 prometheus_handle,
                 database.clone(),
                 provider_factory.static_file_provider(),
+                executor.clone(),
             )
             .await?;
 
@@ -711,6 +712,8 @@ where
         }
 
         // Configure the pipeline
+        let pipeline_exex_handle =
+            exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
         let (mut pipeline, client) = if config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
 
@@ -743,6 +746,7 @@ where
                 max_block,
                 static_file_producer,
                 evm_config,
+                pipeline_exex_handle,
             )
             .await?;
 
@@ -765,6 +769,7 @@ where
                 max_block,
                 static_file_producer,
                 evm_config,
+                pipeline_exex_handle,
             )
             .await?;
 

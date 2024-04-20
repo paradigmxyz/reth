@@ -46,7 +46,7 @@ impl Wallet {
         builder.ingest(b"dummy blob");
         let sidecar: BlobTransactionSidecar = builder.build()?;
         tx.set_blob_sidecar(sidecar);
-        tx.set_max_fee_per_blob_gas(1);
+        tx.set_max_fee_per_blob_gas(1500000000);
         tx.clone().transaction_type(TxType::Eip4844 as u8);
 
         let signer = EthereumSigner::from(self.inner.clone());

@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
-use node_e2e_tests::{node::NodeTestContext, wallet::Wallet};
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
+use reth_e2e_test_utils::{node::NodeTestContext, wallet::Wallet};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
+
+use crate::utils::eth_payload_attributes;
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
@@ -16,8 +18,8 @@ async fn can_sync() -> eyre::Result<()> {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
 
-    let genesis: Genesis =
-        serde_json::from_str(include_str!("../../../assets/genesis.json")).unwrap();
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
@@ -67,15 +69,16 @@ async fn can_sync() -> eyre::Result<()> {
     let tx_hash = first_node.inject_tx(raw_tx).await?;
 
     // Make the first node advance
-    let block_hash = first_node.advance(vec![]).await?;
+    let (block_hash, block_number) = first_node.advance(vec![], eth_payload_attributes).await?;
+
     // assert the block has been committed to the blockchain
-    first_node.assert_new_block(tx_hash, block_hash).await?;
+    first_node.assert_new_block(tx_hash, block_hash, block_number).await?;
 
     // only send forkchoice update to second node
     second_node.engine_api.update_forkchoice(block_hash).await?;
 
     // expect second node advanced via p2p gossip
-    second_node.assert_new_block(tx_hash, block_hash).await?;
+    second_node.assert_new_block(tx_hash, block_hash, 1).await?;
 
     Ok(())
 }
