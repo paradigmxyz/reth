@@ -41,15 +41,14 @@ jobs:
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace --exclude examples --exclude ef-tests \
+            --workspace --exclude examples --exclude ef-tests optimism/node/tests/e2e \
             -E "kind(test)"
       - if: matrix.network == 'optimism'
         name: Run tests
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace --exclude examples --exclude ef-tests node-ethereum/tests/e2e
-            optimism/node/tests/e2e \
+            --workspace --exclude examples --exclude ef-tests node-ethereum/tests/e2e \
             -E "kind(test)"
 
   sync:
