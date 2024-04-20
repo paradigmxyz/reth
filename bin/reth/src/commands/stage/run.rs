@@ -8,7 +8,6 @@ use crate::{
         utils::{chain_help, chain_spec_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs, StageEnum,
     },
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
     prometheus_exporter,
     version::SHORT_VERSION,
@@ -18,6 +17,7 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
+use reth_node_core::cli::runner::CliContext;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::ChainSpec;
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
