@@ -68,6 +68,7 @@ use std::{
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
+use crate::transactions::fetcher::TxSizeMetadata;
 
 mod config;
 mod constants;
@@ -695,7 +696,10 @@ where
 
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback
-        if !self.transaction_fetcher.is_idle(&peer_id) {
+        if !self.transaction_fetcher.is_idle(&TxSizeMetadata {
+            peer_id,
+            tx_encoded_len: 0,
+        }) {
             // load message version before announcement data is destructed in packing
             let msg_version = valid_announcement_data.msg_version();
             let (hashes, _version) = valid_announcement_data.into_request_hashes();

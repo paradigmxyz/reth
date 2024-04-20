@@ -16,7 +16,9 @@ use std::{
     num::NonZeroUsize,
     pin::Pin,
     task::{Context, Poll},
+    hash::{Hash, Hasher},
 };
+
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::{debug, trace};
 
@@ -98,8 +100,8 @@ impl TransactionFetcher {
     }
 
     /// Returns `true` if peer is idle with respect to `self.inflight_requests`.
-    pub(super) fn is_idle(&self, peer_id: &PeerId) -> bool {
-        let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
+    pub(super) fn is_idle(&self, metadata: &TxSizeMetadata) -> bool {
+        let Some(inflight_count) = self.active_peers.peek(&metadata.peer_id) else { return true };
         if *inflight_count < DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
             return true
         }
@@ -114,13 +116,13 @@ impl TransactionFetcher {
     ) -> Option<&PeerId> {
         let TxFetchMetadata { fallback_peers, .. } =
             self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
-
-        for peer_id in fallback_peers.iter() {
-            if self.is_idle(peer_id) && is_session_active(peer_id) {
-                return Some(peer_id)
+    
+        for metadata in fallback_peers.iter() {
+            if self.is_idle(metadata) && is_session_active(&metadata.peer_id) {
+                return Some(&metadata.peer_id)
             }
         }
-
+    
         None
     }
 
@@ -284,13 +286,15 @@ impl TransactionFetcher {
         // the peer as fallback peer so it isn't request again for these hashes.
         hashes.retain(|hash| {
             if let Some(entry) = self.hashes_fetch_inflight_and_pending_fetch.get(hash) {
-                entry.fallback_peers_mut().remove(peer_failed_to_serve);
-                return true
+                entry.fallback_peers_mut().remove(&TxSizeMetadata {
+                    peer_id: *peer_failed_to_serve,
+                    tx_encoded_len: 0,
+                });
+                return true;
             }
-            // tx has been seen over broadcast in the time it took for the request to resolve
             false
         });
-
+        
         self.buffer_hashes(hashes, None)
     }
 
@@ -317,7 +321,10 @@ impl TransactionFetcher {
 
             if let Some(peer_id) = fallback_peer {
                 // peer has not yet requested hash
-                fallback_peers.insert(peer_id);
+                fallback_peers.insert(TxSizeMetadata {
+                    peer_id,
+                    tx_encoded_len: 0,
+                });
             } else {
                 if *retries >= DEFAULT_MAX_RETRIES {
                     debug!(target: "net::tx",
@@ -461,14 +468,17 @@ impl TransactionFetcher {
                 //
                 // remove any ended sessions, so that in case of a full cache, alive peers aren't 
                 // removed in favour of lru dead peers
-                let mut ended_sessions = vec!();
-                for &peer_id in fallback_peers.iter() {
-                    if is_session_active(peer_id) {
-                        ended_sessions.push(peer_id);
+                let mut ended_sessions = vec![];
+                for metadata in fallback_peers.iter() {
+                    if !is_session_active(metadata.peer_id) {
+                        ended_sessions.push(TxSizeMetadata {
+                            peer_id: metadata.peer_id,
+                            tx_encoded_len: 0,
+                        });
                     }
                 }
-                for peer_id in ended_sessions {
-                    fallback_peers.remove(&peer_id);
+                for metadata in ended_sessions {
+                    fallback_peers.remove(&metadata);
                 }
 
                 return false
@@ -879,9 +889,10 @@ impl Default for TransactionFetcher {
     }
 }
 
-struct TxSizeMetadata {
-    peer_id: PeerId,
-    tx_encoded_len: usize,
+#[derive(Debug)]
+pub(super) struct TxSizeMetadata {
+    pub peer_id: PeerId,
+    pub tx_encoded_len: usize,
 }
 
 impl PartialEq for TxSizeMetadata {
@@ -899,13 +910,7 @@ impl Hash for TxSizeMetadata {
 }
 
 impl TxSizeMetadata {
-    fn get_size(&self) -> Option<usize> {
-        if self.tx_encoded_len == 0 {
-            None
-        } else {
-            Some(self.tx_encoded_len)
-        }
-    }
+
 }
 
 
@@ -916,7 +921,7 @@ pub(super) struct TxFetchMetadata {
     retries: u8,
     /// Peers that have announced the hash, but to which a request attempt has not yet been made.
 
-    fallback_peers: LruMap<PeerId, PackedOption<usize>>,
+    fallback_peers: LruCache<TxSizeMetadata>,
     /// Size metadata of the transaction if it has been seen in an eth68 announcement.
     // todo: store all seen sizes as a `(size, peer_id)` tuple to catch peers that respond with
     // another size tx than they announced. alt enter in request (won't catch peers announcing
@@ -925,7 +930,7 @@ pub(super) struct TxFetchMetadata {
 }
 
 impl TxFetchMetadata {
-    pub fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
+    pub fn fallback_peers_mut(&mut self) -> &mut LruCache<TxSizeMetadata> {
         &mut self.fallback_peers
     }
 
