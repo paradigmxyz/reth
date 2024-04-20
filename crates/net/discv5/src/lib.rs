@@ -22,6 +22,7 @@ use discv5::ListenConfig;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
+use rand::RngCore;
 use reth_primitives::{bytes::Bytes, ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use tokio::{sync::mpsc, task};
@@ -799,16 +800,6 @@ mod tests {
 
     #[test]
     fn select_lookup_target() {
-        // bucket index ceiled to the next multiple of 8
-        const fn expected_bucket_index(kbucket_index: usize) -> u64 {
-            let log2distance = kbucket_index + 1;
-            if log2distance % 8 == 0 {
-                return log2distance as u64;
-            }
-            let log2distance = log2distance / 8;
-            ((log2distance + 1) * 8) as u64
-        }
-
         let bucket_index = rand::thread_rng().gen_range(0..=MAX_KBUCKET_INDEX);
 
         let sk = CombinedKey::generate_secp256k1();
@@ -822,10 +813,7 @@ mod tests {
             // log2distance undef (inf)
             assert!(local_node_id.log2_distance(&target).is_none())
         } else {
-            assert_eq!(
-                expected_bucket_index(bucket_index),
-                local_node_id.log2_distance(&target).unwrap()
-            );
+            assert_eq!((bucket_index + 1) as u64, local_node_id.log2_distance(&target).unwrap());
         }
     }
 }
