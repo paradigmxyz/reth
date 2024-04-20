@@ -12,14 +12,13 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
     watch,
 };
-use tokio_stream::wrappers::WatchStream;
-use tokio_util::sync::{PollSendError, PollSender};
+use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 
 /// Metrics for an ExEx.
 #[derive(Metrics)]
@@ -217,7 +216,7 @@ impl ExExManager {
                 exex_tx: handle_tx,
                 num_exexs,
                 is_ready_receiver: is_ready_rx.clone(),
-                is_ready: WatchStream::new(is_ready_rx),
+                is_ready: ReusableBoxFuture::new(make_future(is_ready_rx)),
                 current_capacity,
                 finished_height: finished_height_rx,
             },
@@ -340,13 +339,13 @@ pub struct ExExManagerHandle {
     num_exexs: usize,
     /// A watch channel denoting whether the manager is ready for new notifications or not.
     ///
-    /// This is stored internally alongside a `WatchStream` representation of the same value. This
-    /// field is only used to create a new `WatchStream` when the handle is cloned, but is
-    /// otherwise unused.
+    /// This is stored internally alongside a `ReusableBoxFuture` representation of the same value.
+    /// This field is only used to create a new `ReusableBoxFuture` when the handle is cloned,
+    /// but is otherwise unused.
     is_ready_receiver: watch::Receiver<bool>,
-    /// A stream of bools denoting whether the manager is ready for new notifications.
-    #[allow(unused)]
-    is_ready: WatchStream<bool>,
+    /// A reusable future that resolves when the manager is ready for new
+    /// notifications.
+    is_ready: ReusableBoxFuture<'static, watch::Receiver<bool>>,
     /// The current capacity of the manager's internal notification buffer.
     current_capacity: Arc<AtomicUsize>,
     /// The finished height of all ExEx's.
@@ -368,7 +367,7 @@ impl ExExManagerHandle {
             exex_tx,
             num_exexs: 0,
             is_ready_receiver: is_ready_rx.clone(),
-            is_ready: WatchStream::new(is_ready_rx),
+            is_ready: ReusableBoxFuture::new(make_future(is_ready_rx)),
             current_capacity: Arc::new(AtomicUsize::new(0)),
             finished_height: finished_height_rx,
         }
@@ -427,14 +426,21 @@ impl ExExManagerHandle {
     /// Wait until the manager is ready for new notifications.
     #[allow(clippy::needless_pass_by_ref_mut)]
     pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        use futures as _;
-        // FIXME: if not ready this must be polled
-        if *self.is_ready_receiver.borrow() {
-            Poll::Ready(())
-        } else {
-            cx.waker().wake_by_ref();
-            Poll::Pending
+        let rx = ready!(self.is_ready.poll(cx));
+        self.is_ready.set(make_future(rx));
+        Poll::Ready(())
+    }
+}
+
+async fn make_future(mut rx: watch::Receiver<bool>) -> watch::Receiver<bool> {
+    loop {
+        if *rx.borrow_and_update() {
+            return rx
         }
+
+        // NOTE(onbjerg): We can ignore the error here, because if the channel is closed, the node
+        // is shutting down.
+        let _ = rx.changed().await;
     }
 }
 
@@ -444,7 +450,7 @@ impl Clone for ExExManagerHandle {
             exex_tx: self.exex_tx.clone(),
             num_exexs: self.num_exexs,
             is_ready_receiver: self.is_ready_receiver.clone(),
-            is_ready: WatchStream::new(self.is_ready_receiver.clone()),
+            is_ready: ReusableBoxFuture::new(make_future(self.is_ready_receiver.clone())),
             current_capacity: self.current_capacity.clone(),
             finished_height: self.finished_height.clone(),
         }
