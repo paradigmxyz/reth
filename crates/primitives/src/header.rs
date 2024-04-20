@@ -187,6 +187,11 @@ impl Header {
     ///
     /// Note: This check is relevant only pre-merge.
     pub fn is_timestamp_in_past(&self, parent_timestamp: u64) -> bool {
+        #[cfg(feature = "optimism")]
+        // block below bedrock block
+        if self.beneficiary == Address::ZERO {
+            return self.timestamp < parent_timestamp
+        }
         self.timestamp <= parent_timestamp
     }
 
