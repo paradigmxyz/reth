@@ -116,7 +116,7 @@ impl TransactionFetcher {
             self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
     
         for metadata in fallback_peers.iter() {
-            if self.is_idle(metadata) && is_session_active(&metadata.peer_id) {
+            if self.is_idle(&metadata.peer_id) && is_session_active(&metadata.peer_id) {
                 return Some(&metadata.peer_id)
             }
         }

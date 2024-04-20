@@ -696,14 +696,11 @@ where
 
         // only send request for hashes to idle peer, otherwise buffer hashes storing peer as
         // fallback
-        if !self.transaction_fetcher.is_idle(&TxSizeMetadata {
-            peer_id,
-            tx_encoded_len: 0,
-        }) {
+        if !self.transaction_fetcher.is_idle(&peer_id) {
             // load message version before announcement data is destructed in packing
             let msg_version = valid_announcement_data.msg_version();
             let (hashes, _version) = valid_announcement_data.into_request_hashes();
-
+        
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hashes=?*hashes,
@@ -711,11 +708,12 @@ where
                 client_version=%client_version,
                 "buffering hashes announced by busy peer"
             );
-
+        
             self.transaction_fetcher.buffer_hashes(hashes, Some(peer_id));
-
-            return
+        
+            return;
         }
+        
 
         // load message version before announcement data is destructed in packing
         let msg_version = valid_announcement_data.msg_version();
