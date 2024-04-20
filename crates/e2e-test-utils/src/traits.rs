@@ -5,7 +5,7 @@ use reth::rpc::types::{
 
 /// The execution payload envelope type.
 pub trait PayloadEnvelopeExt: Send + Sync + std::fmt::Debug {
-    /// Returns execution payload from envelope
+    /// Returns the execution payload V3 from the payload
     fn execution_payload(&self) -> ExecutionPayloadV3;
 }
 
