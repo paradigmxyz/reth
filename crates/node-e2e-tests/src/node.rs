@@ -12,14 +12,11 @@ use reth::{
     rpc::{
         api::DebugApiServer,
         eth::{error::EthResult, EthTransactions},
-        types::engine::PayloadAttributes,
     },
 };
 use reth_node_ethereum::EthEngineTypes;
-use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, Address, Bytes, B256};
+use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, Bytes, B256};
 
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_stream::StreamExt;
 
 /// An helper struct to handle node actions
@@ -115,8 +112,8 @@ where
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
         let head = self.engine_api.canonical_stream.next().await.unwrap();
-        let tx = head.tip().transactions().next();
-        assert_eq!(tx.unwrap().hash().as_slice(), tip_tx_hash.as_slice());
+        let tx = head.tip().transactions().next().unwrap();
+        assert_eq!(tx.hash().as_slice(), tip_tx_hash.as_slice());
 
         // wait for the block to commit
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -128,18 +125,4 @@ where
         assert_eq!(latest_block.hash_slow(), block_hash);
         Ok(())
     }
-}
-
-/// Helper function to create a new eth payload attributes
-pub fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-
-    let attributes = PayloadAttributes {
-        timestamp,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Address::ZERO,
-        withdrawals: Some(vec![]),
-        parent_beacon_block_root: Some(B256::ZERO),
-    };
-    EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }

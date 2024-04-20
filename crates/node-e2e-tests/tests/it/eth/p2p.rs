@@ -53,7 +53,7 @@ async fn can_sync() -> eyre::Result<()> {
 
     let mut second_node = NodeTestContext::new(node).await?;
 
-    let wallet = Wallet::default();
+    let mut wallet = Wallet::default();
     let raw_tx = wallet.transfer_tx().await;
 
     // Make them peer

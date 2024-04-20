@@ -4890,7 +4890,6 @@ version = "0.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
- "alloy-rlp",
  "alloy-rpc-types",
  "alloy-signer",
  "alloy-signer-wallet",

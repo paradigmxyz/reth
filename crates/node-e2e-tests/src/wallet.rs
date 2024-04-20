@@ -6,18 +6,20 @@ use reth_primitives::{Address, Bytes, U256};
 /// One of the accounts of the genesis allocations.
 pub struct Wallet {
     inner: LocalWallet,
+    nonce: u64,
 }
 
 impl Wallet {
     /// Creates a new account from one of the secret/pubkeys of the genesis allocations (test.json)
     pub(crate) fn new(phrase: &str) -> Self {
         let inner = MnemonicBuilder::<English>::default().phrase(phrase).build().unwrap();
-        Self { inner }
+        Self { inner, nonce: 0 }
     }
 
     /// Creates a static transfer and signs it
-    pub async fn transfer_tx(&self) -> Bytes {
+    pub async fn transfer_tx(&mut self) -> Bytes {
         let tx = self.tx();
+        self.nonce += 1;
         let signer = EthereumSigner::from(self.inner.clone());
         tx.build(&signer).await.unwrap().encoded_2718().into()
     }
@@ -25,7 +27,7 @@ impl Wallet {
     /// Creates a static tx
     fn tx(&self) -> TransactionRequest {
         TransactionRequest {
-            nonce: Some(0),
+            nonce: Some(self.nonce),
             value: Some(U256::from(100)),
             to: Some(Address::random()),
             gas: Some(21000),
@@ -37,9 +39,9 @@ impl Wallet {
     }
 
     /// Creates a tx with blob sidecar and sign it
-    pub async fn tx_with_blobs(&self) -> eyre::Result<Bytes> {
+    pub async fn tx_with_blobs(&mut self) -> eyre::Result<Bytes> {
         let mut tx = self.tx();
-
+        self.nonce += 1;
         let mut builder = SidecarBuilder::<SimpleCoder>::new();
         builder.ingest(b"dummy blob");
         let sidecar: BlobTransactionSidecar = builder.build()?;

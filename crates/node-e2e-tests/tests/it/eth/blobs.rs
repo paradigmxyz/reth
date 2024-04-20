@@ -39,26 +39,31 @@ async fn can_handle_blobs() -> eyre::Result<()> {
 
     let mut node = NodeTestContext::new(node.clone()).await?;
 
-    let wallet = Wallet::default();
-    let raw_tx = wallet.tx_with_blobs().await?;
+    let mut wallet = Wallet::default();
+    let blob_tx = wallet.tx_with_blobs().await?;
 
     // inject blob tx to the pool
-    let tx_hash = node.inject_tx(raw_tx).await?;
+    let blob_tx_hash = node.inject_tx(blob_tx).await?;
     // fetch it from rpc
-    let envelope = node.envelope_by_hash(tx_hash).await?;
+    let envelope = node.envelope_by_hash(blob_tx_hash).await?;
     // validate sidecar
     let versioned_hashes = node.validate_sidecar(envelope);
+    // advance the node with the blob tx
+    let blob_tx_block_hash = node.advance(versioned_hashes).await?;
 
-    // advance the node
-    let block_hash = node.advance(versioned_hashes).await?;
+    let tx = wallet.transfer_tx().await;
+    let tx_hash = node.inject_tx(tx).await?;
+    let tx_block_hash = node.advance(vec![]).await?;
 
-    // assert the block has been committed to the blockchain
-    node.assert_new_block(tx_hash, block_hash).await?;
+    let envelope = node.envelope_by_hash(blob_tx_hash).await?;
 
-    // fetch the tx from rpc
-    let envelope = node.envelope_by_hash(tx_hash).await?;
-    // validate sidecar
-    node.validate_sidecar(envelope); // Currently failing as its returning a TxEip4844 and not a TxEip4844WithSidecar
+    node.validate_sidecar(envelope);
+    // build block with blob tx
+    // build block without blob tx
+    // send both
+    // send FCU with the blob tx
+    // send FCU without the blob tx
+    // expect the blob tx to be in the pool again and sidecar should be valid
 
     Ok(())
 }
