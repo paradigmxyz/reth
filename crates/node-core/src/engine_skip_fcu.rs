@@ -16,7 +16,11 @@ pub struct EngineApiSkipFcu {
 impl EngineApiSkipFcu {
     /// Creates new [EngineApiSkipFcu] interceptor.
     pub fn new(threshold: usize) -> Self {
-        Self { threshold, skipped: 0 }
+        Self {
+            threshold,
+            // Start with `threshold` so that the first FCU goes through.
+            skipped: threshold,
+        }
     }
 
     /// Intercepts an incoming engine API message, skips FCU or forwards it

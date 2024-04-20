@@ -1,8 +1,11 @@
-use crate::{engine_api::EngineApiHelper, network::NetworkHelper, payload::PayloadHelper};
+use crate::{
+    engine_api::EngineApiHelper, network::NetworkHelper, payload::PayloadHelper,
+    traits::PayloadEnvelopeExt,
+};
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use reth::{
-    api::FullNodeComponents,
+    api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
     builder::FullNode,
     providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
@@ -10,28 +13,28 @@ use reth::{
         types::engine::PayloadAttributes,
     },
 };
-
-use reth_node_ethereum::EthEngineTypes;
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_primitives::{Address, Bytes, B256};
-
-use std::time::{SystemTime, UNIX_EPOCH};
+use reth_primitives::{Address, BlockNumber, Bytes, B256};
+use std::{
+    marker::PhantomData,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio_stream::StreamExt;
 
 /// An helper struct to handle node actions
 pub struct NodeHelper<Node>
 where
-    Node: FullNodeComponents<Engine = EthEngineTypes>,
+    Node: FullNodeComponents,
 {
     pub inner: FullNode<Node>,
     payload: PayloadHelper<Node::Engine>,
     pub network: NetworkHelper,
-    pub engine_api: EngineApiHelper,
+    pub engine_api: EngineApiHelper<Node::Engine>,
 }
 
 impl<Node> NodeHelper<Node>
 where
-    Node: FullNodeComponents<Engine = EthEngineTypes>,
+    Node: FullNodeComponents,
 {
     /// Creates a new test node
     pub async fn new(node: FullNode<Node>) -> eyre::Result<Self> {
@@ -44,17 +47,26 @@ where
             engine_api: EngineApiHelper {
                 engine_api_client: node.auth_server_handle().http_client(),
                 canonical_stream: node.provider.canonical_state_stream(),
+                _marker: PhantomData::<Node::Engine>,
             },
         })
     }
 
     /// Advances the node forward
-    pub async fn advance(&mut self, raw_tx: Bytes) -> eyre::Result<(B256, B256)> {
+    pub async fn advance(
+        &mut self,
+        raw_tx: Bytes,
+        attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
+    ) -> eyre::Result<(B256, B256)>
+    where
+        <Node::Engine as EngineTypes>::ExecutionPayloadV3:
+            From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
+    {
         // push tx into pool via RPC server
         let tx_hash = self.inject_tx(raw_tx).await?;
 
         // trigger new payload building draining the pool
-        let eth_attr = self.payload.new_payload().await.unwrap();
+        let eth_attr = self.payload.new_payload(attributes_generator).await.unwrap();
 
         // first event is the payload attributes
         self.payload.expect_attr_event(eth_attr.clone()).await?;
@@ -69,13 +81,14 @@ where
         let payload = self.payload.expect_built_payload().await?;
 
         // submit payload via engine api
+        let block_number = payload.block().number;
         let block_hash = self.engine_api.submit_payload(payload, eth_attr.clone()).await?;
 
         // trigger forkchoice update via engine api to commit the block to the blockchain
         self.engine_api.update_forkchoice(block_hash).await?;
 
         // assert the block has been committed to the blockchain
-        self.assert_new_block(tx_hash, block_hash).await?;
+        self.assert_new_block(tx_hash, block_hash, block_number).await?;
         Ok((block_hash, tx_hash))
     }
 
@@ -91,6 +104,7 @@ where
         &mut self,
         tip_tx_hash: B256,
         block_hash: B256,
+        block_number: BlockNumber,
     ) -> eyre::Result<()> {
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
@@ -98,14 +112,20 @@ where
         let tx = head.tip().transactions().next();
         assert_eq!(tx.unwrap().hash().as_slice(), tip_tx_hash.as_slice());
 
-        // wait for the block to commit
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-        // make sure the block hash we submitted via FCU engine api is the new latest block
-        // using an RPC call
-        let latest_block =
-            self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap();
-        assert_eq!(latest_block.hash_slow(), block_hash);
+        loop {
+            // wait for the block to commit
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if let Some(latest_block) =
+                self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?
+            {
+                if latest_block.number == block_number {
+                    // make sure the block hash we submitted via FCU engine api is the new latest
+                    // block using an RPC call
+                    assert_eq!(latest_block.hash_slow(), block_hash);
+                    break
+                }
+            }
+        }
         Ok(())
     }
 }
