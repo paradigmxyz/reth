@@ -43,7 +43,8 @@ impl TaskDownloader {
     ///
     /// ```
     /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
-    /// use reth_interfaces::{consensus::Consensus, p2p::bodies::client::BodiesClient};
+    //  use reth_interfaces:: p2p::bodies::client::BodiesClient;
+    /// use reth_consensus_api::Consensus;
     /// use reth_provider::HeaderProvider;
     /// use std::sync::Arc;
     ///
