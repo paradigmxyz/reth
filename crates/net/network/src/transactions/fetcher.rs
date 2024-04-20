@@ -100,13 +100,11 @@ impl TransactionFetcher {
     }
 
     /// Returns `true` if peer is idle with respect to `self.inflight_requests`.
-    pub(super) fn is_idle(&self, metadata: &TxSizeMetadata) -> bool {
-        let Some(inflight_count) = self.active_peers.peek(&metadata.peer_id) else { return true };
-        if *inflight_count < DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
-            return true
-        }
-        false
+    pub(super) fn is_idle(&self, peer_id: &PeerId) -> bool {
+        let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
+        *inflight_count < DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER
     }
+    
 
     /// Returns any idle peer for the given hash.
     pub(super) fn get_idle_peer_for(
@@ -910,7 +908,13 @@ impl Hash for TxSizeMetadata {
 }
 
 impl TxSizeMetadata {
-
+    fn get_size(&self) -> Option<usize> {
+        if self.tx_encoded_len == 0 {
+            None
+        } else {
+            Some(self.tx_encoded_len)
+        }
+    }
 }
 
 
