@@ -1,5 +1,4 @@
 use super::file_codec::BlockFileCodec;
-use alloy_rlp::Bytes;
 use itertools::Either;
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
@@ -380,8 +379,8 @@ impl ChunkedFileReader {
 
         // read new bytes from file
         let mut reader = BytesMut::zeroed(new_read_bytes_target_len as usize);
-        let new_read_bytes_len = self.file.read_exact(&mut reader).await.unwrap() as u64;
         // actual bytes that have been read
+        let new_read_bytes_len = self.file.read_exact(&mut reader).await.unwrap() as u64;
 
         // update remaining file length
         self.file_byte_len -= new_read_bytes_len;
