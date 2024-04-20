@@ -7106,7 +7106,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "c-kzg",
- "cfg-if",
  "clap",
  "criterion",
  "derive_more",
