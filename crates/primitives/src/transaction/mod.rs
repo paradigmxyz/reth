@@ -2194,7 +2194,14 @@ mod tests {
         );
 
         let encoded = &alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("c98080808080801b8080"), encoded[..]);
+        assert_eq!(
+            if cfg!(feature = "optimism") {
+                hex!("c9808080808080808080")
+            } else {
+                hex!("c98080808080801b8080")
+            },
+            &encoded[..]
+        );
         assert_eq!(MIN_LENGTH_LEGACY_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -2228,14 +2235,7 @@ mod tests {
         );
 
         let encoded = &alloy_rlp::encode(signed_tx);
-        assert_eq!(
-            if cfg!(feature = "optimism") {
-                hex!("c9808080808080808080")
-            } else {
-                hex!("c98080808080801b8080")
-            },
-            &encoded[..]
-        );
+        assert_eq!(hex!("8e02cc8080808080808080c0808080"), encoded[..]);
         assert_eq!(MIN_LENGTH_EIP1559_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
