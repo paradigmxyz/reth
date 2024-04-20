@@ -22,7 +22,7 @@
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;
-//! # use reth_node_ethereum::EthEvmConfig;
+//! # use reth_evm_ethereum::EthEvmConfig;
 //! # use reth_provider::ProviderFactory;
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
@@ -76,12 +76,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-
-mod error;
-mod metrics;
-mod pipeline;
-mod stage;
-mod util;
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 #[allow(missing_docs)]
 #[cfg(any(test, feature = "test-utils"))]
@@ -95,7 +90,5 @@ pub mod stages;
 
 pub mod sets;
 
-pub use crate::metrics::*;
-pub use error::*;
-pub use pipeline::*;
-pub use stage::*;
+// re-export the stages API
+pub use reth_stages_api::*;

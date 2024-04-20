@@ -4,14 +4,12 @@ use crate::{bundle_state::BundleStateWithReceipts, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt, U256};
 
-/// Executor factory that would create the EVM with particular state provider.
-///
-/// It can be used to mock executor.
+/// A factory capable of creating an executor with the given state provider.
 pub trait ExecutorFactory: Send + Sync + 'static {
     /// Executor with [`StateProvider`]
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
-        _sp: SP,
+        sp: SP,
     ) -> Box<dyn PrunableBlockExecutor<Error = BlockExecutionError> + 'a>;
 }
 
@@ -19,7 +17,7 @@ pub trait ExecutorFactory: Send + Sync + 'static {
 ///
 /// This type is capable of executing (multiple) blocks by applying the state changes made by each
 /// block. The final state of the executor can extracted using
-/// [take_output_state](BlockExecutor::take_output_state).
+/// [`Self::take_output_state`].
 pub trait BlockExecutor {
     /// The error type returned by the executor.
     type Error;

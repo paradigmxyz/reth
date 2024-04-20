@@ -51,7 +51,7 @@ reth-metrics = { workspace = true, features = ["common"] }
 metrics.workspace = true
 
 # misc
-auto_impl = "1"
+auto_impl.workspace = true
 aquamarine.workspace = true
 tracing.workspace = true
 fnv = "1.0"

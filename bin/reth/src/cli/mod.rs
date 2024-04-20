@@ -9,10 +9,10 @@ use crate::{
         config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, node, node::NoArgs, p2p,
         recover, stage, test_vectors,
     },
-    core::cli::runner::CliRunner,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
+use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{InitState, WithLaunchContext};
 use reth_primitives::ChainSpec;
@@ -148,7 +148,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Stage(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),

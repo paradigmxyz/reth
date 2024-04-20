@@ -14,9 +14,11 @@ use crate::{
 };
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
+use reth_cli_runner::CliContext;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
+use reth_exex::ExExManagerHandle;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::ChainSpec;
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
@@ -119,7 +121,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `stage` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         let _ = fdlimit::raise_fd_limit();
@@ -153,6 +155,7 @@ impl Command {
                 Arc::clone(&db),
                 factory.static_file_provider(),
                 metrics_process::Collector::default(),
+                ctx.task_executor,
             )
             .await?;
         }
@@ -239,6 +242,7 @@ impl Command {
                             },
                             config.stages.merkle.clean_threshold,
                             config.prune.map(|prune| prune.segments).unwrap_or_default(),
+                            ExExManagerHandle::empty(),
                         )),
                         None,
                     )
@@ -256,8 +260,14 @@ impl Command {
                     Box::new(MerkleStage::default_execution()),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
-                StageEnum::AccountHistory => (Box::<IndexAccountHistoryStage>::default(), None),
-                StageEnum::StorageHistory => (Box::<IndexStorageHistoryStage>::default(), None),
+                StageEnum::AccountHistory => (
+                    Box::new(IndexAccountHistoryStage::default().with_etl_config(etl_config)),
+                    None,
+                ),
+                StageEnum::StorageHistory => (
+                    Box::new(IndexStorageHistoryStage::default().with_etl_config(etl_config)),
+                    None,
+                ),
                 _ => return Ok(()),
             };
         if let Some(unwind_stage) = &unwind_stage {
