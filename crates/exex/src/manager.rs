@@ -216,7 +216,7 @@ impl ExExManager {
                 exex_tx: handle_tx,
                 num_exexs,
                 is_ready_receiver: is_ready_rx.clone(),
-                is_ready: ReusableBoxFuture::new(make_future(is_ready_rx)),
+                is_ready: ReusableBoxFuture::new(make_wait_future(is_ready_rx)),
                 current_capacity,
                 finished_height: finished_height_rx,
             },
@@ -367,7 +367,7 @@ impl ExExManagerHandle {
             exex_tx,
             num_exexs: 0,
             is_ready_receiver: is_ready_rx.clone(),
-            is_ready: ReusableBoxFuture::new(make_future(is_ready_rx)),
+            is_ready: ReusableBoxFuture::new(make_wait_future(is_ready_rx)),
             current_capacity: Arc::new(AtomicUsize::new(0)),
             finished_height: finished_height_rx,
         }
@@ -427,21 +427,17 @@ impl ExExManagerHandle {
     #[allow(clippy::needless_pass_by_ref_mut)]
     pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         let rx = ready!(self.is_ready.poll(cx));
-        self.is_ready.set(make_future(rx));
+        self.is_ready.set(make_wait_future(rx));
         Poll::Ready(())
     }
 }
 
-async fn make_future(mut rx: watch::Receiver<bool>) -> watch::Receiver<bool> {
-    loop {
-        if *rx.borrow_and_update() {
-            return rx
-        }
-
-        // NOTE(onbjerg): We can ignore the error here, because if the channel is closed, the node
-        // is shutting down.
-        let _ = rx.changed().await;
-    }
+/// Creates a future that resolves once the given watch channel receiver is true.
+async fn make_wait_future(mut rx: watch::Receiver<bool>) -> watch::Receiver<bool> {
+    // NOTE(onbjerg): We can ignore the error here, because if the channel is closed, the node
+    // is shutting down.
+    let _ = rx.wait_for(|ready| *ready).await;
+    rx
 }
 
 impl Clone for ExExManagerHandle {
@@ -450,7 +446,7 @@ impl Clone for ExExManagerHandle {
             exex_tx: self.exex_tx.clone(),
             num_exexs: self.num_exexs,
             is_ready_receiver: self.is_ready_receiver.clone(),
-            is_ready: ReusableBoxFuture::new(make_future(self.is_ready_receiver.clone())),
+            is_ready: ReusableBoxFuture::new(make_wait_future(self.is_ready_receiver.clone())),
             current_capacity: self.current_capacity.clone(),
             finished_height: self.finished_height.clone(),
         }
