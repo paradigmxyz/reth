@@ -48,7 +48,6 @@ jobs:
         run: |
           cargo nextest run \
             --locked -p reth-node-optimism --features "optimism"
-            -E "kind(test)"
 
   sync:
     name: sync / 100k blocks

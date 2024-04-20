@@ -8,7 +8,7 @@ use reth::{
 };
 use reth_e2e_test_utils::{node::NodeHelper, wallet::Wallet};
 use reth_node_optimism::node::OptimismNode;
-use reth_primitives::{ChainSpecBuilder, Genesis, BASE_MAINNET, hex, Bytes};
+use reth_primitives::{hex, Bytes, ChainSpecBuilder, Genesis, BASE_MAINNET};
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
