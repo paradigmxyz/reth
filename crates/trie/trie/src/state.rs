@@ -18,6 +18,7 @@ use reth_primitives::{
     U256,
 };
 use revm::db::BundleAccount;
+use revm_interpreter::primitives::HashMap as RevmHashMap;
 use std::{
     collections::{hash_map, HashMap, HashSet},
     ops::RangeInclusive,
@@ -36,9 +37,7 @@ impl HashedPostState {
     /// Initialize [HashedPostState] from bundle state.
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
-    pub fn from_bundle_state<'a>(
-        state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
-    ) -> Self {
+    pub fn from_bundle_state<'a>(state: &'a RevmHashMap<Address, BundleAccount>) -> Self {
         let mut this = Self::default();
 
         let changes = state

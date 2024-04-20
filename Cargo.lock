@@ -7960,6 +7960,7 @@ dependencies = [
  "reth-provider",
  "reth-storage-errors",
  "revm",
+ "revm-interpreter",
  "serde_json",
  "similar-asserts",
  "tokio",

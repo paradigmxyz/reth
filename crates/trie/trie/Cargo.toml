@@ -18,6 +18,7 @@ reth-execution-errors.workspace = true
 reth-db.workspace = true
 
 revm.workspace = true
+revm-interpreter.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
