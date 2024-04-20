@@ -424,7 +424,6 @@ impl ExExManagerHandle {
     }
 
     /// Wait until the manager is ready for new notifications.
-    #[allow(clippy::needless_pass_by_ref_mut)]
     pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         let rx = ready!(self.is_ready.poll(cx));
         self.is_ready.set(make_wait_future(rx));
