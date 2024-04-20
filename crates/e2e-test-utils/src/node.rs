@@ -46,7 +46,7 @@ where
             engine_api: EngineApiHelper {
                 engine_api_client: node.auth_server_handle().http_client(),
                 canonical_stream: node.provider.canonical_state_stream(),
-                _marker: PhantomData::<EngineType>::default(),
+                _marker: PhantomData::<EngineType>,
             },
         })
     }
