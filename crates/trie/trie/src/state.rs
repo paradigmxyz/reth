@@ -37,11 +37,11 @@ impl HashedPostState {
     /// Initialize [HashedPostState] from bundle state.
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
-    pub fn from_bundle_state<'a>(state: &'a RevmHashMap<Address, BundleAccount>) -> Self {
+    pub fn from_bundle_state(state: &RevmHashMap<Address, BundleAccount>) -> Self {
         let mut this = Self::default();
 
         let changes = state
-            .into_iter()
+            .iter()
             .par_bridge()
             .map(|(address, account)| {
                 let BundleAccount { info, status, storage, .. } = account;
