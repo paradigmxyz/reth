@@ -887,7 +887,7 @@ impl Default for TransactionFetcher {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct TxSizeMetadata {
     pub peer_id: PeerId,
     pub tx_encoded_len: usize,
@@ -1172,10 +1172,14 @@ mod test {
 
         // insert peer_2 as fallback peer for seen_hashes
         let mut backups = default_cache();
-        backups.insert(peer_2);
+        backups.insert(TxSizeMetadata {
+            peer_id: peer_2,
+            tx_encoded_len: 0,
+        });
         // insert seen_hashes into tx fetcher
         for i in 0..3 {
-            let meta = TxFetchMetadata::new(0, backups.clone(), Some(seen_eth68_hashes_sizes[i]));
+            let meta = TxFetchMetadata::new(0, backups.clone(), 
+            Some(seen_eth68_hashes_sizes[i]));
             tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[i], meta);
         }
         let meta = TxFetchMetadata::new(0, backups.clone(), None);
@@ -1195,7 +1199,10 @@ mod test {
                 .get(hash)
                 .unwrap()
                 .fallback_peers_mut()
-                .insert(peer_1);
+                .insert(TxSizeMetadata {
+                    peer_id: peer_1,
+                    tx_encoded_len: 0,
+                });
         }
 
         // mark seen hashes as pending fetch

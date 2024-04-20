@@ -1915,7 +1915,10 @@ mod tests {
         // for first retry in reverse order to make index 0 lru
         let retries = 1;
         let mut backups = default_cache();
-        backups.insert(peer_id_1);
+        backups.insert(TxSizeMetadata {
+            peer_id: peer_id_1,
+            tx_encoded_len: 0,
+        });
         tx_fetcher
             .hashes_fetch_inflight_and_pending_fetch
             .insert(seen_hashes[1], TxFetchMetadata::new(retries, backups.clone(), None));
