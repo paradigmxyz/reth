@@ -1,13 +1,13 @@
-use std::marker::PhantomData;
-
+use crate::traits::PayloadEnvelopeV3;
 use jsonrpsee::http_client::HttpClient;
 use reth::{
-    api::{traits::PayloadEnvelopeV3, EngineTypes, PayloadBuilderAttributes},
+    api::{EngineTypes, PayloadBuilderAttributes},
     providers::CanonStateNotificationStream,
     rpc::{api::EngineApiClient, types::engine::ForkchoiceState},
 };
 use reth_payload_builder::PayloadId;
 use reth_primitives::B256;
+use std::marker::PhantomData;
 
 /// Helper for engine api operations
 pub struct EngineApiHelper<E>
@@ -35,7 +35,7 @@ impl<E: EngineTypes + 'static> EngineApiHelper<E> {
         payload_builder_attributes: E::PayloadBuilderAttributes,
     ) -> eyre::Result<B256>
     where
-        E::ExecutionPayloadV3: From<E::BuiltPayload>,
+        E::ExecutionPayloadV3: From<E::BuiltPayload> + PayloadEnvelopeV3,
     {
         // setup payload for submission
         let envelope_v3: <E as EngineTypes>::ExecutionPayloadV3 = payload.into();

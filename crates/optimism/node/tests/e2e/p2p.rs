@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::utils::optimism_payload_attributes;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     builder::{NodeBuilder, NodeConfig, NodeHandle},
@@ -8,7 +9,6 @@ use reth::{
 use reth_e2e_test_utils::{node::NodeHelper, wallet::Wallet};
 use reth_node_optimism::node::OptimismNode;
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
-use crate::utils::optimism_payload_attributes;
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
@@ -65,7 +65,8 @@ async fn can_sync() -> eyre::Result<()> {
     second_node.network.expect_session().await;
 
     // Make the first node advance
-    let (block_hash, tx_hash) = first_node.advance(raw_tx.clone(), optimism_payload_attributes).await?;
+    let (block_hash, tx_hash) =
+        first_node.advance(raw_tx.clone(), optimism_payload_attributes).await?;
 
     // only send forkchoice update to second node
     second_node.engine_api.update_forkchoice(block_hash).await?;
