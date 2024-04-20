@@ -306,7 +306,7 @@ dependencies = [
  "futures",
  "futures-utils-wasm",
  "lru",
- "reqwest 0.12.4",
+ "reqwest 0.12.3",
  "serde_json",
  "tokio",
  "tracing",
@@ -345,7 +345,7 @@ dependencies = [
  "alloy-transport-http",
  "futures",
  "pin-project",
- "reqwest 0.12.4",
+ "reqwest 0.12.3",
  "serde",
  "serde_json",
  "tokio",
@@ -540,7 +540,7 @@ source = "git+https://github.com/alloy-rs/alloy?rev=39b8695#39b869585955d95e9c64
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
- "reqwest 0.12.4",
+ "reqwest 0.12.3",
  "serde_json",
  "tower",
  "url",
@@ -3498,7 +3498,7 @@ dependencies = [
  "http 0.2.12",
  "hyper 0.14.28",
  "log",
- "rustls 0.21.11",
+ "rustls 0.21.10",
  "rustls-native-certs 0.6.3",
  "tokio",
  "tokio-rustls 0.24.1",
@@ -5966,7 +5966,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
- "rustls 0.21.11",
+ "rustls 0.21.10",
  "rustls-pemfile 1.0.4",
  "serde",
  "serde_json",
@@ -5988,9 +5988,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.12.4"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "566cafdd92868e0939d3fb961bd0dc25fcfaaed179291093b3d43e6b3150ea10"
+checksum = "3e6cc1e89e689536eb5aeede61520e874df5a4707df811cd5da4aa5fbb2aae19"
 dependencies = [
  "base64 0.22.0",
  "bytes",
@@ -7901,9 +7901,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.11"
+version = "0.21.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fecbfb7b1444f477b345853b1fce097a2c6fb637b2bfb87e6bc5db0f043fae4"
+checksum = "f9d5a6813c0759e4609cd494e8e725babae6a2ca7b62a5536a13daaec6fcb7ba"
 dependencies = [
  "log",
  "ring 0.17.8",
@@ -7913,9 +7913,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.22.4"
+version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf4ef73721ac7bcd79b2b315da7779d8fc09718c6b3d2d1b2d94850eb8c18432"
+checksum = "99008d7ad0bbbea527ec27bddbc0e432c5b87d8175178cee68d2eec9c4a1813c"
 dependencies = [
  "log",
  "ring 0.17.8",
@@ -9072,7 +9072,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
 dependencies = [
- "rustls 0.21.11",
+ "rustls 0.21.10",
  "tokio",
 ]
 
@@ -9082,7 +9082,7 @@ version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "775e0c0f0adb3a2f22a00c4745d728b479985fc15ee7ca6a2608388c5569860f"
 dependencies = [
- "rustls 0.22.4",
+ "rustls 0.22.3",
  "rustls-pki-types",
  "tokio",
 ]
@@ -9124,7 +9124,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.22.12",
+ "toml_edit 0.22.11",
 ]
 
 [[package]]
@@ -9160,9 +9160,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.22.12"
+version = "0.22.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3328d4f68a705b2a4498da1d580585d39a6510f98318a2cec3018a7ec61ddef"
+checksum = "fb686a972ccef8537b39eead3968b0e8616cb5040dbb9bba93007c8e07c9215f"
 dependencies = [
  "indexmap 2.2.6",
  "serde",

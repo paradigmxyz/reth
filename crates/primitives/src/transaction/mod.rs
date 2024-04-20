@@ -1833,18 +1833,11 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
             Signature {
                 r: signature.r,
                 s: signature.s,
-                odd_y_parity: signature
-                    .y_parity
-                    .ok_or(ConversionError::SignatureError(
-                        alloy_primitives::SignatureError::InvalidParity(0),
-                    ))?
-                    .0,
+                odd_y_parity: signature.y_parity.ok_or(ConversionError::MissingYParity)?.0,
             },
         )
         .try_into_ecrecovered()
-        .map_err(|_| {
-            ConversionError::SignatureError(alloy_primitives::SignatureError::InvalidParity(0))
-        })
+        .map_err(|_| ConversionError::InvalidSignature)
     }
 }
 
