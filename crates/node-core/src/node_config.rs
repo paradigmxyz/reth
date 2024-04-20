@@ -365,6 +365,7 @@ impl NodeConfig {
         prometheus_handle: PrometheusHandle,
         db: Metrics,
         static_file_provider: StaticFileProvider,
+        task_executor: TaskExecutor,
     ) -> eyre::Result<()>
     where
         Metrics: DatabaseMetrics + 'static + Send + Sync,
@@ -377,6 +378,7 @@ impl NodeConfig {
                 db,
                 static_file_provider,
                 metrics_process::Collector::default(),
+                task_executor,
             )
             .await?;
         }
