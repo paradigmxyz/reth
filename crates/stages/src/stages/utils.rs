@@ -1,5 +1,4 @@
 //! Utils for `stages`.
-use crate::StageError;
 use reth_config::config::EtlConfig;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -10,6 +9,7 @@ use reth_db::{
 };
 use reth_etl::Collector;
 use reth_primitives::BlockNumber;
+use reth_stages_api::StageError;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
 

@@ -39,10 +39,29 @@ pub use config::{BootNode, Config, ConfigBuilder};
 pub use enr::enr_to_discv4_id;
 pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
-use metrics::Discv5Metrics;
+use metrics::{DiscoveredPeersMetrics, Discv5Metrics};
 
-/// The max log2 distance, is equivalent to the index of the last bit in a discv5 node id.
-const MAX_LOG2_DISTANCE: usize = 255;
+/// Default number of times to do pulse lookup queries, at bootstrap (5 second intervals).
+///
+/// Default is 100 seconds.
+pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 100;
+
+/// Default duration of look up interval, for pulse look ups at bootstrap.
+///
+/// Default is 5 seconds.
+pub const DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL: u64 = 5;
+
+/// Max kbucket index.
+///
+/// This is the max log2distance for 32 byte [`NodeId`](discv5::enr::NodeId) - 1. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
+pub const MAX_KBUCKET_INDEX: usize = 255;
+
+/// Default lowest kbucket index to attempt filling, in periodic look up query to populate kbuckets.
+///
+/// The peer at the 0th kbucket index is at log2distance 1 from the local node ID. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
+///
+/// Default is 0th index.
+pub const DEFAULT_MIN_TARGET_KBUCKET_INDEX: usize = 0;
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Clone)]
@@ -219,7 +238,7 @@ impl Discv5 {
         };
 
         //
-        // 3. start discv5
+        // 2. start discv5
         //
         let sk = discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk.secret_bytes()).unwrap();
         let mut discv5 = match discv5::Discv5::new(enr, sk, discv5_config) {
@@ -234,14 +253,14 @@ impl Discv5 {
         let discv5 = Arc::new(discv5);
 
         //
-        // 4. add boot nodes
+        // 3. add boot nodes
         //
         Self::bootstrap(bootstrap_nodes, &discv5).await?;
 
         let metrics = Discv5Metrics::default();
 
         //
-        // 5. bg kbuckets maintenance
+        // 4. bg kbuckets maintenance
         //
         Self::spawn_populate_kbuckets_bg(lookup_interval, metrics.clone(), discv5.clone());
 
@@ -295,62 +314,54 @@ impl Discv5 {
         metrics: Discv5Metrics,
         discv5: Arc<discv5::Discv5>,
     ) {
-        // initiate regular lookups to populate kbuckets
         task::spawn({
             let local_node_id = discv5.local_enr().node_id();
             let lookup_interval = Duration::from_secs(lookup_interval);
-            let mut metrics = metrics.discovered_peers;
-            let mut log2_distance = 0usize;
+            let metrics = metrics.discovered_peers;
+            let mut kbucket_index = MAX_KBUCKET_INDEX;
+            let pulse_lookup_interval = Duration::from_secs(DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL);
             // todo: graceful shutdown
 
             async move {
-                loop {
-                    metrics.set_total_sessions(discv5.metrics().active_sessions);
-                    metrics.set_total_kbucket_peers(
-                        discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
-                    );
-
-                    // make sure node is connected to each subtree in the network by target
-                    // selection (ref kademlia)
-                    let target = get_lookup_target(log2_distance, local_node_id);
+                // make many fast lookup queries at bootstrap, trying to fill kbuckets at furthest
+                // log2distance from local node
+                for i in (0..DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP).rev() {
+                    let target = discv5::enr::NodeId::random();
 
                     trace!(target: "net::discv5",
-                        target=format!("{:#?}", target),
+                        %target,
+                        bootstrap_boost_runs_count_down=i,
+                        lookup_interval=format!("{:#?}", pulse_lookup_interval),
+                        "starting bootstrap boost lookup query"
+                    );
+
+                    lookup(target, &discv5, &metrics).await;
+
+                    tokio::time::sleep(pulse_lookup_interval).await;
+                }
+
+                // initiate regular lookups to populate kbuckets
+                loop {
+                    // make sure node is connected to each subtree in the network by target
+                    // selection (ref kademlia)
+                    let target = get_lookup_target(kbucket_index, local_node_id);
+
+                    trace!(target: "net::discv5",
+                        %target,
                         lookup_interval=format!("{:#?}", lookup_interval),
                         "starting periodic lookup query"
                     );
 
-                    if log2_distance < MAX_LOG2_DISTANCE {
-                        // try to populate bucket one step further away
-                        log2_distance += 1
+                    lookup(target, &discv5, &metrics).await;
+
+                    if kbucket_index > DEFAULT_MIN_TARGET_KBUCKET_INDEX {
+                        // try to populate bucket one step closer
+                        kbucket_index -= 1
                     } else {
-                        // start over with self lookup
-                        log2_distance = 0
-                    }
-                    match discv5.find_node(target).await {
-                        Err(err) => trace!(target: "net::discv5",
-                            lookup_interval=format!("{:#?}", lookup_interval),
-                            %err,
-                            "periodic lookup query failed"
-                        ),
-                        Ok(peers) => trace!(target: "net::discv5",
-                            target=format!("{:#?}", target),
-                            lookup_interval=format!("{:#?}", lookup_interval),
-                            peers_count=peers.len(),
-                            peers=format!("[{:#}]", peers.iter()
-                                .map(|enr| enr.node_id()
-                            ).format(", ")),
-                            "peers returned by periodic lookup query"
-                        ),
+                        // start over with bucket furthest away
+                        kbucket_index = MAX_KBUCKET_INDEX
                     }
 
-                    // `Discv5::connected_peers` can be subset of sessions, not all peers make it
-                    // into kbuckets, e.g. incoming sessions from peers with
-                    // unreachable enrs
-                    debug!(target: "net::discv5",
-                        connected_peers=discv5.connected_peers(),
-                        "connected peers in routing table"
-                    );
                     tokio::time::sleep(lookup_interval).await;
                 }
             }
@@ -521,15 +532,17 @@ pub struct DiscoveredPeer {
     pub fork_id: Option<ForkId>,
 }
 
-/// Gets the next lookup target, based on which distance is currently being targeted.
+/// Gets the next lookup target, based on which bucket is currently being targeted.
 pub fn get_lookup_target(
-    log2_distance: usize,
+    kbucket_index: usize,
     local_node_id: discv5::enr::NodeId,
 ) -> discv5::enr::NodeId {
+    // init target
     let mut target = local_node_id.raw();
-    //make sure target has a 'distance'-long suffix that differs from local node id
-    if log2_distance != 0 {
-        let suffix_bit_offset = MAX_LOG2_DISTANCE.saturating_sub(log2_distance);
+
+    // make sure target has a 'log2distance'-long suffix that differs from local node id
+    if kbucket_index != 0 {
+        let suffix_bit_offset = MAX_KBUCKET_INDEX.saturating_sub(kbucket_index);
         let suffix_byte_offset = suffix_bit_offset / 8;
         // todo: flip the precise bit
         // let rel_suffix_bit_offset = suffix_bit_offset % 8;
@@ -543,6 +556,41 @@ pub fn get_lookup_target(
     }
 
     target.into()
+}
+
+/// Runs a [`discv5::Discv5`] lookup query.
+pub async fn lookup(
+    target: discv5::enr::NodeId,
+    discv5: &discv5::Discv5,
+    metrics: &DiscoveredPeersMetrics,
+) {
+    metrics.set_total_sessions(discv5.metrics().active_sessions);
+    metrics.set_total_kbucket_peers(
+        discv5.with_kbuckets(|kbuckets| kbuckets.read().iter_ref().count()),
+    );
+
+    match discv5.find_node(target).await {
+        Err(err) => trace!(target: "net::discv5",
+            %err,
+            "lookup query failed"
+        ),
+        Ok(peers) => trace!(target: "net::discv5",
+            target=format!("{:#?}", target),
+            peers_count=peers.len(),
+            peers=format!("[{:#}]", peers.iter()
+                .map(|enr| enr.node_id()
+            ).format(", ")),
+            "peers returned by lookup query"
+        ),
+    }
+
+    // `Discv5::connected_peers` can be subset of sessions, not all peers make it
+    // into kbuckets, e.g. incoming sessions from peers with
+    // unreachable enrs
+    debug!(target: "net::discv5",
+        connected_peers=discv5.connected_peers(),
+        "connected peers in routing table"
+    );
 }
 
 #[cfg(test)]
@@ -759,24 +807,30 @@ mod tests {
 
     #[test]
     fn select_lookup_target() {
-        // distance ceiled to the next byte
-        const fn expected_log2_distance(log2_distance: usize) -> u64 {
-            let log2_distance = log2_distance / 8;
-            ((log2_distance + 1) * 8) as u64
+        // bucket index ceiled to the next multiple of 4
+        const fn expected_bucket_index(kbucket_index: usize) -> u64 {
+            let log2distance = kbucket_index + 1;
+            let log2distance = log2distance / 8;
+            ((log2distance + 1) * 8) as u64
         }
 
-        let log2_distance = rand::thread_rng().gen_range(0..=MAX_LOG2_DISTANCE);
+        let bucket_index = rand::thread_rng().gen_range(0..=MAX_KBUCKET_INDEX);
 
         let sk = CombinedKey::generate_secp256k1();
         let local_node_id = discv5::enr::NodeId::from(sk.public());
-        let target = get_lookup_target(log2_distance, local_node_id);
+        let target = get_lookup_target(bucket_index, local_node_id);
 
         let local_node_id = sigp::Key::from(local_node_id);
         let target = sigp::Key::from(target);
 
-        assert_eq!(
-            expected_log2_distance(log2_distance),
-            local_node_id.log2_distance(&target).unwrap()
-        );
+        if bucket_index == 0 {
+            // log2distance undef (inf)
+            assert!(local_node_id.log2_distance(&target).is_none())
+        } else {
+            assert_eq!(
+                expected_bucket_index(bucket_index),
+                local_node_id.log2_distance(&target).unwrap()
+            );
+        }
     }
 }
