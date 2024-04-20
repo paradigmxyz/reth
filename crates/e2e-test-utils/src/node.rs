@@ -5,7 +5,7 @@ use crate::{
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use reth::{
-    api::{BuiltPayload, EngineTypes, FullNodeComponents, NodeTypes, PayloadBuilderAttributes},
+    api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
     builder::FullNode,
     providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
