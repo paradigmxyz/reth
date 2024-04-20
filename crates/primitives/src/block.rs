@@ -657,8 +657,8 @@ impl From<Block> for BlockBody {
 mod tests {
     use super::{BlockNumberOrTag::*, *};
     use crate::hex_literal::hex;
+    use alloy_eips::eip1898::HexStringMissingPrefixError;
     use alloy_rlp::{Decodable, Encodable};
-    use reth_rpc_types::HexStringMissingPrefixError;
     use std::str::FromStr;
 
     /// Check parsing according to EIP-1898.
