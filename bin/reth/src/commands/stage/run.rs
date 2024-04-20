@@ -8,6 +8,7 @@ use crate::{
         utils::{chain_help, chain_spec_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs, StageEnum,
     },
+    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
     prometheus_exporter,
     version::SHORT_VERSION,
@@ -28,7 +29,6 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use reth_tasks::TaskManager;
 use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
 use tracing::*;
 
@@ -120,7 +120,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `stage` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         let _ = fdlimit::raise_fd_limit();
@@ -147,8 +147,6 @@ impl Command {
         let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
-            let task_manager = TaskManager::current();
-            let task_executor = task_manager.executor();
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::serve(
                 listen_addr,
@@ -156,12 +154,9 @@ impl Command {
                 Arc::clone(&db),
                 factory.static_file_provider(),
                 metrics_process::Collector::default(),
-                task_executor,
+                ctx.task_executor,
             )
             .await?;
-            tokio::spawn(async move {
-                task_manager.await;
-            });
         }
 
         let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
