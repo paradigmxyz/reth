@@ -5,7 +5,7 @@ use crate::{
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use reth::{
-    api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
+    api::{BuiltPayload, EngineTypes, FullNodeComponents, NodeTypes, PayloadBuilderAttributes},
     builder::FullNode,
     providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
@@ -22,21 +22,19 @@ use std::{
 use tokio_stream::StreamExt;
 
 /// An helper struct to handle node actions
-pub struct NodeHelper<Node, EngineType>
+pub struct NodeHelper<Node>
 where
-    Node: FullNodeComponents<Engine = EngineType>,
-    EngineType: EngineTypes + 'static,
+    Node: FullNodeComponents,
 {
     pub inner: FullNode<Node>,
     payload: PayloadHelper<Node::Engine>,
     pub network: NetworkHelper,
-    pub engine_api: EngineApiHelper<EngineType>,
+    pub engine_api: EngineApiHelper<Node::Engine>,
 }
 
-impl<Node, EngineType> NodeHelper<Node, EngineType>
+impl<Node> NodeHelper<Node>
 where
-    Node: FullNodeComponents<Engine = EngineType>,
-    EngineType: EngineTypes + 'static,
+    Node: FullNodeComponents,
 {
     /// Creates a new test node
     pub async fn new(node: FullNode<Node>) -> eyre::Result<Self> {
@@ -49,7 +47,7 @@ where
             engine_api: EngineApiHelper {
                 engine_api_client: node.auth_server_handle().http_client(),
                 canonical_stream: node.provider.canonical_state_stream(),
-                _marker: PhantomData::<EngineType>,
+                _marker: PhantomData::<Node::Engine>,
             },
         })
     }
@@ -58,10 +56,11 @@ where
     pub async fn advance(
         &mut self,
         raw_tx: Bytes,
-        attributes_generator: impl Fn(u64) -> EngineType::PayloadBuilderAttributes,
+        attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
     ) -> eyre::Result<(B256, B256)>
     where
-        EngineType::ExecutionPayloadV3: From<EngineType::BuiltPayload> + PayloadEnvelopeExt,
+        <Node::Engine as EngineTypes>::ExecutionPayloadV3:
+            From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         // push tx into pool via RPC server
         let tx_hash = self.inject_tx(raw_tx).await?;
