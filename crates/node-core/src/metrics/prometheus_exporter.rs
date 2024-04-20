@@ -80,12 +80,14 @@ async fn start_endpoint<F: Hook + 'static>(
         Server::try_bind(&listen_addr).wrap_err("Could not bind to address")?.serve(make_svc);
 
     task_executor.spawn_with_graceful_shutdown_signal(move |signal| async move {
-        server
+        if let Err(error) = server
             .with_graceful_shutdown(async move {
                 let _ = signal.await;
             })
             .await
-            .expect("Metrics endpoint crashed")
+        {
+            tracing::error!(%error, "metrics endpoint crashed")
+        }
     });
 
     Ok(())
