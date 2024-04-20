@@ -4883,33 +4883,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "node-e2e-tests"
-version = "0.0.0"
-dependencies = [
- "alloy-consensus",
- "alloy-network",
- "alloy-rpc-types",
- "alloy-signer",
- "alloy-signer-wallet",
- "eyre",
- "futures-util",
- "jsonrpsee",
- "rand 0.8.5",
- "reth",
- "reth-db",
- "reth-node-core",
- "reth-node-ethereum",
- "reth-payload-builder",
- "reth-primitives",
- "reth-rpc",
- "reth-tracing",
- "secp256k1 0.27.0",
- "serde_json",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6447,6 +6420,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-e2e-test-utils"
+version = "0.2.0-beta.5"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-rpc-types",
+ "alloy-signer",
+ "alloy-signer-wallet",
+ "eyre",
+ "futures-util",
+ "jsonrpsee",
+ "rand 0.8.5",
+ "reth",
+ "reth-db",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-rpc",
+ "reth-tracing",
+ "secp256k1 0.27.0",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "reth-ecies"
 version = "0.2.0-beta.5"
 dependencies = [
@@ -6962,8 +6962,11 @@ version = "0.2.0-beta.5"
 dependencies = [
  "eyre",
  "futures",
+ "futures-util",
+ "reth",
  "reth-basic-payload-builder",
  "reth-db",
+ "reth-e2e-test-utils",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-payload-builder",
  "reth-evm-ethereum",
@@ -6971,10 +6974,14 @@ dependencies = [
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
+ "reth-node-core",
  "reth-payload-builder",
+ "reth-primitives",
  "reth-provider",
  "reth-tracing",
  "reth-transaction-pool",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -7011,8 +7018,10 @@ dependencies = [
  "jsonrpsee",
  "parking_lot 0.12.1",
  "reqwest 0.11.27",
+ "reth",
  "reth-basic-payload-builder",
  "reth-db",
+ "reth-e2e-test-utils",
  "reth-evm",
  "reth-interfaces",
  "reth-network",
@@ -7033,6 +7042,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 
