@@ -109,6 +109,7 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all --check
+      - uses: codespell-project/actions-codespell@v2
 
   grafana:
     runs-on: ubuntu-latest
