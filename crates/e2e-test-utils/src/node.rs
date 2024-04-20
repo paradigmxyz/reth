@@ -1,6 +1,6 @@
 use crate::{
     engine_api::EngineApiHelper, network::NetworkHelper, payload::PayloadHelper,
-    traits::PayloadEnvelopeV3,
+    traits::PayloadEnvelopeExt,
 };
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
@@ -61,7 +61,7 @@ where
         attributes_generator: impl Fn(u64) -> EngineType::PayloadBuilderAttributes,
     ) -> eyre::Result<(B256, B256)>
     where
-        EngineType::ExecutionPayloadV3: From<EngineType::BuiltPayload> + PayloadEnvelopeV3,
+        EngineType::ExecutionPayloadV3: From<EngineType::BuiltPayload> + PayloadEnvelopeExt,
     {
         // push tx into pool via RPC server
         let tx_hash = self.inject_tx(raw_tx).await?;

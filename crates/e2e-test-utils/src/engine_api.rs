@@ -1,4 +1,4 @@
-use crate::traits::PayloadEnvelopeV3;
+use crate::traits::PayloadEnvelopeExt;
 use jsonrpsee::http_client::HttpClient;
 use reth::{
     api::{EngineTypes, PayloadBuilderAttributes},
@@ -32,7 +32,7 @@ impl<E: EngineTypes + 'static> EngineApiHelper<E> {
         payload_builder_attributes: E::PayloadBuilderAttributes,
     ) -> eyre::Result<B256>
     where
-        E::ExecutionPayloadV3: From<E::BuiltPayload> + PayloadEnvelopeV3,
+        E::ExecutionPayloadV3: From<E::BuiltPayload> + PayloadEnvelopeExt,
     {
         // setup payload for submission
         let envelope_v3: <E as EngineTypes>::ExecutionPayloadV3 = payload.into();
