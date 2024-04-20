@@ -1,7 +1,7 @@
 //! `reth stage` command
 
 use clap::{Parser, Subcommand};
-use reth_node_core::cli::runner::CliContext;
+use reth_cli_runner::CliContext;
 
 pub mod drop;
 pub mod dump;

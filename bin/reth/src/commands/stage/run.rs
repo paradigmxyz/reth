@@ -14,10 +14,10 @@ use crate::{
 };
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
+use reth_cli_runner::CliContext;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_node_core::cli::runner::CliContext;
 use reth_exex::ExExManagerHandle;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::ChainSpec;
