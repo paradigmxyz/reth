@@ -10,10 +10,7 @@ use reth_primitives::B256;
 use std::marker::PhantomData;
 
 /// Helper for engine api operations
-pub struct EngineApiHelper<E>
-where
-    E: EngineTypes + 'static,
-{
+pub struct EngineApiHelper<E> {
     pub canonical_stream: CanonStateNotificationStream,
     pub engine_api_client: HttpClient,
     pub _marker: PhantomData<E>,
