@@ -96,8 +96,8 @@ impl Signature {
         buf: &mut &[u8],
     ) -> alloy_rlp::Result<(Self, Option<u64>)> {
         let v = u64::decode(buf)?;
-        let r = Decodable::decode(buf)?;
-        let s = Decodable::decode(buf)?;
+        let r: U256 = Decodable::decode(buf)?;
+        let s: U256 = Decodable::decode(buf)?;
 
         if v < 35 {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
