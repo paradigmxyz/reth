@@ -22,7 +22,6 @@ use discv5::ListenConfig;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
-use rand::RngCore;
 use reth_primitives::{bytes::Bytes, ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use tokio::{sync::mpsc, task};
@@ -544,9 +543,13 @@ pub fn get_lookup_target(
     // make sure target has a 'log2distance'-long suffix that differs from local node id
     let suffix_bit_offset = MAX_KBUCKET_INDEX.saturating_sub(kbucket_index);
     let suffix_byte_offset = suffix_bit_offset / 8;
-    target[suffix_byte_offset] ^= 1 << (suffix_bit_offset % 8);
+    // todo: flip the precise bit
+    // let rel_suffix_bit_offset = suffix_bit_offset % 8;
+    target[suffix_byte_offset] = !target[suffix_byte_offset];
 
-    rand::thread_rng().fill_bytes(&mut target[suffix_byte_offset + 1..]);
+    for b in target.iter_mut().skip(suffix_byte_offset + 1) {
+        *b = rand::random::<u8>();
+    }
 
     target.into()
 }
@@ -800,6 +803,16 @@ mod tests {
 
     #[test]
     fn select_lookup_target() {
+        // bucket index ceiled to the next multiple of 8
+        const fn expected_bucket_index(kbucket_index: usize) -> u64 {
+            let log2distance = kbucket_index + 1;
+            if log2distance % 8 == 0 {
+                return log2distance as u64;
+            }
+            let log2distance = log2distance / 8;
+            ((log2distance + 1) * 8) as u64
+        }
+
         let bucket_index = rand::thread_rng().gen_range(0..=MAX_KBUCKET_INDEX);
 
         let sk = CombinedKey::generate_secp256k1();
@@ -813,7 +826,10 @@ mod tests {
             // log2distance undef (inf)
             assert!(local_node_id.log2_distance(&target).is_none())
         } else {
-            assert_eq!((bucket_index + 1) as u64, local_node_id.log2_distance(&target).unwrap());
+            assert_eq!(
+                expected_bucket_index(bucket_index),
+                local_node_id.log2_distance(&target).unwrap()
+            );
         }
     }
 }
