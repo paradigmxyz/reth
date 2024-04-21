@@ -157,7 +157,7 @@ impl ImportCommand {
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
-        let mut start_header: Option<SealedHeader> = None;
+        let mut start_header: Option<SealedHeader>;
 
         start_header = provider_factory
             .provider()?
