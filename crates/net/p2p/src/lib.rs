@@ -1,3 +1,9 @@
+//! P2P traits and some shared traits used across Reth
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
+
 /// Shared abstractions for downloader implementations.
 pub mod download;
 
@@ -25,14 +31,18 @@ pub mod error;
 /// Priority enum for BlockHeader and BlockBody requests
 pub mod priority;
 
+/// Consensus traits.
 pub mod consensus;
 
+/// Database error
 pub mod db;
 
+/// Provider error
 pub mod provider;
+
+/// Syncing related traits.
+pub mod sync;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
 pub mod test_utils;
-
-pub mod sync;

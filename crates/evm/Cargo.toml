@@ -15,5 +15,4 @@ workspace = true
 reth-primitives.workspace = true
 revm-primitives.workspace = true
 revm.workspace = true
-reth-interfaces.workspace = true
 reth-net-p2p.workspace = true

@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-exex.workspace = true
 reth-primitives.workspace = true
-reth-interfaces.workspace = true
 reth-db.workspace = true
 reth-codecs.workspace = true
 reth-provider.workspace = true

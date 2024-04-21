@@ -14,7 +14,7 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
-reth-interfaces = { workspace = true, features = ["clap"] }
+reth-interfaces.workspace = true
 reth-provider.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-rpc-engine-api.workspace = true
@@ -95,7 +95,6 @@ assert_matches = "1.5.0"
 [features]
 optimism = [
     "reth-primitives/optimism",
-    "reth-interfaces/optimism",
     "reth-rpc/optimism",
     "reth-rpc-engine-api/optimism",
     "reth-provider/optimism",

@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-interfaces.workspace = true
 reth-primitives.workspace = true
 reth-tasks.workspace = true
 reth-provider.workspace = true
