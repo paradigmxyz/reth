@@ -7009,6 +7009,7 @@ dependencies = [
 name = "reth-node-optimism"
 version = "0.2.0-beta.5"
 dependencies = [
+ "alloy-primitives",
  "async-trait",
  "clap",
  "eyre",
