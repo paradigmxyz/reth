@@ -245,7 +245,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
             })
             .map(BlobExcessGasAndPrice::new);
 
-        let mut basefee = parent.next_block_base_fee(chain_spec.base_fee_params(self.timestamp()));
+        let mut basefee = parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp()));
 
         let mut gas_limit = U256::from(parent.gas_limit);
 
@@ -253,7 +253,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
         // elasticity multiplier to get the new gas limit.
         if chain_spec.fork(Hardfork::London).transitions_at_block(parent.number + 1) {
             let elasticity_multiplier =
-                chain_spec.base_fee_params(self.timestamp()).elasticity_multiplier;
+                chain_spec.base_fee_params_at_timestamp(self.timestamp()).elasticity_multiplier;
 
             // multiply the gas limit by the elasticity multiplier
             gas_limit *= U256::from(elasticity_multiplier);
