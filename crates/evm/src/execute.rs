@@ -1,6 +1,6 @@
 //! Traits for execution.
 
-use reth_interfaces::provider::ProviderError;
+use reth_net_p2p::provider::ProviderError;
 use reth_primitives::U256;
 use revm::db::BundleState;
 use revm_primitives::db::Database;

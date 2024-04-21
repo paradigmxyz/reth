@@ -6613,6 +6613,7 @@ name = "reth-evm"
 version = "0.2.0-beta.5"
 dependencies = [
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-primitives",
  "revm",
  "revm-primitives",
@@ -6624,6 +6625,7 @@ version = "0.2.0-beta.5"
 dependencies = [
  "reth-evm",
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -7059,6 +7061,7 @@ dependencies = [
  "reth-e2e-test-utils",
  "reth-evm",
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
@@ -7474,10 +7477,7 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-exex",
  "reth-interfaces",
- "reth-metrics",
  "reth-net-p2p",
- "reth-node-ethereum",
- "reth-node-optimism",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -7503,6 +7503,7 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-provider",
  "reth-static-file",

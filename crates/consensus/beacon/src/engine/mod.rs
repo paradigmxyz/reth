@@ -14,15 +14,16 @@ use reth_interfaces::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
         BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
-    executor::{BlockExecutionError, BlockValidationError}
+    executor::BlockValidationError,
     RethError, RethResult
 };
 use reth_net_p2p::{
-    consensus::ForkchoiceState,
     bodies::client::BodiesClient,
     headers::client::HeadersClient,
     sync::{NetworkSyncUpdater, SyncState},
+    provider::ProviderResult
 };
+use alloy_rpc_types_engine::ForkchoiceState;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
@@ -33,7 +34,7 @@ use reth_provider::{
     StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    CancunPayloadFields, ExecutionPayload, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
 use reth_stages_api::{ControlFlow, Pipeline};

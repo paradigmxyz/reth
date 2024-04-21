@@ -1,11 +1,9 @@
 use crate::pipeline::PipelineEvent;
-use reth_interfaces::{executor, p2p::error::DownloadError, RethError};
+use reth_interfaces::{executor, RethError};
 use reth_net_p2p::{consensus, db::DatabaseError as DbError, error::DownloadError, provider::ProviderError};
 use reth_primitives::{BlockNumber, SealedHeader, StaticFileSegment, TxNumber};
-use reth_provider::ProviderError;
 use thiserror::Error;
 
-use crate::PipelineEvent;
 use tokio::sync::mpsc::error::SendError;
 
 /// Represents the specific error type within a block error.

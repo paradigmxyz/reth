@@ -9,9 +9,9 @@ use reth_evm::{
     ConfigureEvm, ConfigureEvmEnv,
 };
 use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError, OptimismBlockExecutionError},
-    provider::ProviderError,
+    executor::{BlockExecutionError, BlockValidationError, OptimismBlockExecutionError}
 };
+use reth_net_p2p::provider::ProviderError;
 use reth_primitives::{
     proofs::calculate_receipt_root_optimism, BlockWithSenders, Bloom, Bytes, ChainSpec,
     GotExpected, Hardfork, Header, PruneModes, Receipt, ReceiptWithBloom, Receipts, TxType,
