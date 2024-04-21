@@ -35,7 +35,7 @@ reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
-reth-net-p2p.workspace = true
+reth-net-p2p = {workspace = true, features = ["clap"]}
 alloy-rpc-types-engine.workspace = true
 
 # ethereum
@@ -103,6 +103,7 @@ optimism = [
     "reth-auto-seal-consensus/optimism",
     "reth-consensus-common/optimism",
     "reth-beacon-consensus/optimism",
+    "reth-net-p2p/optimism"
 ]
 
 jemalloc = ["dep:tikv-jemalloc-ctl"]
