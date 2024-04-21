@@ -64,4 +64,20 @@ impl<E: EngineTypes + 'static> EngineApiHelper<E> {
 
         Ok(())
     }
+
+    /// Sends forkchoice update to the engine api with a zero finalized hash
+    pub async fn update_optimistic_forkchoice(&self, hash: B256) -> eyre::Result<()> {
+        EngineApiClient::<E>::fork_choice_updated_v2(
+            &self.engine_api_client,
+            ForkchoiceState {
+                head_block_hash: hash,
+                safe_block_hash: B256::ZERO,
+                finalized_block_hash: B256::ZERO,
+            },
+            None,
+        )
+        .await?;
+
+        Ok(())
+    }
 }

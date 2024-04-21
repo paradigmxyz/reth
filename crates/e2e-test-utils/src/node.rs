@@ -4,19 +4,21 @@ use crate::{
 };
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
+use futures_util::Future;
 use reth::{
     api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
     builder::FullNode,
-    providers::{BlockReaderIdExt, CanonStateSubscriptions},
+    providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
         eth::{error::EthResult, EthTransactions},
         types::engine::PayloadAttributes,
     },
 };
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_primitives::{Address, BlockNumber, Bytes, B256};
+use reth_primitives::{Address, BlockHash, BlockNumber, Bytes, B256};
 use std::{
     marker::PhantomData,
+    pin::Pin,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio_stream::StreamExt;
@@ -52,8 +54,31 @@ where
         })
     }
 
-    /// Advances the node forward
+    /// Advances the chain `length` blocks.
+    ///
+    /// Returns the added chain as a Vec of block hashes.
     pub async fn advance(
+        &mut self,
+        length: u64,
+        tx_generator: impl Fn() -> Pin<Box<dyn Future<Output = Bytes>>>,
+        attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes
+            + Copy,
+    ) -> eyre::Result<Vec<BlockHash>>
+    where
+        <Node::Engine as EngineTypes>::ExecutionPayloadV3:
+            From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
+    {
+        let mut chain = Vec::with_capacity(length as usize);
+        for _ in 0..length {
+            let (block_hash, _) =
+                self.advance_block(tx_generator().await, attributes_generator).await?;
+            chain.push(block_hash);
+        }
+        Ok(chain)
+    }
+
+    /// Advances the node forward one block
+    pub async fn advance_block(
         &mut self,
         raw_tx: Bytes,
         attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
@@ -90,6 +115,23 @@ where
         // assert the block has been committed to the blockchain
         self.assert_new_block(tx_hash, block_hash, block_number).await?;
         Ok((block_hash, tx_hash))
+    }
+
+    /// Waits for block to be available on node.
+    pub async fn wait_block(
+        &self,
+        number: BlockNumber,
+        expected_block_hash: BlockHash,
+        _is_pipeline: bool,
+    ) -> eyre::Result<()> {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
+                assert_eq!(latest_block.hash_slow(), expected_block_hash);
+                break
+            }
+        }
+        Ok(())
     }
 
     /// Injects a raw transaction into the node tx pool via RPC server
