@@ -24,7 +24,7 @@ use reth_net_p2p::{
 };
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, PruneModes, B256};
+use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};
 use reth_provider::{
     providers::BlockchainProvider,
     test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
@@ -437,6 +437,7 @@ where
             self.base_config.chain_spec.prune_delete_limit,
             config.max_reorg_depth() as usize,
             None,
+            watch::channel(FinishedExExHeight::NoExExs).1,
         );
 
         let mut hooks = EngineHooks::new();

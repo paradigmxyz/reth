@@ -25,6 +25,7 @@ use {
     },
 };
 
+/// Mock state for testing
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct StateProviderTest {
     accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,

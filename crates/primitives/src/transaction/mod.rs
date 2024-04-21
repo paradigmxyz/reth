@@ -32,7 +32,7 @@ pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
 
-pub use signature::{Signature, OP_RETH_MAINNET_BELOW_BEDROCK};
+pub use signature::Signature;
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
@@ -963,8 +963,8 @@ impl TransactionSignedNoHash {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
-            return Some(address)
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
         }
 
         let signature_hash = self.signature_hash();
@@ -979,13 +979,29 @@ impl TransactionSignedNoHash {
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
     /// [Signature::recover_signer_unchecked].
+    ///
+    /// # Optimism
+    ///
+    /// For optimism this will return [Address::ZERO] if the Signature is empty, this is because pre bedrock (on OP mainnet), relay messages to the L2 Cross Domain Messenger were sent as legacy transactions from the zero address with an empty signature, e.g.: <https://optimistic.etherscan.io/tx/0x1bb352ff9215efe5a4c102f45d730bae323c3288d2636672eb61543ddd47abad>
+    /// This makes it possible to import pre bedrock transactions via the sender recovery stage.
     pub fn encode_and_recover_unchecked(&self, buffer: &mut Vec<u8>) -> Option<Address> {
         buffer.clear();
         self.transaction.encode_without_signature(buffer);
 
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
         #[cfg(feature = "optimism")]
-        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
-            return Some(address)
+        {
+            if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+                return Some(from)
+            }
+
+            // pre bedrock system transactions were sent from the zero address as legacy
+            // transactions with an empty signature Note: this is very hacky and only
+            // relevant for op-mainnet pre bedrock
+            if self.is_legacy() && self.signature == Signature::optimism_deposit_tx_signature() {
+                return Some(Address::ZERO)
+            }
         }
 
         self.signature.recover_signer_unchecked(keccak256(buffer))
@@ -1088,7 +1104,7 @@ impl Compact for TransactionSignedNoHash {
         to_compact_ztd_unaware(self, buf)
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         from_compact_zstd_unaware(buf, _len)
     }
 }
@@ -1189,13 +1205,19 @@ impl TransactionSigned {
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
+    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [Signature::recover_signer].
+    ///
+    /// Note:
+    ///
+    /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
+    /// [Self::recover_signer_unchecked] if you want to recover the signer without ensuring that the
+    /// signature has a low `s` value.
     pub fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
-            return Some(address)
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
@@ -1205,13 +1227,13 @@ impl TransactionSigned {
     /// value_.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [Self::recover_signer_unchecked].
+    /// [Signature::recover_signer_unchecked].
     pub fn recover_signer_unchecked(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         #[cfg(feature = "optimism")]
-        if let Some(address) = get_deposit_or_null_address(&self.transaction, &self.signature) {
-            return Some(address)
+        if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
+            return Some(from)
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer_unchecked(signature_hash)
@@ -1800,26 +1822,6 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     }
 }
 
-#[cfg(feature = "optimism")]
-fn get_deposit_or_null_address(
-    transaction: &Transaction,
-    signature: &Signature,
-) -> Option<Address> {
-    // Optimism's Deposit transaction does not have a signature. Directly return the
-    // `from` address.
-    if let Transaction::Deposit(TxDeposit { from, .. }) = transaction {
-        return Some(*from)
-    }
-    // OP blocks below bedrock include transactions sent from the null address
-    if std::env::var_os(OP_RETH_MAINNET_BELOW_BEDROCK).as_deref() == Some("true".as_ref()) &&
-        *signature == Signature::optimism_deposit_tx_signature()
-    {
-        return Some(Address::default())
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -2166,6 +2168,19 @@ mod tests {
         assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
         let encoded = tx.envelope_encoded();
         assert_eq!(encoded.as_ref(), data.as_slice());
+    }
+
+    // <https://github.com/paradigmxyz/reth/issues/7750>
+    // <https://etherscan.io/tx/0x2084b8144eea4031c2fa7dfe343498c5e665ca85ed17825f2925f0b5b01c36ac>
+    #[test]
+    fn recover_pre_eip2() {
+        let data = hex!("f8ea0c850ba43b7400832dc6c0942935aa0a2d2fbb791622c29eb1c117b65b7a908580b884590528a9000000000000000000000001878ace42092b7f1ae1f28d16c1272b1aa80ca4670000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000d02ab486cedc0000000000000000000000000000000000000000000000000000557fe293cabc08cf1ca05bfaf3fda0a56b49cc78b22125feb5ae6a99d2b4781f00507d8b02c173771c85a0b5da0dbe6c5bc53740d0071fc83eb17ba0f709e49e9ae7df60dee625ef51afc5");
+        let tx = TransactionSigned::decode_enveloped(&mut data.as_slice()).unwrap();
+        let sender = tx.recover_signer();
+        assert!(sender.is_none());
+        let sender = tx.recover_signer_unchecked().unwrap();
+
+        assert_eq!(sender, address!("7e9e359edf0dbacf96a9952fa63092d919b0842b"));
     }
 
     #[test]

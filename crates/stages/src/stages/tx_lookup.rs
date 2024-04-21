@@ -1,4 +1,3 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use num_traits::Zero;
 use reth_config::config::EtlConfig;
 use reth_db::{
@@ -18,6 +17,7 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
     TransactionsProvider, TransactionsProviderExt,
 };
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use tracing::*;
 
 /// The transaction lookup stage.
@@ -47,6 +47,12 @@ impl TransactionLookupStage {
     /// Create new instance of [TransactionLookupStage].
     pub fn new(chunk_size: u64, etl_config: EtlConfig, prune_mode: Option<PruneMode>) -> Self {
         Self { chunk_size, etl_config, prune_mode }
+    }
+
+    /// Set the ETL configuration to use.
+    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
+        self.etl_config = etl_config;
+        self
     }
 }
 

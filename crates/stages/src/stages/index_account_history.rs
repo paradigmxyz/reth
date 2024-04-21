@@ -1,5 +1,4 @@
 use super::{collect_history_indices, load_history_indices};
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database, models::ShardedKey, table::Decode, tables, transaction::DbTxMut,
@@ -11,6 +10,7 @@ use reth_primitives::{
 use reth_provider::{
     DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
 };
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::fmt::Debug;
 use tracing::info;
 
@@ -36,6 +36,12 @@ impl IndexAccountHistoryStage {
         etl_config: EtlConfig,
     ) -> Self {
         Self { commit_threshold, prune_mode, etl_config }
+    }
+
+    /// Set the ETL configuration to use.
+    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
+        self.etl_config = etl_config;
+        self
     }
 }
 

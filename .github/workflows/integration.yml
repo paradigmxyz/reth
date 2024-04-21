@@ -48,7 +48,7 @@ jobs:
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace --exclude examples --exclude ef-tests node-e2e-tests \
+            --workspace --exclude examples --exclude ef-tests node-ethereum \
             -E "kind(test)"
 
   sync:

@@ -1,4 +1,3 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use reth_config::config::EtlConfig;
 use reth_db::{
@@ -16,6 +15,7 @@ use reth_primitives::{
     Account, B256,
 };
 use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
@@ -46,6 +46,12 @@ impl AccountHashingStage {
     /// Create new instance of [AccountHashingStage].
     pub fn new(clean_threshold: u64, commit_threshold: u64, etl_config: EtlConfig) -> Self {
         Self { clean_threshold, commit_threshold, etl_config }
+    }
+
+    /// Set the ETL configuration to use.
+    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
+        self.etl_config = etl_config;
+        self
     }
 }
 

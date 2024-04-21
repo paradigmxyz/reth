@@ -28,7 +28,7 @@ use reth_provider::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
     ChainSpecProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider, ProviderError,
 };
-use reth_stages::{MetricEvent, MetricEventsSender};
+use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::Arc,
@@ -59,7 +59,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// * [BlockchainTree::make_canonical]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
-pub struct BlockchainTree<DB: Database, EVM: ExecutorFactory> {
+pub struct BlockchainTree<DB, EVM> {
     /// The state of the tree
     ///
     /// Tracks all the chains, the block indices, and the block buffer.
@@ -75,6 +75,20 @@ pub struct BlockchainTree<DB: Database, EVM: ExecutorFactory> {
     /// Metrics for sync stages.
     sync_metrics_tx: Option<MetricEventsSender>,
     prune_modes: Option<PruneModes>,
+}
+
+impl<DB, EVM> BlockchainTree<DB, EVM> {
+    /// Subscribe to new blocks events.
+    ///
+    /// Note: Only canonical blocks are emitted by the tree.
+    pub fn subscribe_canon_state(&self) -> CanonStateNotifications {
+        self.canon_state_notification_sender.subscribe()
+    }
+
+    /// Returns a clone of the sender for the canonical state notifications.
+    pub fn canon_state_notification_sender(&self) -> CanonStateNotificationSender {
+        self.canon_state_notification_sender.clone()
+    }
 }
 
 impl<DB, EVM> BlockchainTree<DB, EVM>
@@ -1104,18 +1118,6 @@ where
         let outcome = CanonicalOutcome::Committed { head: chain_notification.tip().header.clone() };
         let _ = self.canon_state_notification_sender.send(chain_notification);
         Ok(outcome)
-    }
-
-    /// Subscribe to new blocks events.
-    ///
-    /// Note: Only canonical blocks are emitted by the tree.
-    pub fn subscribe_canon_state(&self) -> CanonStateNotifications {
-        self.canon_state_notification_sender.subscribe()
-    }
-
-    /// Returns a clone of the sender for the canonical state notifications.
-    pub fn canon_state_notification_sender(&self) -> CanonStateNotificationSender {
-        self.canon_state_notification_sender.clone()
     }
 
     /// Write the given chain to the database as canonical.

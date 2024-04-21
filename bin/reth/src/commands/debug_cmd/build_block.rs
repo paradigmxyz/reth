@@ -5,7 +5,6 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use alloy_rlp::Decodable;
@@ -18,6 +17,7 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_cli_runner::CliContext;
 use reth_db::{init_db, DatabaseEnv};
 use reth_interfaces::RethResult;
 use reth_net_p2p::consensus::{Consensus, ConsensusError};

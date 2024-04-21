@@ -1,4 +1,3 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use reth_config::config::EtlConfig;
 use reth_db::{
@@ -18,6 +17,7 @@ use reth_primitives::{
     BufMut, StorageEntry, B256,
 };
 use reth_provider::{DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::{
     fmt::Debug,
     sync::mpsc::{self, Receiver},
@@ -47,6 +47,12 @@ impl StorageHashingStage {
     /// Create new instance of [StorageHashingStage].
     pub fn new(clean_threshold: u64, commit_threshold: u64, etl_config: EtlConfig) -> Self {
         Self { clean_threshold, commit_threshold, etl_config }
+    }
+
+    /// Set the ETL configuration to use.
+    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
+        self.etl_config = etl_config;
+        self
     }
 }
 

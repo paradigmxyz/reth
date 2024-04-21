@@ -24,7 +24,7 @@ reth-net-p2p.workspace = true
 # codecs
 serde = { workspace = true, default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
-modular-bitfield = "0.11.2"
+modular-bitfield.workspace = true
 
 # metrics
 reth-metrics.workspace = true

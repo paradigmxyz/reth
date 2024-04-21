@@ -282,6 +282,7 @@ where
                     peer_id: Some(peer_id),
                     error: DownloadError::HeaderValidation {
                         hash: head.hash(),
+                        number: head.number,
                         error: Box::new(error),
                     },
                 }
