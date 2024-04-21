@@ -52,8 +52,12 @@ thiserror.workspace = true
 jsonrpsee.workspace = true
 
 [dev-dependencies]
+reth.workspace = true
 reth-db.workspace = true
 reth-revm = { workspace = true, features = ["test-utils"]}
+reth-e2e-test-utils.workspace = true
+tokio.workspace = true
+alloy-primitives.workspace = true
 
 [features]
 optimism = [
