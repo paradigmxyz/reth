@@ -70,7 +70,7 @@ smallvec.workspace = true
 [dev-dependencies]
 # reth
 reth-discv4 = { workspace = true, features = ["test-utils"] }
-reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-interfaces.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils"] }
 
 # we need to enable the test-utils feature in our own crate to use utils in

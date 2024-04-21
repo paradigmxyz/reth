@@ -37,7 +37,7 @@ linked_hash_set = "0.1.4"
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
-reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-interfaces.workspace = true
 reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm.workspace = true

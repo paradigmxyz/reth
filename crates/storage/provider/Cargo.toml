@@ -54,7 +54,7 @@ reth-net-p2p = {workspace = true, features = ["test-utils"]}
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
-reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-interfaces.workspace = true
 
 alloy-rlp.workspace = true
 parking_lot.workspace = true

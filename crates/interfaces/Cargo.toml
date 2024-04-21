@@ -17,16 +17,9 @@ reth-net-p2p.workspace = true
 
 # misc
 thiserror.workspace = true
-secp256k1 = { workspace = true, default-features = false, features = [
-    "alloc",
-    "recovery",
-    "rand",
-], optional = true }
-rand = { workspace = true, optional = true }
 
 [dev-dependencies]
 parking_lot.workspace = true
 
 [features]
-test-utils = ["secp256k1", "rand"]
 optimism =[]

@@ -43,7 +43,7 @@ tempfile = { workspace = true, optional = true }
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-evm-ethereum.workspace = true
-reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-interfaces.workspace = true
 reth-downloaders.workspace = true
 reth-revm.workspace = true
 reth-static-file.workspace = true
@@ -73,7 +73,6 @@ pprof = { workspace = true, features = [
 
 [features]
 test-utils = [
-    "reth-interfaces/test-utils",
     "reth-db/test-utils",
     "reth-provider/test-utils",
     "reth-stages-api/test-utils",

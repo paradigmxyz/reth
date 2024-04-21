@@ -82,7 +82,7 @@ reth-evm-ethereum.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
 tempfile.workspace = true
-reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-interfaces.workspace = true
 
 [features]
 optimism = [

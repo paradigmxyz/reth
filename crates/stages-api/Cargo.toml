@@ -38,7 +38,7 @@ auto_impl.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-interfaces.workspace = true
 
 [features]
 test-utils = []
