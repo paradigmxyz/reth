@@ -1,8 +1,10 @@
 use super::TestStageDB;
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, UnwindOutput};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_interfaces::db::DatabaseError;
 use reth_provider::ProviderError;
+use reth_stages_api::{
+    ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, UnwindOutput,
+};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -27,7 +29,6 @@ pub(crate) trait StageTestRunner {
     fn stage(&self) -> Self::S;
 }
 
-#[async_trait::async_trait]
 pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     type Seed: Send + Sync;
 
@@ -63,7 +64,6 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     }
 }
 
-#[async_trait::async_trait]
 pub(crate) trait UnwindStageTestRunner: StageTestRunner {
     /// Validate the unwind
     fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError>;
@@ -78,7 +78,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
             provider.commit().expect("failed to commit");
             tx.send(result).expect("failed to send result");
         });
-        Box::pin(rx).await.unwrap()
+        rx.await.unwrap()
     }
 
     /// Run a hook before [Stage::unwind]. Required for MerkleStage.

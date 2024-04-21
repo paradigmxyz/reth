@@ -1,9 +1,9 @@
 use crate::EthPooledTransaction;
 use rand::Rng;
 use reth_primitives::{
-    constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Address, Bytes,
-    FromRecoveredTransaction, Transaction, TransactionKind, TransactionSigned, TxEip1559,
-    TxEip4844, TxLegacy, TxValue, B256, MAINNET,
+    constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Address, Bytes, Transaction,
+    TransactionKind, TransactionSigned, TryFromRecoveredTransaction, TxEip1559, TxEip4844,
+    TxLegacy, B256, MAINNET, U256,
 };
 
 /// A generator for transactions for testing purposes.
@@ -98,15 +98,17 @@ impl<R: Rng> TransactionGenerator<R> {
 
     /// Generates and returns a pooled EIP-1559 transaction with a random signer.
     pub fn gen_eip1559_pooled(&mut self) -> EthPooledTransaction {
-        EthPooledTransaction::from_recovered_transaction(
+        EthPooledTransaction::try_from_recovered_transaction(
             self.gen_eip1559().into_ecrecovered().unwrap(),
         )
+        .unwrap()
     }
+
     /// Generates and returns a pooled EIP-4844 transaction with a random signer.
     pub fn gen_eip4844_pooled(&mut self) -> EthPooledTransaction {
-        EthPooledTransaction::from_recovered_transaction(
-            self.gen_eip4844().into_ecrecovered().unwrap(),
-        )
+        let tx = self.gen_eip4844().into_ecrecovered().unwrap();
+        let encoded_length = tx.length_without_header();
+        EthPooledTransaction::new(tx, encoded_length)
     }
 }
 
@@ -129,7 +131,7 @@ pub struct TransactionBuilder {
     /// The recipient or contract address of the transaction.
     pub to: TransactionKind,
     /// The value to be transferred in the transaction.
-    pub value: TxValue,
+    pub value: U256,
     /// The list of addresses and storage keys that the transaction can access.
     pub access_list: AccessList,
     /// The input data for the transaction, typically containing function parameters for contract
@@ -250,7 +252,7 @@ impl TransactionBuilder {
 
     /// Sets the value to be transferred in the transaction.
     pub fn value(mut self, value: u128) -> Self {
-        self.value = value.into();
+        self.value = U256::from(value);
         self
     }
 
@@ -310,7 +312,7 @@ impl TransactionBuilder {
 
     /// Sets the value to be transferred in the transaction, mutable reference version.
     pub fn set_value(&mut self, value: u128) -> &mut Self {
-        self.value = value.into();
+        self.value = U256::from(value);
         self
     }
 

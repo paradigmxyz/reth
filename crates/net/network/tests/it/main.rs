@@ -1,7 +1,5 @@
 mod big_pooled_txs_req;
-mod clique;
 mod connect;
-mod geth;
 mod multiplex;
 mod requests;
 mod session;

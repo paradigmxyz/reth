@@ -1,29 +1,33 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
-use rayon::slice::ParallelSliceMut;
+use reth_config::config::EtlConfig;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable,
+    RawKey, RawTable, RawValue,
 };
-use reth_interfaces::db::DatabaseError;
+use reth_etl::Collector;
+use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
-    stage::{
-        AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, StageCheckpoint,
-        StageId,
-    },
+    stage::{AccountHashingCheckpoint, EntitiesCheckpoint, StageCheckpoint, StageId},
+    Account, B256,
 };
-use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter};
+use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::{
-    cmp::max,
     fmt::Debug,
     ops::{Range, RangeInclusive},
-    sync::mpsc,
+    sync::mpsc::{self, Receiver},
 };
 use tracing::*;
+
+/// Maximum number of channels that can exist in memory.
+const MAXIMUM_CHANNELS: usize = 10_000;
+
+/// Maximum number of accounts to hash per rayon worker job.
+const WORKER_CHUNK_SIZE: usize = 100;
 
 /// Account hashing stage hashes plain account.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
@@ -32,20 +36,32 @@ pub struct AccountHashingStage {
     /// The threshold (in number of blocks) for switching between incremental
     /// hashing and full storage hashing.
     pub clean_threshold: u64,
-    /// The maximum number of accounts to process before committing.
+    /// The maximum number of accounts to process before committing during unwind.
     pub commit_threshold: u64,
+    /// ETL configuration
+    pub etl_config: EtlConfig,
 }
 
 impl AccountHashingStage {
     /// Create new instance of [AccountHashingStage].
-    pub fn new(clean_threshold: u64, commit_threshold: u64) -> Self {
-        Self { clean_threshold, commit_threshold }
+    pub fn new(clean_threshold: u64, commit_threshold: u64, etl_config: EtlConfig) -> Self {
+        Self { clean_threshold, commit_threshold, etl_config }
+    }
+
+    /// Set the ETL configuration to use.
+    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
+        self.etl_config = etl_config;
+        self
     }
 }
 
 impl Default for AccountHashingStage {
     fn default() -> Self {
-        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
+        Self {
+            clean_threshold: 500_000,
+            commit_threshold: 100_000,
+            etl_config: EtlConfig::default(),
+        }
     }
 }
 
@@ -65,8 +81,8 @@ impl Default for AccountHashingStage {
 pub struct SeedOpts {
     /// The range of blocks to be generated
     pub blocks: RangeInclusive<u64>,
-    /// The range of accounts to be generated
-    pub accounts: Range<u64>,
+    /// The number of accounts to be generated
+    pub accounts: usize,
     /// The range of transactions to be generated per block.
     pub txs: Range<u8>,
 }
@@ -77,7 +93,7 @@ impl AccountHashingStage {
     /// at the target block, with `txs_range` transactions in each block.
     ///
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
-    /// account state in the `AccountChangeSet` table.
+    /// account state in the `AccountChangeSets` table.
     pub fn seed<DB: Database>(
         provider: &DatabaseProviderRW<DB>,
         opts: SeedOpts,
@@ -85,19 +101,25 @@ impl AccountHashingStage {
         use reth_db::models::AccountBeforeTx;
         use reth_interfaces::test_utils::{
             generators,
-            generators::{random_block_range, random_eoa_account_range},
+            generators::{random_block_range, random_eoa_accounts},
         };
-        use reth_primitives::{Account, B256, U256};
-        use reth_provider::BlockWriter;
+        use reth_primitives::U256;
+        use reth_provider::providers::StaticFileWriter;
 
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs);
 
         for block in blocks {
-            provider.insert_block(block.try_seal_with_senders().unwrap(), None).unwrap();
+            provider.insert_historical_block(block.try_seal_with_senders().unwrap(), None).unwrap();
         }
-        let mut accounts = random_eoa_account_range(&mut rng, opts.accounts);
+        provider
+            .static_file_provider()
+            .latest_writer(reth_primitives::StaticFileSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
+        let mut accounts = random_eoa_accounts(&mut rng, opts.accounts);
         {
             // Account State generator
             let mut account_cursor =
@@ -108,8 +130,8 @@ impl AccountHashingStage {
             }
 
             let mut acc_changeset_cursor =
-                provider.tx_ref().cursor_write::<tables::AccountChangeSet>()?;
-            for (t, (addr, acc)) in (opts.blocks).zip(&accounts) {
+                provider.tx_ref().cursor_write::<tables::AccountChangeSets>()?;
+            for (t, (addr, acc)) in opts.blocks.zip(&accounts) {
                 let Account { nonce, balance, .. } = acc;
                 let prev_acc = Account {
                     nonce: nonce - 1,
@@ -149,96 +171,55 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // genesis accounts are not in changeset.
         if to_block - from_block > self.clean_threshold || from_block == 1 {
             let tx = provider.tx_ref();
-            let stage_checkpoint = input
-                .checkpoint
-                .and_then(|checkpoint| checkpoint.account_hashing_stage_checkpoint());
 
-            let start_address = match stage_checkpoint {
-                Some(AccountHashingCheckpoint { address: address @ Some(_), block_range: CheckpointBlockRange { from, to }, .. })
-                    // Checkpoint is only valid if the range of transitions didn't change.
-                    // An already hashed account may have been changed with the new range,
-                    // and therefore should be hashed again.
-                    if from == from_block && to == to_block =>
-                {
-                    debug!(target: "sync::stages::account_hashing::exec", checkpoint = ?stage_checkpoint, "Continuing inner account hashing checkpoint");
+            // clear table, load all accounts and hash it
+            tx.clear::<tables::HashedAccounts>()?;
 
-                    address
-                }
-                _ => {
-                    // clear table, load all accounts and hash it
-                    tx.clear::<tables::HashedAccount>()?;
+            let mut accounts_cursor = tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
+            let mut collector =
+                Collector::new(self.etl_config.file_size, self.etl_config.dir.clone());
+            let mut channels = Vec::with_capacity(MAXIMUM_CHANNELS);
 
-                    None
+            // channels used to return result of account hashing
+            for chunk in &accounts_cursor.walk(None)?.chunks(WORKER_CHUNK_SIZE) {
+                // An _unordered_ channel to receive results from a rayon job
+                let (tx, rx) = mpsc::channel();
+                channels.push(rx);
+
+                let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+                // Spawn the hashing task onto the global rayon pool
+                rayon::spawn(move || {
+                    for (address, account) in chunk.into_iter() {
+                        let address = address.key().unwrap();
+                        let _ = tx.send((RawKey::new(keccak256(address)), account));
+                    }
+                });
+
+                // Flush to ETL when channels length reaches MAXIMUM_CHANNELS
+                if !channels.is_empty() && channels.len() % MAXIMUM_CHANNELS == 0 {
+                    collect(&mut channels, &mut collector)?;
                 }
             }
-            .take()
-            .map(RawKey::new);
 
-            let next_address = {
-                let mut accounts_cursor =
-                    tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
+            collect(&mut channels, &mut collector)?;
 
-                // channels used to return result of account hashing
-                let mut channels = Vec::new();
-                for chunk in &accounts_cursor
-                    .walk(start_address.clone())?
-                    .take(self.commit_threshold as usize)
-                    .chunks(
-                        max(self.commit_threshold as usize, rayon::current_num_threads()) /
-                            rayon::current_num_threads(),
-                    )
-                {
-                    // An _unordered_ channel to receive results from a rayon job
-                    let (tx, rx) = mpsc::channel();
-                    channels.push(rx);
+            let mut hashed_account_cursor =
+                tx.cursor_write::<RawTable<tables::HashedAccounts>>()?;
 
-                    let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
-                    // Spawn the hashing task onto the global rayon pool
-                    rayon::spawn(move || {
-                        for (address, account) in chunk.into_iter() {
-                            let address = address.key().unwrap();
-                            let _ = tx.send((RawKey::new(keccak256(address)), account));
-                        }
-                    });
+            let total_hashes = collector.len();
+            let interval = (total_hashes / 10).max(1);
+            for (index, item) in collector.iter()?.enumerate() {
+                if index > 0 && index % interval == 0 {
+                    info!(
+                        target: "sync::stages::hashing_account",
+                        progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                        "Inserting hashes"
+                    );
                 }
-                let mut hashed_batch = Vec::with_capacity(self.commit_threshold as usize);
 
-                // Iterate over channels and append the hashed accounts.
-                for channel in channels {
-                    while let Ok(hashed) = channel.recv() {
-                        hashed_batch.push(hashed);
-                    }
-                }
-                // sort it all in parallel
-                hashed_batch.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
-
-                let mut hashed_account_cursor =
-                    tx.cursor_write::<RawTable<tables::HashedAccount>>()?;
-
-                // iterate and put presorted hashed accounts
-                if start_address.is_none() {
-                    hashed_batch
-                        .into_iter()
-                        .try_for_each(|(k, v)| hashed_account_cursor.append(k, v))?;
-                } else {
-                    hashed_batch
-                        .into_iter()
-                        .try_for_each(|(k, v)| hashed_account_cursor.insert(k, v))?;
-                }
-                // next key of iterator
-                accounts_cursor.next()?
-            };
-
-            if let Some((next_address, _)) = &next_address {
-                let checkpoint = input.checkpoint().with_account_hashing_stage_checkpoint(
-                    AccountHashingCheckpoint {
-                        address: Some(next_address.key().unwrap()),
-                        block_range: CheckpointBlockRange { from: from_block, to: to_block },
-                        progress: stage_checkpoint_progress(provider)?,
-                    },
-                );
-
-                return Ok(ExecOutput { checkpoint, done: false })
+                let (key, value) = item?;
+                hashed_account_cursor
+                    .append(RawKey::<B256>::from_vec(key), RawValue::<Account>::from_vec(value))?;
             }
         } else {
             // Aggregate all transition changesets and make a list of accounts that have been
@@ -287,12 +268,27 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     }
 }
 
+/// Flushes channels hashes to ETL collector.
+fn collect(
+    channels: &mut Vec<Receiver<(RawKey<B256>, RawValue<Account>)>>,
+    collector: &mut Collector<RawKey<B256>, RawValue<Account>>,
+) -> Result<(), StageError> {
+    for channel in channels.iter_mut() {
+        while let Ok((key, v)) = channel.recv() {
+            collector.insert(key, v)?;
+        }
+    }
+    info!(target: "sync::stages::hashing_account", "Hashed {} entries", collector.len());
+    channels.clear();
+    Ok(())
+}
+
 fn stage_checkpoint_progress<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, DatabaseError> {
+) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
-        processed: provider.tx_ref().entries::<tables::HashedAccount>()? as u64,
-        total: provider.tx_ref().entries::<tables::PlainAccountState>()? as u64,
+        processed: provider.count_entries::<tables::HashedAccounts>()? as u64,
+        total: provider.count_entries::<tables::PlainAccountState>()? as u64,
     })
 }
 
@@ -300,10 +296,12 @@ fn stage_checkpoint_progress<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, TestRunnerError, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
+    use reth_provider::providers::StaticFileWriter;
     use test_utils::*;
 
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
@@ -348,105 +346,16 @@ mod tests {
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
     }
 
-    #[tokio::test]
-    async fn execute_clean_account_hashing_with_commit_threshold() {
-        let (previous_stage, stage_progress) = (20, 10);
-        // Set up the runner
-        let mut runner = AccountHashingTestRunner::default();
-        runner.set_clean_threshold(1);
-        runner.set_commit_threshold(5);
-
-        let mut input = ExecInput {
-            target: Some(previous_stage),
-            checkpoint: Some(StageCheckpoint::new(stage_progress)),
-        };
-
-        runner.seed_execution(input).expect("failed to seed execution");
-
-        // first run, hash first five accounts.
-        let rx = runner.execute(input);
-        let result = rx.await.unwrap();
-
-        let fifth_address = runner
-            .db
-            .query(|tx| {
-                let (address, _) = tx
-                    .cursor_read::<tables::PlainAccountState>()?
-                    .walk(None)?
-                    .nth(5)
-                    .unwrap()
-                    .unwrap();
-                Ok(address)
-            })
-            .unwrap();
-
-        assert_matches!(
-            result,
-            Ok(ExecOutput {
-                checkpoint: StageCheckpoint {
-                    block_number: 10,
-                    stage_checkpoint: Some(StageUnitCheckpoint::Account(
-                        AccountHashingCheckpoint {
-                            address: Some(address),
-                            block_range: CheckpointBlockRange {
-                                from: 11,
-                                to: 20,
-                            },
-                            progress: EntitiesCheckpoint { processed: 5, total }
-                        }
-                    ))
-                },
-                done: false
-            }) if address == fifth_address &&
-                total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
-        );
-        assert_eq!(runner.db.table::<tables::HashedAccount>().unwrap().len(), 5);
-
-        // second run, hash next five accounts.
-        input.checkpoint = Some(result.unwrap().checkpoint);
-        let rx = runner.execute(input);
-        let result = rx.await.unwrap();
-
-        assert_matches!(
-            result,
-            Ok(ExecOutput {
-                checkpoint: StageCheckpoint {
-                    block_number: 20,
-                    stage_checkpoint: Some(StageUnitCheckpoint::Account(
-                        AccountHashingCheckpoint {
-                            address: None,
-                            block_range: CheckpointBlockRange {
-                                from: 0,
-                                to: 0,
-                            },
-                            progress: EntitiesCheckpoint { processed, total }
-                        }
-                    ))
-                },
-                done: true
-            }) if processed == total &&
-                total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
-        );
-        assert_eq!(runner.db.table::<tables::HashedAccount>().unwrap().len(), 10);
-
-        // Validate the stage execution
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
-    }
-
     mod test_utils {
         use super::*;
-        use crate::{
-            stages::hashing_account::AccountHashingStage,
-            test_utils::{StageTestRunner, TestStageDB},
-            ExecInput, ExecOutput, UnwindInput,
-        };
-        use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
+        use crate::test_utils::TestStageDB;
         use reth_primitives::Address;
 
         pub(crate) struct AccountHashingTestRunner {
             pub(crate) db: TestStageDB,
             commit_threshold: u64,
             clean_threshold: u64,
+            etl_config: EtlConfig,
         }
 
         impl AccountHashingTestRunner {
@@ -460,11 +369,11 @@ mod tests {
             }
 
             /// Iterates over PlainAccount table and checks that the accounts match the ones
-            /// in the HashedAccount table
+            /// in the HashedAccounts table
             pub(crate) fn check_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {
                     let mut acc_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
-                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
                     while let Some((address, account)) = acc_cursor.next()? {
                         let hashed_addr = keccak256(address);
@@ -483,7 +392,7 @@ mod tests {
             pub(crate) fn check_old_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {
                     let mut acc_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
-                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+                    let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
                     while let Some((address, account)) = acc_cursor.next()? {
                         let Account { nonce, balance, .. } = account;
@@ -506,7 +415,12 @@ mod tests {
 
         impl Default for AccountHashingTestRunner {
             fn default() -> Self {
-                Self { db: TestStageDB::default(), commit_threshold: 1000, clean_threshold: 1000 }
+                Self {
+                    db: TestStageDB::default(),
+                    commit_threshold: 1000,
+                    clean_threshold: 1000,
+                    etl_config: EtlConfig::default(),
+                }
             }
         }
 
@@ -521,11 +435,11 @@ mod tests {
                 Self::S {
                     commit_threshold: self.commit_threshold,
                     clean_threshold: self.clean_threshold,
+                    etl_config: self.etl_config.clone(),
                 }
             }
         }
 
-        #[async_trait::async_trait]
         impl ExecuteStageTestRunner for AccountHashingTestRunner {
             type Seed = Vec<(Address, Account)>;
 
@@ -533,7 +447,7 @@ mod tests {
                 let provider = self.db.factory.provider_rw()?;
                 let res = Ok(AccountHashingStage::seed(
                     &provider,
-                    SeedOpts { blocks: 1..=input.target(), accounts: 0..10, txs: 0..3 },
+                    SeedOpts { blocks: 1..=input.target(), accounts: 10, txs: 0..3 },
                 )
                 .unwrap());
                 provider.commit().expect("failed to commit");

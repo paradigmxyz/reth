@@ -12,17 +12,12 @@ default-run = "reth"
 [lints]
 workspace = true
 
-[package.metadata.cargo-udeps.ignore]
-normal = [
-    # Used for diagrams in docs
-    "aquamarine",
-]
-
 [dependencies]
 # reth
 reth-config.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
 reth-db = { workspace = true, features = ["mdbx"] }
+reth-exex.workspace = true
 reth-provider = { workspace = true }
 reth-revm.workspace = true
 reth-stages.workspace = true
@@ -30,6 +25,7 @@ reth-interfaces = { workspace = true, features = ["clap"] }
 reth-transaction-pool.workspace = true
 reth-beacon-consensus.workspace = true
 reth-auto-seal-consensus.workspace = true
+reth-cli-runner.workspace = true
 reth-consensus-common.workspace = true
 reth-blockchain-tree.workspace = true
 reth-rpc-engine-api.workspace = true
@@ -43,15 +39,14 @@ reth-network-api.workspace = true
 reth-downloaders.workspace = true
 reth-tracing.workspace = true
 reth-tasks.workspace = true
-reth-optimism-payload-builder = { workspace = true, optional = true }
 reth-ethereum-payload-builder.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
 reth-prune.workspace = true
-reth-snapshot = { workspace = true, features = ["clap"] }
-reth-trie.workspace = true
+reth-static-file = { workspace = true, features = ["clap"] }
+reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
@@ -59,16 +54,11 @@ reth-node-optimism = { workspace = true, optional = true, features = [
     "optimism",
 ] }
 reth-node-core.workspace = true
+reth-node-builder.workspace = true
+reth-node-events.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
-alloy-chains.workspace = true
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
-revm-inspectors.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -81,12 +71,7 @@ confy.workspace = true
 toml = { workspace = true, features = ["display"] }
 
 # metrics
-metrics-exporter-prometheus = "0.12.1"
-metrics-util = "0.15.0"
 metrics-process = "=1.0.14"
-reth-metrics.workspace = true
-metrics.workspace = true
-once_cell.workspace = true
 
 # test vectors generation
 proptest.workspace = true
@@ -106,26 +91,25 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
 ] }
 futures.workspace = true
-pin-project.workspace = true
-
-# http/rpc
-hyper = "0.14.25"
 
 # misc
 aquamarine.workspace = true
 eyre.workspace = true
-thiserror.workspace = true
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 tempfile.workspace = true
 backon = "0.4"
 similar-asserts.workspace = true
-humantime = "2.1.0"
 itertools.workspace = true
 rayon.workspace = true
 boyer-moore-magiclen = "0.2.16"
+ahash = "0.8"
 
-[target.'cfg(not(windows))'.dependencies]
-jemallocator = { version = "0.5.0", optional = true }
+# p2p
+discv5.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+tikv-jemallocator = { version = "0.5.0", optional = true }
+libc = "0.2"
 
 [dev-dependencies]
 jsonrpsee.workspace = true
@@ -136,8 +120,8 @@ default = ["jemalloc"]
 
 asm-keccak = ["reth-primitives/asm-keccak"]
 
-jemalloc = ["dep:jemallocator", "reth-node-core/jemalloc"]
-jemalloc-prof = ["jemalloc", "jemallocator?/profiling"]
+jemalloc = ["dep:tikv-jemallocator", "reth-node-core/jemalloc"]
+jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]
@@ -151,17 +135,10 @@ optimism = [
     "reth-interfaces/optimism",
     "reth-rpc/optimism",
     "reth-rpc-engine-api/optimism",
-    "reth-transaction-pool/optimism",
     "reth-provider/optimism",
     "reth-beacon-consensus/optimism",
     "reth-auto-seal-consensus/optimism",
-    "reth-network/optimism",
-    "reth-network-api/optimism",
     "reth-blockchain-tree/optimism",
-    "reth-payload-builder/optimism",
-    "reth-optimism-payload-builder/optimism",
-    "reth-ethereum-payload-builder/optimism",
-    "reth-node-ethereum/optimism",
     "dep:reth-node-optimism",
     "reth-node-core/optimism",
 ]

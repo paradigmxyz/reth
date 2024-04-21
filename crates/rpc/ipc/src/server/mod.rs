@@ -6,8 +6,8 @@ use crate::server::{
 };
 use futures::{FutureExt, Stream, StreamExt};
 use jsonrpsee::{
-    core::{Error, TEN_MB_SIZE_BYTES},
-    server::{logger::Logger, IdProvider, RandomIntegerIdProvider, ServerHandle},
+    core::TEN_MB_SIZE_BYTES,
+    server::{AlreadyStoppedError, IdProvider, RandomIntegerIdProvider},
     BoundedSubscriptions, MethodSink, Methods,
 };
 use std::{
@@ -37,19 +37,15 @@ mod ipc;
 /// Ipc Server implementation
 
 // This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
-pub struct IpcServer<B = Identity, L = ()> {
+pub struct IpcServer<B = Identity> {
     /// The endpoint we listen for incoming transactions
     endpoint: Endpoint,
-    logger: L,
     id_provider: Arc<dyn IdProvider>,
     cfg: Settings,
     service_builder: tower::ServiceBuilder<B>,
 }
 
-impl<L> IpcServer<Identity, L>
-where
-    L: Logger,
-{
+impl IpcServer<Identity> {
     /// Returns the configured [Endpoint]
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
@@ -64,7 +60,7 @@ where
     /// use jsonrpsee::RpcModule;
     /// use reth_ipc::server::Builder;
     /// async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    ///     let server = Builder::default().build("/tmp/my-uds")?;
+    ///     let server = Builder::default().build("/tmp/my-uds");
     ///     let mut module = RpcModule::new(());
     ///     module.register_method("say_hello", |_, _| "lo")?;
     ///     let handle = server.start(module).await?;
@@ -76,7 +72,10 @@ where
     ///     Ok(())
     /// }
     /// ```
-    pub async fn start(mut self, methods: impl Into<Methods>) -> Result<ServerHandle, Error> {
+    pub async fn start(
+        mut self,
+        methods: impl Into<Methods>,
+    ) -> Result<ServerHandle, IpcServerStartError> {
         let methods = methods.into();
         let (stop_tx, stop_rx) = watch::channel(());
 
@@ -89,7 +88,7 @@ where
             Some(rt) => rt.spawn(self.start_inner(methods, stop_handle, tx)),
             None => tokio::spawn(self.start_inner(methods, stop_handle, tx)),
         };
-        rx.await.expect("channel is open").map_err(Error::Custom)?;
+        rx.await.expect("channel is open")?;
 
         Ok(ServerHandle::new(stop_tx))
     }
@@ -98,9 +97,9 @@ where
         self,
         methods: Methods,
         stop_handle: StopHandle,
-        on_ready: oneshot::Sender<Result<(), String>>,
-    ) -> io::Result<()> {
-        trace!( endpoint = ?self.endpoint.path(), "starting ipc server");
+        on_ready: oneshot::Sender<Result<(), IpcServerStartError>>,
+    ) {
+        trace!(endpoint = ?self.endpoint.path(), "starting ipc server");
 
         if cfg!(unix) {
             // ensure the file does not exist
@@ -115,7 +114,6 @@ where
         let max_log_length = self.cfg.max_log_length;
         let id_provider = self.id_provider;
         let max_subscriptions_per_connection = self.cfg.max_subscriptions_per_connection;
-        let logger = self.logger;
 
         let mut id: u32 = 0;
         let connection_guard = ConnectionGuard::new(self.cfg.max_connections as usize);
@@ -129,9 +127,10 @@ where
                 Incoming::new(connections)
             }
             Err(err) => {
-                let msg = format!("failed to listen on ipc endpoint `{endpoint_path}`: {err}");
-                on_ready.send(Err(msg)).ok();
-                return Err(err)
+                on_ready
+                    .send(Err(IpcServerStartError { endpoint: endpoint_path, source: err }))
+                    .ok();
+                return
             }
         };
         // signal that we're ready to accept connections
@@ -154,8 +153,7 @@ where
                     };
 
                     let (tx, rx) = mpsc::channel::<String>(message_buffer_capacity as usize);
-                    let method_sink =
-                        MethodSink::new_with_limit(tx, max_response_body_size, max_log_length);
+                    let method_sink = MethodSink::new_with_limit(tx, max_response_body_size);
                     let tower_service = TowerService {
                         inner: ServiceData {
                             methods: methods.clone(),
@@ -166,7 +164,6 @@ where
                             stop_handle: stop_handle.clone(),
                             max_subscriptions_per_connection,
                             conn_id: id,
-                            logger: logger.clone(),
                             conn: Arc::new(conn),
                             bounded_subscriptions: BoundedSubscriptions::new(
                                 max_subscriptions_per_connection,
@@ -193,7 +190,6 @@ where
         }
 
         connections.await;
-        Ok(())
     }
 }
 
@@ -207,10 +203,19 @@ impl std::fmt::Debug for IpcServer {
     }
 }
 
+/// Error thrown when server couldn't be started.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to listen on ipc endpoint `{endpoint}`: {source}")]
+pub struct IpcServerStartError {
+    endpoint: String,
+    #[source]
+    source: io::Error,
+}
+
 /// Data required by the server to handle requests received via an IPC connection
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub(crate) struct ServiceData<L: Logger> {
+pub(crate) struct ServiceData {
     /// Registered server methods.
     pub(crate) methods: Methods,
     /// Max request body size.
@@ -229,8 +234,6 @@ pub(crate) struct ServiceData<L: Logger> {
     pub(crate) max_subscriptions_per_connection: u32,
     /// Connection ID
     pub(crate) conn_id: u32,
-    /// Logger.
-    pub(crate) logger: L,
     /// Handle to hold a `connection permit`.
     pub(crate) conn: Arc<OwnedSemaphorePermit>,
     /// Limits the number of subscriptions for this connection
@@ -246,11 +249,11 @@ pub(crate) struct ServiceData<L: Logger> {
 /// # Note
 /// This is similar to [`hyper::service::service_fn`](https://docs.rs/hyper/latest/hyper/service/fn.service_fn.html).
 #[derive(Debug)]
-pub struct TowerService<L: Logger> {
-    inner: ServiceData<L>,
+pub struct TowerService {
+    inner: ServiceData,
 }
 
-impl<L: Logger> Service<String> for TowerService<L> {
+impl Service<String> for TowerService {
     /// The response of a handled RPC call
     ///
     /// This is an `Option` because subscriptions and call responses are handled differently.
@@ -277,7 +280,6 @@ impl<L: Logger> Service<String> for TowerService<L> {
             max_response_body_size: self.inner.max_response_body_size,
             max_log_length: self.inner.max_log_length,
             batch_requests_supported: true,
-            logger: self.inner.logger.clone(),
             conn: self.inner.conn.clone(),
             bounded_subscriptions: self.inner.bounded_subscriptions.clone(),
             method_sink: self.inner.method_sink.clone(),
@@ -331,7 +333,7 @@ async fn spawn_connection<S, T>(
                     // shutdown
                     break
                 }
-            };
+            }
         }
     });
 
@@ -411,9 +413,8 @@ impl Default for Settings {
 
 /// Builder to configure and create a JSON-RPC server
 #[derive(Debug)]
-pub struct Builder<B = Identity, L = ()> {
+pub struct Builder<B = Identity> {
     settings: Settings,
-    logger: L,
     /// Subscription ID provider.
     id_provider: Arc<dyn IdProvider>,
     service_builder: tower::ServiceBuilder<B>,
@@ -423,14 +424,13 @@ impl Default for Builder {
     fn default() -> Self {
         Builder {
             settings: Settings::default(),
-            logger: (),
             id_provider: Arc::new(RandomIntegerIdProvider),
             service_builder: tower::ServiceBuilder::new(),
         }
     }
 }
 
-impl<B, L> Builder<B, L> {
+impl<B> Builder<B> {
     /// Set the maximum size of a request body in bytes. Default is 10 MiB.
     pub fn max_request_body_size(mut self, size: u32) -> Self {
         self.settings.max_request_body_size = size;
@@ -483,16 +483,6 @@ impl<B, L> Builder<B, L> {
         self
     }
 
-    /// Add a logger to the builder [`Logger`].
-    pub fn set_logger<T: Logger>(self, logger: T) -> Builder<B, T> {
-        Builder {
-            settings: self.settings,
-            logger,
-            id_provider: self.id_provider,
-            service_builder: self.service_builder,
-        }
-    }
-
     /// Configure a custom [`tokio::runtime::Handle`] to run the server on.
     ///
     /// Default: [`tokio::spawn`]
@@ -538,36 +528,57 @@ impl<B, L> Builder<B, L> {
     /// async fn main() {
     ///     let builder = tower::ServiceBuilder::new();
     ///
-    ///     let server = reth_ipc::server::Builder::default()
-    ///         .set_middleware(builder)
-    ///         .build("/tmp/my-uds")
-    ///         .unwrap();
+    ///     let server =
+    ///         reth_ipc::server::Builder::default().set_middleware(builder).build("/tmp/my-uds");
     /// }
     /// ```
-    pub fn set_middleware<T>(self, service_builder: tower::ServiceBuilder<T>) -> Builder<T, L> {
-        Builder {
-            settings: self.settings,
-            logger: self.logger,
-            id_provider: self.id_provider,
-            service_builder,
-        }
+    pub fn set_middleware<T>(self, service_builder: tower::ServiceBuilder<T>) -> Builder<T> {
+        Builder { settings: self.settings, id_provider: self.id_provider, service_builder }
     }
 
     /// Finalize the configuration of the server. Consumes the [`Builder`].
-    pub fn build(self, endpoint: impl AsRef<str>) -> Result<IpcServer<B, L>, Error> {
+    pub fn build(self, endpoint: impl AsRef<str>) -> IpcServer<B> {
         let endpoint = Endpoint::new(endpoint.as_ref().to_string());
         self.build_with_endpoint(endpoint)
     }
 
     /// Finalize the configuration of the server. Consumes the [`Builder`].
-    pub fn build_with_endpoint(self, endpoint: Endpoint) -> Result<IpcServer<B, L>, Error> {
-        Ok(IpcServer {
+    pub fn build_with_endpoint(self, endpoint: Endpoint) -> IpcServer<B> {
+        IpcServer {
             endpoint,
             cfg: self.settings,
-            logger: self.logger,
             id_provider: self.id_provider,
             service_builder: self.service_builder,
-        })
+        }
+    }
+}
+
+/// Server handle.
+///
+/// When all [`jsonrpsee::server::StopHandle`]'s have been `dropped` or `stop` has been called
+/// the server will be stopped.
+#[derive(Debug, Clone)]
+pub struct ServerHandle(Arc<watch::Sender<()>>);
+
+impl ServerHandle {
+    /// Create a new server handle.
+    pub(crate) fn new(tx: watch::Sender<()>) -> Self {
+        Self(Arc::new(tx))
+    }
+
+    /// Tell the server to stop without waiting for the server to stop.
+    pub fn stop(&self) -> Result<(), AlreadyStoppedError> {
+        self.0.send(()).map_err(|_| AlreadyStoppedError)
+    }
+
+    /// Wait for the server to stop.
+    pub async fn stopped(self) {
+        self.0.closed().await
+    }
+
+    /// Check if the server has been stopped.
+    pub fn is_stopped(&self) -> bool {
+        self.0.is_closed()
     }
 }
 
@@ -632,7 +643,7 @@ mod tests {
     #[tokio::test]
     async fn test_rpc_request() {
         let endpoint = dummy_endpoint();
-        let server = Builder::default().build(&endpoint).unwrap();
+        let server = Builder::default().build(&endpoint);
         let mut module = RpcModule::new(());
         let msg = r#"{"jsonrpc":"2.0","id":83,"result":"0x7a69"}"#;
         module.register_method("eth_chainId", move |_, _| msg).unwrap();
@@ -647,7 +658,7 @@ mod tests {
     #[tokio::test]
     async fn test_ipc_modules() {
         let endpoint = dummy_endpoint();
-        let server = Builder::default().build(&endpoint).unwrap();
+        let server = Builder::default().build(&endpoint);
         let mut module = RpcModule::new(());
         let msg = r#"{"admin":"1.0","debug":"1.0","engine":"1.0","eth":"1.0","ethash":"1.0","miner":"1.0","net":"1.0","rpc":"1.0","txpool":"1.0","web3":"1.0"}"#;
         module.register_method("rpc_modules", move |_, _| msg).unwrap();
@@ -662,7 +673,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_rpc_subscription() {
         let endpoint = dummy_endpoint();
-        let server = Builder::default().build(&endpoint).unwrap();
+        let server = Builder::default().build(&endpoint);
         let (tx, _rx) = broadcast::channel::<usize>(16);
 
         let mut module = RpcModule::new(tx.clone());

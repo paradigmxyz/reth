@@ -1,0 +1,17 @@
+[package]
+name = "reth-etl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+tempfile.workspace = true
+reth-db.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+reth-primitives.workspace = true

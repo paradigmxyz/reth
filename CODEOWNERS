@@ -1,23 +1,24 @@
 *                           @gakonst
 bin/                        @onbjerg
+crates/blockchain-tree      @rakita @rkrasiuk
+crates/consensus/auto-seal  @mattsse
+crates/consensus/beacon     @rkrasiuk @mattsse @Rjected
+crates/exex                 @onbjerg @shekhirin
+crates/metrics              @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk
+crates/payload/             @mattsse @Rjected
+crates/prune                @shekhirin @joshieDo
 crates/revm/src/            @rakita
 crates/revm/                @mattsse
-crates/stages/              @onbjerg @rkrasiuk @shekhirin
-crates/storage/             @rakita @joshieDo
-crates/transaction-pool/    @mattsse
 crates/rpc/                 @mattsse @Rjected
 crates/rpc/rpc-types        @mattsse @Rjected @Evalir
 crates/rpc/rpc-types-compat @mattsse @Rjected @Evalir
-crates/payload/             @mattsse @Rjected
-crates/consensus/auto-seal  @mattsse
-crates/consensus/beacon     @rkrasiuk @mattsse @Rjected
-crates/trie                 @rkrasiuk
-crates/blockchain-tree      @rakita @rkrasiuk
-crates/metrics              @onbjerg
-crates/tracing              @onbjerg
+crates/stages/              @onbjerg @rkrasiuk @shekhirin
+crates/static-file          @joshieDo @shekhirin
+crates/storage/             @rakita @joshieDo @shekhirin
 crates/tasks                @mattsse
-crates/prune                @shekhirin @joshieDo
-crates/snapshot             @joshieDo
+crates/tracing              @onbjerg
+crates/transaction-pool/    @mattsse
+crates/trie                 @rkrasiuk
 .github/                    @onbjerg @gakonst @DaniPopes

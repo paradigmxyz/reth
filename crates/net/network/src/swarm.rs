@@ -10,7 +10,7 @@ use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, EthVersion, Status,
+    EthVersion, Status,
 };
 use reth_primitives::PeerId;
 use reth_provider::{BlockNumReader, BlockReader};
@@ -29,7 +29,7 @@ use tracing::trace;
 ///
 /// A swarm emits [`SwarmEvent`]s when polled.
 ///
-/// The manages the [`ConnectionListener`] and delegates new incoming connections to the
+/// It manages the [`ConnectionListener`] and delegates new incoming connections to the
 /// [`SessionManager`]. Outgoing connections are either initiated on demand or triggered by the
 /// [`NetworkState`] and also delegated to the [`NetworkState`].
 ///
@@ -147,7 +147,7 @@ where
                 })
             }
             SessionEvent::AlreadyConnected { peer_id, remote_addr, direction } => {
-                trace!( target: "net", ?peer_id, ?remote_addr, ?direction, "already connected");
+                trace!(target: "net", ?peer_id, ?remote_addr, ?direction, "already connected");
                 self.state.peers_mut().on_already_connected(direction);
                 None
             }
@@ -203,12 +203,8 @@ where
                         InboundConnectionError::IpBanned => {
                             trace!(target: "net", ?remote_addr, "The incoming ip address is in the ban list");
                         }
-                        InboundConnectionError::ExceedsLimit(limit) => {
-                            trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; disconnecting");
-                            self.sessions.disconnect_incoming_connection(
-                                stream,
-                                DisconnectReason::TooManyPeers,
-                            );
+                        InboundConnectionError::ExceedsCapacity => {
+                            trace!(target: "net", ?remote_addr, "No capacity for incoming connection");
                         }
                     }
                     return None
@@ -220,7 +216,7 @@ where
                         return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
                     }
                     Err(err) => {
-                        trace!(target: "net", ?err, "Incoming connection rejected, capacity already reached.");
+                        trace!(target: "net", %err, "Incoming connection rejected, capacity already reached.");
                         self.state_mut()
                             .peers_mut()
                             .on_incoming_pending_session_rejected_internally();

@@ -33,7 +33,7 @@ use tower::{Layer, Service};
 ///     let middleware = tower::ServiceBuilder::default().layer(layer);
 ///
 ///     let _server = ServerBuilder::default()
-///         .set_middleware(middleware)
+///         .set_http_middleware(middleware)
 ///         .build(addr.parse::<SocketAddr>().unwrap())
 ///         .await
 ///         .unwrap();
@@ -159,7 +159,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use http::{header, Method, Request, StatusCode};
     use hyper::{body, Body};
     use jsonrpsee::{
@@ -241,7 +240,7 @@ mod tests {
         let server = spawn_server().await;
         let client = hyper::Client::new();
 
-        let jwt = jwt.unwrap_or("".into());
+        let jwt = jwt.unwrap_or_default();
         let address = format!("http://{AUTH_ADDR}:{AUTH_PORT}");
         let bearer = format!("Bearer {jwt}");
         let body = r#"{"jsonrpc": "2.0", "method": "greet_melkor", "params": [], "id": 1}"#;
@@ -276,7 +275,7 @@ mod tests {
         // Create a layered server
         let server = ServerBuilder::default()
             .set_id_provider(RandomStringIdProvider::new(16))
-            .set_middleware(middleware)
+            .set_http_middleware(middleware)
             .build(addr.parse::<SocketAddr>().unwrap())
             .await
             .unwrap();

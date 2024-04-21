@@ -1,23 +1,22 @@
-#[cfg(not(feature = "optimism"))]
-use crate::proofs::calculate_receipt_root_ref;
-#[cfg(feature = "optimism")]
-use crate::proofs::calculate_receipt_root_ref_optimism;
-use crate::{
-    compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR},
-    logs_bloom, Bloom, Log, PruneSegmentError, TxType, B256,
-};
+#[cfg(feature = "zstd-codec")]
+use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
+use crate::{logs_bloom, Bloom, Bytes, PruneSegmentError, TxType, B256};
+use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable};
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::strategy::Strategy;
-use reth_codecs::{add_arbitrary_tests, main_codec, Compact, CompactZstd};
+#[cfg(feature = "zstd-codec")]
+use reth_codecs::CompactZstd;
+use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use std::{
     cmp::Ordering,
     ops::{Deref, DerefMut},
 };
 
 /// Receipt containing result of transaction execution.
-#[main_codec(no_arbitrary, zstd)]
+#[cfg_attr(feature = "zstd-codec", main_codec(no_arbitrary, zstd))]
+#[cfg_attr(not(feature = "zstd-codec"), main_codec(no_arbitrary))]
 #[add_arbitrary_tests]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Receipt {
@@ -97,22 +96,21 @@ impl Receipts {
     }
 
     /// Retrieves the receipt root for all recorded receipts from index.
-    #[cfg(not(feature = "optimism"))]
     pub fn root_slow(&self, index: usize) -> Option<B256> {
-        Some(calculate_receipt_root_ref(
+        Some(crate::proofs::calculate_receipt_root_ref(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
         ))
     }
 
     /// Retrieves the receipt root for all recorded receipts from index.
     #[cfg(feature = "optimism")]
-    pub fn root_slow(
+    pub fn optimism_root_slow(
         &self,
         index: usize,
         chain_spec: &crate::ChainSpec,
         timestamp: u64,
     ) -> Option<B256> {
-        Some(calculate_receipt_root_ref_optimism(
+        Some(crate::proofs::calculate_receipt_root_ref_optimism(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
             chain_spec,
             timestamp,
@@ -121,13 +119,15 @@ impl Receipts {
 
     /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
     pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, PruneSegmentError> {
-        let Some(block_r) = self.last() else { return Ok(vec![]) };
+        let Some(block_r) = self.last() else {
+            return Ok(vec![]);
+        };
         let mut out = Vec::with_capacity(block_r.len());
         for (id, tx_r) in block_r.iter().enumerate() {
             if let Some(receipt) = tx_r.as_ref() {
                 out.push((id as u64, receipt.cumulative_gas_used));
             } else {
-                return Err(PruneSegmentError::ReceiptsPruned)
+                return Err(PruneSegmentError::ReceiptsPruned);
             }
         }
         Ok(out)
@@ -219,7 +219,7 @@ impl proptest::arbitrary::Arbitrary for Receipt {
             {
                 // Only receipts for deposit transactions may contain a deposit nonce
                 #[cfg(feature = "optimism")]
-                let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::DEPOSIT {
+                let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::Deposit {
                     // The deposit receipt version is only present if the deposit nonce is present
                     let deposit_receipt_version = _deposit_nonce.and(_deposit_receipt_version);
                     (_deposit_nonce, deposit_receipt_version)
@@ -239,7 +239,7 @@ impl proptest::arbitrary::Arbitrary for Receipt {
                     deposit_receipt_version
                 }
             }
-        };
+        }
         arbitrary_receipt().boxed()
     }
 
@@ -256,7 +256,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
 
         // Only receipts for deposit transactions may contain a deposit nonce
         #[cfg(feature = "optimism")]
-        let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::DEPOSIT {
+        let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::Deposit {
             let deposit_nonce = Option::<u64>::arbitrary(u)?;
             let deposit_nonce_version =
                 deposit_nonce.map(|_| Option::<u64>::arbitrary(u)).transpose()?.flatten();
@@ -279,6 +279,28 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
 }
 
 impl ReceiptWithBloom {
+    /// Returns the enveloped encoded receipt.
+    ///
+    /// See also [ReceiptWithBloom::encode_enveloped]
+    pub fn envelope_encoded(&self) -> Bytes {
+        let mut buf = Vec::new();
+        self.encode_enveloped(&mut buf);
+        buf.into()
+    }
+
+    /// Encodes the receipt into its "raw" format.
+    /// This format is also referred to as "binary" encoding.
+    ///
+    /// For legacy receipts, it encodes the RLP of the receipt into the buffer:
+    /// `rlp([status, cumulativeGasUsed, logsBloom, logs])` as per EIP-2718.
+    /// For EIP-2718 typed transactions, it encodes the type of the transaction followed by the rlp
+    /// of the receipt:
+    /// - EIP-1559, 2930 and 4844 transactions: `tx-type || rlp([status, cumulativeGasUsed,
+    ///   logsBloom, logs])`
+    pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
+        self.encode_inner(out, false)
+    }
+
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         self.as_encoder().encode_inner(out, with_header)
@@ -289,7 +311,7 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::Error::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -300,7 +322,7 @@ impl ReceiptWithBloom {
 
         let receipt = match tx_type {
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => {
+            TxType::Deposit => {
                 let remaining = |b: &[u8]| rlp_head.payload_length - (started_len - b.len()) > 0;
                 let deposit_nonce =
                     remaining(b).then(|| alloy_rlp::Decodable::decode(b)).transpose()?;
@@ -334,7 +356,7 @@ impl ReceiptWithBloom {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         *buf = *b;
         Ok(this)
@@ -369,20 +391,20 @@ impl Decodable for ReceiptWithBloom {
                 match receipt_type {
                     0x01 => {
                         buf.advance(1);
-                        Self::decode_receipt(buf, TxType::EIP2930)
+                        Self::decode_receipt(buf, TxType::Eip2930)
                     }
                     0x02 => {
                         buf.advance(1);
-                        Self::decode_receipt(buf, TxType::EIP1559)
+                        Self::decode_receipt(buf, TxType::Eip1559)
                     }
                     0x03 => {
                         buf.advance(1);
-                        Self::decode_receipt(buf, TxType::EIP4844)
+                        Self::decode_receipt(buf, TxType::Eip4844)
                     }
                     #[cfg(feature = "optimism")]
                     0x7E => {
                         buf.advance(1);
-                        Self::decode_receipt(buf, TxType::DEPOSIT)
+                        Self::decode_receipt(buf, TxType::Deposit)
                     }
                     _ => Err(alloy_rlp::Error::Custom("invalid receipt type")),
                 }
@@ -453,7 +475,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         rlp_head.payload_length += self.receipt.logs.length();
 
         #[cfg(feature = "optimism")]
-        if self.receipt.tx_type == TxType::DEPOSIT {
+        if self.receipt.tx_type == TxType::Deposit {
             if let Some(deposit_nonce) = self.receipt.deposit_nonce {
                 rlp_head.payload_length += deposit_nonce.length();
             }
@@ -473,7 +495,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         self.bloom.encode(out);
         self.receipt.logs.encode(out);
         #[cfg(feature = "optimism")]
-        if self.receipt.tx_type == TxType::DEPOSIT {
+        if self.receipt.tx_type == TxType::Deposit {
             if let Some(deposit_nonce) = self.receipt.deposit_nonce {
                 deposit_nonce.encode(out)
             }
@@ -487,10 +509,10 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return
+            return;
         }
 
-        let mut payload = BytesMut::new();
+        let mut payload = Vec::new();
         self.encode_fields(&mut payload);
 
         if with_header {
@@ -500,20 +522,21 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
         }
 
         match self.receipt.tx_type {
-            TxType::EIP2930 => {
+            TxType::Legacy => unreachable!("legacy already handled"),
+
+            TxType::Eip2930 => {
                 out.put_u8(0x01);
             }
-            TxType::EIP1559 => {
+            TxType::Eip1559 => {
                 out.put_u8(0x02);
             }
-            TxType::EIP4844 => {
+            TxType::Eip4844 => {
                 out.put_u8(0x03);
             }
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => {
+            TxType::Deposit => {
                 out.put_u8(0x7E);
             }
-            _ => unreachable!("legacy handled; qed."),
         }
         out.put_slice(payload.as_ref());
     }
@@ -546,8 +569,7 @@ impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
 mod tests {
     use super::*;
     use crate::hex_literal::hex;
-    use alloy_primitives::{address, b256, bytes, Bytes};
-    use alloy_rlp::{Decodable, Encodable};
+    use alloy_primitives::{address, b256, bytes};
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
@@ -559,14 +581,14 @@ mod tests {
             receipt: Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
-                logs: vec![Log {
-                    address: address!("0000000000000000000000000000000000000011"),
-                    topics: vec![
+                logs: vec![Log::new_unchecked(
+                    address!("0000000000000000000000000000000000000011"),
+                    vec![
                         b256!("000000000000000000000000000000000000000000000000000000000000dead"),
                         b256!("000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
-                    data: bytes!("0100ff"),
-                }],
+                    bytes!("0100ff"),
+                )],
                 success: false,
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
@@ -593,14 +615,14 @@ mod tests {
             receipt: Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
-                logs: vec![Log {
-                    address: address!("0000000000000000000000000000000000000011"),
-                    topics: vec![
+                logs: vec![Log::new_unchecked(
+                    address!("0000000000000000000000000000000000000011"),
+                    vec![
                         b256!("000000000000000000000000000000000000000000000000000000000000dead"),
                         b256!("000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
-                    data: bytes!("0100ff"),
-                }],
+                    bytes!("0100ff"),
+                )],
                 success: false,
                 #[cfg(feature = "optimism")]
                 deposit_nonce: None,
@@ -622,7 +644,7 @@ mod tests {
         // Deposit Receipt (post-regolith)
         let expected = ReceiptWithBloom {
             receipt: Receipt {
-                tx_type: TxType::DEPOSIT,
+                tx_type: TxType::Deposit,
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
@@ -635,9 +657,9 @@ mod tests {
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
         assert_eq!(receipt, expected);
 
-        let mut buf = BytesMut::default();
+        let mut buf = Vec::new();
         receipt.encode_inner(&mut buf, false);
-        assert_eq!(buf.freeze(), &data[..]);
+        assert_eq!(buf, &data[..]);
     }
 
     #[cfg(feature = "optimism")]
@@ -648,7 +670,7 @@ mod tests {
         // Deposit Receipt (post-regolith)
         let expected = ReceiptWithBloom {
             receipt: Receipt {
-                tx_type: TxType::DEPOSIT,
+                tx_type: TxType::Deposit,
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
@@ -661,9 +683,9 @@ mod tests {
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
         assert_eq!(receipt, expected);
 
-        let mut buf = BytesMut::default();
+        let mut buf = Vec::new();
         expected.encode_inner(&mut buf, false);
-        assert_eq!(buf.freeze(), &data[..]);
+        assert_eq!(buf, &data[..]);
     }
 
     #[test]
@@ -673,20 +695,16 @@ mod tests {
             success: true,
             tx_type: TxType::Legacy,
             logs: vec![
-                Log {
-                    address: address!("4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
-                    topics: vec![b256!(
-                        "c69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9"
-                    )],
-                    data: Bytes::from(vec![1; 0xffffff]),
-                },
-                Log {
-                    address: address!("faca325c86bf9c2d5b413cd7b90b209be92229c2"),
-                    topics: vec![b256!(
-                        "8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2"
-                    )],
-                    data: Bytes::from(vec![1; 0xffffff]),
-                },
+                Log::new_unchecked(
+                    address!("4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
+                    vec![b256!("c69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9")],
+                    Bytes::from(vec![1; 0xffffff]),
+                ),
+                Log::new_unchecked(
+                    address!("faca325c86bf9c2d5b413cd7b90b209be92229c2"),
+                    vec![b256!("8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2")],
+                    Bytes::from(vec![1; 0xffffff]),
+                ),
             ],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,

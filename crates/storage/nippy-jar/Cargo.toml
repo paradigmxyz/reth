@@ -15,13 +15,15 @@ workspace = true
 name = "reth_nippy_jar"
 
 [dependencies]
+# reth
+reth-primitives.workspace = true
 
 # filter
 ph = "0.8.0"
 cuckoofilter = { version = "0.5.0", features = ["serde_support", "serde_bytes"] }
 
 # compression
-zstd = { version = "0.12", features = ["experimental", "zdict_builder"] }
+zstd = { version = "0.13", features = ["experimental", "zdict_builder"] }
 lz4_flex = { version = "0.11", default-features = false }
 
 # offsets
@@ -33,7 +35,7 @@ serde = { version = "1.0",  features = ["derive"] }
 tracing = "0.1.0"
 anyhow = "1.0"
 thiserror.workspace = true
-derive_more = "0.99"
+derive_more.workspace = true
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["small_rng"] }
@@ -42,3 +44,4 @@ tempfile.workspace = true
 
 [features]
 default = []
+test-utils = []

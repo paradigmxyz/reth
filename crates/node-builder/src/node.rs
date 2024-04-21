@@ -1,95 +1,107 @@
 use crate::{
-    components::FullNodeComponents,
+    components::ComponentsBuilder,
     rpc::{RethRpcServerHandles, RpcRegistry},
 };
-use reth_db::database::Database;
 use reth_network::NetworkHandle;
-use reth_node_api::{evm::EvmConfig, primitives::NodePrimitives, EngineTypes};
+use reth_node_api::FullNodeComponents;
 use reth_node_core::{
-    cli::components::FullProvider,
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
+    rpc::{
+        api::EngineApiClient,
+        builder::{auth::AuthServerHandle, RpcServerHandle},
+    },
 };
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives::ChainSpec;
+use reth_provider::ChainSpecProvider;
 use reth_tasks::TaskExecutor;
-use std::marker::PhantomData;
+use std::sync::Arc;
 
-/// The type that configures stateless node types, the node's primitive types.
-pub trait NodeTypes: Send + Sync + 'static {
-    /// The node's primitive types.
-    type Primitives: NodePrimitives;
-    /// The node's engine types.
-    type Engine: EngineTypes;
-    /// The node's evm configuration.
-    type Evm: EvmConfig;
+// re-export the node api types
+pub use reth_node_api::{FullNodeTypes, NodeTypes};
 
-    /// Returns the node's evm config.
-    fn evm_config(&self) -> Self::Evm;
-}
+/// A [Node] is a [NodeTypes] that comes with preconfigured components.
+///
+/// This can be used to configure the builder with a preset of components.
+pub trait Node<N>: NodeTypes + Clone {
+    /// The type that builds the node's pool.
+    type PoolBuilder;
+    /// The type that builds the node's network.
+    type NetworkBuilder;
+    /// The type that builds the node's payload service.
+    type PayloadBuilder;
 
-/// A helper type that is downstream of the node types and adds stateful components to the node.
-pub trait FullNodeTypes: NodeTypes + 'static {
-    /// Underlying database type.
-    type DB: Database + Clone + 'static;
-    /// The provider type used to interact with the node.
-    type Provider: FullProvider<Self::DB>;
-}
-
-/// An adapter type that adds the builtin provider type to the user configured node types.
-#[derive(Debug)]
-pub struct FullNodeTypesAdapter<Types, DB, Provider> {
-    pub(crate) types: Types,
-    _db: PhantomData<DB>,
-    _provider: PhantomData<Provider>,
-}
-
-impl<Types, DB, Provider> FullNodeTypesAdapter<Types, DB, Provider> {
-    /// Create a new adapter from the given node types.
-    pub fn new(types: Types) -> Self {
-        Self { types, _db: Default::default(), _provider: Default::default() }
-    }
-}
-
-impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
-where
-    Types: NodeTypes,
-    DB: Send + Sync + 'static,
-    Provider: Send + Sync + 'static,
-{
-    type Primitives = Types::Primitives;
-    type Engine = Types::Engine;
-    type Evm = Types::Evm;
-
-    fn evm_config(&self) -> Self::Evm {
-        self.types.evm_config()
-    }
-}
-
-impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
-where
-    Types: NodeTypes,
-    Provider: FullProvider<DB>,
-    DB: Database + Clone + 'static,
-{
-    type DB = DB;
-    type Provider = Provider;
+    /// Returns the [ComponentsBuilder] for the node.
+    fn components(
+        self,
+    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder>;
 }
 
 /// The launched node with all components including RPC handlers.
+///
+/// This can be used to interact with the launched node.
 #[derive(Debug)]
 pub struct FullNode<Node: FullNodeComponents> {
-    pub(crate) evm_config: Node::Evm,
-    pub(crate) pool: Node::Pool,
-    pub(crate) network: NetworkHandle,
-    pub(crate) provider: Node::Provider,
-    pub(crate) payload_builder: PayloadBuilderHandle<Node::Engine>,
-    pub(crate) executor: TaskExecutor,
-    pub(crate) rpc_server_handles: RethRpcServerHandles,
-    pub(crate) rpc_registry: RpcRegistry<Node>,
+    /// The evm configuration.
+    pub evm_config: Node::Evm,
+    /// The node's transaction pool.
+    pub pool: Node::Pool,
+    /// Handle to the node's network.
+    pub network: NetworkHandle,
+    /// Provider to interact with the node's database
+    pub provider: Node::Provider,
+    /// Handle to the node's payload builder service.
+    pub payload_builder: PayloadBuilderHandle<Node::Engine>,
+    /// Task executor for the node.
+    pub task_executor: TaskExecutor,
+    /// Handles to the node's rpc servers
+    pub rpc_server_handles: RethRpcServerHandles,
+    /// The configured rpc namespaces
+    pub rpc_registry: RpcRegistry<Node>,
     /// The initial node config.
-    pub(crate) config: NodeConfig,
+    pub config: NodeConfig,
     /// The data dir of the node.
-    pub(crate) data_dir: ChainPath<DataDirPath>,
+    pub data_dir: ChainPath<DataDirPath>,
+}
+
+impl<Node: FullNodeComponents> FullNode<Node> {
+    /// Returns the [ChainSpec] of the node.
+    pub fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.provider.chain_spec()
+    }
+
+    /// Returns the [RpcServerHandle] to the started rpc server.
+    pub fn rpc_server_handle(&self) -> &RpcServerHandle {
+        &self.rpc_server_handles.rpc
+    }
+
+    /// Returns the [AuthServerHandle] to the started authenticated engine API server.
+    pub fn auth_server_handle(&self) -> &AuthServerHandle {
+        &self.rpc_server_handles.auth
+    }
+
+    /// Returns the [EngineApiClient] interface for the authenticated engine API.
+    ///
+    /// This will send authenticated http requests to the node's auth server.
+    pub fn engine_http_client(&self) -> impl EngineApiClient<Node::Engine> {
+        self.auth_server_handle().http_client()
+    }
+
+    /// Returns the [EngineApiClient] interface for the authenticated engine API.
+    ///
+    /// This will send authenticated ws requests to the node's auth server.
+    pub async fn engine_ws_client(&self) -> impl EngineApiClient<Node::Engine> {
+        self.auth_server_handle().ws_client().await
+    }
+
+    /// Returns the [EngineApiClient] interface for the authenticated engine API.
+    ///
+    /// This will send not authenticated IPC requests to the node's auth server.
+    #[cfg(unix)]
+    pub async fn engine_ipc_client(&self) -> Option<impl EngineApiClient<Node::Engine>> {
+        self.auth_server_handle().ipc_client().await
+    }
 }
 
 impl<Node: FullNodeComponents> Clone for FullNode<Node> {
@@ -100,7 +112,7 @@ impl<Node: FullNodeComponents> Clone for FullNode<Node> {
             network: self.network.clone(),
             provider: self.provider.clone(),
             payload_builder: self.payload_builder.clone(),
-            executor: self.executor.clone(),
+            task_executor: self.task_executor.clone(),
             rpc_server_handles: self.rpc_server_handles.clone(),
             rpc_registry: self.rpc_registry.clone(),
             config: self.config.clone(),

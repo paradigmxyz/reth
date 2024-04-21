@@ -5,10 +5,7 @@ use crate::{
 };
 
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt::Debug,
-    marker::{Send, Sync},
-};
+use std::fmt::Debug;
 
 /// Trait that will transform the data to be saved in the DB in a (ideally) compressed format
 pub trait Compress: Send + Sync + Sized + Debug {
@@ -19,7 +16,8 @@ pub trait Compress: Send + Sync + Sized + Debug {
         + Into<Vec<u8>>
         + Default
         + Send
-        + Sync;
+        + Sync
+        + Debug;
 
     /// If the type cannot be compressed, return its inner reference as `Some(self.as_ref())`
     fn uncompressable_ref(&self) -> Option<&[u8]> {
@@ -51,7 +49,7 @@ pub trait Decompress: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be saved in the DB.
 pub trait Encode: Send + Sync + Sized + Debug {
     /// Encoded type.
-    type Encoded: AsRef<[u8]> + Into<Vec<u8>> + Send + Sync;
+    type Encoded: AsRef<[u8]> + Into<Vec<u8>> + Send + Sync + Ord + Debug;
 
     /// Encodes data going into the database.
     fn encode(self) -> Self::Encoded;

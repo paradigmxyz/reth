@@ -23,20 +23,20 @@ use std::borrow::Cow;
 /// Response object of GET `/eth/v1/builder/header/{slot}/{parent_hash}/{pubkey}`
 ///
 /// See also <https://ethereum.github.io/builder-specs/#/Builder/getHeader>
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GetExecutionPayloadHeaderResponse {
     pub version: String,
     pub data: ExecutionPayloadHeaderData,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPayloadHeaderData {
     pub message: ExecutionPayloadHeaderMessage,
-    pub signature: String,
+    pub signature: Bytes,
 }
 
 #[serde_as]
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPayloadHeaderMessage {
     pub header: ExecutionPayloadHeader,
     #[serde_as(as = "DisplayFromStr")]
@@ -46,7 +46,7 @@ pub struct ExecutionPayloadHeaderMessage {
 
 /// The header of the execution payload.
 #[serde_as]
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPayloadHeader {
     pub parent_hash: B256,
     pub fee_recipient: Address,
@@ -105,7 +105,6 @@ struct BeaconOptimismPayloadAttributes {
 pub mod beacon_api_payload_attributes_optimism {
     use super::*;
     use crate::engine::{OptimismPayloadAttributes, PayloadAttributes};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     /// Serialize the payload attributes for the beacon API.
     pub fn serialize<S>(
@@ -170,7 +169,6 @@ pub mod beacon_api_payload_attributes_optimism {
 pub mod beacon_api_payload_attributes {
     use super::*;
     use crate::engine::PayloadAttributes;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     /// Serialize the payload attributes for the beacon API.
     pub fn serialize<S>(
@@ -309,7 +307,6 @@ impl<'a> From<&'a ExecutionPayloadV1> for BeaconExecutionPayloadV1<'a> {
 /// big-endian hex.
 pub mod beacon_payload_v1 {
     use super::*;
-    use serde::{Deserializer, Serializer};
 
     /// Serialize the payload attributes for the beacon API.
     pub fn serialize<S>(
@@ -364,7 +361,6 @@ impl<'a> From<&'a ExecutionPayloadV2> for BeaconExecutionPayloadV2<'a> {
 /// big-endian hex.
 pub mod beacon_payload_v2 {
     use super::*;
-    use serde::{Deserializer, Serializer};
 
     /// Serialize the payload attributes for the beacon API.
     pub fn serialize<S>(
@@ -420,7 +416,6 @@ impl<'a> From<&'a ExecutionPayloadV3> for BeaconExecutionPayloadV3<'a> {
 /// big-endian hex.
 pub mod beacon_payload_v3 {
     use super::*;
-    use serde::{Deserializer, Serializer};
 
     /// Serialize the payload attributes for the beacon API.
     pub fn serialize<S>(
@@ -527,7 +522,6 @@ impl<'de> DeserializeAs<'de, ExecutionPayload> for BeaconExecutionPayload<'de> {
 
 pub mod beacon_payload {
     use super::*;
-    use serde::{Deserializer, Serializer};
 
     /// Serialize the payload attributes for the beacon API.
     pub fn serialize<S>(

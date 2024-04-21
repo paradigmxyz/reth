@@ -1,9 +1,10 @@
 use reth_interfaces::{
     blockchain_tree::{
-        error::{BlockchainTreeError, InsertBlockError},
+        error::{BlockchainTreeError, CanonicalError, InsertBlockError},
         BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
         InsertPayloadOk,
     },
+    provider::ProviderError,
     RethResult,
 };
 use reth_primitives::{
@@ -52,12 +53,8 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
         Ok(())
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
-        Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
-    }
-
-    fn unwind(&self, _unwind_to: BlockNumber) -> RethResult<()> {
-        Ok(())
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
+        Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash }.into())
     }
 }
 
@@ -90,12 +87,8 @@ impl BlockchainTreeViewer for NoopBlockchainTree {
         Default::default()
     }
 
-    fn find_canonical_ancestor(&self, _parent_hash: BlockHash) -> Option<BlockHash> {
-        None
-    }
-
-    fn is_canonical(&self, block_hash: BlockHash) -> RethResult<bool> {
-        Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash }.into())
+    fn is_canonical(&self, _block_hash: BlockHash) -> Result<bool, ProviderError> {
+        Ok(false)
     }
 
     fn lowest_buffered_ancestor(&self, _hash: BlockHash) -> Option<SealedBlockWithSenders> {

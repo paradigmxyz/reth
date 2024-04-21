@@ -36,13 +36,15 @@ pub trait Consensus: Debug + Send + Sync {
     /// on its own and valid against its parent.
     ///
     /// Note: this expects that the headers are in natural order (ascending block number)
-    fn validate_header_range(&self, headers: &[SealedHeader]) -> Result<(), ConsensusError> {
+    fn validate_header_range(&self, headers: &[SealedHeader]) -> Result<(), HeaderConsensusError> {
         if let Some((initial_header, remaining_headers)) = headers.split_first() {
-            self.validate_header(initial_header)?;
+            self.validate_header(initial_header)
+                .map_err(|e| HeaderConsensusError(e, initial_header.clone()))?;
             let mut parent = initial_header;
             for child in remaining_headers {
-                self.validate_header(child)?;
-                self.validate_header_against_parent(child, parent)?;
+                self.validate_header(child).map_err(|e| HeaderConsensusError(e, child.clone()))?;
+                self.validate_header_against_parent(child, parent)
+                    .map_err(|e| HeaderConsensusError(e, child.clone()))?;
                 parent = child;
             }
         }
@@ -222,6 +224,17 @@ pub enum ConsensusError {
         blob_gas_per_blob: u64,
     },
 
+    /// Error when excess blob gas is not a multiple of blob gas per blob.
+    #[error(
+    "excess blob gas {excess_blob_gas} is not a multiple of blob gas per blob {blob_gas_per_blob}"
+    )]
+    ExcessBlobGasNotMultipleOfBlobGasPerBlob {
+        /// The actual excess blob gas.
+        excess_blob_gas: u64,
+        /// The blob gas per blob.
+        blob_gas_per_blob: u64,
+    },
+
     /// Error when the blob gas used in the header does not match the expected blob gas used.
     #[error("blob gas used mismatch: {0}")]
     BlobGasUsedDiff(GotExpected<u64>),
@@ -234,3 +247,8 @@ pub enum ConsensusError {
     #[error(transparent)]
     HeaderValidationError(#[from] HeaderValidationError),
 }
+
+/// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
+#[derive(thiserror::Error, Debug)]
+#[error("Consensus error: {0}, Invalid header: {1:?}")]
+pub struct HeaderConsensusError(ConsensusError, SealedHeader);

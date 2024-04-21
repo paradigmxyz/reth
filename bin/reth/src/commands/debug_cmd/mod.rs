@@ -1,11 +1,9 @@
 //! `reth debug` command. Collection of various debugging routines.
 
 use clap::{Parser, Subcommand};
-
-use crate::runner::CliContext;
+use reth_cli_runner::CliContext;
 
 mod build_block;
-pub mod engine_api_store;
 mod execution;
 mod in_memory_merkle;
 mod merkle;
@@ -14,7 +12,7 @@ mod replay_engine;
 /// `reth debug` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Subcommands,
 }
 

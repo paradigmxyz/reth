@@ -1,10 +1,6 @@
 #![allow(missing_docs, unreachable_pub)]
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use proptest::{
-    prelude::*,
-    strategy::{Strategy, ValueTree},
-    test_runner::TestRunner,
-};
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_primitives::{proofs::triehash::KeccakHasher, ReceiptWithBloom, B256};
 
 /// Benchmarks different implementations of the root calculation.
@@ -45,7 +41,6 @@ criterion_main!(benches);
 mod implementations {
     use super::*;
     use alloy_rlp::Encodable;
-    use bytes::BytesMut;
     use reth_primitives::{
         proofs::adjust_index_for_rlp,
         trie::{HashBuilder, Nibbles},
@@ -60,8 +55,8 @@ mod implementations {
     }
 
     pub fn hash_builder_root(receipts: &[ReceiptWithBloom]) -> B256 {
-        let mut index_buffer = BytesMut::new();
-        let mut value_buffer = BytesMut::new();
+        let mut index_buffer = Vec::new();
+        let mut value_buffer = Vec::new();
 
         let mut hb = HashBuilder::default();
         let receipts_len = receipts.len();

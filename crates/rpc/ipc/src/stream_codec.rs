@@ -141,7 +141,7 @@ impl tokio_util::codec::Encoder<String> for StreamCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::{BufMut, BytesMut};
+    use bytes::BufMut;
     use tokio_util::codec::Decoder;
 
     #[test]

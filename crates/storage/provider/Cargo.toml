@@ -16,9 +16,10 @@ workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
-reth-trie.workspace = true
+reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
-reth-node-api.workspace = true
+reth-codecs.workspace = true
+reth-evm.workspace = true
 
 revm.workspace = true
 
@@ -34,7 +35,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-auto_impl = "1.0"
+auto_impl.workspace = true
 itertools.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
@@ -60,5 +61,5 @@ assert_matches.workspace = true
 rand.workspace = true
 
 [features]
-test-utils = ["alloy-rlp", "reth-db/test-utils"]
+test-utils = ["alloy-rlp", "reth-db/test-utils", "reth-nippy-jar/test-utils"]
 optimism = ["reth-primitives/optimism", "reth-interfaces/optimism"]

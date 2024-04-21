@@ -48,7 +48,7 @@ impl<'a> EnumHandler<'a> {
 
     /// Generates `from_compact` code for an enum variant.
     ///
-    /// `fields_iterator` might look something like \[VariantUnit, VariantUnamedField, Field,
+    /// `fields_iterator` might look something like \[VariantUnit, VariantUnnamedField, Field,
     /// VariantUnit...\].
     pub fn from(&mut self, variant_name: &str, ident: &Ident) {
         let variant_name = format_ident!("{variant_name}");
@@ -65,7 +65,7 @@ impl<'a> EnumHandler<'a> {
                         format_ident!("specialized_from_compact")
                     };
 
-                    // Unamed type
+                    // Unnamed type
                     self.enum_lines.push(quote! {
                         #current_variant_index => {
                             let (inner, new_buf) = #field_type::#from_compact_ident(buf, buf.len());
@@ -91,7 +91,7 @@ impl<'a> EnumHandler<'a> {
 
     /// Generates `to_compact` code for an enum variant.
     ///
-    /// `fields_iterator` might look something like [VariantUnit, VariantUnamedField, Field,
+    /// `fields_iterator` might look something like [VariantUnit, VariantUnnamedField, Field,
     /// VariantUnit...].
     pub fn to(&mut self, variant_name: &str, ident: &Ident) {
         let variant_name = format_ident!("{variant_name}");
@@ -106,7 +106,7 @@ impl<'a> EnumHandler<'a> {
                         format_ident!("specialized_to_compact")
                     };
 
-                    // Unamed type
+                    // Unnamed type
                     self.enum_lines.push(quote! {
                         #ident::#variant_name(field) => {
                             field.#to_compact_ident(&mut buffer);

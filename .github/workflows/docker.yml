@@ -36,5 +36,9 @@ jobs:
         run: |
           docker run --privileged --rm tonistiigi/binfmt --install arm64,amd64
           docker buildx create --use --name cross-builder
+      - name: Build and push image, tag as "latest"
+        if: ${{ contains(github.event.ref, 'beta') }}
+        run: make PROFILE=maxperf docker-build-push-latest
       - name: Build and push image
-        run: make PROFILE=maxperf docker-build-latest
+        if: ${{ ! contains(github.event.ref, 'beta') }}
+        run: make PROFILE=maxperf docker-build-push

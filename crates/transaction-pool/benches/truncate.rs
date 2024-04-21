@@ -2,14 +2,15 @@
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
+use pprof::criterion::{Output, PProfProfiler};
 use proptest::{
     prelude::*,
-    strategy::{Strategy, ValueTree},
+    strategy::ValueTree,
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
 use reth_primitives::{hex_literal::hex, Address};
 use reth_transaction_pool::{
-    pool::{BasefeeOrd, ParkedPool, PendingPool},
+    pool::{BasefeeOrd, ParkedPool, PendingPool, QueuedOrd},
     test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
     SubPoolLimit,
 };
@@ -84,6 +85,23 @@ fn generate_many_transactions(senders: usize, max_depth: usize) -> Vec<MockTrans
     txs
 }
 
+/// Benchmarks all pool types for the truncate function.
+fn benchmark_pools(group: &mut BenchmarkGroup<'_, WallTime>, senders: usize, max_depth: usize) {
+    println!("Generating transactions for benchmark with {senders} unique senders and a max depth of {max_depth}...");
+    let txs = generate_many_transactions(senders, max_depth);
+
+    // benchmark parked pool
+    truncate_basefee(group, "BasefeePool", txs.clone(), senders, max_depth);
+
+    // benchmark pending pool
+    truncate_pending(group, "PendingPool", txs.clone(), senders, max_depth);
+
+    // benchmark queued pool
+    truncate_queued(group, "QueuedPool", txs, senders, max_depth);
+
+    // TODO: benchmark blob truncate
+}
+
 fn txpool_truncate(c: &mut Criterion) {
     let mut group = c.benchmark_group("Transaction Pool Truncate");
 
@@ -95,17 +113,8 @@ fn txpool_truncate(c: &mut Criterion) {
     for senders in [5, 10, 20, 100, 1000, 2000] {
         // the max we'll be benching is 20, because MAX_ACCOUNT_SLOTS so far is 16. So 20 should be
         // a reasonable worst-case benchmark
-        for max_depth in [5, 10, 20] {
-            println!("Generating transactions for benchmark with {senders} unique senders and a max depth of {max_depth}...");
-            let txs = generate_many_transactions(senders, max_depth);
-
-            // benchmark parked pool
-            truncate_parked(&mut group, "ParkedPool", txs.clone(), senders, max_depth);
-
-            // benchmark pending pool
-            truncate_pending(&mut group, "PendingPool", txs, senders, max_depth);
-
-            // TODO: benchmark blob truncate
+        for max_depth in [1, 5, 10, 20] {
+            benchmark_pools(&mut group, senders, max_depth);
         }
     }
 
@@ -114,14 +123,12 @@ fn txpool_truncate(c: &mut Criterion) {
 
     // let's run a benchmark that includes a large number of senders and max_depth of 16 to ensure
     // we hit the TXPOOL_SUBPOOL_MAX_TXS_DEFAULT limit, which is currently 10k
-    println!("Generating transactions for large benchmark with {large_senders} unique senders and a max depth of {max_depth}...");
-    let txs = generate_many_transactions(large_senders, max_depth);
+    benchmark_pools(&mut group, large_senders, max_depth);
 
-    // benchmark parked
-    truncate_parked(&mut group, "ParkedPool", txs.clone(), large_senders, max_depth);
-
-    // benchmark pending
-    truncate_pending(&mut group, "PendingPool", txs, large_senders, max_depth);
+    // now we'll run a more realistic benchmark, with max depth of 1 and 15000 senders
+    let realistic_senders = 15000;
+    let realistic_max_depth = 1;
+    benchmark_pools(&mut group, realistic_senders, realistic_max_depth);
 }
 
 fn truncate_pending(
@@ -159,7 +166,41 @@ fn truncate_pending(
     });
 }
 
-fn truncate_parked(
+fn truncate_queued(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    description: &str,
+    seed: Vec<MockTransaction>,
+    senders: usize,
+    max_depth: usize,
+) {
+    let setup = || {
+        let mut txpool = ParkedPool::<QueuedOrd<_>>::default();
+        let mut f = MockTransactionFactory::default();
+
+        for tx in seed.iter() {
+            txpool.add_transaction(f.validated_arc(tx.clone()));
+        }
+        txpool
+    };
+
+    let group_id = format!(
+        "txpool | total txs: {} | total senders: {} | max depth: {} | {}",
+        seed.len(),
+        senders,
+        max_depth,
+        description,
+    );
+
+    // for now we just use the default SubPoolLimit
+    group.bench_function(group_id, |b| {
+        b.iter_with_setup(setup, |mut txpool| {
+            txpool.truncate_pool(SubPoolLimit::default());
+            std::hint::black_box(());
+        });
+    });
+}
+
+fn truncate_basefee(
     group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     seed: Vec<MockTransaction>,
@@ -193,5 +234,9 @@ fn truncate_parked(
     });
 }
 
-criterion_group!(truncate, txpool_truncate);
+criterion_group! {
+    name = truncate;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = txpool_truncate
+}
 criterion_main!(truncate);

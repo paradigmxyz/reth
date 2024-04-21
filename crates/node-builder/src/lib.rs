@@ -5,30 +5,41 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![warn(unused_crate_dependencies)]
 
 /// Node event hooks.
 pub mod hooks;
 
 /// Support for configuring the higher level node types.
 pub mod node;
+pub use node::*;
 
 /// Support for configuring the components of a node.
 pub mod components;
 
 mod builder;
+pub use builder::*;
+
 mod handle;
+pub use handle::NodeHandle;
+
 pub mod rpc;
 
-pub mod provider;
+pub mod setup;
 
-pub use builder::*;
-pub use handle::NodeHandle;
+/// Support for installing the ExExs (execution extensions) in a node.
+pub mod exex;
 
 /// Re-export the core configuration traits.
 pub use reth_node_core::cli::config::{
     PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig, RethTransactionPoolConfig,
 };
 
+// re-export the core config for convenience
 pub use reth_node_core::node_config::NodeConfig;
+
+// re-export API types for convenience
+pub use reth_node_api::*;
+
+use aquamarine as _;

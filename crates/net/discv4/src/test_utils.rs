@@ -6,7 +6,7 @@ use crate::{
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
-use reth_primitives::{hex, ForkHash, ForkId, NodeRecord, B256};
+use reth_primitives::{hex, pk2id, ForkHash, ForkId, NodeRecord, B256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},
@@ -49,7 +49,7 @@ impl MockDiscovery {
         let mut rng = thread_rng();
         let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
         let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-        let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+        let id = pk2id(&pk);
         let socket = Arc::new(UdpSocket::bind(socket).await?);
         let local_addr = socket.local_addr()?;
         let local_enr = NodeRecord {
@@ -146,7 +146,7 @@ impl Stream for MockDiscovery {
             match event {
                 IngressEvent::RecvError(_) => {}
                 IngressEvent::BadPacket(from, err, data) => {
-                    debug!(target: "discv4", ?from, ?err, packet=?hex::encode(&data), "bad packet");
+                    debug!(target: "discv4", ?from, %err, packet=?hex::encode(&data), "bad packet");
                 }
                 IngressEvent::Packet(remote_addr, Packet { msg, node_id, hash }) => match msg {
                     Message::Ping(ping) => {
@@ -241,7 +241,7 @@ pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4S
     let mut rng = thread_rng();
     let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
     let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-    let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+    let id = pk2id(&pk);
     let local_enr =
         NodeRecord { address: socket.ip(), tcp_port: socket.port(), udp_port: socket.port(), id };
     Discv4::bind(socket, local_enr, secret_key, config).await.unwrap()
@@ -314,7 +314,7 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
 mod tests {
     use super::*;
     use crate::Discv4Event;
-    use std::net::{IpAddr, Ipv4Addr};
+    use std::net::Ipv4Addr;
 
     /// This test creates two local UDP sockets. The mocked discovery service responds to specific
     /// messages and we check the actual service receives answers

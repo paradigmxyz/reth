@@ -65,6 +65,11 @@ Options:
       --trusted-only
           Connect only to trusted peers
 
+      --retries <RETRIES>
+          The number of retries per request
+          
+          [default: 5]
+
       --instance <INSTANCE>
           Add a new instance of a node.
           
@@ -75,11 +80,6 @@ Options:
           Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
           
           [default: 1]
-
-      --retries <RETRIES>
-          The number of retries per request
-          
-          [default: 5]
 
       --nat <NAT>
           [default: any]
@@ -100,6 +100,11 @@ Database:
           - debug:   Enables logging for debug-level messages
           - trace:   Enables logging for trace debug-level messages
           - extra:   Enables logging for extra debug-level messages
+
+      --db.exclusive <EXCLUSIVE>
+          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
+          
+          [possible values: true, false]
 
 Logging:
       --log.stdout.format <FORMAT>

@@ -1,11 +1,12 @@
 use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
+use reth_engine_primitives::EngineTypes;
+use reth_evm::ConfigureEvm;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
-use reth_stages::PipelineEvent;
+use reth_stages_api::PipelineEvent;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,
@@ -88,7 +89,7 @@ where
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
     Engine: EngineTypes + 'static,
-    EvmConfig: ConfigureEvmEnv + Clone + Unpin + Send + Sync + 'static,
+    EvmConfig: ConfigureEvm + Clone + Unpin + Send + Sync + 'static,
 {
     type Output = ();
 
@@ -182,7 +183,7 @@ where
                                         }
                                     }
                                     Err(err) => {
-                                        error!(target: "consensus::auto", ?err, "Autoseal fork choice update failed");
+                                        error!(target: "consensus::auto", %err, "Autoseal fork choice update failed");
                                         return None
                                     }
                                 }
@@ -219,7 +220,7 @@ where
                                 .send(reth_provider::CanonStateNotification::Commit { new: chain });
                         }
                         Err(err) => {
-                            warn!(target: "consensus::auto", ?err, "failed to execute block")
+                            warn!(target: "consensus::auto", %err, "failed to execute block")
                         }
                     }
 

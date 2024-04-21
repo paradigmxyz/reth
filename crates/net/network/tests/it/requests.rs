@@ -26,7 +26,7 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
         gas_price: rng.gen(),
         gas_limit: rng.gen(),
         to: TransactionKind::Create,
-        value: rng.gen::<u128>().into(),
+        value: U256::from(rng.gen::<u128>()),
         input: Bytes::from(vec![1, 2]),
         access_list: Default::default(),
     });

@@ -33,7 +33,7 @@ impl<'a, TX: DbTx> PrefixSetLoader<'a, TX> {
         let mut destroyed_accounts = HashSet::default();
 
         // Walk account changeset and insert account prefixes.
-        let mut account_changeset_cursor = self.cursor_read::<tables::AccountChangeSet>()?;
+        let mut account_changeset_cursor = self.cursor_read::<tables::AccountChangeSets>()?;
         let mut account_plain_state_cursor = self.cursor_read::<tables::PlainAccountState>()?;
         for account_entry in account_changeset_cursor.walk_range(range.clone())? {
             let (_, AccountBeforeTx { address, .. }) = account_entry?;
@@ -47,7 +47,7 @@ impl<'a, TX: DbTx> PrefixSetLoader<'a, TX> {
 
         // Walk storage changeset and insert storage prefixes as well as account prefixes if missing
         // from the account prefix set.
-        let mut storage_cursor = self.cursor_dup_read::<tables::StorageChangeSet>()?;
+        let mut storage_cursor = self.cursor_dup_read::<tables::StorageChangeSets>()?;
         let storage_range = BlockNumberAddress::range(range);
         for storage_entry in storage_cursor.walk_range(storage_range)? {
             let (BlockNumberAddress((_, address)), StorageEntry { key, .. }) = storage_entry?;

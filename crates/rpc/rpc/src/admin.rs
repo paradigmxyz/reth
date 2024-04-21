@@ -1,10 +1,15 @@
 use crate::result::ToRpcResult;
+use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
-use reth_primitives::NodeRecord;
+use reth_primitives::{AnyNode, ChainSpec, NodeRecord};
 use reth_rpc_api::AdminApiServer;
-use reth_rpc_types::{NodeInfo, PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo};
+use reth_rpc_types::{
+    admin::{EthProtocolInfo, NodeInfo, Ports, ProtocolInfo},
+    PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo,
+};
+use std::sync::Arc;
 
 /// `admin` API implementation.
 ///
@@ -12,12 +17,14 @@ use reth_rpc_types::{NodeInfo, PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, P
 pub struct AdminApi<N> {
     /// An interface to interact with the network
     network: N,
+    /// The specification of the blockchain's configuration.
+    chain_spec: Arc<ChainSpec>,
 }
 
 impl<N> AdminApi<N> {
     /// Creates a new instance of `AdminApi`.
-    pub fn new(network: N) -> Self {
-        AdminApi { network }
+    pub fn new(network: N, chain_spec: Arc<ChainSpec>) -> Self {
+        AdminApi { network, chain_spec }
     }
 }
 
@@ -33,20 +40,23 @@ where
     }
 
     /// Handler for `admin_removePeer`
-    fn remove_peer(&self, record: NodeRecord) -> RpcResult<bool> {
-        self.network.remove_peer(record.id, PeerKind::Basic);
+    fn remove_peer(&self, record: AnyNode) -> RpcResult<bool> {
+        self.network.remove_peer(record.peer_id(), PeerKind::Basic);
         Ok(true)
     }
 
     /// Handler for `admin_addTrustedPeer`
-    fn add_trusted_peer(&self, record: NodeRecord) -> RpcResult<bool> {
-        self.network.add_trusted_peer(record.id, record.tcp_addr());
+    fn add_trusted_peer(&self, record: AnyNode) -> RpcResult<bool> {
+        if let Some(record) = record.node_record() {
+            self.network.add_trusted_peer(record.id, record.tcp_addr())
+        }
+        self.network.add_trusted_peer_id(record.peer_id());
         Ok(true)
     }
 
     /// Handler for `admin_removeTrustedPeer`
-    fn remove_trusted_peer(&self, record: NodeRecord) -> RpcResult<bool> {
-        self.network.remove_peer(record.id, PeerKind::Trusted);
+    fn remove_trusted_peer(&self, record: AnyNode) -> RpcResult<bool> {
+        self.network.remove_peer(record.peer_id(), PeerKind::Trusted);
         Ok(true)
     }
 
@@ -81,10 +91,31 @@ where
 
     /// Handler for `admin_nodeInfo`
     async fn node_info(&self) -> RpcResult<NodeInfo> {
-        let enr = self.network.local_node_record();
+        let enode = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
+        let config = self.chain_spec.genesis().config.clone();
 
-        Ok(NodeInfo::new(enr, status))
+        let node_info = NodeInfo {
+            id: B256::from_slice(&enode.id.as_slice()[..32]),
+            name: status.client_version,
+            enode: enode.to_string(),
+            enr: self.network.local_enr().to_string(),
+            ip: enode.address,
+            ports: Ports { discovery: enode.udp_port, listener: enode.tcp_port },
+            listen_addr: enode.tcp_addr(),
+            protocols: ProtocolInfo {
+                eth: Some(EthProtocolInfo {
+                    network: status.eth_protocol_info.network,
+                    difficulty: status.eth_protocol_info.difficulty,
+                    genesis: status.eth_protocol_info.genesis,
+                    config,
+                    head: status.eth_protocol_info.head,
+                }),
+                snap: None,
+            },
+        };
+
+        Ok(node_info)
     }
 
     /// Handler for `admin_peerEvents`

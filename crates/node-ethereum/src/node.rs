@@ -5,7 +5,7 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_network::NetworkHandle;
 use reth_node_builder::{
     components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
-    node::{FullNodeTypes, NodeTypes},
+    node::{FullNodeTypes, Node, NodeTypes},
     BuilderContext, PayloadBuilderConfig,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
@@ -20,12 +20,11 @@ use reth_transaction_pool::{
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct EthereumNode;
-// TODO make this stateful with evm config
 
 impl EthereumNode {
     /// Returns a [ComponentsBuilder] configured for a regular Ethereum node.
     pub fn components<Node>(
-    ) -> ComponentsBuilder<Node, EthereumPoolBuilder, EthereumPayloadBuilder, EthereumNetwork>
+    ) -> ComponentsBuilder<Node, EthereumPoolBuilder, EthereumPayloadBuilder, EthereumNetworkBuilder>
     where
         Node: FullNodeTypes<Engine = EthEngineTypes>,
     {
@@ -33,7 +32,7 @@ impl EthereumNode {
             .node_types::<Node>()
             .pool(EthereumPoolBuilder::default())
             .payload(EthereumPayloadBuilder::default())
-            .network(EthereumNetwork::default())
+            .network(EthereumNetworkBuilder::default())
     }
 }
 
@@ -43,7 +42,26 @@ impl NodeTypes for EthereumNode {
     type Evm = EthEvmConfig;
 
     fn evm_config(&self) -> Self::Evm {
-        todo!()
+        EthEvmConfig::default()
+    }
+}
+
+impl<N> Node<N> for EthereumNode
+where
+    N: FullNodeTypes<Engine = EthEngineTypes>,
+{
+    type PoolBuilder = EthereumPoolBuilder;
+    type NetworkBuilder = EthereumNetworkBuilder;
+    type PayloadBuilder = EthereumPayloadBuilder;
+
+    fn components(
+        self,
+    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder> {
+        ComponentsBuilder::default()
+            .node_types::<N>()
+            .pool(EthereumPoolBuilder::default())
+            .payload(EthereumPayloadBuilder::default())
+            .network(EthereumNetworkBuilder::default())
     }
 }
 
@@ -63,7 +81,7 @@ where
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
 
-    fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
+    async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.data_dir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
@@ -128,7 +146,7 @@ where
     Node: FullNodeTypes<Engine = EthEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
 {
-    fn spawn_payload_service(
+    async fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
@@ -140,7 +158,7 @@ where
             .interval(conf.interval())
             .deadline(conf.deadline())
             .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_rlp_bytes())
+            .extradata(conf.extradata_bytes())
             .max_gas_limit(conf.max_gas_limit());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
@@ -162,17 +180,21 @@ where
 
 /// A basic ethereum payload service.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct EthereumNetwork {
+pub struct EthereumNetworkBuilder {
     // TODO add closure to modify network
 }
 
-impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetwork
+impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetworkBuilder
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
 {
-    fn build_network(self, ctx: &BuilderContext<Node>, pool: Pool) -> eyre::Result<NetworkHandle> {
-        let network = ctx.network_builder_blocking()?;
+    async fn build_network(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<NetworkHandle> {
+        let network = ctx.network_builder().await?;
         let handle = ctx.start_network(network, pool);
 
         Ok(handle)

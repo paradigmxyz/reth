@@ -1,6 +1,6 @@
 use crate::NippyJarError;
 use serde::{Deserialize, Serialize};
-use std::{clone::Clone, hash::Hash, marker::Sync};
+use std::hash::Hash;
 
 mod fmph;
 pub use fmph::Fmph;

@@ -2,9 +2,8 @@ use crate::{
     trie::{hash_builder::HashBuilderState, StoredSubNode},
     Address, BlockNumber, B256,
 };
-use bytes::{Buf, BufMut};
-use reth_codecs::{derive_arbitrary, main_codec, Compact};
-use serde::{Deserialize, Serialize};
+use bytes::Buf;
+use reth_codecs::{main_codec, Compact};
 use std::ops::RangeInclusive;
 
 /// Saves the progress of Merkle stage.
@@ -14,9 +13,6 @@ pub struct MerkleCheckpoint {
     pub target_block: BlockNumber,
     /// The last hashed account key processed.
     pub last_account_key: B256,
-    // TODO: remove in the next breaking release.
-    /// The last walker key processed.
-    pub last_walker_key: Vec<u8>,
     /// Previously recorded walker stack.
     pub walker_stack: Vec<StoredSubNode>,
     /// The hash builder state.
@@ -31,13 +27,7 @@ impl MerkleCheckpoint {
         walker_stack: Vec<StoredSubNode>,
         state: HashBuilderState,
     ) -> Self {
-        Self {
-            target_block,
-            last_account_key,
-            walker_stack,
-            state,
-            last_walker_key: Vec::default(),
-        }
+        Self { target_block, last_account_key, walker_stack, state }
     }
 }
 
@@ -53,10 +43,6 @@ impl Compact for MerkleCheckpoint {
 
         buf.put_slice(self.last_account_key.as_slice());
         len += self.last_account_key.len();
-
-        buf.put_u16(self.last_walker_key.len() as u16);
-        buf.put_slice(&self.last_walker_key[..]);
-        len += 2 + self.last_walker_key.len();
 
         buf.put_u16(self.walker_stack.len() as u16);
         len += 2;
@@ -74,10 +60,6 @@ impl Compact for MerkleCheckpoint {
         let last_account_key = B256::from_slice(&buf[..32]);
         buf.advance(32);
 
-        let last_walker_key_len = buf.get_u16() as usize;
-        let last_walker_key = Vec::from(&buf[..last_walker_key_len]);
-        buf.advance(last_walker_key_len);
-
         let walker_stack_len = buf.get_u16() as usize;
         let mut walker_stack = Vec::with_capacity(walker_stack_len);
         for _ in 0..walker_stack_len {
@@ -87,16 +69,7 @@ impl Compact for MerkleCheckpoint {
         }
 
         let (state, buf) = HashBuilderState::from_compact(buf, 0);
-        (
-            MerkleCheckpoint {
-                target_block,
-                last_account_key,
-                last_walker_key,
-                walker_stack,
-                state,
-            },
-            buf,
-        )
+        (MerkleCheckpoint { target_block, last_account_key, walker_stack, state }, buf)
     }
 }
 
@@ -175,7 +148,11 @@ impl EntitiesCheckpoint {
             return None
         }
 
-        Some(format!("{:.2}%", 100.0 * self.processed as f64 / self.total as f64))
+        // Calculate percentage with 2 decimal places.
+        let percentage = 100.0 * self.processed as f64 / self.total as f64;
+
+        // Truncate to 2 decimal places, rounding down so that 99.999% becomes 99.99% and not 100%.
+        Some(format!("{:.2}%", (percentage * 100.0).floor() / 100.0))
     }
 }
 
@@ -250,8 +227,8 @@ impl StageCheckpoint {
 // TODO(alexey): add a merkle checkpoint. Currently it's hard because [`MerkleCheckpoint`]
 //  is not a Copy type.
 /// Stage-specific checkpoint metrics.
-#[derive_arbitrary(compact)]
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+#[main_codec]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum StageUnitCheckpoint {
     /// Saves the progress of AccountHashing stage.
     Account(AccountHashingCheckpoint),
@@ -267,39 +244,16 @@ pub enum StageUnitCheckpoint {
     IndexHistory(IndexHistoryCheckpoint),
 }
 
-/// Generates:
-/// 1. [Compact::to_compact] and [Compact::from_compact] implementations for [StageUnitCheckpoint].
-/// 2. [StageCheckpoint] getter and builder methods.
+#[cfg(test)]
+impl Default for StageUnitCheckpoint {
+    fn default() -> Self {
+        Self::Account(AccountHashingCheckpoint::default())
+    }
+}
+
+/// Generates [StageCheckpoint] getter and builder methods.
 macro_rules! stage_unit_checkpoints {
     ($(($index:expr,$enum_variant:tt,$checkpoint_ty:ty,#[doc = $fn_get_doc:expr]$fn_get_name:ident,#[doc = $fn_build_doc:expr]$fn_build_name:ident)),+) => {
-        impl Compact for StageUnitCheckpoint {
-            fn to_compact<B>(self, buf: &mut B) -> usize
-            where
-                B: BufMut + AsMut<[u8]>,
-            {
-                match self {
-                    $(
-                        StageUnitCheckpoint::$enum_variant(data) => {
-                            buf.put_u8($index);
-                            1 + data.to_compact(buf)
-                        }
-                    )+
-                }
-            }
-
-            fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
-                match buf[0] {
-                    $(
-                        $index => {
-                            let (data, buf) = <$checkpoint_ty>::from_compact(&buf[1..], buf.len() - 1);
-                            (Self::$enum_variant(data), buf)
-                        }
-                    )+
-                    _ => unreachable!("Junk data in database: unknown StageUnitCheckpoint variant"),
-                }
-            }
-        }
-
         impl StageCheckpoint {
             $(
                 #[doc = $fn_get_doc]
@@ -391,7 +345,6 @@ mod tests {
         let checkpoint = MerkleCheckpoint {
             target_block: rng.gen(),
             last_account_key: rng.gen(),
-            last_walker_key: B256::random_with(&mut rng).to_vec(),
             walker_stack: vec![StoredSubNode {
                 key: B256::random_with(&mut rng).to_vec(),
                 nibble: Some(rng.gen()),
@@ -404,54 +357,5 @@ mod tests {
         let encoded = checkpoint.clone().to_compact(&mut buf);
         let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
-    }
-
-    #[test]
-    fn stage_unit_checkpoint_roundtrip() {
-        let mut rng = rand::thread_rng();
-        let checkpoints = vec![
-            StageUnitCheckpoint::Account(AccountHashingCheckpoint {
-                address: Some(rng.gen()),
-                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
-                progress: EntitiesCheckpoint {
-                    processed: rng.gen::<u32>() as u64,
-                    total: u32::MAX as u64 + rng.gen::<u64>(),
-                },
-            }),
-            StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
-                address: Some(rng.gen()),
-                storage: Some(rng.gen()),
-                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
-                progress: EntitiesCheckpoint {
-                    processed: rng.gen::<u32>() as u64,
-                    total: u32::MAX as u64 + rng.gen::<u64>(),
-                },
-            }),
-            StageUnitCheckpoint::Entities(EntitiesCheckpoint {
-                processed: rng.gen::<u32>() as u64,
-                total: u32::MAX as u64 + rng.gen::<u64>(),
-            }),
-            StageUnitCheckpoint::Execution(ExecutionCheckpoint {
-                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
-                progress: EntitiesCheckpoint {
-                    processed: rng.gen::<u32>() as u64,
-                    total: u32::MAX as u64 + rng.gen::<u64>(),
-                },
-            }),
-            StageUnitCheckpoint::Headers(HeadersCheckpoint {
-                block_range: CheckpointBlockRange { from: rng.gen(), to: rng.gen() },
-                progress: EntitiesCheckpoint {
-                    processed: rng.gen::<u32>() as u64,
-                    total: u32::MAX as u64 + rng.gen::<u64>(),
-                },
-            }),
-        ];
-
-        for checkpoint in checkpoints {
-            let mut buf = Vec::new();
-            let encoded = checkpoint.to_compact(&mut buf);
-            let (decoded, _) = StageUnitCheckpoint::from_compact(&buf, encoded);
-            assert_eq!(decoded, checkpoint);
-        }
     }
 }

@@ -12,16 +12,19 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
+use reth_engine_primitives::EngineTypes;
+use reth_evm::ConfigureEvm;
 use reth_interfaces::{
     consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
 };
-use reth_node_api::{ConfigureEvmEnv, EngineTypes};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
+    eip4844::calculate_excess_blob_gas,
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
     ChainSpec, Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
     EMPTY_OMMER_ROOT_HASH, U256,
@@ -302,6 +305,27 @@ impl StorageInner {
             parent_beacon_block_root: None,
         };
 
+        if chain_spec.is_cancun_active_at_timestamp(timestamp) {
+            let parent = self.headers.get(&self.best_block);
+            header.parent_beacon_block_root =
+                parent.and_then(|parent| parent.parent_beacon_block_root);
+            header.blob_gas_used = Some(0);
+
+            let (parent_excess_blob_gas, parent_blob_gas_used) = match parent {
+                Some(parent_block)
+                    if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) =>
+                {
+                    (
+                        parent_block.excess_blob_gas.unwrap_or_default(),
+                        parent_block.blob_gas_used.unwrap_or_default(),
+                    )
+                }
+                _ => (0, 0),
+            };
+            header.excess_blob_gas =
+                Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+        }
+
         header.transactions_root = if transactions.is_empty() {
             EMPTY_TRANSACTIONS
         } else {
@@ -320,7 +344,7 @@ impl StorageInner {
         executor: &mut EVMProcessor<'_, EvmConfig>,
     ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvm,
     {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
         // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
@@ -347,17 +371,14 @@ impl StorageInner {
 
     /// Fills in the post-execution header fields based on the given BundleState and gas used.
     /// In doing this, the state root is calculated and the final header is returned.
-    ///
-    /// This is optimism-specific and contains the `ChainSpec` so the proper state root can be
-    /// calculated.
-    #[cfg(feature = "optimism")]
     pub(crate) fn complete_header<S: StateProviderFactory>(
         &self,
         mut header: Header,
         bundle_state: &BundleStateWithReceipts,
         client: &S,
         gas_used: u64,
-        chain_spec: &ChainSpec,
+        blob_gas_used: Option<u64>,
+        #[cfg(feature = "optimism")] chain_spec: &ChainSpec,
     ) -> Result<Header, BlockExecutionError> {
         let receipts = bundle_state.receipts_by_block(header.number);
         header.receipts_root = if receipts.is_empty() {
@@ -369,55 +390,28 @@ impl StorageInner {
                 .collect::<Vec<ReceiptWithBloom>>();
             header.logs_bloom =
                 receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
-            proofs::calculate_receipt_root_optimism(
-                &receipts_with_bloom,
-                chain_spec,
-                header.timestamp,
-            )
+            #[cfg(feature = "optimism")]
+            {
+                proofs::calculate_receipt_root_optimism(
+                    &receipts_with_bloom,
+                    chain_spec,
+                    header.timestamp,
+                )
+            }
+            #[cfg(not(feature = "optimism"))]
+            {
+                proofs::calculate_receipt_root(&receipts_with_bloom)
+            }
         };
 
         header.gas_used = gas_used;
+        header.blob_gas_used = blob_gas_used;
 
         // calculate the state root
         let state_root = client
             .latest()
-            .map_err(|_| BlockExecutionError::ProviderError)?
-            .state_root(bundle_state)
-            .unwrap();
-        header.state_root = state_root;
-        Ok(header)
-    }
-
-    /// Fills in the post-execution header fields based on the given BundleState and gas used.
-    /// In doing this, the state root is calculated and the final header is returned.
-    #[cfg(not(feature = "optimism"))]
-    pub(crate) fn complete_header<S: StateProviderFactory>(
-        &self,
-        mut header: Header,
-        bundle_state: &BundleStateWithReceipts,
-        client: &S,
-        gas_used: u64,
-    ) -> Result<Header, BlockExecutionError> {
-        let receipts = bundle_state.receipts_by_block(header.number);
-        header.receipts_root = if receipts.is_empty() {
-            EMPTY_RECEIPTS
-        } else {
-            let receipts_with_bloom = receipts
-                .iter()
-                .map(|r| (*r).clone().expect("receipts have not been pruned").into())
-                .collect::<Vec<ReceiptWithBloom>>();
-            header.logs_bloom =
-                receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
-            proofs::calculate_receipt_root(&receipts_with_bloom)
-        };
-
-        header.gas_used = gas_used;
-
-        // calculate the state root
-        let state_root = client
-            .latest()
-            .map_err(|_| BlockExecutionError::ProviderError)?
-            .state_root(bundle_state)
+            .map_err(BlockExecutionError::LatestBlock)?
+            .state_root(bundle_state.state())
             .unwrap();
         header.state_root = state_root;
         Ok(header)
@@ -434,7 +428,7 @@ impl StorageInner {
         evm_config: EvmConfig,
     ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvm,
     {
         let header = self.build_header_template(&transactions, chain_spec.clone());
 
@@ -446,7 +440,9 @@ impl StorageInner {
 
         // now execute the block
         let db = State::builder()
-            .with_database_boxed(Box::new(StateProviderDatabase::new(client.latest().unwrap())))
+            .with_database_boxed(Box::new(StateProviderDatabase::new(
+                client.latest().map_err(BlockExecutionError::LatestBlock)?,
+            )))
             .with_bundle_update()
             .build();
         let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db, evm_config);
@@ -456,6 +452,18 @@ impl StorageInner {
         let Block { header, body, .. } = block.block;
         let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
 
+        let blob_gas_used = if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
+            let mut sum_blob_gas_used = 0;
+            for tx in &body.transactions {
+                if let Some(blob_tx) = tx.transaction.as_eip4844() {
+                    sum_blob_gas_used += blob_tx.blob_gas();
+                }
+            }
+            Some(sum_blob_gas_used)
+        } else {
+            None
+        };
+
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 
         // fill in the rest of the fields
@@ -464,6 +472,7 @@ impl StorageInner {
             &bundle_state,
             client,
             gas_used,
+            blob_gas_used,
             #[cfg(feature = "optimism")]
             chain_spec.as_ref(),
         )?;

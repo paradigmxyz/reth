@@ -1,6 +1,6 @@
 use crate::{
-    bundle_state::BundleStateWithReceipts, BlockExecutor, BlockExecutorStats, ExecutorFactory,
-    PrunableBlockExecutor, StateProvider,
+    bundle_state::BundleStateWithReceipts, BlockExecutor, ExecutorFactory, PrunableBlockExecutor,
+    StateProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::executor::BlockExecutionError;
@@ -11,16 +11,7 @@ use std::sync::Arc;
 pub struct TestExecutor(pub Option<BundleStateWithReceipts>);
 
 impl BlockExecutor for TestExecutor {
-    fn execute(
-        &mut self,
-        _block: &BlockWithSenders,
-        _total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError> {
-        if self.0.is_none() {
-            return Err(BlockExecutionError::UnavailableForTest)
-        }
-        Ok(())
-    }
+    type Error = BlockExecutionError;
 
     fn execute_and_verify_receipt(
         &mut self,
@@ -43,10 +34,6 @@ impl BlockExecutor for TestExecutor {
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
         self.0.clone().unwrap_or_default()
-    }
-
-    fn stats(&self) -> BlockExecutorStats {
-        BlockExecutorStats::default()
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -77,7 +64,7 @@ impl ExecutorFactory for TestExecutorFactory {
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
         _sp: SP,
-    ) -> Box<dyn PrunableBlockExecutor + 'a> {
+    ) -> Box<dyn PrunableBlockExecutor<Error = <TestExecutor as BlockExecutor>::Error> + 'a> {
         let exec_res = self.exec_results.lock().pop();
         Box::new(TestExecutor(exec_res))
     }

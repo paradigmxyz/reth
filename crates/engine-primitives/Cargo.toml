@@ -1,0 +1,20 @@
+[package]
+name = "reth-engine-primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-rpc-types.workspace = true
+
+# misc
+serde.workspace = true
+thiserror.workspace = true

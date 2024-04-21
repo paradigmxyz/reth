@@ -51,12 +51,6 @@ pub use dev_args::DevArgs;
 mod pruning_args;
 pub use pruning_args::PruningArgs;
 
-/// RollupArgs for configuring the op-reth rollup
-#[cfg(feature = "optimism")]
-mod rollup_args;
-#[cfg(feature = "optimism")]
-pub use rollup_args::RollupArgs;
-
 pub mod utils;
 
 pub mod types;

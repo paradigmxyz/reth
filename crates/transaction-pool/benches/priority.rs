@@ -2,11 +2,7 @@
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use proptest::{
-    prelude::*,
-    strategy::{Strategy, ValueTree},
-    test_runner::TestRunner,
-};
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_transaction_pool::{blob_tx_priority, fee_delta};
 
 fn generate_test_data_fee_delta() -> (u128, u128) {
@@ -26,7 +22,7 @@ fn priority_bench(
     description: &str,
     input_data: (u128, u128, u128, u128),
 ) {
-    let group_id = format!("txpool | {}", description);
+    let group_id = format!("txpool | {description}");
 
     group.bench_function(group_id, |b| {
         b.iter(|| {
@@ -45,7 +41,7 @@ fn fee_jump_bench(
     description: &str,
     input_data: (u128, u128),
 ) {
-    let group_id = format!("txpool | {}", description);
+    let group_id = format!("txpool | {description}");
 
     group.bench_function(group_id, |b| {
         b.iter(|| {

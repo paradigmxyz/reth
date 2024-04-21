@@ -52,7 +52,6 @@ mod trusted_setup {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use std::sync::Arc;
 
         #[test]
         fn ensure_load_kzg_settings() {

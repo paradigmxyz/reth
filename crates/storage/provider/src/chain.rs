@@ -8,7 +8,7 @@ use reth_primitives::{
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
-use std::{borrow::Cow, collections::BTreeMap, fmt};
+use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive};
 
 /// A chain of blocks and their final state.
 ///
@@ -26,7 +26,8 @@ pub struct Chain {
     /// This state also contains the individual changes that lead to the current state.
     state: BundleStateWithReceipts,
     /// State trie updates after block is added to the chain.
-    /// NOTE: Currently, trie updates are present only if the block extends canonical chain.
+    /// NOTE: Currently, trie updates are present only for
+    /// single-block chains that extend the canonical chain.
     trie_updates: Option<TrieUpdates>,
 }
 
@@ -110,7 +111,7 @@ impl Chain {
             return Some(self.state.clone())
         }
 
-        if self.blocks.get(&block_number).is_some() {
+        if self.blocks.contains_key(&block_number) {
             let mut state = self.state.clone();
             state.revert_to(block_number);
             return Some(state)
@@ -177,6 +178,11 @@ impl Chain {
         self.blocks.len()
     }
 
+    /// Returns the range of block numbers in the chain.
+    pub fn range(&self) -> RangeInclusive<BlockNumber> {
+        self.first().number..=self.tip().number
+    }
+
     /// Get all receipts for the given block.
     pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&Receipt>> {
         let num = self.block_number(block_hash)?;
@@ -187,7 +193,7 @@ impl Chain {
     ///
     /// Attachment includes block number, block hash, transaction hash and transaction index.
     pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts> {
-        let mut receipt_attch = Vec::new();
+        let mut receipt_attach = Vec::new();
         for ((block_num, block), receipts) in self.blocks().iter().zip(self.state.receipts().iter())
         {
             let mut tx_receipts = Vec::new();
@@ -198,22 +204,17 @@ impl Chain {
                 ));
             }
             let block_num_hash = BlockNumHash::new(*block_num, block.hash());
-            receipt_attch.push(BlockReceipts { block: block_num_hash, tx_receipts });
+            receipt_attach.push(BlockReceipts { block: block_num_hash, tx_receipts });
         }
-        receipt_attch
+        receipt_attach
     }
 
     /// Append a single block with state to the chain.
     /// This method assumes that blocks attachment to the chain has already been validated.
-    pub fn append_block(
-        &mut self,
-        block: SealedBlockWithSenders,
-        state: BundleStateWithReceipts,
-        trie_updates: Option<TrieUpdates>,
-    ) {
+    pub fn append_block(&mut self, block: SealedBlockWithSenders, state: BundleStateWithReceipts) {
         self.blocks.insert(block.number, block);
         self.state.extend(state);
-        self.append_trie_updates(trie_updates);
+        self.trie_updates.take(); // reset
     }
 
     /// Merge two chains by appending the given chain into the current one.
@@ -233,21 +234,9 @@ impl Chain {
         // Insert blocks from other chain
         self.blocks.extend(other.blocks);
         self.state.extend(other.state);
-        self.append_trie_updates(other.trie_updates);
+        self.trie_updates.take(); // reset
 
         Ok(())
-    }
-
-    /// Append trie updates.
-    /// If existing or incoming trie updates are not set, reset as neither is valid anymore.
-    fn append_trie_updates(&mut self, other_trie_updates: Option<TrieUpdates>) {
-        if let Some((trie_updates, other)) = self.trie_updates.as_mut().zip(other_trie_updates) {
-            // Extend trie updates.
-            trie_updates.extend(other.into_iter());
-        } else {
-            // Reset trie updates as they are no longer valid.
-            self.trie_updates.take();
-        }
     }
 
     /// Split this chain at the given block.
@@ -320,26 +309,16 @@ pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithS
 
 impl<'a> fmt::Display for DisplayBlocksChain<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0.len() <= 3 {
-            write!(f, "[")?;
-            let mut iter = self.0.values().map(|block| block.num_hash());
-            if let Some(block_num_hash) = iter.next() {
-                write!(f, "{:?}", block_num_hash)?;
-                for block_num_hash_iter in iter {
-                    write!(f, ", {:?}", block_num_hash_iter)?;
-                }
-            }
-            write!(f, "]")?;
+        let mut list = f.debug_list();
+        let mut values = self.0.values().map(|block| block.num_hash());
+        if values.len() <= 3 {
+            list.entries(values);
         } else {
-            write!(
-                f,
-                "[{:?}, ..., {:?}]",
-                self.0.values().next().unwrap().num_hash(),
-                self.0.values().last().unwrap().num_hash()
-            )?;
+            list.entry(&values.next().unwrap());
+            list.entry(&format_args!("..."));
+            list.entry(&values.next_back().unwrap());
         }
-
-        Ok(())
+        list.finish()
     }
 }
 
@@ -471,11 +450,8 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Address, Receipts, B256};
-    use revm::{
-        db::BundleState,
-        primitives::{AccountInfo, HashMap},
-    };
+    use reth_primitives::{Receipts, B256};
+    use revm::primitives::{AccountInfo, HashMap};
 
     #[test]
     fn chain_append() {
@@ -553,8 +529,8 @@ mod tests {
         block2.set_hash(block2_hash);
         block2.senders.push(Address::new([4; 20]));
 
-        let mut block_state_extended = block_state1.clone();
-        block_state_extended.extend(block_state2.clone());
+        let mut block_state_extended = block_state1;
+        block_state_extended.extend(block_state2);
 
         let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, None);
 

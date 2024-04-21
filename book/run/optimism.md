@@ -66,16 +66,14 @@ This will build the `rethdb-reader` dylib and instruct the `op-node` build to st
 
 The `optimism` feature flag in `op-reth` adds several new CLI flags to the `reth` binary:
 1. `--rollup.sequencer-http <uri>` - The sequencer endpoint to connect to. Transactions sent to the `op-reth` EL are also forwarded to this sequencer endpoint for inclusion, as the sequencer is the entity that builds blocks on OP Stack chains.
-1. `--rollup.disable-tx-pool-gossip` - Disables gossiping of transactions in the mempool to peers. This can be ommitted for personal nodes, though providers should always opt to enable this flag.
-1. `--rollup.enable-genesis-walkback` - Disables setting the forkchoice status to tip on startup, making the `op-node` walk back to genesis and verify the integrity of the chain before starting to sync. This can be ommitted unless a corruption of local chainstate is suspected.
-
-Base's `rollup.json` files, which contain various configuration fields for the rollup, can be found in their [node][base-node] repository, under the respective L1 settlement layer's directory (`mainnet`, `goerli`, & `sepolia`).
+1. `--rollup.disable-tx-pool-gossip` - Disables gossiping of transactions in the mempool to peers. This can be omitted for personal nodes, though providers should always opt to enable this flag.
+1. `--rollup.enable-genesis-walkback` - Disables setting the forkchoice status to tip on startup, making the `op-node` walk back to genesis and verify the integrity of the chain before starting to sync. This can be omitted unless a corruption of local chainstate is suspected.
 
 First, ensure that your L1 archival node is running and synced to tip. Then, start `op-reth` with the `--rollup.sequencer-http` flag set to the `Base Mainnet` sequencer endpoint:
 ```sh
 op-reth node \
     --chain base \
-    --rollup.sequencer-http https://sequencer.base.org \
+    --rollup.sequencer-http https://mainnet-sequencer.base.org \
     --http \
     --ws \
     --authrpc.port 9551 \
@@ -85,9 +83,9 @@ op-reth node \
 Then, once `op-reth` has been started, start up the `op-node`:
 ```sh
 op-node \
+    --network="base-mainnet" \
     --l1=<your-L1-rpc> \
     --l2=http://localhost:9551 \
-    --rollup.config=/path/to/rollup.json \
     --l2.jwt-secret=/path/to/jwt.hex \
     --rpc.addr=0.0.0.0 \
     --rpc.port=7000 \
@@ -121,5 +119,3 @@ op-node \
 [op-node]: https://github.com/ethereum-optimism/optimism/tree/develop/op-node
 [magi]: https://github.com/a16z/magi
 [hildr]: https://github.com/optimism-java/hildr
-
-[base-node]: https://github.com/base-org/node/tree/main

@@ -26,6 +26,8 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 
 /// Extracts the [L1BlockInfo] from the L2 block. The L1 info transaction is always the first
 /// transaction in the L2 block.
+///
+/// Returns an error if the L1 info transaction is not found, if the block is empty.
 pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, BlockExecutionError> {
     let l1_info_tx_data = block
         .body
@@ -251,7 +253,7 @@ where
     // chain is an optimism chain, then we need to force-deploy the create2 deployer contract.
     if chain_spec.is_optimism() &&
         chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp - 2)
+        !chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp.saturating_sub(2))
     {
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 

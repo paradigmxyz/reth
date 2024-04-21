@@ -1,8 +1,8 @@
 //! Builder support for rpc components.
 
-use crate::components::FullNodeComponents;
 use futures::TryFutureExt;
 use reth_network::NetworkHandle;
+use reth_node_api::FullNodeComponents;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     node_config::NodeConfig,
@@ -14,6 +14,7 @@ use reth_node_core::{
         },
     },
 };
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_rpc::JwtSecret;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
@@ -94,7 +95,7 @@ impl<Node: FullNodeComponents> fmt::Debug for RpcHooks<Node> {
 }
 
 /// Event hook that is called once the rpc server is started.
-pub trait OnRpcStarted<Node: FullNodeComponents> {
+pub trait OnRpcStarted<Node: FullNodeComponents>: Send {
     /// The hook that is called once the rpc server is started.
     fn on_rpc_started(
         &self,
@@ -105,7 +106,7 @@ pub trait OnRpcStarted<Node: FullNodeComponents> {
 
 impl<Node, F> OnRpcStarted<Node> for F
 where
-    F: Fn(RpcContext<'_, Node>, RethRpcServerHandles) -> eyre::Result<()>,
+    F: Fn(RpcContext<'_, Node>, RethRpcServerHandles) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
 {
     fn on_rpc_started(
@@ -124,14 +125,14 @@ impl<Node: FullNodeComponents> OnRpcStarted<Node> for () {
 }
 
 /// Event hook that is called when the rpc server is started.
-pub trait ExtendRpcModules<Node: FullNodeComponents> {
+pub trait ExtendRpcModules<Node: FullNodeComponents>: Send {
     /// The hook that is called once the rpc server is started.
     fn extend_rpc_modules(&self, ctx: RpcContext<'_, Node>) -> eyre::Result<()>;
 }
 
 impl<Node, F> ExtendRpcModules<Node> for F
 where
-    F: Fn(RpcContext<'_, Node>) -> eyre::Result<()>,
+    F: Fn(RpcContext<'_, Node>) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
 {
     fn extend_rpc_modules(&self, ctx: RpcContext<'_, Node>) -> eyre::Result<()> {
@@ -223,6 +224,26 @@ impl<'a, Node: FullNodeComponents> RpcContext<'a, Node> {
     pub fn node(&self) -> &Node {
         &self.node
     }
+
+    /// Returns the transaction pool instance.
+    pub fn pool(&self) -> &Node::Pool {
+        self.node.pool()
+    }
+
+    /// Returns provider to interact with the node.
+    pub fn provider(&self) -> &Node::Provider {
+        self.node.provider()
+    }
+
+    /// Returns the handle to the network
+    pub fn network(&self) -> &NetworkHandle {
+        self.node.network()
+    }
+
+    /// Returns the handle to the payload builder service
+    pub fn payload_builder(&self) -> &PayloadBuilderHandle<Node::Engine> {
+        self.node.payload_builder()
+    }
 }
 
 /// Launch the rpc servers.
@@ -279,7 +300,12 @@ where
 
     let launch_auth = auth_module.clone().start_server(auth_config).map_ok(|handle| {
         let addr = handle.local_addr();
-        info!(target: "reth::cli", url=%addr, "RPC auth server started");
+        if let Some(ipc_endpoint) = handle.ipc_endpoint() {
+            let ipc_endpoint = ipc_endpoint.path();
+            info!(target: "reth::cli", url=%addr, ipc_endpoint=%ipc_endpoint,"RPC auth server started");
+        } else {
+            info!(target: "reth::cli", url=%addr, "RPC auth server started");
+        }
         handle
     });
 

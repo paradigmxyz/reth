@@ -1,8 +1,10 @@
-use crate::{components::FullNodeComponents, node::FullNode};
+use crate::node::FullNode;
+use reth_node_api::FullNodeComponents;
 use reth_node_core::exit::NodeExitFuture;
 use std::fmt;
 
 /// A Handle to the launched node.
+#[must_use = "Needs to await the node exit future"]
 pub struct NodeHandle<Node: FullNodeComponents> {
     /// All node components.
     pub node: FullNode<Node>,

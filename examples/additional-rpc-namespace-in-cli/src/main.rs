@@ -14,60 +14,46 @@
 
 use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth::cli::{
-    components::{RethNodeComponents, RethRpcComponents},
-    config::RethRpcConfig,
-    ext::{RethCliExt, RethNodeCommandConfig},
-    Cli,
-};
+use reth::cli::Cli;
+use reth_node_ethereum::EthereumNode;
 use reth_transaction_pool::TransactionPool;
 
 fn main() {
-    Cli::<MyRethCliExt>::parse().run().unwrap();
-}
+    Cli::<RethCliTxpoolExt>::parse()
+        .run(|builder, args| async move {
+            let handle = builder
+                .node(EthereumNode::default())
+                .extend_rpc_modules(move |ctx| {
+                    if !args.enable_ext {
+                        return Ok(())
+                    }
 
-/// The type that tells the reth CLI what extensions to use
-struct MyRethCliExt;
+                    // here we get the configured pool.
+                    let pool = ctx.pool().clone();
 
-impl RethCliExt for MyRethCliExt {
-    /// This tells the reth CLI to install the `txpool` rpc namespace via `RethCliTxpoolExt`
-    type Node = RethCliTxpoolExt;
+                    let ext = TxpoolExt { pool };
+
+                    // now we merge our extension namespace into all configured transports
+                    ctx.modules.merge_configured(ext.into_rpc())?;
+
+                    println!("txpool extension enabled");
+
+                    Ok(())
+                })
+                .launch()
+                .await?;
+
+            handle.wait_for_node_exit().await
+        })
+        .unwrap();
 }
 
 /// Our custom cli args extension that adds one flag to reth default CLI.
 #[derive(Debug, Clone, Copy, Default, clap::Args)]
 struct RethCliTxpoolExt {
     /// CLI flag to enable the txpool extension namespace
-    #[clap(long)]
+    #[arg(long)]
     pub enable_ext: bool,
-}
-
-impl RethNodeCommandConfig for RethCliTxpoolExt {
-    // This is the entrypoint for the CLI to extend the RPC server with custom rpc namespaces.
-    fn extend_rpc_modules<Conf, Reth>(
-        &mut self,
-        _config: &Conf,
-        _components: &Reth,
-        rpc_components: RethRpcComponents<'_, Reth>,
-    ) -> eyre::Result<()>
-    where
-        Conf: RethRpcConfig,
-        Reth: RethNodeComponents,
-    {
-        if !self.enable_ext {
-            return Ok(())
-        }
-
-        // here we get the configured pool type from the CLI.
-        let pool = rpc_components.registry.pool().clone();
-        let ext = TxpoolExt { pool };
-
-        // now we merge our extension namespace into all configured transports
-        rpc_components.modules.merge_configured(ext.into_rpc())?;
-
-        println!("txpool extension enabled");
-        Ok(())
-    }
 }
 
 /// trait interface for a custom rpc namespace: `txpool`

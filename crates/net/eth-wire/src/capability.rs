@@ -359,32 +359,32 @@ pub struct SharedCapabilities(Vec<SharedCapability>);
 
 impl SharedCapabilities {
     /// Merges the local and peer capabilities and returns a new [`SharedCapabilities`] instance.
+    #[inline]
     pub fn try_new(
         local_protocols: Vec<Protocol>,
         peer_capabilities: Vec<Capability>,
     ) -> Result<Self, P2PStreamError> {
-        Ok(Self(shared_capability_offsets(local_protocols, peer_capabilities)?))
+        shared_capability_offsets(local_protocols, peer_capabilities).map(Self)
     }
 
     /// Iterates over the shared capabilities.
+    #[inline]
     pub fn iter_caps(&self) -> impl Iterator<Item = &SharedCapability> {
         self.0.iter()
     }
 
     /// Returns the eth capability if it is shared.
+    #[inline]
     pub fn eth(&self) -> Result<&SharedCapability, P2PStreamError> {
-        for cap in self.iter_caps() {
-            if cap.is_eth() {
-                return Ok(cap)
-            }
-        }
-        Err(P2PStreamError::CapabilityNotShared)
+        self.iter_caps().find(|c| c.is_eth()).ok_or(P2PStreamError::CapabilityNotShared)
     }
 
     /// Returns the negotiated eth version if it is shared.
     #[inline]
     pub fn eth_version(&self) -> Result<EthVersion, P2PStreamError> {
-        self.eth().map(|cap| cap.eth_version().expect("is eth; qed"))
+        self.iter_caps()
+            .find_map(SharedCapability::eth_version)
+            .ok_or(P2PStreamError::CapabilityNotShared)
     }
 
     /// Returns true if the shared capabilities contain the given capability.
@@ -526,15 +526,13 @@ pub fn shared_capability_offsets(
     // alphabetic order.
     let mut offset = MAX_RESERVED_MESSAGE_ID + 1;
     for name in shared_capability_names {
-        let proto_version = shared_capabilities.get(&name).expect("shared; qed");
-
+        let proto_version = &shared_capabilities[&name];
         let shared_capability = SharedCapability::new(
             &name,
             proto_version.version as u8,
             offset,
             proto_version.messages,
         )?;
-
         offset += shared_capability.num_messages();
         shared_with_offsets.push(shared_capability);
     }

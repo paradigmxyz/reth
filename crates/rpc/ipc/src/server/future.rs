@@ -195,7 +195,7 @@ impl ConnectionGuard {
         match self.0.clone().try_acquire_owned() {
             Ok(guard) => Some(guard),
             Err(TryAcquireError::Closed) => {
-                unreachable!("Semaphore::Close is never called and can't be closed; qed")
+                unreachable!("Semaphore::Close is never called and can't be closed")
             }
             Err(TryAcquireError::NoPermits) => None,
         }

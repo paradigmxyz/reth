@@ -11,10 +11,13 @@ use crate::args::{
 };
 use clap::Parser;
 use reth_db::{
-    cursor::DbCursorRO, database::Database, init_db, table::TableImporter, tables,
-    transaction::DbTx, DatabaseEnv,
+    cursor::DbCursorRO, database::Database, init_db, mdbx::DatabaseArguments,
+    models::client_version::ClientVersion, table::TableImporter, tables, transaction::DbTx,
+    DatabaseEnv,
 };
+use reth_node_core::dirs::PlatformPath;
 use reth_primitives::ChainSpec;
+use reth_provider::ProviderFactory;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -29,7 +32,6 @@ use execution::dump_execution_stage;
 
 mod merkle;
 use merkle::dump_merkle_stage;
-use reth_db::mdbx::DatabaseArguments;
 
 /// `reth dump-stage` command
 #[derive(Debug, Parser)]
@@ -56,10 +58,10 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Stages,
 }
 
@@ -79,9 +81,9 @@ pub enum Stages {
 /// Stage command that takes a range
 #[derive(Debug, Clone, Parser)]
 pub struct StageCommand {
-    /// The path to the new database folder.
+    /// The path to the new datadir folder.
     #[arg(long, value_name = "OUTPUT_PATH", verbatim_doc_comment)]
-    output_db: PathBuf,
+    output_datadir: PlatformPath<DataDirPath>,
 
     /// From which block.
     #[arg(long, short)]
@@ -102,24 +104,54 @@ impl Command {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db =
-            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
+        let db = Arc::new(init_db(db_path, self.db.database_args())?);
+        let provider_factory =
+            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
+
         info!(target: "reth::cli", "Database opened");
 
-        let tool = DbTool::new(&db, self.chain.clone())?;
+        let tool = DbTool::new(provider_factory, self.chain.clone())?;
 
         match &self.command {
-            Stages::Execution(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_execution_stage(&tool, *from, *to, output_db, *dry_run).await?
+            Stages::Execution(StageCommand { output_datadir, from, to, dry_run, .. }) => {
+                dump_execution_stage(
+                    &tool,
+                    *from,
+                    *to,
+                    output_datadir.with_chain(self.chain.chain),
+                    *dry_run,
+                )
+                .await?
             }
-            Stages::StorageHashing(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_hashing_storage_stage(&tool, *from, *to, output_db, *dry_run).await?
+            Stages::StorageHashing(StageCommand { output_datadir, from, to, dry_run, .. }) => {
+                dump_hashing_storage_stage(
+                    &tool,
+                    *from,
+                    *to,
+                    output_datadir.with_chain(self.chain.chain),
+                    *dry_run,
+                )
+                .await?
             }
-            Stages::AccountHashing(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_hashing_account_stage(&tool, *from, *to, output_db, *dry_run).await?
+            Stages::AccountHashing(StageCommand { output_datadir, from, to, dry_run, .. }) => {
+                dump_hashing_account_stage(
+                    &tool,
+                    *from,
+                    *to,
+                    output_datadir.with_chain(self.chain.chain),
+                    *dry_run,
+                )
+                .await?
             }
-            Stages::Merkle(StageCommand { output_db, from, to, dry_run, .. }) => {
-                dump_merkle_stage(&tool, *from, *to, output_db, *dry_run).await?
+            Stages::Merkle(StageCommand { output_datadir, from, to, dry_run, .. }) => {
+                dump_merkle_stage(
+                    &tool,
+                    *from,
+                    *to,
+                    output_datadir.with_chain(self.chain.chain),
+                    *dry_run,
+                )
+                .await?
             }
         }
 
@@ -133,24 +165,27 @@ pub(crate) fn setup<DB: Database>(
     from: u64,
     to: u64,
     output_db: &PathBuf,
-    db_tool: &DbTool<'_, DB>,
+    db_tool: &DbTool<DB>,
 ) -> eyre::Result<(DatabaseEnv, u64)> {
     assert!(from < to, "FROM block should be bigger than TO block.");
 
     info!(target: "reth::cli", ?output_db, "Creating separate db");
 
-    let output_db = init_db(output_db, Default::default())?;
+    let output_datadir = init_db(output_db, DatabaseArguments::new(ClientVersion::default()))?;
 
-    output_db.update(|tx| {
+    output_datadir.update(|tx| {
         tx.import_table_with_range::<tables::BlockBodyIndices, _>(
-            &db_tool.db.tx()?,
+            &db_tool.provider_factory.db_ref().tx()?,
             Some(from - 1),
             to + 1,
         )
     })??;
 
-    let (tip_block_number, _) =
-        db_tool.db.view(|tx| tx.cursor_read::<tables::BlockBodyIndices>()?.last())??.expect("some");
+    let (tip_block_number, _) = db_tool
+        .provider_factory
+        .db_ref()
+        .view(|tx| tx.cursor_read::<tables::BlockBodyIndices>()?.last())??
+        .expect("some");
 
-    Ok((output_db, tip_block_number))
+    Ok((output_datadir, tip_block_number))
 }

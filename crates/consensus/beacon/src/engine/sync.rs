@@ -1,6 +1,9 @@
 //! Sync management for the engine implementation.
 
-use crate::{engine::metrics::EngineSyncMetrics, BeaconConsensus};
+use crate::{
+    engine::metrics::EngineSyncMetrics, BeaconConsensus, BeaconConsensusEngineEvent,
+    ConsensusEngineLiveSyncProgress,
+};
 use futures::FutureExt;
 use reth_db::database::Database;
 use reth_interfaces::p2p::{
@@ -9,15 +12,16 @@ use reth_interfaces::p2p::{
     headers::client::HeadersClient,
 };
 use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, B256};
-use reth_stages::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
+use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
+use reth_tokio_util::EventListeners;
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tracing::trace;
 
 /// Manages syncing under the control of the engine.
@@ -45,6 +49,8 @@ where
     inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
     /// In-flight full block _range_ requests in progress.
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
+    /// Listeners for engine events.
+    listeners: EventListeners<BeaconConsensusEngineEvent>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
     range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock>>,
@@ -70,6 +76,7 @@ where
         run_pipeline_continuously: bool,
         max_block: Option<BlockNumber>,
         chain_spec: Arc<ChainSpec>,
+        listeners: EventListeners<BeaconConsensusEngineEvent>,
     ) -> Self {
         Self {
             full_block_client: FullBlockClient::new(
@@ -83,6 +90,7 @@ where
             inflight_block_range_requests: Vec::new(),
             range_buffered_blocks: BinaryHeap::new(),
             run_pipeline_continuously,
+            listeners,
             max_block,
             metrics: EngineSyncMetrics::default(),
         }
@@ -117,6 +125,11 @@ where
     /// Returns whether or not the sync controller is set to run the pipeline continuously.
     pub(crate) fn run_pipeline_continuously(&self) -> bool {
         self.run_pipeline_continuously
+    }
+
+    /// Pushes an [UnboundedSender] to the sync controller's listeners.
+    pub(crate) fn push_listener(&mut self, listener: UnboundedSender<BeaconConsensusEngineEvent>) {
+        self.listeners.push_listener(listener);
     }
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
@@ -155,6 +168,13 @@ where
                 "start downloading full block range."
             );
 
+            // notify listeners that we're downloading a block range
+            self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
+                ConsensusEngineLiveSyncProgress::DownloadingBlocks {
+                    remaining_blocks: count,
+                    target: hash,
+                },
+            ));
             let request = self.full_block_client.get_full_block_range(hash, count);
             self.inflight_block_range_requests.push(request);
         }
@@ -176,6 +196,15 @@ where
             ?hash,
             "Start downloading full block"
         );
+
+        // notify listeners that we're downloading a block
+        self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
+            ConsensusEngineLiveSyncProgress::DownloadingBlocks {
+                remaining_blocks: 1,
+                target: hash,
+            },
+        ));
+
         let request = self.full_block_client.get_full_block(hash);
         self.inflight_full_block_requests.push(request);
 
@@ -185,7 +214,13 @@ where
     }
 
     /// Sets a new target to sync the pipeline to.
+    ///
+    /// But ensures the target is not the zero hash.
     pub(crate) fn set_pipeline_sync_target(&mut self, target: B256) {
+        if target.is_zero() {
+            // precaution to never sync to the zero hash
+            return
+        }
         self.pending_pipeline_target = Some(target);
     }
 
@@ -397,16 +432,17 @@ mod tests {
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
     use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpec,
-        ChainSpecBuilder, Header, SealedHeader, MAINNET,
+        constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
+        Header, PruneModes, SealedHeader, MAINNET,
     };
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
         BundleStateWithReceipts,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
+    use reth_static_file::StaticFileProducer;
     use reth_tasks::TokioTaskExecutor;
-    use std::{collections::VecDeque, future::poll_fn, ops::Range, sync::Arc};
+    use std::{collections::VecDeque, future::poll_fn, ops::Range};
     use tokio::sync::watch;
 
     struct TestPipelineBuilder {
@@ -465,7 +501,15 @@ mod tests {
                 pipeline = pipeline.with_max_block(max_block);
             }
 
-            pipeline.build(create_test_provider_factory_with_chain_spec(chain_spec))
+            let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+
+            let static_file_producer = StaticFileProducer::new(
+                provider_factory.clone(),
+                provider_factory.static_file_provider(),
+                PruneModes::default(),
+            );
+
+            pipeline.build(provider_factory, static_file_producer)
         }
     }
 
@@ -516,6 +560,7 @@ mod tests {
                 false,
                 self.max_block,
                 chain_spec,
+                Default::default(),
             )
         }
     }

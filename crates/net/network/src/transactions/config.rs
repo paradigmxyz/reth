@@ -1,5 +1,5 @@
 use super::{
-    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST,
+    DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 use derive_more::Constructor;
@@ -29,7 +29,7 @@ pub struct TransactionFetcherConfig {
 
 impl Default for TransactionFetcherConfig {
     fn default() -> Self {
-        Self { soft_limit_byte_size_pooled_transactions_response: SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_PACK_GET_POOLED_TRANSACTIONS_REQUEST
+        Self { soft_limit_byte_size_pooled_transactions_response: SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ
         }
     }
 }

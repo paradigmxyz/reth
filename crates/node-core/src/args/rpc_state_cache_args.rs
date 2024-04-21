@@ -6,8 +6,7 @@ use reth_rpc::eth::cache::{
 
 /// Parameters to configure RPC state cache.
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
-#[clap(next_help_heading = "RPC State Cache")]
-
+#[command(next_help_heading = "RPC State Cache")]
 pub struct RpcStateCacheArgs {
     /// Max number of blocks in cache.
     #[arg(

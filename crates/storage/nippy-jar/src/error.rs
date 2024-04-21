@@ -7,6 +7,8 @@ pub enum NippyJarError {
     Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
     #[error(transparent)]
     Disconnect(#[from] std::io::Error),
+    #[error(transparent)]
+    FileSystem(#[from] reth_primitives::fs::FsPathError),
     #[error("{0}")]
     Custom(String),
     #[error(transparent)]

@@ -12,7 +12,6 @@ use reth_rpc_types::{
 /// A subset of the [EthBundleApi] API interface that only supports `eth_callBundle`.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-#[async_trait::async_trait]
 pub trait EthCallBundleApi {
     /// `eth_callBundle` can be used to simulate a bundle against a specific block number,
     /// including simulating a bundle at the top of the next block.
@@ -28,7 +27,6 @@ pub trait EthCallBundleApi {
 /// See also <https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-#[async_trait::async_trait]
 pub trait EthBundleApi {
     /// `eth_sendBundle` can be used to send your bundles to the builder.
     #[method(name = "sendBundle")]

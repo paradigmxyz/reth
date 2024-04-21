@@ -80,7 +80,7 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
         gas_price: rng.gen::<u16>().into(),
         gas_limit: rng.gen::<u16>().into(),
         to: TransactionKind::Call(rng.gen()),
-        value: U256::from(rng.gen::<u16>()).into(),
+        value: U256::from(rng.gen::<u16>()),
         input: Bytes::default(),
     })
 }
@@ -196,7 +196,6 @@ pub type ChangeSet = Vec<(Address, Account, Vec<StorageEntry>)>;
 type AccountState = (Account, Vec<StorageEntry>);
 
 /// Generate a range of changesets for given blocks and accounts.
-/// Assumes all accounts start with an empty storage.
 ///
 /// Returns a Vec of account and storage changes for each block,
 /// along with the final state of all accounts and storages.
@@ -216,7 +215,7 @@ where
         .map(|(addr, (acc, st))| (addr, (acc, st.into_iter().map(|e| (e.key, e.value)).collect())))
         .collect();
 
-    let valid_addresses = state.keys().copied().collect();
+    let valid_addresses = state.keys().copied().collect::<Vec<_>>();
 
     let mut changesets = Vec::new();
 
@@ -251,7 +250,7 @@ where
                     }
                     old
                 };
-                Some(StorageEntry { value: old.unwrap_or(U256::from(0)), ..entry })
+                Some(StorageEntry { value: old.unwrap_or(U256::ZERO), ..entry })
             })
             .collect();
         old_entries.sort_by_key(|entry| entry.key);
@@ -279,7 +278,7 @@ where
 /// Returns two addresses, a balance_change, and a Vec of new storage entries.
 pub fn random_account_change<R: Rng>(
     rng: &mut R,
-    valid_addresses: &Vec<Address>,
+    valid_addresses: &[Address],
     n_storage_changes: Range<u64>,
     key_range: Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
@@ -324,12 +323,9 @@ pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
 }
 
 /// Generate random Externally Owned Accounts
-pub fn random_eoa_account_range<R: Rng>(
-    rng: &mut R,
-    acc_range: Range<u64>,
-) -> Vec<(Address, Account)> {
-    let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
-    for _ in acc_range {
+pub fn random_eoa_accounts<R: Rng>(rng: &mut R, accounts_num: usize) -> Vec<(Address, Account)> {
+    let mut accounts = Vec::with_capacity(accounts_num);
+    for _ in 0..accounts_num {
         accounts.push(random_eoa_account(rng))
     }
     accounts
@@ -343,6 +339,7 @@ pub fn random_contract_account_range<R: Rng>(
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
         let (address, eoa_account) = random_eoa_account(rng);
+        // todo: can a non-eoa account have a nonce > 0?
         let account = Account { bytecode_hash: Some(rng.gen()), ..eoa_account };
         accounts.push((address, account))
     }
@@ -377,20 +374,17 @@ pub fn random_receipt<R: Rng>(
 pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: Option<u8>) -> Log {
     let data_byte_count = rng.gen::<u8>() as usize;
     let topics_count = topics_count.unwrap_or_else(|| rng.gen()) as usize;
-    Log {
-        address: address.unwrap_or_else(|| rng.gen()),
-        topics: std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
-        data: std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
-    }
+    Log::new_unchecked(
+        address.unwrap_or_else(|| rng.gen()),
+        std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
+        std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{
-        hex, public_key_to_address, AccessList, Signature, TransactionKind, TxEip1559,
-    };
-    use secp256k1::KeyPair;
+    use reth_primitives::{hex, public_key_to_address, AccessList, Signature, TxEip1559};
     use std::str::FromStr;
 
     #[test]
@@ -402,7 +396,7 @@ mod tests {
             nonce: 0x42,
             gas_limit: 44386,
             to: TransactionKind::Call(hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
-            value: 0_u64.into(),
+            value: U256::from(0_u64),
             input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
             max_fee_per_gas: 0x4a817c800,
             max_priority_fee_per_gas: 0x3b9aca00,
@@ -434,16 +428,14 @@ mod tests {
             gas_price: 20 * 10_u128.pow(9),
             gas_limit: 21000,
             to: TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
-            value: 10_u128.pow(18).into(),
+            value: U256::from(10_u128.pow(18)),
             input: Bytes::default(),
         });
 
         // TODO resolve dependency issue
-        // let mut encoded = BytesMut::new();
-        // transaction.encode(&mut encoded);
         // let expected =
         // hex!("ec098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a764000080018080");
-        // assert_eq!(expected, encoded.as_ref());
+        // assert_eq!(expected, &alloy_rlp::encode(transaction));
 
         let hash = transaction.signature_hash();
         let expected =

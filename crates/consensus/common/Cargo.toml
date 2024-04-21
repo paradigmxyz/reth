@@ -15,15 +15,11 @@ workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
-alloy-chains.workspace = true
-# misc
-cfg-if = "1.0.0"
 
 [dev-dependencies]
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-assert_matches.workspace = true
-mockall = "0.11.3"
+mockall = "0.12"
 
 [features]
 optimism = ["reth-primitives/optimism"]

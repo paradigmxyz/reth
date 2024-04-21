@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
+readme = "README.md"
 
 [lints]
 workspace = true
@@ -15,6 +16,7 @@ workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
 reth-blockchain-tree.workspace = true
+reth-exex.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
 reth-db.workspace = true
@@ -29,11 +31,12 @@ reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
 reth-interfaces.workspace = true
-reth-snapshot.workspace = true
+reth-static-file.workspace = true
 reth-prune.workspace = true
 reth-stages.workspace = true
 reth-config.workspace = true
-
+reth-downloaders.workspace = true
+reth-node-events.workspace = true
 
 ## async
 futures.workspace = true
@@ -45,6 +48,8 @@ tokio = { workspace = true, features = [
 ] }
 
 ## misc
+aquamarine.workspace = true
 eyre.workspace = true
 fdlimit = "0.3.0"
 confy.workspace = true
+rayon.workspace = true

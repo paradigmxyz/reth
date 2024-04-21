@@ -1,7 +1,7 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_provider::DatabaseProviderRW;
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 
 /// The finish stage.
 ///
@@ -45,6 +45,7 @@ mod tests {
         generators::{random_header, random_header_range},
     };
     use reth_primitives::SealedHeader;
+    use reth_provider::providers::StaticFileWriter;
 
     stage_test_suite_ext!(FinishTestRunner, finish);
 

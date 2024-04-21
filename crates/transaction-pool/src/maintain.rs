@@ -13,8 +13,8 @@ use futures_util::{
 };
 use reth_primitives::{
     fs::FsPathError, Address, BlockHash, BlockNumber, BlockNumberOrTag,
-    FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, TransactionSigned,
+    FromRecoveredPooledTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
+    TransactionSigned, TryFromRecoveredTransaction,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
@@ -233,7 +233,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             Some(Ok(Err(res))) => {
                 // Failed to load accounts from state
                 let (accs, err) = *res;
-                debug!(target: "txpool", ?err, "failed to load accounts");
+                debug!(target: "txpool", %err, "failed to load accounts");
                 dirty_addresses.extend(accs);
             }
             Some(Err(_)) => {
@@ -292,7 +292,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                             let (addresses, err) = *err;
                             debug!(
                                 target: "txpool",
-                                ?err,
+                                %err,
                                 "failed to load missing changed accounts at new tip: {:?}",
                                 new_tip.hash()
                             );
@@ -333,9 +333,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     <P as TransactionPool>::Transaction::from_recovered_pooled_transaction,
                                 )
                         } else {
-                            Some(<P as TransactionPool>::Transaction::from_recovered_transaction(
+                            <P as TransactionPool>::Transaction::try_from_recovered_transaction(
                                 tx,
-                            ))
+                            ).ok()
                         }
                     })
                     .collect::<Vec<_>>();
@@ -347,7 +347,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     pending_block_blob_fee,
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
-                    mined_transactions: new_mined_transactions.into_iter().collect(),
+                    mined_transactions: new_blocks.transaction_hashes().collect(),
                 };
                 pool.on_canonical_state_change(update);
 
@@ -525,10 +525,11 @@ fn load_accounts<Client, I>(
     addresses: I,
 ) -> Result<LoadedAccounts, Box<(HashSet<Address>, ProviderError)>>
 where
-    I: Iterator<Item = Address>,
+    I: IntoIterator<Item = Address>,
 
     Client: StateProviderFactory,
 {
+    let addresses = addresses.into_iter();
     let mut res = LoadedAccounts::default();
     let state = match client.history_by_block_hash(at) {
         Ok(state) => state,
@@ -583,8 +584,13 @@ where
 
     let pool_transactions = txs_signed
         .into_iter()
-        .filter_map(|tx| tx.try_ecrecovered().map(<P::Transaction>::from_recovered_transaction))
+        .filter_map(|tx| tx.try_ecrecovered())
+        .filter_map(|tx| {
+            // Filter out errors
+            <P as TransactionPool>::Transaction::try_from_recovered_transaction(tx).ok()
+        })
         .collect::<Vec<_>>();
+
     let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
 
     info!(target: "txpool", txs_file =?file_path, num_txs=%outcome.len(), "Successfully reinserted local transactions from file");
@@ -608,7 +614,7 @@ where
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();
-    let mut buf = alloy_rlp::BytesMut::new();
+    let mut buf = Vec::new();
     alloy_rlp::encode_list(&local_transactions, &mut buf);
     info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
@@ -663,7 +669,6 @@ pub async fn backup_local_transactions_task<P>(
     drop(graceful_guard)
 }
 
-#[cfg(not(feature = "optimism"))]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -671,9 +676,7 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
     };
-    use reth_primitives::{
-        fs, hex, FromRecoveredPooledTransaction, PooledTransactionsElement, MAINNET, U256,
-    };
+    use reth_primitives::{fs, hex, PooledTransactionsElement, MAINNET, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 
@@ -693,7 +696,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let transactions_path = temp_dir.path().join(FILENAME).with_extension(EXTENSION);
         let tx_bytes = hex!("02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507");
-        let tx = PooledTransactionsElement::decode_enveloped(tx_bytes.into()).unwrap();
+        let tx = PooledTransactionsElement::decode_enveloped(&mut &tx_bytes[..]).unwrap();
         let provider = MockEthProvider::default();
         let transaction = EthPooledTransaction::from_recovered_pooled_transaction(
             tx.try_into_ecrecovered().unwrap(),

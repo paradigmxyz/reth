@@ -151,7 +151,7 @@
 
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
-use reth_eth_wire::HandleAnnouncement;
+use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
@@ -242,8 +242,6 @@ where
     ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
         futures_util::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
             .await
-            .into_iter()
-            .collect()
     }
 
     /// Validates the given transaction
@@ -318,7 +316,6 @@ where
 }
 
 /// implements the `TransactionPool` interface for various transaction pool API consumers.
-#[async_trait::async_trait]
 impl<V, T, S> TransactionPool for Pool<V, T, S>
 where
     V: TransactionValidator,
@@ -350,7 +347,8 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
-        self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
+        let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
+        results.pop().expect("result length is the same as the input")
     }
 
     async fn add_transactions(
@@ -416,6 +414,10 @@ where
         self.pool.get_pooled_transaction_elements(tx_hashes, limit)
     }
 
+    fn get_pooled_transaction_element(&self, tx_hash: TxHash) -> Option<PooledTransactionsElement> {
+        self.pool.get_pooled_transaction_element(tx_hash)
+    }
+
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
@@ -455,9 +457,9 @@ where
         self.pool.remove_transactions(hashes)
     }
 
-    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
+    fn retain_unknown<A>(&self, announcement: &mut A)
     where
-        A: HandleAnnouncement,
+        A: HandleMempoolData,
     {
         self.pool.retain_unknown(announcement)
     }
@@ -521,7 +523,7 @@ where
     }
 }
 
-impl<V: TransactionValidator, T: TransactionOrdering, S> TransactionPoolExt for Pool<V, T, S>
+impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
 where
     V: TransactionValidator,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,

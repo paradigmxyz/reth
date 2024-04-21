@@ -1,26 +1,35 @@
-//! Validation of [`NewPooledTransactionHashes66`] and [`NewPooledTransactionHashes68`]
+//! Validation of [`NewPooledTransactionHashes66`](reth_eth_wire::NewPooledTransactionHashes66)
+//! and [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)
 //! announcements. Validation and filtering of announcements is network dependent.
 
-use std::{collections::HashMap, mem};
+use std::{fmt, fmt::Display, mem};
 
-use derive_more::{Deref, DerefMut, Display};
-use itertools::izip;
+use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
+use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
-    NewPooledTransactionHashes66, NewPooledTransactionHashes68, ValidAnnouncementData,
+    DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
 };
 use reth_primitives::{Signature, TxHash, TxType};
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// The size of a decoded signature in bytes.
 pub const SIGNATURE_DECODED_SIZE_BYTES: usize = mem::size_of::<Signature>();
 
-/// Interface for validating a `(ty, size, hash)` tuple from a [`NewPooledTransactionHashes68`].
+/// Interface for validating a `(ty, size, hash)` tuple from a
+/// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)..
 pub trait ValidateTx68 {
-    /// Validates a [`NewPooledTransactionHashes68`] entry. Returns [`ValidationOutcome`] which
-    /// signals to the caller wether to fetch the transaction or wether to drop it, and wether the
-    /// sender of the announcement should be penalized.
-    fn should_fetch(&self, ty: u8, hash: TxHash, size: usize) -> ValidationOutcome;
+    /// Validates a [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)
+    /// entry. Returns [`ValidationOutcome`] which signals to the caller whether to fetch the
+    /// transaction or wether to drop it, and whether the sender of the announcement should be
+    /// penalized.
+    fn should_fetch(
+        &self,
+        ty: u8,
+        hash: &TxHash,
+        size: usize,
+        tx_types_counter: &mut TxTypesCounter,
+    ) -> ValidationOutcome;
 
     /// Returns the reasonable maximum encoded transaction length configured for this network, if
     /// any. This property is not spec'ed out but can be inferred by looking how much data can be
@@ -42,9 +51,9 @@ pub trait ValidateTx68 {
     fn strict_min_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
 }
 
-/// Outcomes from validating a `(ty, hash, size)` entry from a [`NewPooledTransactionHashes68`].
-/// Signals to the caller how to deal with an announcement entry and the peer who sent the
-/// announcement.
+/// Outcomes from validating a `(ty, hash, size)` entry from a
+/// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68). Signals to the
+/// caller how to deal with an announcement entry and the peer who sent the announcement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationOutcome {
     /// Tells the caller to keep the entry in the announcement for fetch.
@@ -56,30 +65,68 @@ pub enum ValidationOutcome {
     ReportPeer,
 }
 
-/// Filters valid entries in [`NewPooledTransactionHashes68`] and [`NewPooledTransactionHashes66`]
-/// in place, and flags misbehaving peers.
+/// Generic filter for announcements and responses. Checks for empty message and unique hashes/
+/// transactions in message.
+pub trait PartiallyFilterMessage {
+    /// Removes duplicate entries from a mempool message. Returns [`FilterOutcome::ReportPeer`] if
+    /// the caller should penalize the peer, otherwise [`FilterOutcome::Ok`].
+    fn partially_filter_valid_entries<V>(
+        &self,
+        msg: impl DedupPayload<Value = V> + fmt::Debug,
+    ) -> (FilterOutcome, PartiallyValidData<V>) {
+        // 1. checks if the announcement is empty
+        if msg.is_empty() {
+            trace!(target: "net::tx",
+                msg=?msg,
+                "empty payload"
+            );
+            return (FilterOutcome::ReportPeer, PartiallyValidData::empty_eth66())
+        }
+
+        // 2. checks if announcement is spam packed with duplicate hashes
+        let original_len = msg.len();
+        let partially_valid_data = msg.dedup();
+
+        (
+            if partially_valid_data.len() != original_len {
+                FilterOutcome::ReportPeer
+            } else {
+                FilterOutcome::Ok
+            },
+            partially_valid_data,
+        )
+    }
+}
+
+/// Filters valid entries in
+/// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68) and
+/// [`NewPooledTransactionHashes66`](reth_eth_wire::NewPooledTransactionHashes66) in place, and
+/// flags misbehaving peers.
 pub trait FilterAnnouncement {
-    /// Removes invalid entries from a [`NewPooledTransactionHashes68`] announcement. Returns
-    /// [`FilterOutcome::ReportPeer`] if the caller should penalize the peer, otherwise
+    /// Removes invalid entries from a
+    /// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68) announcement.
+    /// Returns [`FilterOutcome::ReportPeer`] if the caller should penalize the peer, otherwise
     /// [`FilterOutcome::Ok`].
     fn filter_valid_entries_68(
         &self,
-        msg: NewPooledTransactionHashes68,
+        msg: PartiallyValidData<Eth68TxMetadata>,
     ) -> (FilterOutcome, ValidAnnouncementData)
     where
         Self: ValidateTx68;
 
-    /// Removes invalid entries from a [`NewPooledTransactionHashes66`] announcement. Returns
-    /// [`FilterOutcome::ReportPeer`] if the caller should penalize the peer, otherwise
+    /// Removes invalid entries from a
+    /// [`NewPooledTransactionHashes66`](reth_eth_wire::NewPooledTransactionHashes66) announcement.
+    /// Returns [`FilterOutcome::ReportPeer`] if the caller should penalize the peer, otherwise
     /// [`FilterOutcome::Ok`].
     fn filter_valid_entries_66(
         &self,
-        msg: NewPooledTransactionHashes66,
+        msg: PartiallyValidData<Eth68TxMetadata>,
     ) -> (FilterOutcome, ValidAnnouncementData);
 }
 
-/// Outcome from filtering [`NewPooledTransactionHashes68`]. Signals to caller whether to penalize
-/// the sender of the announcement or not.
+/// Outcome from filtering
+/// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68). Signals to caller
+/// whether to penalize the sender of the announcement or not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterOutcome {
     /// Peer behaves appropriately.
@@ -90,35 +137,52 @@ pub enum FilterOutcome {
 }
 
 /// Wrapper for types that implement [`FilterAnnouncement`]. The definition of a valid
-/// announcement is network dependent. For example, different networks support different [`TxType`]
-/// s, and different [`TxType`]s have different transaction size constraints. Defaults to
-/// [`EthAnnouncementFilter`].
+/// announcement is network dependent. For example, different networks support different
+/// [`TxType`]s, and different [`TxType`]s have different transaction size constraints. Defaults to
+/// [`EthMessageFilter`].
 #[derive(Debug, Default, Deref, DerefMut)]
-pub struct AnnouncementFilter<N = EthAnnouncementFilter>(N);
+pub struct MessageFilter<N = EthMessageFilter>(N);
 
 /// Filter for announcements containing EIP [`TxType`]s.
-#[derive(Debug, Display, Default)]
-pub struct EthAnnouncementFilter;
+#[derive(Debug, Default)]
+pub struct EthMessageFilter {
+    announced_tx_types_metrics: AnnouncedTxTypesMetrics,
+}
 
-impl ValidateTx68 for EthAnnouncementFilter {
-    fn should_fetch(&self, ty: u8, hash: TxHash, size: usize) -> ValidationOutcome {
+impl Display for EthMessageFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EthMessageFilter")
+    }
+}
+
+impl PartiallyFilterMessage for EthMessageFilter {}
+
+impl ValidateTx68 for EthMessageFilter {
+    fn should_fetch(
+        &self,
+        ty: u8,
+        hash: &TxHash,
+        size: usize,
+        tx_types_counter: &mut TxTypesCounter,
+    ) -> ValidationOutcome {
         //
         // 1. checks if tx type is valid value for this network
         //
         let tx_type = match TxType::try_from(ty) {
             Ok(ty) => ty,
             Err(_) => {
-                debug!(target: "net::eth-wire",
+                trace!(target: "net::eth-wire",
                     ty=ty,
                     size=size,
                     hash=%hash,
-                    network=%Self,
+                    network=%self,
                     "invalid tx type in eth68 announcement"
                 );
 
                 return ValidationOutcome::ReportPeer
             }
         };
+        tx_types_counter.increase_by_tx_type(tx_type);
 
         //
         // 2. checks if tx's encoded length is within limits for this network
@@ -128,12 +192,12 @@ impl ValidateTx68 for EthAnnouncementFilter {
         //
         if let Some(strict_min_encoded_tx_length) = self.strict_min_encoded_tx_length(tx_type) {
             if size < strict_min_encoded_tx_length {
-                debug!(target: "net::eth-wire",
+                trace!(target: "net::eth-wire",
                     ty=ty,
                     size=size,
                     hash=%hash,
                     strict_min_encoded_tx_length=strict_min_encoded_tx_length,
-                    network=%Self,
+                    network=%self,
                     "invalid tx size in eth68 announcement"
                 );
 
@@ -142,13 +206,13 @@ impl ValidateTx68 for EthAnnouncementFilter {
         }
         if let Some(reasonable_min_encoded_tx_length) = self.min_encoded_tx_length(tx_type) {
             if size < reasonable_min_encoded_tx_length {
-                debug!(target: "net::eth-wire",
+                trace!(target: "net::eth-wire",
                     ty=ty,
                     size=size,
                     hash=%hash,
                     reasonable_min_encoded_tx_length=reasonable_min_encoded_tx_length,
                     strict_min_encoded_tx_length=self.strict_min_encoded_tx_length(tx_type),
-                    network=%Self,
+                    network=%self,
                     "tx size in eth68 announcement, is unreasonably small"
                 );
 
@@ -159,13 +223,13 @@ impl ValidateTx68 for EthAnnouncementFilter {
         // this network has no strict max encoded tx length for any tx type
         if let Some(reasonable_max_encoded_tx_length) = self.max_encoded_tx_length(tx_type) {
             if size > reasonable_max_encoded_tx_length {
-                debug!(target: "net::eth-wire",
+                trace!(target: "net::eth-wire",
                     ty=ty,
                     size=size,
                     hash=%hash,
                     reasonable_max_encoded_tx_length=reasonable_max_encoded_tx_length,
                     strict_max_encoded_tx_length=self.strict_max_encoded_tx_length(tx_type),
-                    network=%Self,
+                    network=%self,
                     "tx size in eth68 announcement, is unreasonably large"
                 );
 
@@ -180,11 +244,11 @@ impl ValidateTx68 for EthAnnouncementFilter {
     fn max_encoded_tx_length(&self, ty: TxType) -> Option<usize> {
         // the biggest transaction so far is a blob transaction, which is currently max 2^17,
         // encoded length, nonetheless, the blob tx may become bigger in the future.
+        #[allow(unreachable_patterns)]
         match ty {
-            TxType::Legacy | TxType::EIP2930 | TxType::EIP1559 => Some(MAX_MESSAGE_SIZE),
-            TxType::EIP4844 => None,
-            #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => None,
+            TxType::Legacy | TxType::Eip2930 | TxType::Eip1559 => Some(MAX_MESSAGE_SIZE),
+            TxType::Eip4844 => None,
+            _ => None,
         }
     }
 
@@ -204,137 +268,76 @@ impl ValidateTx68 for EthAnnouncementFilter {
     }
 }
 
-impl FilterAnnouncement for EthAnnouncementFilter {
+impl FilterAnnouncement for EthMessageFilter {
     fn filter_valid_entries_68(
         &self,
-        msg: NewPooledTransactionHashes68,
+        mut msg: PartiallyValidData<Eth68TxMetadata>,
     ) -> (FilterOutcome, ValidAnnouncementData)
     where
         Self: ValidateTx68,
     {
         trace!(target: "net::tx::validation",
-            types=?msg.types,
-            sizes=?msg.sizes,
-            hashes=?msg.hashes,
-            network=%Self,
+            msg=?*msg,
+            network=%self,
             "validating eth68 announcement data.."
         );
 
-        let NewPooledTransactionHashes68 { mut hashes, mut types, mut sizes } = msg;
-
-        debug_assert!(
-            hashes.len() == types.len() && hashes.len() == sizes.len(), "`%hashes`, `%types` and `%sizes` should all be the same length, decoding of `NewPooledTransactionHashes68` should handle this, 
-`%hashes`: {hashes:?}, 
-`%types`: {types:?}, 
-`%sizes: {sizes:?}`"
-        );
-
-        //
-        // 1. checks if the announcement is empty
-        //
-        if hashes.is_empty() {
-            debug!(target: "net::tx",
-                network=%Self,
-                "empty eth68 announcement"
-            );
-            return (FilterOutcome::ReportPeer, ValidAnnouncementData::empty_eth68())
-        }
-
         let mut should_report_peer = false;
-        let mut indices_to_remove = vec![];
+        let mut tx_types_counter = TxTypesCounter::default();
 
-        //
-        // 2. checks if eth68 announcement metadata is valid
+        // checks if eth68 announcement metadata is valid
         //
         // transactions that are filtered out here, may not be spam, rather from benevolent peers
         // that are unknowingly sending announcements with invalid data.
         //
-        for (i, (&ty, &hash, &size)) in izip!(&types, &hashes, &sizes).enumerate() {
-            match self.should_fetch(ty, hash, size) {
-                ValidationOutcome::Fetch => (),
-                ValidationOutcome::Ignore => indices_to_remove.push(i),
+        msg.retain(|hash, metadata| {
+            debug_assert!(
+                metadata.is_some(),
+                "metadata should exist for `%hash` in eth68 announcement passed to `%filter_valid_entries_68`,
+`%hash`: {hash}"
+            );
+
+            let Some((ty, size)) = metadata else {
+                return false
+            };
+
+            match self.should_fetch(*ty, hash, *size, &mut tx_types_counter) {
+                ValidationOutcome::Fetch => true,
+                ValidationOutcome::Ignore => false,
                 ValidationOutcome::ReportPeer => {
-                    indices_to_remove.push(i);
                     should_report_peer = true;
+                    false
                 }
             }
-        }
-
-        for index in indices_to_remove.into_iter().rev() {
-            hashes.remove(index);
-            types.remove(index);
-            sizes.remove(index);
-        }
-
-        //
-        // 3. checks if announcement is spam packed with duplicate hashes
-        //
-        let mut deduped_data = HashMap::with_capacity(hashes.len());
-
-        let original_len = hashes.len();
-
-        for hash in hashes.into_iter().rev() {
-            if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
-                deduped_data.insert(hash, Some((ty, size)));
-            }
-        }
-        if deduped_data.len() != original_len {
-            should_report_peer = true
-        }
-
+        });
+        self.announced_tx_types_metrics.update_eth68_announcement_metrics(tx_types_counter);
         (
             if should_report_peer { FilterOutcome::ReportPeer } else { FilterOutcome::Ok },
-            ValidAnnouncementData::new_eth68(deduped_data),
+            ValidAnnouncementData::from_partially_valid_data(msg),
         )
     }
 
     fn filter_valid_entries_66(
         &self,
-        msg: NewPooledTransactionHashes66,
+        partially_valid_data: PartiallyValidData<Option<(u8, usize)>>,
     ) -> (FilterOutcome, ValidAnnouncementData) {
         trace!(target: "net::tx::validation",
-            hashes=?msg.0,
-            network=%Self,
+            hashes=?*partially_valid_data,
+            network=%self,
             "validating eth66 announcement data.."
         );
 
-        let NewPooledTransactionHashes66(hashes) = msg;
-
-        // 1. checks if the announcement is empty
-        if hashes.is_empty() {
-            debug!(target: "net::tx",
-                network=%Self,
-                "empty eth66 announcement"
-            );
-            return (FilterOutcome::ReportPeer, ValidAnnouncementData::empty_eth66())
-        }
-
-        // 2. checks if announcement is spam packed with duplicate hashes
-        let mut deduped_data = HashMap::with_capacity(hashes.len());
-
-        let original_len = hashes.len();
-
-        for hash in hashes.into_iter().rev() {
-            deduped_data.insert(hash, None);
-        }
-
-        (
-            if deduped_data.len() != original_len {
-                FilterOutcome::ReportPeer
-            } else {
-                FilterOutcome::Ok
-            },
-            ValidAnnouncementData::new_eth66(deduped_data),
-        )
+        (FilterOutcome::Ok, ValidAnnouncementData::from_partially_valid_data(partially_valid_data))
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use reth_eth_wire::MAX_MESSAGE_SIZE;
+
+    use reth_eth_wire::{NewPooledTransactionHashes66, NewPooledTransactionHashes68};
     use reth_primitives::B256;
-    use std::str::FromStr;
+    use std::{collections::HashMap, str::FromStr};
 
     #[test]
     fn eth68_empty_announcement() {
@@ -344,9 +347,9 @@ mod test {
 
         let announcement = NewPooledTransactionHashes68 { types, sizes, hashes };
 
-        let filter = EthAnnouncementFilter;
+        let filter = EthMessageFilter::default();
 
-        let (outcome, _data) = filter.filter_valid_entries_68(announcement);
+        let (outcome, _partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
     }
@@ -371,22 +374,26 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthAnnouncementFilter;
+        let filter = EthMessageFilter::default();
 
-        let (outcome, data) = filter.filter_valid_entries_68(announcement);
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
+
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let (outcome, valid_data) = filter.filter_valid_entries_68(partially_valid_data);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
         let mut expected_data = HashMap::new();
         expected_data.insert(hashes[1], Some((types[1], sizes[1])));
 
-        assert_eq!(expected_data, data.into_data())
+        assert_eq!(expected_data, valid_data.into_data())
     }
 
     #[test]
     fn eth68_announcement_too_small_tx() {
         let types =
-            vec![TxType::MAX_RESERVED_EIP as u8, TxType::Legacy as u8, TxType::EIP2930 as u8];
+            vec![TxType::MAX_RESERVED_EIP as u8, TxType::Legacy as u8, TxType::Eip2930 as u8];
         let sizes = vec![
             0, // the first length isn't valid
             0, // neither is the second
@@ -407,25 +414,29 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthAnnouncementFilter;
+        let filter = EthMessageFilter::default();
 
-        let (outcome, data) = filter.filter_valid_entries_68(announcement);
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
+
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let (outcome, valid_data) = filter.filter_valid_entries_68(partially_valid_data);
 
         assert_eq!(outcome, FilterOutcome::Ok);
 
         let mut expected_data = HashMap::new();
         expected_data.insert(hashes[2], Some((types[2], sizes[2])));
 
-        assert_eq!(expected_data, data.into_data())
+        assert_eq!(expected_data, valid_data.into_data())
     }
 
     #[test]
     fn eth68_announcement_duplicate_tx_hash() {
         let types = vec![
-            TxType::EIP1559 as u8,
-            TxType::EIP4844 as u8,
-            TxType::EIP1559 as u8,
-            TxType::EIP4844 as u8,
+            TxType::Eip1559 as u8,
+            TxType::Eip4844 as u8,
+            TxType::Eip1559 as u8,
+            TxType::Eip4844 as u8,
         ];
         let sizes = vec![1, 1, 1, MAX_MESSAGE_SIZE];
         // first three or the same
@@ -446,9 +457,9 @@ mod test {
             hashes: hashes.clone(),
         };
 
-        let filter = EthAnnouncementFilter;
+        let filter = EthMessageFilter::default();
 
-        let (outcome, data) = filter.filter_valid_entries_68(announcement);
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
@@ -456,7 +467,7 @@ mod test {
         expected_data.insert(hashes[3], Some((types[3], sizes[3])));
         expected_data.insert(hashes[0], Some((types[0], sizes[0])));
 
-        assert_eq!(expected_data, data.into_data())
+        assert_eq!(expected_data, partially_valid_data.into_data())
     }
 
     #[test]
@@ -465,9 +476,9 @@ mod test {
 
         let announcement = NewPooledTransactionHashes66(hashes);
 
-        let filter: AnnouncementFilter = AnnouncementFilter::default();
+        let filter: MessageFilter = MessageFilter::default();
 
-        let (outcome, _data) = filter.filter_valid_entries_66(announcement);
+        let (outcome, _partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
     }
@@ -490,9 +501,9 @@ mod test {
 
         let announcement = NewPooledTransactionHashes66(hashes.clone());
 
-        let filter: AnnouncementFilter = AnnouncementFilter::default();
+        let filter: MessageFilter = MessageFilter::default();
 
-        let (outcome, data) = filter.filter_valid_entries_66(announcement);
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
 
         assert_eq!(outcome, FilterOutcome::ReportPeer);
 
@@ -500,12 +511,12 @@ mod test {
         expected_data.insert(hashes[1], None);
         expected_data.insert(hashes[0], None);
 
-        assert_eq!(expected_data, data.into_data())
+        assert_eq!(expected_data, partially_valid_data.into_data())
     }
 
     #[test]
-    fn test_derive_more_display_for_zst() {
-        let filter = EthAnnouncementFilter;
-        assert_eq!("EthAnnouncementFilter", &filter.to_string());
+    fn test_display_for_zst() {
+        let filter = EthMessageFilter::default();
+        assert_eq!("EthMessageFilter", &filter.to_string());
     }
 }

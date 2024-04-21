@@ -21,7 +21,7 @@ tokio-util = { workspace = true, features = ["codec"] }
 tokio-stream.workspace = true
 async-trait.workspace = true
 pin-project.workspace = true
-tower = "0.4"
+tower.workspace = true
 
 # misc
 jsonrpsee = { workspace = true, features = ["server", "client"] }

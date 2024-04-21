@@ -12,11 +12,11 @@ use reth_primitives::constants::{
 use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
-#[derive(Debug, Clone, Args, PartialEq)]
-#[clap(next_help_heading = "Builder")]
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
+#[command(next_help_heading = "Builder")]
 pub struct PayloadBuilderArgs {
     /// Block extra data set by the payload builder.
-    #[arg(long = "builder.extradata", value_parser=ExtradataValueParser::default(),  default_value_t = default_extradata())]
+    #[arg(long = "builder.extradata", value_parser = ExtradataValueParser::default(), default_value_t = default_extradata())]
     pub extradata: String,
 
     /// Target gas ceiling for built blocks.
@@ -34,18 +34,6 @@ pub struct PayloadBuilderArgs {
     /// Maximum number of tasks to spawn for building a payload.
     #[arg(long = "builder.max-tasks", default_value = "3", value_parser = RangedU64ValueParser::<usize>::new().range(1..))]
     pub max_payload_tasks: usize,
-
-    /// By default the pending block equals the latest block
-    /// to save resources and not leak txs from the tx-pool,
-    /// this flag enables computing of the pending block
-    /// from the tx-pool instead.
-    ///
-    /// If `compute_pending_block` is not enabled, the payload builder
-    /// will use the payload attributes from the latest block. Note
-    /// that this flag is not yet functional.
-    #[cfg(feature = "optimism")]
-    #[arg(long = "rollup.compute-pending-block")]
-    pub compute_pending_block: bool,
 }
 
 impl Default for PayloadBuilderArgs {
@@ -56,8 +44,6 @@ impl Default for PayloadBuilderArgs {
             interval: Duration::from_secs(1),
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
-            #[cfg(feature = "optimism")]
-            compute_pending_block: false,
         }
     }
 }
@@ -82,11 +68,6 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
     fn max_payload_tasks(&self) -> usize {
         self.max_payload_tasks
     }
-
-    #[cfg(feature = "optimism")]
-    fn compute_pending_block(&self) -> bool {
-        self.compute_pending_block
-    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -108,7 +89,7 @@ impl TypedValueParser for ExtradataValueParser {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
                 format!(
-                    "Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}bytes limit"
+                    "Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}-byte limit"
                 ),
             ))
         }
@@ -119,12 +100,12 @@ impl TypedValueParser for ExtradataValueParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::{Args, Parser};
+    use clap::Parser;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
-        #[clap(flatten)]
+        #[command(flatten)]
         args: T,
     }
 

@@ -7,11 +7,11 @@ use crate::{
     },
     EthApi,
 };
+use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{BlockId, TransactionMeta};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::{Index, RichBlock, TransactionReceipt};
+use reth_rpc_types::{AnyTransactionReceipt, Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ where
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     /// Returns the uncle headers of the given block
     ///
@@ -62,7 +62,7 @@ where
     pub(crate) async fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> EthResult<Option<Vec<TransactionReceipt>>> {
+    ) -> EthResult<Option<Vec<AnyTransactionReceipt>>> {
         let mut block_and_receipts = None;
 
         if block_id.is_pending() {
@@ -79,6 +79,7 @@ where
             let base_fee = block.base_fee_per_gas;
             let block_hash = block.hash();
             let excess_blob_gas = block.excess_blob_gas;
+            let timestamp = block.timestamp;
             let block = block.unseal();
 
             #[cfg(feature = "optimism")]
@@ -100,6 +101,7 @@ where
                         block_number,
                         base_fee,
                         excess_blob_gas,
+                        timestamp,
                     };
 
                     #[cfg(feature = "optimism")]
@@ -199,5 +201,14 @@ where
             .ok_or(EthApiError::UnknownBlockNumber)?;
         let block = from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))?;
         Ok(Some(block.into()))
+    }
+
+    /// Returns the block header for the given block id.
+    pub(crate) async fn rpc_block_header(
+        &self,
+        block_id: impl Into<BlockId>,
+    ) -> EthResult<Option<Header>> {
+        let header = self.rpc_block(block_id, false).await?.map(|block| block.inner.header);
+        Ok(header)
     }
 }

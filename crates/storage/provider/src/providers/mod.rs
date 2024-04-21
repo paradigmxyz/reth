@@ -1,19 +1,26 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
+    BlockSource, BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
     CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     DatabaseProviderFactory, EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
     StateProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, models::StoredBlockBodyIndices};
+use reth_db::{
+    database::Database,
+    models::{AccountBeforeTx, StoredBlockBodyIndices},
+};
+use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::{
-    blockchain_tree::{BlockchainTreeEngine, BlockchainTreeViewer},
+    blockchain_tree::{
+        error::{CanonicalError, InsertBlockError},
+        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+        InsertPayloadOk,
+    },
     consensus::ForkchoiceState,
     provider::ProviderResult,
-    RethError, RethResult,
+    RethResult,
 };
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
@@ -31,24 +38,29 @@ use std::{
 };
 use tracing::trace;
 
+mod database;
+pub use database::*;
+
+mod static_file;
+pub use static_file::{
+    StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
+    StaticFileWriter,
+};
+
+mod state;
 pub use state::{
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
 
 mod bundle_state_provider;
-mod chain_info;
-mod database;
-mod snapshot;
-pub use snapshot::{SnapshotJarProvider, SnapshotProvider};
-mod state;
-use crate::{providers::chain_info::ChainInfoTracker, traits::BlockSource};
 pub use bundle_state_provider::BundleStateProvider;
-pub use database::*;
-use reth_db::models::AccountBeforeTx;
-use reth_interfaces::blockchain_tree::{
-    error::InsertBlockError, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
-};
+
+mod chain_info;
+use chain_info::ChainInfoTracker;
+
+mod consistent_view;
+pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
 /// The main type for interacting with the blockchain.
 ///
@@ -131,34 +143,34 @@ where
     Tree: Send + Sync,
 {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
-        self.database.provider()?.header(block_hash)
+        self.database.header(block_hash)
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.database.provider()?.header_by_number(num)
+        self.database.header_by_number(num)
     }
 
     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        self.database.provider()?.header_td(hash)
+        self.database.header_td(hash)
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.database.provider()?.header_td_by_number(number)
+        self.database.header_td_by_number(number)
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        self.database.provider()?.headers_range(range)
+        self.database.headers_range(range)
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        self.database.provider()?.sealed_header(number)
+        self.database.sealed_header(number)
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.database.provider()?.sealed_headers_range(range)
+        self.database.sealed_headers_range(range)
     }
 
     fn sealed_headers_while(
@@ -166,7 +178,7 @@ where
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        self.database.provider()?.sealed_headers_while(range, predicate)
+        self.database.sealed_headers_while(range, predicate)
     }
 }
 
@@ -176,7 +188,7 @@ where
     Tree: Send + Sync,
 {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.database.provider()?.block_hash(number)
+        self.database.block_hash(number)
     }
 
     fn canonical_hashes_range(
@@ -184,7 +196,7 @@ where
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.database.provider()?.canonical_hashes_range(start, end)
+        self.database.canonical_hashes_range(start, end)
     }
 }
 
@@ -202,11 +214,11 @@ where
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.database.provider()?.last_block_number()
+        self.database.last_block_number()
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
-        self.database.provider()?.block_number(hash)
+        self.database.block_number(hash)
     }
 }
 
@@ -237,7 +249,7 @@ where
         let block = match source {
             BlockSource::Any => {
                 // check database first
-                let mut block = self.database.provider()?.block_by_hash(hash)?;
+                let mut block = self.database.block_by_hash(hash)?;
                 if block.is_none() {
                     // Note: it's fine to return the unsealed block because the caller already has
                     // the hash
@@ -246,7 +258,7 @@ where
                 block
             }
             BlockSource::Pending => self.tree.block_by_hash(hash).map(|block| block.unseal()),
-            BlockSource::Database => self.database.provider()?.block_by_hash(hash)?,
+            BlockSource::Database => self.database.block_by_hash(hash)?,
         };
 
         Ok(block)
@@ -255,7 +267,7 @@ where
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
         match id {
             BlockHashOrNumber::Hash(hash) => self.find_block_by_hash(hash, BlockSource::Any),
-            BlockHashOrNumber::Number(num) => self.database.provider()?.block_by_number(num),
+            BlockHashOrNumber::Number(num) => self.database.block_by_number(num),
         }
     }
 
@@ -272,14 +284,14 @@ where
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        self.database.provider()?.ommers(id)
+        self.database.ommers(id)
     }
 
     fn block_body_indices(
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.database.provider()?.block_body_indices(number)
+        self.database.block_body_indices(number)
     }
 
     /// Returns the block with senders with matching number or hash from database.
@@ -293,11 +305,18 @@ where
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>> {
-        self.database.provider()?.block_with_senders(id, transaction_kind)
+        self.database.block_with_senders(id, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        self.database.provider()?.block_range(range)
+        self.database.block_range(range)
+    }
+
+    fn block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>> {
+        self.database.block_with_senders_range(range)
     }
 }
 
@@ -307,65 +326,65 @@ where
     Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        self.database.provider()?.transaction_id(tx_hash)
+        self.database.transaction_id(tx_hash)
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        self.database.provider()?.transaction_by_id(id)
+        self.database.transaction_by_id(id)
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.database.provider()?.transaction_by_id_no_hash(id)
+        self.database.transaction_by_id_no_hash(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
-        self.database.provider()?.transaction_by_hash(hash)
+        self.database.transaction_by_hash(hash)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
-        self.database.provider()?.transaction_by_hash_with_meta(tx_hash)
+        self.database.transaction_by_hash_with_meta(tx_hash)
     }
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        self.database.provider()?.transaction_block(id)
+        self.database.transaction_block(id)
     }
 
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
-        self.database.provider()?.transactions_by_block(id)
+        self.database.transactions_by_block(id)
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
-        self.database.provider()?.transactions_by_block_range(range)
+        self.database.transactions_by_block_range(range)
     }
 
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
-        self.database.provider()?.transactions_by_tx_range(range)
+        self.database.transactions_by_tx_range(range)
     }
 
     fn senders_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.database.provider()?.senders_by_tx_range(range)
+        self.database.senders_by_tx_range(range)
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        self.database.provider()?.transaction_sender(id)
+        self.database.transaction_sender(id)
     }
 }
 
@@ -375,22 +394,22 @@ where
     Tree: Send + Sync,
 {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.database.provider()?.receipt(id)
+        self.database.receipt(id)
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
-        self.database.provider()?.receipt_by_hash(hash)
+        self.database.receipt_by_hash(hash)
     }
 
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
-        self.database.provider()?.receipts_by_block(block)
+        self.database.receipts_by_block(block)
     }
 
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.database.provider()?.receipts_by_tx_range(range)
+        self.database.receipts_by_tx_range(range)
     }
 }
 impl<DB, Tree> ReceiptProviderIdExt for BlockchainProvider<DB, Tree>
@@ -431,11 +450,11 @@ where
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        self.database.provider()?.withdrawals_by_block(id, timestamp)
+        self.database.withdrawals_by_block(id, timestamp)
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.database.provider()?.latest_withdrawal()
+        self.database.latest_withdrawal()
     }
 }
 
@@ -657,12 +676,8 @@ where
         self.tree.connect_buffered_blocks_to_canonical_hashes()
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         self.tree.make_canonical(block_hash)
-    }
-
-    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()> {
-        self.tree.unwind(unwind_to)
     }
 }
 
@@ -699,11 +714,7 @@ where
         self.tree.canonical_blocks()
     }
 
-    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {
-        self.tree.find_canonical_ancestor(hash)
-    }
-
-    fn is_canonical(&self, hash: BlockHash) -> Result<bool, RethError> {
+    fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
         self.tree.is_canonical(hash)
     }
 

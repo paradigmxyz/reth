@@ -5,20 +5,19 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
-use alloy_rlp::Encodable;
 use futures_core::ready;
 use futures_util::FutureExt;
+use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_interfaces::RethResult;
-use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, EthBuiltPayload, KeepPayloadJobAlive,
-    PayloadId, PayloadJob, PayloadJobGenerator,
+    database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
+    PayloadJobGenerator,
 };
 use reth_primitives::{
-    bytes::BytesMut,
     constants::{EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION},
     proofs, BlockNumberOrTag, Bytes, ChainSpec, SealedBlock, Withdrawals, B256, U256,
 };
@@ -195,23 +194,22 @@ where
     }
 
     fn on_new_state(&mut self, new_state: CanonStateNotification) {
-        if let Some(committed) = new_state.committed() {
-            let mut cached = CachedReads::default();
+        let mut cached = CachedReads::default();
 
-            // extract the state from the notification and put it into the cache
-            let new_state = committed.state();
-            for (addr, acc) in new_state.bundle_accounts_iter() {
-                if let Some(info) = acc.info.clone() {
-                    // we want pre cache existing accounts and their storage
-                    // this only includes changed accounts and storage but is better than nothing
-                    let storage =
-                        acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
-                    cached.insert_account(addr, info, storage);
-                }
+        // extract the state from the notification and put it into the cache
+        let committed = new_state.committed();
+        let new_state = committed.state();
+        for (addr, acc) in new_state.bundle_accounts_iter() {
+            if let Some(info) = acc.info.clone() {
+                // we want pre cache existing accounts and their storage
+                // this only includes changed accounts and storage but is better than nothing
+                let storage =
+                    acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
+                cached.insert_account(addr, info, storage);
             }
-
-            self.pre_cached = Some(PrecachedState { block: committed.tip().hash(), cached });
         }
+
+        self.pre_cached = Some(PrecachedState { block: committed.tip().hash(), cached });
     }
 }
 
@@ -300,10 +298,8 @@ impl BasicPayloadJobGeneratorConfig {
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
-        let mut extradata = BytesMut::new();
-        RETH_CLIENT_VERSION.as_bytes().encode(&mut extradata);
         Self {
-            extradata: extradata.freeze().into(),
+            extradata: alloy_rlp::encode(RETH_CLIENT_VERSION.as_bytes()).into(),
             max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             // 12s slot time
@@ -428,7 +424,7 @@ where
                 }
                 Poll::Ready(Err(error)) => {
                     // job failed, but we simply try again next interval
-                    debug!(target: "payload_builder", ?error, "payload build attempt failed");
+                    debug!(target: "payload_builder", %error, "payload build attempt failed");
                     this.metrics.inc_failed_payload_builds();
                 }
                 Poll::Pending => {
@@ -568,7 +564,7 @@ where
         match empty_payload.poll_unpin(cx) {
             Poll::Ready(Ok(res)) => {
                 if let Err(err) = &res {
-                    warn!(target: "payload_builder", ?err, "failed to resolve empty payload");
+                    warn!(target: "payload_builder", %err, "failed to resolve empty payload");
                 } else {
                     debug!(target: "payload_builder", "resolving empty payload");
                 }
@@ -889,7 +885,7 @@ where
 ///
 /// This compares the total fees of the blocks, higher is better.
 #[inline(always)]
-pub fn is_better_payload(best_payload: Option<&EthBuiltPayload>, new_fees: U256) -> bool {
+pub fn is_better_payload(best_payload: Option<impl BuiltPayload>, new_fees: U256) -> bool {
     if let Some(best_payload) = best_payload {
         new_fees > best_payload.fees()
     } else {

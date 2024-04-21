@@ -134,7 +134,7 @@ impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {
         this.meter
             .inner
             .inbound
-            .fetch_add(u64::try_from(num_bytes).unwrap_or(u64::max_value()), Ordering::Relaxed);
+            .fetch_add(u64::try_from(num_bytes).unwrap_or(u64::MAX), Ordering::Relaxed);
         Poll::Ready(Ok(()))
     }
 }
@@ -150,7 +150,7 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
         this.meter
             .inner
             .outbound
-            .fetch_add(u64::try_from(num_bytes).unwrap_or(u64::max_value()), Ordering::Relaxed);
+            .fetch_add(u64::try_from(num_bytes).unwrap_or(u64::MAX), Ordering::Relaxed);
         Poll::Ready(Ok(num_bytes))
     }
 
@@ -176,7 +176,7 @@ mod tests {
     use super::*;
     use tokio::{
         io::{duplex, AsyncReadExt, AsyncWriteExt, DuplexStream},
-        net::{TcpListener, TcpStream},
+        net::TcpListener,
     };
 
     async fn duplex_stream_ping_pong(
