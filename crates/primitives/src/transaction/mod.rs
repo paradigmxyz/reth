@@ -997,8 +997,9 @@ impl TransactionSignedNoHash {
             }
 
             // pre bedrock system transactions were sent from the zero address as legacy
-            // transactions with an empty signature Note: this is very hacky and only
-            // relevant for op-mainnet pre bedrock
+            // transactions with an empty signature
+            //
+            // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
             if self.is_legacy() && self.signature == Signature::optimism_deposit_tx_signature() {
                 return Some(Address::ZERO)
             }
