@@ -8,8 +8,8 @@ use reth_evm::{
     },
     ConfigureEvm, ConfigureEvmEnv,
 };
-use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError, OptimismBlockExecutionError}
+use reth_interfaces::executor::{
+    BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
 use reth_net_p2p::provider::ProviderError;
 use reth_primitives::{

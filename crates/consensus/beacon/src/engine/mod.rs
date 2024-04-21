@@ -6,6 +6,7 @@ use crate::{
     hooks::{EngineHookContext, EngineHooksController},
     sync::{EngineSyncController, EngineSyncEvent},
 };
+use alloy_rpc_types_engine::ForkchoiceState;
 use futures::{Future, StreamExt};
 use reth_db::database::Database;
 use reth_engine_primitives::{EngineTypes, PayloadAttributes, PayloadBuilderAttributes};
@@ -15,15 +16,14 @@ use reth_interfaces::{
         BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
     executor::BlockValidationError,
-    RethError, RethResult
+    RethError, RethResult,
 };
 use reth_net_p2p::{
     bodies::client::BodiesClient,
     headers::client::HeadersClient,
+    provider::ProviderResult,
     sync::{NetworkSyncUpdater, SyncState},
-    provider::ProviderResult
 };
-use alloy_rpc_types_engine::ForkchoiceState;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
     constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
@@ -34,8 +34,7 @@ use reth_provider::{
     StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, PayloadStatus, PayloadStatusEnum,
-    PayloadValidationError,
+    CancunPayloadFields, ExecutionPayload, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use reth_stages_api::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;

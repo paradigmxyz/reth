@@ -8,8 +8,8 @@ use reth_evm::{
     },
     ConfigureEvm, ConfigureEvmEnv,
 };
-use reth_net_p2p::provider::ProviderError;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+use reth_net_p2p::provider::ProviderError;
 use reth_primitives::{
     BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt, Receipts,
     Withdrawals, U256,

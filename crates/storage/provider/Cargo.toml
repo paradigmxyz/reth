@@ -20,9 +20,8 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-evm.workspace = true
-reth-net-p2p.workspace = true
 alloy-rpc-types-engine.workspace = true
-
+reth-net-p2p.workspace = true
 revm.workspace = true
 
 # async
@@ -51,6 +50,7 @@ alloy-rlp = { workspace = true, optional = true }
 rayon.workspace = true
 
 [dev-dependencies]
+reth-net-p2p = {workspace = true, features = ["test-utils"]}
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }

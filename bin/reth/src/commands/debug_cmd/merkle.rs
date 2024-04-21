@@ -15,8 +15,8 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
-use reth_net_p2p::{consensus::Consensus, full_block::FullBlockClient};
 use reth_exex::ExExManagerHandle;
+use reth_net_p2p::{consensus::Consensus, full_block::FullBlockClient};
 
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;

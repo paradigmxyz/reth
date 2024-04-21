@@ -1,6 +1,8 @@
 use crate::pipeline::PipelineEvent;
 use reth_interfaces::{executor, RethError};
-use reth_net_p2p::{consensus, db::DatabaseError as DbError, error::DownloadError, provider::ProviderError};
+use reth_net_p2p::{
+    consensus, db::DatabaseError as DbError, error::DownloadError, provider::ProviderError,
+};
 use reth_primitives::{BlockNumber, SealedHeader, StaticFileSegment, TxNumber};
 use thiserror::Error;
 

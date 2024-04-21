@@ -20,10 +20,10 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 
-use reth_net_p2p::{
-    bodies::client::BodiesClient, consensus::Consensus, headers::client::HeadersClient
-};
 use reth_exex::ExExManagerHandle;
+use reth_net_p2p::{
+    bodies::client::BodiesClient, consensus::Consensus, headers::client::HeadersClient,
+};
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_core::init::init_genesis;
