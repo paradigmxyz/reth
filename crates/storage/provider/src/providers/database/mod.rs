@@ -79,11 +79,6 @@ impl<DB> ProviderFactory<DB> {
     pub fn into_db(self) -> DB {
         self.db
     }
-
-    /// Returns a reference to the chain spec.
-    pub fn chain_spec_ref(&self) -> &ChainSpec {
-        &self.chain_spec
-    }
 }
 
 impl ProviderFactory<DatabaseEnv> {

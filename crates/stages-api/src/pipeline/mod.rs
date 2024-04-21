@@ -11,6 +11,8 @@ use reth_primitives::{
     static_file::HighestStaticFiles,
     BlockNumber, B256,
 };
+#[cfg(feature = "optimism")]
+use reth_provider::ChainSpecProvider;
 use reth_provider::{
     providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
 };
@@ -524,8 +526,8 @@ fn on_stage_error<DB: Database>(
         Ok(Some(ControlFlow::Unwind { target: block.number - 1, bad_block: block }))
     } else if err.is_fatal() {
         #[cfg(feature = "optimism")]
-        if factory.chain_spec_ref().is_optimism_mainnet() &&
-            !factory.chain_spec_ref().is_bedrock_active_at_block(block.number)
+        if factory.chain_spec().is_optimism_mainnet() &&
+            !factory.chain_spec().is_bedrock_active_at_block(block.number)
         {
             // below bedrock, transaction nonces could be replayed
             if err.is_dup_tx() {
