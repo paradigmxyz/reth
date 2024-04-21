@@ -14,14 +14,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_node_core::init::{
-    init_genesis, insert_genesis_hashes, insert_genesis_header, insert_genesis_history,
-    insert_genesis_state,
+    init_genesis, insert_genesis_hashes, insert_genesis_history, insert_genesis_state,
 };
 use reth_primitives::{stage::StageId, Address, ChainSpec, GenesisAccount, B256};
-use reth_provider::{
-    providers::StaticFileWriter, BlockHashReader, BlockNumReader, ChainSpecProvider,
-    ProviderFactory,
-};
+use reth_provider::{BlockHashReader, BlockNumReader, ChainSpecProvider, ProviderFactory};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -64,16 +60,16 @@ pub struct InitCommand {
     /// JSONL file with state dump.
     ///
     /// Must contain accounts in following format, additional account fields are ignored. Can
-    /// also contain { "root": <state-root> } as first line.
+    /// also contain { "root": \<state-root\> } as first line.
     /// {
-    ///     "balance": "<balance>",
-    ///     "nonce": <nonce>,
-    ///     "code": "<bytecode>",
+    ///     "balance": "\<balance\>",
+    ///     "nonce": \<nonce\>,
+    ///     "code": "\<bytecode\>",
     ///     "storage": {
-    ///         "<key>": "<value>",
+    ///         "\<key\>": "\<value\>",
     ///         ..
     ///     },
-    ///     "address": "<address>",
+    ///     "address": "\<address\>",
     /// }
     ///
     /// Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
@@ -116,7 +112,6 @@ pub fn init_at_state<DB: Database>(
     state_dump_path: PathBuf,
     factory: ProviderFactory<DB>,
 ) -> eyre::Result<B256> {
-    let chain = factory.chain_spec();
     let block = factory.last_block_number()?;
     let hash = factory.block_hash(block)?.unwrap();
 
@@ -126,6 +121,7 @@ pub fn init_at_state<DB: Database>(
 
     debug!(target: "reth::cli",
         block,
+        chain=%factory.chain_spec().chain,
         "Initializing state at block"
     );
 
@@ -165,10 +161,7 @@ pub fn init_at_state<DB: Database>(
                 accounts.iter().map(|(address, account)| (address, account)),
             )?;
 
-            // Insert header
             let tx = provider_rw.into_tx();
-            let static_file_provider = factory.static_file_provider();
-            insert_genesis_header::<DB>(&tx, &static_file_provider, chain.clone())?;
 
             insert_genesis_state::<DB>(
                 &tx,
@@ -182,7 +175,6 @@ pub fn init_at_state<DB: Database>(
             }
 
             tx.commit()?;
-            static_file_provider.commit()?;
         }
 
         if n == 0 {
