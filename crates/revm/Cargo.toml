@@ -19,7 +19,6 @@ reth-provider.workspace = true
 reth-consensus-common.workspace = true
 reth-evm.workspace = true
 reth-trie = { workspace = true, optional = true }
-reth-net-p2p.workspace = true
 
 # revm
 revm.workspace = true
@@ -29,6 +28,7 @@ revm-inspectors.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth-net-p2p.workspace = true
 reth-trie.workspace = true
 
 [features]
