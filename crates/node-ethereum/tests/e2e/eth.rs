@@ -44,7 +44,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let raw_tx = wallet.transfer_tx().await;
 
     // make the node advance
-    node.advance(raw_tx, eth_payload_attributes).await?;
+    node.advance_block(raw_tx, eth_payload_attributes).await?;
 
     Ok(())
 }
@@ -83,7 +83,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     let raw_tx = wallet.transfer_tx().await;
 
     // make the node advance
-    node.advance(raw_tx, crate::utils::eth_payload_attributes).await?;
+    node.advance_block(raw_tx, crate::utils::eth_payload_attributes).await?;
 
     Ok(())
 }

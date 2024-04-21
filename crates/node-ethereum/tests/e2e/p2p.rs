@@ -65,7 +65,8 @@ async fn can_sync() -> eyre::Result<()> {
     second_node.network.expect_session().await;
 
     // Make the first node advance
-    let (block_hash, tx_hash) = first_node.advance(raw_tx.clone(), eth_payload_attributes).await?;
+    let (block_hash, tx_hash) =
+        first_node.advance_block(raw_tx.clone(), eth_payload_attributes).await?;
 
     // only send forkchoice update to second node
     second_node.engine_api.update_forkchoice(block_hash).await?;
