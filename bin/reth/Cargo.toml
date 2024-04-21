@@ -103,6 +103,7 @@ itertools.workspace = true
 rayon.workspace = true
 boyer-moore-magiclen = "0.2.16"
 ahash = "0.8"
+thiserror.workspace = true
 
 # p2p
 discv5.workspace = true
