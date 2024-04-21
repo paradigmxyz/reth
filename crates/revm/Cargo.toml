@@ -23,22 +23,21 @@ reth-trie = { workspace = true, optional = true }
 # revm
 revm.workspace = true
 revm-inspectors.workspace = true
+reth-net-p2p = {workspace = true, optional = true}
 
 # common
 tracing.workspace = true
 
 [dev-dependencies]
-reth-net-p2p.workspace = true
 reth-trie.workspace = true
 
 [features]
-test-utils = ["dep:reth-trie"]
+test-utils = ["dep:reth-trie","dep:reth-net-p2p"]
 optimism = [
     "revm/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-consensus-common/optimism",
     "reth-interfaces/optimism",
-    "reth-net-p2p/optimism"
 ]
 js-tracer = ["revm-inspectors/js-tracer"]
