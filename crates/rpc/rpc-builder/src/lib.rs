@@ -1354,6 +1354,7 @@ where
         let filter = EthFilter::new(
             self.provider.clone(),
             self.pool.clone(),
+            self.events.clone(),
             cache.clone(),
             self.config.eth.filter_config(),
             executor.clone(),

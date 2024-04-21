@@ -19,8 +19,8 @@ use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
-    StateProviderFactory,
+    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
+    ReceiptProviderIdExt, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -42,9 +42,10 @@ use tower::layer::util::Identity;
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
-pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, EngineT, EvmConfig>(
+pub async fn launch<Provider, Pool, Events, Network, Tasks, EngineApi, EngineT, EvmConfig>(
     provider: Provider,
     pool: Pool,
+    events: Events,
     network: Network,
     executor: Tasks,
     engine_api: EngineApi,
@@ -63,6 +64,7 @@ where
         + Unpin
         + 'static,
     Pool: TransactionPool + Clone + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EngineT: EngineTypes + 'static,
@@ -97,8 +99,14 @@ where
     let config = EthFilterConfig::default()
         .max_logs_per_response(DEFAULT_MAX_LOGS_PER_RESPONSE)
         .max_blocks_per_filter(DEFAULT_MAX_BLOCKS_PER_FILTER);
-    let eth_filter =
-        EthFilter::new(provider, pool, eth_cache.clone(), config, Box::new(executor.clone()));
+    let eth_filter = EthFilter::new(
+        provider,
+        pool,
+        events,
+        eth_cache.clone(),
+        config,
+        Box::new(executor.clone()),
+    );
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }
 

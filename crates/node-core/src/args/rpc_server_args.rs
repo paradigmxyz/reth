@@ -320,10 +320,11 @@ impl RpcServerArgs {
 
     /// Create Engine API server.
     #[allow(clippy::too_many_arguments)]
-    pub async fn start_auth_server<Provider, Pool, Network, Tasks, EngineT, EvmConfig>(
+    pub async fn start_auth_server<Provider, Pool, Events, Network, Tasks, EngineT, EvmConfig>(
         &self,
         provider: Provider,
         pool: Pool,
+        events: Events,
         network: Network,
         executor: Tasks,
         engine_api: EngineApi<Provider, EngineT>,
@@ -340,6 +341,7 @@ impl RpcServerArgs {
             + Unpin
             + 'static,
         Pool: TransactionPool + Clone + 'static,
+        Events: CanonStateSubscriptions + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         EngineT: EngineTypes + 'static,
@@ -350,6 +352,7 @@ impl RpcServerArgs {
         reth_rpc_builder::auth::launch(
             provider,
             pool,
+            events,
             network,
             executor,
             engine_api,
