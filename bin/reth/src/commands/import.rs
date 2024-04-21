@@ -19,12 +19,10 @@ use reth_downloaders::{
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_interfaces::{
+use reth_net_p2p::{
+    bodies::downloader::BodyDownloader,
     consensus::Consensus,
-    p2p::{
-        bodies::downloader::BodyDownloader,
-        headers::downloader::{HeaderDownloader, SyncTarget},
-    },
+    headers::downloader::{HeaderDownloader, SyncTarget},
 };
 use reth_node_core::init::init_genesis;
 use reth_node_ethereum::EthEvmConfig;

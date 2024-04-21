@@ -3,14 +3,13 @@
 use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse, peers::PeersHandle};
 use futures::{future, future::Either};
 
-use reth_interfaces::p2p::{
+use reth_net_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
-    error::{PeerRequestResult, RequestError},
+    error::{PeerRequestResult, ReputationChangeKind, RequestError},
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
-use reth_network_api::ReputationChangeKind;
 use reth_primitives::{Header, PeerId, B256};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},

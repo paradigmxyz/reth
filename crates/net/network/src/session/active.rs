@@ -18,8 +18,8 @@ use reth_eth_wire::{
     message::{EthBroadcastMessage, RequestPair},
     DisconnectP2P, DisconnectReason, EthMessage,
 };
-use reth_interfaces::p2p::error::RequestError;
 use reth_metrics::common::mpsc::MeteredPollSender;
+use reth_net_p2p::error::RequestError;
 use reth_primitives::PeerId;
 use std::{
     collections::VecDeque,

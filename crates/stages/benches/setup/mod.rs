@@ -7,7 +7,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv,
 };
-use reth_interfaces::test_utils::{
+use reth_net_p2p::test_utils::{
     generators,
     generators::{
         random_block_range, random_changeset_range, random_contract_account_range,

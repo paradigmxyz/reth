@@ -5,7 +5,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::consensus;
+use reth_net_p2p::consensus;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
@@ -342,7 +342,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_interfaces::test_utils::{
+    use reth_net_p2p::test_utils::{
         generators,
         generators::{
             random_block, random_block_range, random_changeset_range, random_contract_account_range,

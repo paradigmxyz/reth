@@ -7,12 +7,10 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_interfaces::{
+use reth_net_p2p::{
+    bodies::{client::BodiesClient, downloader::BodyDownloader},
     consensus::Consensus,
-    p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader},
-        headers::{client::HeadersClient, downloader::HeaderDownloader},
-    },
+    headers::{client::HeadersClient, downloader::HeaderDownloader},
 };
 use reth_node_core::{
     node_config::NodeConfig,

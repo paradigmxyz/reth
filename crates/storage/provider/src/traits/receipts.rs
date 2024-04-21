@@ -1,6 +1,6 @@
 use std::ops::RangeBounds;
 
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, Receipt, TxHash, TxNumber};
 
 use crate::BlockIdReader;

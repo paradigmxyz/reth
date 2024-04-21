@@ -4,7 +4,7 @@ use crate::{
 };
 use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Header,
     PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,

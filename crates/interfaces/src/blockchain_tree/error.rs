@@ -1,11 +1,10 @@
 //! Error handling for the blockchain tree
 
 use crate::{
-    consensus::ConsensusError,
     executor::{BlockExecutionError, BlockValidationError},
-    provider::ProviderError,
     RethError,
 };
+use reth_net_p2p::{consensus::ConsensusError, provider::ProviderError};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 
 /// Various error cases that can occur when a block violates tree assumptions.

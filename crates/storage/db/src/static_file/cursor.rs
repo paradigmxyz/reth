@@ -1,7 +1,7 @@
 use super::mask::{ColumnSelectorOne, ColumnSelectorThree, ColumnSelectorTwo};
 use crate::table::Decompress;
 use derive_more::{Deref, DerefMut};
-use reth_interfaces::provider::{ProviderError, ProviderResult};
+use reth_net_p2p::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor};
 use reth_primitives::{static_file::SegmentHeader, B256};
 use std::sync::Arc;

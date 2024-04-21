@@ -82,7 +82,7 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
-    use reth_interfaces::test_utils::{generators, generators::random_block_range};
+    use reth_net_p2p::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
         TxNumber, B256,

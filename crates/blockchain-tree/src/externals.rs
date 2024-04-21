@@ -3,7 +3,8 @@
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
-use reth_interfaces::{consensus::Consensus, RethResult};
+use reth_interfaces::RethResult;
+use reth_net_p2p::consensus::Consensus;
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
 use reth_provider::{ProviderFactory, StatsReader};
 use std::{collections::BTreeMap, sync::Arc};

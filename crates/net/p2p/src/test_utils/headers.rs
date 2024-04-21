@@ -2,16 +2,14 @@
 
 use crate::{
     consensus::{self, Consensus, ConsensusError},
-    p2p::{
-        download::DownloadClient,
-        error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
-        headers::{
-            client::{HeadersClient, HeadersRequest},
-            downloader::{HeaderDownloader, SyncTarget},
-            error::HeadersDownloaderResult,
-        },
-        priority::Priority,
+    download::DownloadClient,
+    error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
+    headers::{
+        client::{HeadersClient, HeadersRequest},
+        downloader::{HeaderDownloader, SyncTarget},
+        error::HeadersDownloaderResult,
     },
+    priority::Priority,
 };
 use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_primitives::{

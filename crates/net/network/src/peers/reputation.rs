@@ -1,6 +1,6 @@
 //! Peer reputation management
 
-use reth_network_api::{Reputation, ReputationChangeKind};
+use reth_net_p2p::error::{Reputation, ReputationChangeKind};
 
 /// The default reputation of a peer
 pub(crate) const DEFAULT_REPUTATION: Reputation = 0;

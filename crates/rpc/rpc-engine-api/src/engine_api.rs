@@ -1,4 +1,5 @@
 use crate::{metrics::EngineApiMetrics, EngineApiError, EngineApiResult};
+use alloy_rpc_types_engine::ForkchoiceState;
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
@@ -6,7 +7,6 @@ use reth_engine_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, EngineTypes, PayloadAttributes,
     PayloadBuilderAttributes, PayloadOrAttributes,
 };
-use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
@@ -707,7 +707,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::BeaconEngineMessage;
-    use reth_interfaces::test_utils::generators::random_block;
+    use reth_net_p2p::test_utils::generators::random_block;
     use reth_node_ethereum::EthEngineTypes;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, B256, MAINNET};
@@ -755,7 +755,7 @@ mod tests {
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
     mod get_payload_bodies {
         use super::*;
-        use reth_interfaces::test_utils::{generators, generators::random_block_range};
+        use reth_net_p2p::test_utils::{generators, generators::random_block_range};
 
         #[tokio::test]
         async fn invalid_params() {
@@ -869,7 +869,7 @@ mod tests {
     // https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-3
     mod exchange_transition_configuration {
         use super::*;
-        use reth_interfaces::test_utils::generators;
+        use reth_net_p2p::test_utils::generators;
         use reth_primitives::U256;
 
         #[tokio::test]

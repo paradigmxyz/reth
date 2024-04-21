@@ -1,5 +1,5 @@
 use crate::{BlockNumReader, BlockReader};
-use reth_interfaces::provider::{ProviderError, ProviderResult};
+use reth_net_p2p::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     Address, BlockHashOrNumber, BlockNumber, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber,

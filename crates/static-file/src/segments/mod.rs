@@ -12,7 +12,7 @@ pub use receipts::Receipts;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, RawKey, RawTable,
 };
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     static_file::{

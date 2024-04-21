@@ -9,7 +9,7 @@ use reth_db::{
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
     stage::{AccountHashingCheckpoint, EntitiesCheckpoint, StageCheckpoint, StageId},
@@ -93,7 +93,7 @@ impl AccountHashingStage {
         opts: SeedOpts,
     ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
         use reth_db::models::AccountBeforeTx;
-        use reth_interfaces::test_utils::{
+        use reth_net_p2p::test_utils::{
             generators,
             generators::{random_block_range, random_eoa_accounts},
         };

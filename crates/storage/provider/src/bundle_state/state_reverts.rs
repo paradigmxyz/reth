@@ -5,7 +5,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::db::DatabaseError;
+use reth_net_p2p::db::DatabaseError;
 use reth_primitives::{revm::compat::into_reth_acc, BlockNumber, StorageEntry, B256, U256};
 use revm::db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot};
 use std::iter::Peekable;

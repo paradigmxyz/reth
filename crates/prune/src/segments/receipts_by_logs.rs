@@ -217,7 +217,7 @@ mod tests {
     use crate::segments::{receipts_by_logs::ReceiptsByLogs, PruneInput, Segment};
     use assert_matches::assert_matches;
     use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
-    use reth_interfaces::test_utils::{
+    use reth_net_p2p::test_utils::{
         generators,
         generators::{random_block_range, random_eoa_account, random_log, random_receipt},
     };

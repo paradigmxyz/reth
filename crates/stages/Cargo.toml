@@ -23,6 +23,7 @@ reth-tokio-util.workspace = true
 reth-etl.workspace = true
 reth-static-file.workspace = true
 reth-config.workspace = true
+reth-net-p2p.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }

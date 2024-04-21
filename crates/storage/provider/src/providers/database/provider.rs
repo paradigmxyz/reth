@@ -27,10 +27,10 @@ use reth_db::{
     BlockNumberList, DatabaseError,
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::{
-    p2p::headers::downloader::SyncTarget,
+use reth_interfaces::RethResult;
+use reth_net_p2p::{
+    headers::downloader::SyncTarget,
     provider::{ProviderResult, RootMismatch},
-    RethResult,
 };
 use reth_primitives::{
     keccak256,

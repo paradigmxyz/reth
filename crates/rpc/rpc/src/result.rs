@@ -100,7 +100,7 @@ macro_rules! impl_to_rpc_result {
 
 impl_to_rpc_result!(PayloadError);
 impl_to_rpc_result!(reth_interfaces::RethError);
-impl_to_rpc_result!(reth_interfaces::provider::ProviderError);
+impl_to_rpc_result!(reth_net_p2p::provider::ProviderError);
 impl_to_rpc_result!(reth_network_api::NetworkError);
 
 /// Constructs an invalid params JSON-RPC error.

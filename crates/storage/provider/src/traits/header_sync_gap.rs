@@ -1,5 +1,6 @@
 use auto_impl::auto_impl;
-use reth_interfaces::{p2p::headers::downloader::SyncTarget, RethResult};
+use reth_interfaces::RethResult;
+use reth_net_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, SealedHeader, B256};
 use tokio::sync::watch;
 

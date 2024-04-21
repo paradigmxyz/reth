@@ -1,10 +1,8 @@
 use crate::{
     blockchain_tree::error::{BlockchainTreeError, CanonicalError},
-    consensus::ConsensusError,
-    db::DatabaseError,
     executor::BlockExecutionError,
-    provider::ProviderError,
 };
+use reth_net_p2p::{consensus::ConsensusError, db::DatabaseError, provider::ProviderError};
 use reth_network_api::NetworkError;
 use reth_primitives::fs::FsPathError;
 

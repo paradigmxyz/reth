@@ -1,6 +1,7 @@
 //! Error types emitted by types or implementations of this crate.
 
-use reth_interfaces::{provider::ProviderError, RethError};
+use reth_interfaces::RethError;
+use reth_net_p2p::provider::ProviderError;
 use reth_primitives::{revm_primitives::EVMError, B256};
 use reth_transaction_pool::BlobStoreError;
 use tokio::sync::oneshot;

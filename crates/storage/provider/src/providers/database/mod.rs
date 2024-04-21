@@ -9,7 +9,8 @@ use crate::{
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
+use reth_interfaces::{RethError, RethResult};
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
@@ -571,13 +572,13 @@ mod tests {
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_interfaces::{
+    use reth_interfaces::RethError;
+    use reth_net_p2p::{
         provider::ProviderError,
         test_utils::{
             generators,
             generators::{random_block, random_header},
         },
-        RethError,
     };
     use reth_primitives::{
         hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, StaticFileSegment,

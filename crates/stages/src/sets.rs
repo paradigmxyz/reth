@@ -56,9 +56,8 @@ use crate::{
 };
 use reth_config::config::EtlConfig;
 use reth_db::database::Database;
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
+use reth_net_p2p::{
+    bodies::downloader::BodyDownloader, consensus::Consensus, headers::downloader::HeaderDownloader,
 };
 use reth_provider::{ExecutorFactory, HeaderSyncGapProvider, HeaderSyncMode};
 use std::sync::Arc;

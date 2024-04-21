@@ -10,7 +10,7 @@ use reth_eth_wire::{
     NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
     SharedTransactions, Transactions,
 };
-use reth_interfaces::p2p::error::{RequestError, RequestResult};
+use reth_net_p2p::error::{RequestError, RequestResult};
 use reth_primitives::{
     BlockBody, Bytes, Header, PeerId, PooledTransactionsElement, ReceiptWithBloom, B256,
 };

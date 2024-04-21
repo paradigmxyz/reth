@@ -1,4 +1,5 @@
-use crate::{blockchain_tree::error::InsertBlockError, provider::ProviderError, RethResult};
+use crate::{blockchain_tree::error::InsertBlockError, RethResult};
+use reth_net_p2p::provider::ProviderError;
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,

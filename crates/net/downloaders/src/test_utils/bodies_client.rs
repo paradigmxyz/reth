@@ -1,4 +1,4 @@
-use reth_interfaces::p2p::{
+use reth_net_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     priority::Priority,

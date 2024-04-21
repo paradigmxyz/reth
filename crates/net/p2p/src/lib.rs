@@ -24,3 +24,15 @@ pub mod error;
 
 /// Priority enum for BlockHeader and BlockBody requests
 pub mod priority;
+
+pub mod consensus;
+
+pub mod db;
+
+pub mod provider;
+
+#[cfg(any(test, feature = "test-utils"))]
+/// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
+pub mod test_utils;
+
+pub mod sync;

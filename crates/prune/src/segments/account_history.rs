@@ -107,7 +107,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
-    use reth_interfaces::test_utils::{
+    use reth_net_p2p::test_utils::{
         generators,
         generators::{random_block_range, random_changeset_range, random_eoa_accounts},
     };

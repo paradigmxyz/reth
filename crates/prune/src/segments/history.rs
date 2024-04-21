@@ -6,7 +6,7 @@ use reth_db::{
     transaction::DbTxMut,
     BlockNumberList,
 };
-use reth_interfaces::db::DatabaseError;
+use reth_net_p2p::db::DatabaseError;
 use reth_primitives::BlockNumber;
 use reth_provider::DatabaseProviderRW;
 

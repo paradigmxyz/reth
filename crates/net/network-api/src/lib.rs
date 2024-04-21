@@ -18,8 +18,8 @@ use reth_primitives::{NodeRecord, PeerId};
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 pub use error::NetworkError;
-pub use reputation::{Reputation, ReputationChangeKind};
 use reth_eth_wire::capability::Capabilities;
+pub use reth_net_p2p::error::{Reputation, ReputationChangeKind};
 use reth_rpc_types::NetworkStatus;
 
 /// Network Error

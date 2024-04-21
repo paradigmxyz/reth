@@ -1,5 +1,5 @@
 use crate::engine::forkchoice::ForkchoiceStatus;
-use reth_interfaces::consensus::ForkchoiceState;
+use alloy_rpc_types_engine::ForkchoiceState;
 use reth_primitives::{SealedBlock, SealedHeader, B256};
 use std::{sync::Arc, time::Duration};
 

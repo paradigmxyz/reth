@@ -1,12 +1,26 @@
-use crate::p2p::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
+use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use futures::{Future, FutureExt};
-pub use reth_eth_wire_types::BlockHeaders;
 use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection};
 use std::{
     fmt::Debug,
     pin::Pin,
     task::{ready, Context, Poll},
 };
+
+/// The response to [`GetBlockHeaders`], containing headers if any headers were found.
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct BlockHeaders(
+    /// The requested headers.
+    pub Vec<Header>,
+);
+
+impl From<Vec<Header>> for BlockHeaders {
+    fn from(headers: Vec<Header>) -> Self {
+        BlockHeaders(headers)
+    }
+}
 
 /// The header request struct to be sent to connected peers, which
 /// will proceed to ask them to stream the requested headers to us.

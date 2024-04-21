@@ -1,4 +1,5 @@
-use crate::{provider::ProviderError, trie::StateRootError};
+use crate::trie::StateRootError;
+use reth_net_p2p::provider::ProviderError;
 use reth_primitives::{
     revm_primitives::EVMError, BlockNumHash, Bloom, GotExpected, GotExpectedBoxed,
     PruneSegmentError, B256,

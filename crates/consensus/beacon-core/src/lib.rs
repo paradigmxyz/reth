@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_consensus_common::validation;
-use reth_interfaces::consensus::{Consensus, ConsensusError};
+use reth_net_p2p::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
     constants::MAXIMUM_EXTRA_DATA_SIZE, Chain, ChainSpec, Hardfork, Header, SealedBlock,
     SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,

@@ -13,11 +13,11 @@ use crate::{
 };
 use eyre::Context;
 use metrics::{gauge, Label};
-use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
     PageSize, SyncMode, RO, RW,
 };
+use reth_net_p2p::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
     ops::Deref,
@@ -455,8 +455,8 @@ mod tests {
         test_utils::*,
         AccountChangeSets,
     };
-    use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
     use reth_libmdbx::Error;
+    use reth_net_p2p::db::{DatabaseWriteError, DatabaseWriteOperation};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
     use std::str::FromStr;
     use tempfile::TempDir;

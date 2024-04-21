@@ -1,4 +1,4 @@
-use crate::db::DatabaseError;
+use reth_net_p2p::db::DatabaseError;
 use thiserror::Error;
 
 /// State root error.

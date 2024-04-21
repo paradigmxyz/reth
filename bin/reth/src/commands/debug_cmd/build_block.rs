@@ -19,7 +19,8 @@ use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
 use reth_db::{init_db, DatabaseEnv};
-use reth_interfaces::{consensus::Consensus, RethResult};
+use reth_interfaces::RethResult;
+use reth_net_p2p::consensus::{Consensus, ConsensusError};
 use reth_node_api::PayloadBuilderAttributes;
 #[cfg(not(feature = "optimism"))]
 use reth_node_ethereum::EthEvmConfig;

@@ -15,7 +15,7 @@ use discv5::ListenConfig;
 use reth_config::Config;
 use reth_db::create_db;
 use reth_discv4::NatResolver;
-use reth_interfaces::p2p::bodies::client::BodiesClient;
+use reth_net_p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
 use reth_provider::ProviderFactory;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};

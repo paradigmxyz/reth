@@ -11,7 +11,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId, StorageHashingCheckpoint},
@@ -219,7 +219,7 @@ mod tests {
         cursor::{DbCursorRW, DbDupCursorRO},
         models::StoredBlockBodyIndices,
     };
-    use reth_interfaces::test_utils::{
+    use reth_net_p2p::test_utils::{
         generators,
         generators::{random_block_range, random_contract_account_range},
     };

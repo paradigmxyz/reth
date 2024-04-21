@@ -7,7 +7,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawValue,
 };
-use reth_interfaces::consensus;
+use reth_net_p2p::consensus;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,
@@ -282,7 +282,7 @@ struct FailedSenderRecoveryError {
 mod tests {
     use assert_matches::assert_matches;
     use reth_db::cursor::DbCursorRO;
-    use reth_interfaces::test_utils::{
+    use reth_net_p2p::test_utils::{
         generators,
         generators::{random_block, random_block_range},
     };

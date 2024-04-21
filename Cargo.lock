@@ -6097,6 +6097,7 @@ dependencies = [
  "reth-downloaders",
  "reth-ethereum-payload-builder",
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-network",
  "reth-network-api",
  "reth-nippy-jar",
@@ -6138,11 +6139,13 @@ dependencies = [
 name = "reth-auto-seal-consensus"
 version = "0.2.0-beta.5"
 dependencies = [
+ "alloy-rpc-types-engine",
  "futures-util",
  "reth-beacon-consensus",
  "reth-engine-primitives",
  "reth-evm",
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6179,6 +6182,7 @@ dependencies = [
 name = "reth-beacon-consensus"
 version = "0.2.0-beta.5"
 dependencies = [
+ "alloy-rpc-types-engine",
  "assert_matches",
  "futures",
  "metrics",
@@ -6190,6 +6194,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-interfaces",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-node-ethereum",
  "reth-payload-builder",
  "reth-payload-validator",
@@ -6217,6 +6222,7 @@ version = "0.2.0-beta.5"
 dependencies = [
  "reth-consensus-common",
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-primitives",
 ]
 
@@ -6233,6 +6239,7 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-node-ethereum",
  "reth-primitives",
  "reth-provider",
@@ -6294,6 +6301,7 @@ version = "0.2.0-beta.5"
 dependencies = [
  "mockall",
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-provider",
 ]
@@ -6323,6 +6331,7 @@ dependencies = [
  "reth-interfaces",
  "reth-libmdbx",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-nippy-jar",
  "reth-primitives",
  "reth-tracing",
@@ -6422,6 +6431,7 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-provider",
  "reth-tasks",
@@ -6633,6 +6643,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "reth-eth-wire-types",
+ "reth-net-p2p",
  "reth-network-api",
  "reth-primitives",
  "reth-rpc-types",
@@ -6741,6 +6752,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-net-p2p"
+version = "0.2.0-beta.5"
+dependencies = [
+ "alloy-rlp",
+ "auto_impl",
+ "clap",
+ "futures",
+ "parking_lot 0.12.1",
+ "rand 0.8.5",
+ "reth-primitives",
+ "secp256k1 0.27.0",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-network"
 version = "0.2.0-beta.5"
 dependencies = [
@@ -6772,6 +6801,7 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-net-common",
+ "reth-net-p2p",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
@@ -6802,6 +6832,7 @@ dependencies = [
  "enr",
  "reth-discv4",
  "reth-eth-wire",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-rpc-types",
  "serde",
@@ -6862,6 +6893,7 @@ dependencies = [
  "reth-downloaders",
  "reth-exex",
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-network",
  "reth-node-api",
  "reth-node-core",
@@ -6885,6 +6917,7 @@ dependencies = [
 name = "reth-node-core"
 version = "0.2.0-beta.5"
 dependencies = [
+ "alloy-rpc-types-engine",
  "assert_matches",
  "clap",
  "const-str",
@@ -6915,6 +6948,7 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-net-nat",
+ "reth-net-p2p",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
@@ -6965,6 +6999,7 @@ dependencies = [
 name = "reth-node-events"
 version = "0.2.0-beta.5"
 dependencies = [
+ "alloy-rpc-types-engine",
  "futures",
  "humantime",
  "pin-project",
@@ -7047,6 +7082,7 @@ dependencies = [
  "reth-ethereum-engine-primitives",
  "reth-interfaces",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-types",
@@ -7126,6 +7162,7 @@ name = "reth-provider"
 version = "0.2.0-beta.5"
 dependencies = [
  "alloy-rlp",
+ "alloy-rpc-types-engine",
  "assert_matches",
  "auto_impl",
  "dashmap",
@@ -7140,6 +7177,7 @@ dependencies = [
  "reth-evm",
  "reth-interfaces",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-nippy-jar",
  "reth-primitives",
  "reth-trie",
@@ -7164,6 +7202,7 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-provider",
  "reth-stages",
@@ -7181,6 +7220,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-evm",
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-provider",
  "reth-trie",
@@ -7216,6 +7256,7 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-interfaces",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
@@ -7246,8 +7287,10 @@ dependencies = [
 name = "reth-rpc-api"
 version = "0.2.0-beta.5"
 dependencies = [
+ "alloy-rpc-types-engine",
  "jsonrpsee",
  "reth-engine-primitives",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-rpc-types",
  "serde",
@@ -7272,6 +7315,7 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "0.2.0-beta.5"
 dependencies = [
+ "alloy-rpc-types-engine",
  "hyper 0.14.28",
  "jsonrpsee",
  "metrics",
@@ -7282,6 +7326,7 @@ dependencies = [
  "reth-interfaces",
  "reth-ipc",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-network-api",
  "reth-node-ethereum",
  "reth-payload-builder",
@@ -7310,6 +7355,7 @@ name = "reth-rpc-engine-api"
 version = "0.2.0-beta.5"
 dependencies = [
  "alloy-rlp",
+ "alloy-rpc-types-engine",
  "assert_matches",
  "async-trait",
  "jsonrpsee-core",
@@ -7319,6 +7365,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-interfaces",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-node-ethereum",
  "reth-node-optimism",
  "reth-payload-builder",
@@ -7400,6 +7447,7 @@ dependencies = [
  "reth-etl",
  "reth-interfaces",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-node-ethereum",
  "reth-node-optimism",
  "reth-primitives",
@@ -7426,6 +7474,7 @@ dependencies = [
  "rayon",
  "reth-db",
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-nippy-jar",
  "reth-primitives",
  "reth-provider",

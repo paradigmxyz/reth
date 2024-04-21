@@ -9,7 +9,7 @@ use reth_db::{
     RawKey, RawValue,
 };
 use reth_etl::Collector;
-use reth_interfaces::provider::ProviderError;
+use reth_net_p2p::provider::ProviderError;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, TxHash, TxNumber,
@@ -237,7 +237,7 @@ mod tests {
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::{
+    use reth_net_p2p::test_utils::{
         generators,
         generators::{random_block, random_block_range},
     };

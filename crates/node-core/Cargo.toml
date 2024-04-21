@@ -35,6 +35,8 @@ reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
+reth-net-p2p.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # ethereum
 discv5.workspace = true

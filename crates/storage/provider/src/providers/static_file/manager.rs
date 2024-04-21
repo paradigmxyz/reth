@@ -16,7 +16,7 @@ use reth_db::{
     table::Table,
     tables,
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
+use reth_net_p2p::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     keccak256,

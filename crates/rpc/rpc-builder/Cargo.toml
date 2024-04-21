@@ -22,6 +22,8 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
 reth-engine-primitives.workspace = true
+reth-net-p2p.workspace  = true
+alloy-rpc-types-engine.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }

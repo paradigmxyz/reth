@@ -28,7 +28,7 @@ pub use providers::{
 pub mod test_utils;
 
 /// Re-export provider error.
-pub use reth_interfaces::provider::ProviderError;
+pub use reth_net_p2p::provider::ProviderError;
 
 pub mod chain;
 pub use chain::{Chain, DisplayBlocksChain};

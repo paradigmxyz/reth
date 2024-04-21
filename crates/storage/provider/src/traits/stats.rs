@@ -1,5 +1,5 @@
 use reth_db::table::Table;
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 
 /// The trait for fetching provider statistics.
 #[auto_impl::auto_impl(&, Arc)]

@@ -1,4 +1,4 @@
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber,

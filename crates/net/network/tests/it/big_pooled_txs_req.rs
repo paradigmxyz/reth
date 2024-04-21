@@ -1,5 +1,5 @@
 use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
-use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
+use reth_net_p2p::sync::{NetworkSyncUpdater, SyncState};
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
     NetworkEvents, PeerRequest,

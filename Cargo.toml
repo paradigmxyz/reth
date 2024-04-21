@@ -8,6 +8,7 @@ members = [
     "crates/consensus/beacon-core/",
     "crates/consensus/common/",
     "crates/ethereum-forks/",
+    "crates/net/p2p/",
     "crates/etl/",
     "crates/evm/",
     "crates/evm-ethereum/",
@@ -260,6 +261,7 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 reth-node-events = {path = "crates/node-events"}
+reth-net-p2p = {path = "crates/net/p2p"}
 
 # revm
 revm = { version = "8.0.0", features = [

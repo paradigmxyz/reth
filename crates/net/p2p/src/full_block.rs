@@ -1,11 +1,9 @@
 use super::headers::client::HeadersRequest;
 use crate::{
+    bodies::client::{BodiesClient, SingleBodyRequest},
     consensus::{Consensus, ConsensusError},
-    p2p::{
-        bodies::client::{BodiesClient, SingleBodyRequest},
-        error::PeerRequestResult,
-        headers::client::{HeadersClient, SingleHeaderRequest},
-    },
+    error::PeerRequestResult,
+    headers::client::{HeadersClient, SingleHeaderRequest},
 };
 use futures::Stream;
 use reth_primitives::{

@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::FutureExt;
 use reth_db::database::Database;
-use reth_interfaces::p2p::{
+use reth_net_p2p::{
     bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
@@ -430,7 +430,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
-    use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
+    use reth_net_p2p::{either::EitherDownloader, test_utils::TestFullBlockClient};
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
         Header, PruneModes, SealedHeader, MAINNET,

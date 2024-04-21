@@ -1,6 +1,6 @@
 use crate::DatabaseProviderRO;
 use reth_db::database::Database;
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 
 /// Database provider factory.
 pub trait DatabaseProviderFactory<DB: Database> {

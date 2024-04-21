@@ -10,9 +10,9 @@ use reth_db::{
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
-use reth_interfaces::{
+use reth_net_p2p::{
     consensus::Consensus,
-    p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError},
+    headers::{downloader::HeaderDownloader, error::HeadersDownloaderError},
     provider::ProviderError,
 };
 use reth_primitives::{
@@ -361,7 +361,7 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::random_header;
+    use reth_net_p2p::test_utils::generators::random_header;
     use reth_primitives::{stage::StageUnitCheckpoint, B256};
     use reth_provider::ProviderFactory;
     use test_runner::HeadersTestRunner;
@@ -373,7 +373,7 @@ mod tests {
         use reth_downloaders::headers::reverse_headers::{
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
-        use reth_interfaces::test_utils::{
+        use reth_net_p2p::test_utils::{
             generators, generators::random_header_range, TestConsensus, TestHeaderDownloader,
             TestHeadersClient,
         };

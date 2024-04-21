@@ -1,6 +1,7 @@
 //! Collection of methods for block validation.
 
-use reth_interfaces::{consensus::ConsensusError, RethResult};
+use reth_interfaces::RethResult;
+use reth_net_p2p::consensus::ConsensusError;
 use reth_primitives::{
     constants::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
     BlockNumber, ChainSpec, GotExpected, Hardfork, Header, InvalidTransactionError, SealedBlock,
@@ -324,7 +325,7 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
 mod tests {
     use super::*;
     use mockall::mock;
-    use reth_interfaces::{
+    use reth_net_p2p::{
         provider::ProviderResult,
         test_utils::generators::{self, Rng},
     };

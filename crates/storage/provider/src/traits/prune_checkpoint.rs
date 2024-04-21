@@ -1,4 +1,4 @@
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{PruneCheckpoint, PruneSegment};
 
 /// The trait for fetching prune checkpoint related data.

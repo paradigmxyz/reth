@@ -22,7 +22,8 @@ reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
 reth-engine-primitives.workspace = true
-
+alloy-rpc-types-engine.workspace = true
+reth-net-p2p.workspace = true
 # async
 futures-util.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }

@@ -192,9 +192,9 @@ impl From<RethError> for EthApiError {
     }
 }
 
-impl From<reth_interfaces::provider::ProviderError> for EthApiError {
-    fn from(error: reth_interfaces::provider::ProviderError) -> Self {
-        use reth_interfaces::provider::ProviderError;
+impl From<reth_net_p2p::provider::ProviderError> for EthApiError {
+    fn from(error: reth_net_p2p::provider::ProviderError) -> Self {
+        use reth_net_p2p::provider::ProviderError;
         match error {
             ProviderError::HeaderNotFound(_) |
             ProviderError::BlockHashNotFound(_) |

@@ -1,12 +1,10 @@
 //! Stores engine API messages to disk for later inspection and replay.
 
+use alloy_rpc_types_engine::ForkchoiceState;
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_engine_primitives::EngineTypes;
 use reth_primitives::fs;
-use reth_rpc_types::{
-    engine::{CancunPayloadFields, ForkchoiceState},
-    ExecutionPayload,
-};
+use reth_rpc_types::{engine::CancunPayloadFields, ExecutionPayload};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf, time::SystemTime};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};

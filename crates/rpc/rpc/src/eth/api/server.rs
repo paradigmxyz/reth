@@ -448,7 +448,7 @@ mod tests {
         EthApi,
     };
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_interfaces::test_utils::{generators, generators::Rng};
+    use reth_net_p2p::test_utils::{generators, generators::Rng};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams, Block, BlockNumberOrTag, Header,

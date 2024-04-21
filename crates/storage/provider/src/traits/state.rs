@@ -1,7 +1,7 @@
 use super::AccountReader;
 use crate::{BlockHashReader, BlockIdReader, BundleStateWithReceipts, StateRootProvider};
 use auto_impl::auto_impl;
-use reth_interfaces::provider::{ProviderError, ProviderResult};
+use reth_net_p2p::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     trie::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
     Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,

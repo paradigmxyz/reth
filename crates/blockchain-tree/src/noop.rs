@@ -4,9 +4,9 @@ use reth_interfaces::{
         BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
         InsertPayloadOk,
     },
-    provider::ProviderError,
     RethResult,
 };
+use reth_net_p2p::provider::ProviderError;
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,

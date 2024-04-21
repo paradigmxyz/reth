@@ -10,7 +10,7 @@ use reth_db::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{
     constants::EPOCH_SLOTS, trie::AccountProof, Account, Address, BlockNumber, Bytecode,
     StaticFileSegment, StorageKey, StorageValue, B256,
@@ -412,7 +412,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };
-    use reth_interfaces::provider::ProviderError;
+    use reth_net_p2p::provider::ProviderError;
     use reth_primitives::{address, b256, Account, Address, StorageEntry, B256, U256};
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");

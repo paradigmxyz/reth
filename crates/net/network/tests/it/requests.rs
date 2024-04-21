@@ -2,7 +2,7 @@
 //! Tests for eth related requests
 
 use rand::Rng;
-use reth_interfaces::p2p::{
+use reth_net_p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
 };

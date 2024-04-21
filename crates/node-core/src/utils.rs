@@ -3,7 +3,7 @@
 
 use eyre::Result;
 use reth_consensus_common::validation::validate_block_standalone;
-use reth_interfaces::p2p::{
+use reth_net_p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,

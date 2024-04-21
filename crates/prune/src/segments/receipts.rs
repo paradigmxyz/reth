@@ -3,7 +3,7 @@ use crate::{
     PrunerError,
 };
 use reth_db::{database::Database, tables};
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
 use tracing::{instrument, trace};
@@ -97,7 +97,7 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
-    use reth_interfaces::test_utils::{
+    use reth_net_p2p::test_utils::{
         generators,
         generators::{random_block_range, random_receipt},
     };

@@ -2,9 +2,10 @@ use crate::{
     engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus},
     BeaconConsensusEngineEvent,
 };
+use alloy_rpc_types_engine::ForkchoiceState;
 use futures::{future::Either, FutureExt};
 use reth_engine_primitives::EngineTypes;
-use reth_interfaces::{consensus::ForkchoiceState, RethResult};
+use reth_interfaces::RethResult;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceUpdateError,

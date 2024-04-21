@@ -28,7 +28,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_exex::{ExExContext, ExExHandle, ExExManager};
-use reth_interfaces::p2p::either::EitherDownloader;
+use reth_net_p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_api::{
     FullNodeComponents, FullNodeComponentsAdapter, FullNodeTypes, FullNodeTypesAdapter, NodeTypes,

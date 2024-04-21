@@ -4,7 +4,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::db::DatabaseError;
+use reth_net_p2p::db::DatabaseError;
 use reth_primitives::{revm::compat::into_reth_acc, Bytecode, StorageEntry, U256};
 use revm::db::states::{PlainStorageChangeset, StateChangeset};
 

@@ -13,10 +13,12 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_interfaces::{
+use reth_interfaces::executor::BlockExecutionError;
+use reth_net_p2p::{
+    bodies::client::BodiesClient,
     consensus::Consensus,
-    executor::BlockExecutionError,
-    p2p::{bodies::client::BodiesClient, either::EitherDownloader, headers::client::HeadersClient},
+    either::EitherDownloader,
+    headers::client::HeadersClient,
     sync::NoopSyncStateUpdater,
     test_utils::{NoopFullBlockClient, TestConsensus},
 };

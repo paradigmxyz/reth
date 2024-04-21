@@ -19,6 +19,7 @@ reth-codecs.workspace = true
 reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed", "read-tx-timeouts"] }
 reth-nippy-jar.workspace = true
 reth-tracing.workspace = true
+reth-net-p2p.workspace = true
 
 # codecs
 serde = { workspace = true, default-features = false }

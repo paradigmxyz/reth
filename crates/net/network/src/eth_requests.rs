@@ -10,7 +10,7 @@ use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
     Receipts,
 };
-use reth_interfaces::p2p::error::RequestResult;
+use reth_net_p2p::error::RequestResult;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
 use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{

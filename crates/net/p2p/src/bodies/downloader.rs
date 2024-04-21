@@ -1,5 +1,5 @@
 use super::response::BlockResponse;
-use crate::p2p::error::DownloadResult;
+use crate::error::DownloadResult;
 use futures::Stream;
 use reth_primitives::BlockNumber;
 use std::ops::RangeInclusive;

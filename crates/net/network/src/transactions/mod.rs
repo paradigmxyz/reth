@@ -20,11 +20,11 @@ use reth_eth_wire::{
     NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
     PooledTransactions, RequestTxHashes, Transactions,
 };
-use reth_interfaces::{
-    p2p::error::{RequestError, RequestResult},
+use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
+use reth_net_p2p::{
+    error::{RequestError, RequestResult},
     sync::SyncStateProvider,
 };
-use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
     FromRecoveredPooledTransaction, PeerId, PooledTransactionsElement, TransactionSigned, TxHash,
@@ -1624,7 +1624,7 @@ mod tests {
     use alloy_rlp::Decodable;
     use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
     use futures::FutureExt;
-    use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
+    use reth_net_p2p::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
     use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;

@@ -1,38 +1,51 @@
 [package]
-name = "reth-interfaces"
+name = "reth-net-p2p"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
+description = "p2p "
 
 [lints]
 workspace = true
 
 [dependencies]
+# reth
 reth-primitives.workspace = true
-reth-rpc-types.workspace = true
-reth-network-api.workspace = true
-reth-eth-wire-types.workspace = true
-reth-net-p2p.workspace = true
 
-# async
+#alloy
+alloy-rlp.workspace = true
+
+
+#async 
+tracing.workspace = true
+
+
+#async
 futures.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+
+thiserror.workspace = true
+
+#async 
+tokio.workspace = true
+
+
+serde.workspace = true
+
 
 # misc
 auto_impl = "1.0"
-thiserror.workspace = true
-tracing.workspace = true
+parking_lot = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
 secp256k1 = { workspace = true, default-features = false, features = [
     "alloc",
     "recovery",
     "rand",
 ], optional = true }
 clap = { workspace = true, features = ["derive"], optional = true }
-parking_lot = { workspace = true, optional = true }
-rand = { workspace = true, optional = true }
+
 
 [dev-dependencies]
 parking_lot.workspace = true
@@ -42,5 +55,5 @@ secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
 test-utils = ["secp256k1", "rand", "parking_lot"]
+optimism =["reth-primitives/optimism"]
 cli = ["clap"]
-optimism = ["reth-eth-wire-types/optimism"]

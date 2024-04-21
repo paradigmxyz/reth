@@ -14,11 +14,13 @@ use reth_interfaces::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
         BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
-    consensus::ForkchoiceState,
     executor::{BlockExecutionError, BlockValidationError},
-    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
-    sync::{NetworkSyncUpdater, SyncState},
     RethError, RethResult,
+};
+use reth_net_p2p::{
+    bodies::client::BodiesClient,
+    headers::client::HeadersClient,
+    sync::{NetworkSyncUpdater, SyncState},
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
@@ -30,7 +32,8 @@ use reth_provider::{
     StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
 };
 use reth_stages::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
@@ -1856,7 +1859,7 @@ mod tests {
         BeaconForkChoiceUpdateError,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::{self, Rng};
+    use reth_net_p2p::test_utils::generators::{self, Rng};
     use reth_primitives::{stage::StageCheckpoint, ChainSpecBuilder, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
@@ -2051,7 +2054,7 @@ mod tests {
     mod fork_choice_updated {
         use super::*;
         use reth_db::{tables, test_utils::create_test_static_files_dir, transaction::DbTxMut};
-        use reth_interfaces::test_utils::generators::random_block;
+        use reth_net_p2p::test_utils::generators::random_block;
         use reth_primitives::U256;
         use reth_rpc_types::engine::ForkchoiceUpdateError;
 
@@ -2351,7 +2354,7 @@ mod tests {
     mod new_payload {
         use super::*;
         use reth_db::test_utils::create_test_static_files_dir;
-        use reth_interfaces::test_utils::generators::random_block;
+        use reth_net_p2p::test_utils::generators::random_block;
         use reth_primitives::{
             genesis::{Genesis, GenesisAllocator},
             Hardfork, U256,

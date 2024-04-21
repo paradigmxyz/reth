@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use reth_db::{database::Database, tables, transaction::DbTxMut, DatabaseEnv};
-use reth_interfaces::{db, p2p::bodies::response::BlockResponse};
+use reth_net_p2p::{bodies::response::BlockResponse, db};
 use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader, B256};
 use std::collections::HashMap;
 

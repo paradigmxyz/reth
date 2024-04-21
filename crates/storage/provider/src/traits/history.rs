@@ -1,6 +1,6 @@
 use auto_impl::auto_impl;
 use reth_db::models::BlockNumberAddress;
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{Address, BlockNumber, B256};
 use std::{
     collections::BTreeMap,

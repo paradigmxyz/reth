@@ -1,7 +1,7 @@
 use crate::{
     AccountReader, BlockHashReader, BundleStateDataProvider, StateProvider, StateRootProvider,
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
+use reth_net_p2p::provider::{ProviderError, ProviderResult};
 use reth_primitives::{trie::AccountProof, Account, Address, BlockNumber, Bytecode, B256};
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;

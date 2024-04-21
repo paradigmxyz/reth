@@ -10,7 +10,7 @@ use reth_db::{
     codecs::CompactU256,
     static_file::{HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
+use reth_net_p2p::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,

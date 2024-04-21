@@ -551,7 +551,7 @@ mod tests {
     use super::*;
     use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
-    use reth_interfaces::{
+    use reth_net_p2p::{
         consensus,
         provider::ProviderError,
         test_utils::{generators, generators::random_header},

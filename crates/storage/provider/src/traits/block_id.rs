@@ -1,5 +1,5 @@
 use super::BlockHashReader;
-use reth_interfaces::provider::{ProviderError, ProviderResult};
+use reth_net_p2p::provider::{ProviderError, ProviderResult};
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, B256};
 
 /// Client trait for getting important block numbers (such as the latest block number), converting

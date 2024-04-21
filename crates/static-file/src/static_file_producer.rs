@@ -242,13 +242,13 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::{database::Database, test_utils::TempDatabase, transaction::DbTx, DatabaseEnv};
-    use reth_interfaces::{
+    use reth_interfaces::RethError;
+    use reth_net_p2p::{
         provider::ProviderError,
         test_utils::{
             generators,
             generators::{random_block_range, random_receipt},
         },
-        RethError,
     };
     use reth_primitives::{
         static_file::HighestStaticFiles, PruneModes, StaticFileSegment, B256, U256,

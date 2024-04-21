@@ -7,8 +7,8 @@ use reth_db::{
     tables,
     transaction::DbTxMut,
 };
-use reth_interfaces::{
-    p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
+use reth_net_p2p::{
+    bodies::{downloader::BodyDownloader, response::BlockResponse},
     provider::ProviderResult,
 };
 use reth_primitives::{
@@ -606,14 +606,12 @@ mod tests {
             transaction::{DbTx, DbTxMut},
             DatabaseEnv,
         };
-        use reth_interfaces::{
-            p2p::{
-                bodies::{
-                    downloader::{BodyDownloader, BodyDownloaderResult},
-                    response::BlockResponse,
-                },
-                error::DownloadResult,
+        use reth_net_p2p::{
+            bodies::{
+                downloader::{BodyDownloader, BodyDownloaderResult},
+                response::BlockResponse,
             },
+            error::DownloadResult,
             test_utils::{
                 generators,
                 generators::{random_block_range, random_signed_tx},

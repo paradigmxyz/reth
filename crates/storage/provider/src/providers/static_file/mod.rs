@@ -9,7 +9,7 @@ pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 
 mod metrics;
 
-use reth_interfaces::provider::{ProviderError, ProviderResult};
+use reth_net_p2p::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
 use std::{ops::Deref, sync::Arc};
@@ -65,7 +65,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers, RawTable,
     };
-    use reth_interfaces::test_utils::generators::{self, random_header_range};
+    use reth_net_p2p::test_utils::generators::{self, random_header_range};
     use reth_primitives::{static_file::find_fixed_range, BlockNumber, B256, U256};
 
     #[test]

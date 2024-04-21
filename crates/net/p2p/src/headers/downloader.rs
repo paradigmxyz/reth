@@ -1,7 +1,7 @@
 use super::error::HeadersDownloaderResult;
 use crate::{
     consensus::Consensus,
-    p2p::error::{DownloadError, DownloadResult},
+    error::{DownloadError, DownloadResult},
 };
 use futures::Stream;
 use reth_primitives::{BlockHashOrNumber, SealedHeader, B256};

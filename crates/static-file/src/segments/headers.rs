@@ -3,7 +3,7 @@ use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::create_static_file_T1_T2_T3, tables,
     transaction::DbTx, RawKey, RawTable,
 };
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{static_file::SegmentConfig, BlockNumber, StaticFileSegment};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},

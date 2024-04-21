@@ -22,7 +22,8 @@ pub use transactions::Transactions;
 
 use crate::PrunerError;
 use reth_db::database::Database;
-use reth_interfaces::{provider::ProviderResult, RethResult};
+use reth_interfaces::RethResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{
     BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
     PruneSegment, TxNumber,

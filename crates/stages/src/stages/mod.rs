@@ -50,7 +50,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         AccountsHistory, DatabaseEnv,
     };
-    use reth_interfaces::test_utils::generators::{self, random_block};
+    use reth_net_p2p::test_utils::generators::{self, random_block};
     use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,

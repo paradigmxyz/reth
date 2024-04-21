@@ -4,7 +4,7 @@ use std::{
 };
 
 use auto_impl::auto_impl;
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{Address, BlockNumber, StorageEntry, B256};
 
 /// Storage reader

@@ -1,6 +1,6 @@
 use auto_impl::auto_impl;
 use reth_db::models::AccountBeforeTx;
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{Account, Address, BlockNumber};
 use std::{
     collections::{BTreeMap, BTreeSet},

@@ -2,7 +2,7 @@
 
 use alloy_rlp::{Decodable, Error as RlpError};
 use assert_matches::assert_matches;
-use reth_interfaces::test_utils::generators::{
+use reth_net_p2p::test_utils::generators::{
     self, random_block, random_block_range, random_header, Rng,
 };
 use reth_primitives::{

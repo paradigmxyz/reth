@@ -13,7 +13,8 @@ use crate::{
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_common::ban_list::BanList;
-use reth_network_api::{PeerKind, ReputationChangeKind};
+use reth_net_p2p::error::ReputationChangeKind;
+use reth_network_api::PeerKind;
 use reth_primitives::{ForkId, NodeRecord, PeerId};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},

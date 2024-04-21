@@ -11,7 +11,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv, DatabaseError as DbError,
 };
-use reth_interfaces::{provider::ProviderResult, test_utils::generators::ChangeSet};
+use reth_net_p2p::{provider::ProviderResult, test_utils::generators::ChangeSet};
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader,
     StaticFileSegment, StorageEntry, TxHash, TxNumber, B256, MAINNET, U256,

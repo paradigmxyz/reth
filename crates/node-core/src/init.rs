@@ -5,7 +5,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
+use reth_net_p2p::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
     stage::StageId, Account, Bytecode, ChainSpec, Receipts, StaticFileSegment, StorageEntry, B256,
     U256,

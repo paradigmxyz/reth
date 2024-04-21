@@ -189,7 +189,7 @@ where
 mod tests {
     use assert_matches::assert_matches;
     use reth_db::{tables, transaction::DbTx};
-    use reth_interfaces::test_utils::{generators, generators::random_header_range};
+    use reth_net_p2p::test_utils::{generators, generators::random_header_range};
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
         PruneSegment, B256, U256,

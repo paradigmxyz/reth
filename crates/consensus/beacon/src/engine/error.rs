@@ -37,8 +37,8 @@ impl From<PipelineError> for BeaconConsensusEngineError {
 }
 
 // for convenience in the beacon engine
-impl From<reth_interfaces::db::DatabaseError> for BeaconConsensusEngineError {
-    fn from(e: reth_interfaces::db::DatabaseError) -> Self {
+impl From<reth_net_p2p::db::DatabaseError> for BeaconConsensusEngineError {
+    fn from(e: reth_net_p2p::db::DatabaseError) -> Self {
         Self::Common(e.into())
     }
 }
@@ -65,8 +65,8 @@ impl From<RethError> for BeaconForkChoiceUpdateError {
         Self::Internal(Box::new(e))
     }
 }
-impl From<reth_interfaces::db::DatabaseError> for BeaconForkChoiceUpdateError {
-    fn from(e: reth_interfaces::db::DatabaseError) -> Self {
+impl From<reth_net_p2p::db::DatabaseError> for BeaconForkChoiceUpdateError {
+    fn from(e: reth_net_p2p::db::DatabaseError) -> Self {
         Self::Internal(Box::new(e.into()))
     }
 }

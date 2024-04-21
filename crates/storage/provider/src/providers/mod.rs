@@ -6,6 +6,7 @@ use crate::{
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
     StateProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_rpc_types_engine::ForkchoiceState;
 use reth_db::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
@@ -17,10 +18,9 @@ use reth_interfaces::{
         BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
         InsertPayloadOk,
     },
-    consensus::ForkchoiceState,
-    provider::ProviderResult,
     RethResult,
 };
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,

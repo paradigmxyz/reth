@@ -1,5 +1,5 @@
 use auto_impl::auto_impl;
-use reth_interfaces::provider::ProviderResult;
+use reth_net_p2p::provider::ProviderResult;
 use reth_primitives::B256;
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;

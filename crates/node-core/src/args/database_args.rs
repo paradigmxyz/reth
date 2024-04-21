@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for database configuration
 
 use clap::Args;
-use reth_interfaces::db::LogLevel;
+use reth_net_p2p::db::LogLevel;
 
 use crate::version::default_client_version;
 
