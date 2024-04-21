@@ -2,20 +2,7 @@ use reth_primitives::{
     BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, HeaderValidationError,
     InvalidTransactionError, SealedBlock, SealedHeader, B256, U256,
 };
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-
-/// This structure encapsulates the fork choice state
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ForkchoiceState {
-    /// Hash of the head block.
-    pub head_block_hash: B256,
-    /// Hash of the safe block.
-    pub safe_block_hash: B256,
-    /// Hash of finalized block.
-    pub finalized_block_hash: B256,
-}
 
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
