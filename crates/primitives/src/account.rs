@@ -35,13 +35,13 @@ impl Account {
             self.bytecode_hash.map_or(true, |hash| hash == KECCAK_EMPTY)
     }
 
-    /// Converts [GenesisAccount] to [Account] type
-    pub fn from_genesis_account(value: GenesisAccount) -> Self {
+    /// Makes an [Account] from [GenesisAccount] type
+    pub fn from_genesis_account(value: &GenesisAccount) -> Self {
         Account {
             // nonce must exist, so we default to zero when converting a genesis account
             nonce: value.nonce.unwrap_or_default(),
             balance: value.balance,
-            bytecode_hash: value.code.map(keccak256),
+            bytecode_hash: value.code.as_ref().map(keccak256),
         }
     }
 

@@ -1,9 +1,10 @@
-use node_e2e_tests::{node::NodeHelper, wallet::Wallet};
+use crate::utils::eth_payload_attributes;
 use reth::{
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
+use reth_e2e_test_utils::{node::NodeHelper, wallet::Wallet};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 use std::sync::Arc;
@@ -16,7 +17,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let exec = exec.executor();
 
     // Chain spec with test allocs
-    let genesis: Genesis = serde_json::from_str(include_str!("../../assets/genesis.json")).unwrap();
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
@@ -39,11 +40,11 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let mut node = NodeHelper::new(node).await?;
 
     // Configure wallet from test mnemonic and create dummy transfer tx
-    let wallet = Wallet::default();
+    let mut wallet = Wallet::default();
     let raw_tx = wallet.transfer_tx().await;
 
     // make the node advance
-    node.advance(raw_tx).await?;
+    node.advance(raw_tx, eth_payload_attributes).await?;
 
     Ok(())
 }
@@ -56,7 +57,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     let exec = exec.executor();
 
     // Chain spec with test allocs
-    let genesis: Genesis = serde_json::from_str(include_str!("../../assets/genesis.json")).unwrap();
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
@@ -78,11 +79,11 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     let mut node = NodeHelper::new(node).await?;
 
     // Configure wallet from test mnemonic and create dummy transfer tx
-    let wallet = Wallet::default();
+    let mut wallet = Wallet::default();
     let raw_tx = wallet.transfer_tx().await;
 
     // make the node advance
-    node.advance(raw_tx).await?;
+    node.advance(raw_tx, crate::utils::eth_payload_attributes).await?;
 
     Ok(())
 }
@@ -95,7 +96,7 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
     let exec = exec.executor();
 
     // Chain spec with test allocs
-    let genesis: Genesis = serde_json::from_str(include_str!("../../assets/genesis.json")).unwrap();
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
