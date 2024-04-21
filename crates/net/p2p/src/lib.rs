@@ -21,7 +21,7 @@ pub mod full_block;
 /// [`HeadersClient`].
 ///
 /// [`Consensus`]: crate::consensus::Consensus
-/// [`HeadersClient`]: crate::p2p::headers::client::HeadersClient
+/// [`HeadersClient`]: crate::headers::client::HeadersClient
 pub mod headers;
 
 /// Error types broadly used by p2p interfaces for any operation which may produce an error when

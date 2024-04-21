@@ -8,7 +8,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-/// The response to [`GetBlockHeaders`], containing headers if any headers were found.
+/// The response to GetBlockHeaders, containing headers if any headers were found.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockHeaders(
