@@ -142,14 +142,10 @@ impl StageError {
         )
     }
 
-    /// Returns `true` if error is caused by attempt to insert duplicate transaction.
-    pub fn is_dup_tx(&self) -> bool {
-        if let StageError::Database(DbError::Write(e)) = self {
-            if e.table_name == "TransactionHashNumbers" && e.info.code == -30799 {
-                return true
-            }
-        }
-        false
+    /// Returns `true` if error is caused by attempt to insert key/data pair into db, that already
+    /// exists.
+    pub fn is_dup_data(&self) -> bool {
+        matches!(self, StageError::Database(DbError::Write(e)) if e.info.code == -30799)
     }
 }
 
