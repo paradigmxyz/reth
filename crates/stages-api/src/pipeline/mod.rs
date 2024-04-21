@@ -526,14 +526,21 @@ fn on_stage_error<DB: Database>(
         Ok(Some(ControlFlow::Unwind { target: block.number - 1, bad_block: block }))
     } else if err.is_fatal() {
         #[cfg(feature = "optimism")]
-        if stage_id.is_tx_lookup() &&
-            factory.chain_spec().is_optimism_mainnet() &&
-            !factory.chain_spec().is_bedrock_active_at_block(block.number)
-        {
-            // below bedrock, transaction nonces could be replayed
-            if err.is_dup_data() {
-                // skip tx
-                return Ok(None)
+        if !factory.chain_spec().is_bedrock_active_at_block(block.number) {
+            // below bedrock, transaction nonces can be replayed
+            if err.is_dup_tx() {
+                let block_number = block.number;
+                // drop tx
+                warn!(
+                    target: "sync::pipeline",
+                    stage = %stage_id,
+                    %err,
+                    block_number,
+                    chain_spec = %factory.chain_spec().name(),
+                    "Stage encountered otherwise fatal error, but allowed for blocks below bedrock"
+                );
+
+                return Ok(ControlFlow::Continue { block_number })
             }
         }
         error!(target: "sync::pipeline", stage = %stage_id, "Stage encountered a fatal error: {err}");
