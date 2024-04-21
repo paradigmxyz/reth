@@ -44,9 +44,10 @@ pub use filter::{FilterOutcome, MustNotIncludeKeys};
 
 use metrics::{DiscoveredPeersMetrics, Discv5Metrics};
 
-/// Default number of times to do pulse lookup queries, at bootstrap (5 second intervals).
+/// Default number of times to do pulse lookup queries, at bootstrap (pulse intervals, defaulting
+/// to 5 seconds).
 ///
-/// Default is 100 seconds.
+/// Default is 100 counts.
 pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 100;
 
 /// Default duration of look up interval, for pulse look ups at bootstrap.
@@ -54,7 +55,7 @@ pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 100;
 /// Default is 5 seconds.
 pub const DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL: u64 = 5;
 
-/// Max kbucket index.
+/// Max kbucket index is 255.
 ///
 /// This is the max log2distance for 32 byte [`NodeId`](discv5::enr::NodeId) - 1. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
 pub const MAX_KBUCKET_INDEX: usize = 255;
