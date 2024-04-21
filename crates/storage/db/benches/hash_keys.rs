@@ -136,7 +136,7 @@ where
     T::Key: std::hash::Hash + Arbitrary,
     T::Value: Arbitrary,
 {
-    let start = proptest::collection::vec(
+    let strategy = proptest::collection::vec(
         any_with::<TableRow<T>>((
             <T::Key as Arbitrary>::Parameters::default(),
             <T::Value as Arbitrary>::Parameters::default(),
@@ -147,8 +147,8 @@ where
     .boxed();
 
     let mut runner = TestRunner::new(ProptestConfig::default());
-    let mut preload = start.new_tree(&mut runner).unwrap().current();
-    let mut input = start.new_tree(&mut runner).unwrap().current();
+    let mut preload = strategy.new_tree(&mut runner).unwrap().current();
+    let mut input = strategy.new_tree(&mut runner).unwrap().current();
 
     let mut unique_keys = HashSet::new();
     preload.retain(|(k, _)| unique_keys.insert(k.clone()));
