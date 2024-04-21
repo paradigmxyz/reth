@@ -303,11 +303,21 @@ lint-other-targets:
 	--all-features \
 	-- -D warnings
 
+lint-codespell: ensure-codespell
+	codespell
+
+ensure-codespell:
+	@if ! command -v codespell &> /dev/null; then \
+        echo "codespell not found. Installing..."; \
+        pip install codespell; \
+    fi
+
 lint:
 	make fmt && \
 	make lint-reth && \
 	make lint-op-reth && \
-	make lint-other-targets
+	make lint-other-targets \
+	make lint-codespell
 
 fix-lint-reth:
 	cargo +nightly clippy \
