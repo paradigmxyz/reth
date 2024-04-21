@@ -7243,6 +7243,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-evm",
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-provider",
  "reth-trie",
@@ -7336,6 +7337,7 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "0.2.0-beta.5"
 dependencies = [
+ "alloy-rpc-types-engine",
  "hyper 0.14.28",
  "jsonrpsee",
  "metrics",
@@ -7383,6 +7385,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-engine-primitives",
  "reth-metrics",
+ "reth-net-p2p",
  "reth-node-ethereum",
  "reth-node-optimism",
  "reth-payload-builder",

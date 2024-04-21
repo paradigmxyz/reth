@@ -46,6 +46,7 @@ reth-node-optimism.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 assert_matches.workspace = true
+reth-net-p2p = {workspace = true, features =["test-utils"]}
 
 [features]
 optimism = ["reth-primitives/optimism"]

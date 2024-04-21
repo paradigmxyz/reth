@@ -27,8 +27,6 @@ rand = { workspace = true, optional = true }
 
 [dev-dependencies]
 parking_lot.workspace = true
-rand.workspace = true
-secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
 test-utils = ["secp256k1", "rand", "parking_lot"]
