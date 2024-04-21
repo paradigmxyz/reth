@@ -13,14 +13,22 @@ use reth_primitives::{
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BundleStateWithReceipts, ChainSpecProvider, DatabaseProviderRW, HashingWriter,
-    HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
+    BlockHashReader, BlockNumReader, BundleStateWithReceipts, ChainSpecProvider,
+    DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
+    ProviderFactory,
 };
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
+    io::BufRead,
     sync::Arc,
 };
 use tracing::debug;
+
+/// Number of accounts from state dump file to insert into database at once.
+///
+/// Default is 10k accounts.
+pub const DEFAULT_LEN_ACCOUNTS_CHUNK: usize = 10_000;
 
 /// Database initialization error type.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
@@ -231,6 +239,96 @@ pub fn insert_genesis_header<DB: Database>(
     tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
 
     Ok(())
+}
+
+/// Initialize chain with state at specific block, from a file with state dump.
+pub fn init_from_state_dump<DB: Database>(
+    mut reader: impl BufRead,
+    factory: ProviderFactory<DB>,
+) -> eyre::Result<B256> {
+    let block = factory.last_block_number()?;
+    let hash = factory.block_hash(block)?.unwrap();
+
+    debug!(target: "reth::cli",
+        block,
+        chain=%factory.chain_spec().chain,
+        "Initializing state at block"
+    );
+
+    let mut accounts = Vec::with_capacity(10_000);
+    let mut line = String::new();
+
+    // first line can be state root, then it can be used for verifying against computed state root
+    reader.read_line(&mut line)?;
+    let _state_root = match serde_json::from_str::<B256>(&line) {
+        Ok(root) => Some(root),
+        Err(_) => {
+            let GenesisAccountWithAddress { genesis_account, address } =
+                serde_json::from_str(&line)?;
+            accounts.push((address, genesis_account));
+            line.clear();
+
+            None
+        }
+    };
+
+    // remaining lines are accounts
+    while let Ok(n) = reader.read_line(&mut line) {
+        if accounts.len() == DEFAULT_LEN_ACCOUNTS_CHUNK || n == 0 {
+            debug!(target: "reth::cli",
+                block,
+                accounts=accounts.len(),
+                "Writing accounts to db"
+            );
+            // use transaction to insert genesis header
+            let provider_rw = factory.provider_rw()?;
+            insert_genesis_hashes(
+                &provider_rw,
+                accounts.iter().map(|(address, account)| (address, account)),
+            )?;
+            insert_genesis_history(
+                &provider_rw,
+                accounts.iter().map(|(address, account)| (address, account)),
+            )?;
+
+            let tx = provider_rw.into_tx();
+
+            insert_genesis_state::<DB>(
+                &tx,
+                accounts.len(),
+                accounts.iter().map(|(address, account)| (address, account)),
+            )?;
+
+            // insert sync stage
+            for stage in StageId::ALL.iter() {
+                tx.put::<tables::StageCheckpoints>(stage.to_string(), Default::default())?;
+            }
+
+            tx.commit()?;
+        }
+
+        if n == 0 {
+            break;
+        }
+
+        let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
+        accounts.push((address, genesis_account));
+
+        line.clear();
+    }
+
+    Ok(hash)
+}
+
+/// An account as in the state dump file. This contains a [`GenesisAccount`] and the account's
+/// address.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct GenesisAccountWithAddress {
+    /// The account's balance, nonce, code, and storage.
+    #[serde(flatten)]
+    genesis_account: GenesisAccount,
+    /// The account's address.
+    address: Address,
 }
 
 #[cfg(test)]

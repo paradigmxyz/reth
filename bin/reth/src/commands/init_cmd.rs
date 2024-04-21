@@ -8,29 +8,13 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
-use reth_db::{
-    database::Database,
-    init_db, tables,
-    transaction::{DbTx, DbTxMut},
-};
-use reth_node_core::init::{
-    init_genesis, insert_genesis_hashes, insert_genesis_history, insert_genesis_state,
-};
-use reth_primitives::{stage::StageId, Address, ChainSpec, GenesisAccount, B256};
-use reth_provider::{BlockHashReader, BlockNumReader, ChainSpecProvider, ProviderFactory};
-use serde::{Deserialize, Serialize};
-use std::{
-    fs::File,
-    io::{BufRead, BufReader},
-    path::PathBuf,
-    sync::Arc,
-};
-use tracing::{debug, info};
+use reth_db::{database::Database, init_db};
+use reth_node_core::init::{init_from_state_dump, init_genesis};
+use reth_primitives::{ChainSpec, B256};
+use reth_provider::ProviderFactory;
 
-/// Number of accounts from state dump file to insert into database at once.
-///
-/// Default is 10k accounts.
-pub const DEFAULT_LEN_ACCOUNTS_CHUNK: usize = 10_000;
+use std::{fs::File, io::BufReader, path::PathBuf, sync::Arc};
+use tracing::info;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
@@ -112,91 +96,12 @@ pub fn init_at_state<DB: Database>(
     state_dump_path: PathBuf,
     factory: ProviderFactory<DB>,
 ) -> eyre::Result<B256> {
-    let block = factory.last_block_number()?;
-    let hash = factory.block_hash(block)?.unwrap();
+    info!(target: "reth::cli",
+        path=?state_dump_path,
+        "Opening state dump");
 
-    // Open the file in read-only mode with buffer.
     let file = File::open(state_dump_path)?;
-    let mut reader = BufReader::new(file);
+    let reader = BufReader::new(file);
 
-    debug!(target: "reth::cli",
-        block,
-        chain=%factory.chain_spec().chain,
-        "Initializing state at block"
-    );
-
-    let mut accounts = Vec::with_capacity(10_000);
-    let mut line = String::new();
-
-    // first line can be state root, then it can be used for verifying against computed state root
-    reader.read_line(&mut line)?;
-    let _state_root = match serde_json::from_str::<B256>(&line) {
-        Ok(root) => Some(root),
-        Err(_) => {
-            let GenesisAccountWithAddress { genesis_account, address } =
-                serde_json::from_str(&line)?;
-            accounts.push((address, genesis_account));
-            line.clear();
-
-            None
-        }
-    };
-
-    // remaining lines are accounts
-    while let Ok(n) = reader.read_line(&mut line) {
-        if accounts.len() == DEFAULT_LEN_ACCOUNTS_CHUNK || n == 0 {
-            debug!(target: "reth::cli",
-                block,
-                accounts=accounts.len(),
-                "Writing accounts to db"
-            );
-            // use transaction to insert genesis header
-            let provider_rw = factory.provider_rw()?;
-            insert_genesis_hashes(
-                &provider_rw,
-                accounts.iter().map(|(address, account)| (address, account)),
-            )?;
-            insert_genesis_history(
-                &provider_rw,
-                accounts.iter().map(|(address, account)| (address, account)),
-            )?;
-
-            let tx = provider_rw.into_tx();
-
-            insert_genesis_state::<DB>(
-                &tx,
-                accounts.len(),
-                accounts.iter().map(|(address, account)| (address, account)),
-            )?;
-
-            // insert sync stage
-            for stage in StageId::ALL.iter() {
-                tx.put::<tables::StageCheckpoints>(stage.to_string(), Default::default())?;
-            }
-
-            tx.commit()?;
-        }
-
-        if n == 0 {
-            break;
-        }
-
-        let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
-        accounts.push((address, genesis_account));
-
-        line.clear();
-    }
-
-    Ok(hash)
-}
-
-/// An account as in the state dump file. This contains a [`GenesisAccount`] and the account's
-/// address.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-struct GenesisAccountWithAddress {
-    /// The account's balance, nonce, code, and storage.
-    #[serde(flatten)]
-    genesis_account: GenesisAccount,
-    /// The account's address.
-    address: Address,
+    init_from_state_dump(reader, factory)
 }
