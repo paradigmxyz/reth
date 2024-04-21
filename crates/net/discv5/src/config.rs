@@ -9,7 +9,7 @@ use std::{
 use derive_more::Display;
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{ForkId, NodeRecord, MAINNET};
+use reth_primitives::{Bytes, ForkId, NodeRecord, MAINNET};
 
 use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, network_key};
 
@@ -34,9 +34,9 @@ pub struct ConfigBuilder {
     /// opposed to [`Enr`](enr::Enr)s, TCP is limited to same IP address as UDP, since
     /// [`NodeRecord`] doesn't supply an extra field for and alternative TCP address.
     tcp_port: u16,
-    /// Additional kv-pairs (asides tcp port, udp port and fork) that should be advertised to
-    /// peers by including in local node record.
-    other_enr_kv_pairs: Vec<(&'static [u8], Box<dyn EnrValue>)>,
+    /// List of (key, rlp-encoded-value) tuples that should be advertised in local node record
+    /// (additional to tcp port, udp port and fork).
+    other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query to populate kbuckets.
     lookup_interval: Option<u64>,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
@@ -128,13 +128,10 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds an additional kv-pair to include in the local [`Enr`](discv5::enr::Enr).
-    pub fn add_enr_kv_pair(
-        mut self,
-        key: &'static [u8],
-        value: impl alloy_rlp::Encodable + Debug + Send + 'static,
-    ) -> Self {
-        self.other_enr_kv_pairs.push((key, Box::new(value)));
+    /// Adds an additional kv-pair to include in the local [`Enr`](discv5::enr::Enr). Takes the key
+    /// to use for the kv-pair and the rlp encoded value.
+    pub fn add_enr_kv_pair(mut self, key: &'static [u8], value: Bytes) -> Self {
+        self.other_enr_kv_pairs.push((key, value));
         self
     }
 
@@ -197,7 +194,7 @@ pub struct Config {
     pub(super) tcp_port: u16,
     /// Additional kv-pairs (asides tcp port, udp port and fork) that should be advertised to
     /// peers by including in local node record.
-    pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Box<dyn EnrValue>)>,
+    pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query with to populate kbuckets.
     pub(super) lookup_interval: u64,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
@@ -266,10 +263,6 @@ impl BootNode {
         Ok(Self::Enode(multi_address))
     }
 }
-
-/// Auto-trait for value to insert in a local ENR kv-pair.
-pub trait EnrValue: alloy_rlp::Encodable + Debug + Send {}
-impl<T> EnrValue for T where T: alloy_rlp::Encodable + Debug + Send {}
 
 #[cfg(test)]
 mod test {

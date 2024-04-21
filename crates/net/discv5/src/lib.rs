@@ -261,7 +261,7 @@ impl Discv5 {
 
         // add other data
         for (key, value) in other_enr_kv_pairs {
-            builder.add_value_rlp(key, alloy_rlp::encode(value).into());
+            builder.add_value_rlp(key, value.clone().into());
         }
 
         // enr v4 not to get confused with discv4, independent versioning enr and
@@ -843,7 +843,7 @@ mod tests {
         const TCP_PORT: u16 = 30303;
         let fork_id = MAINNET.latest_fork_id();
 
-        let config = Config::builder(TCP_PORT).add_enr_kv_pair(network_key::ETH, fork_id).build();
+        let config = Config::builder(TCP_PORT).fork(network_key::ETH, fork_id).build();
 
         let sk = SecretKey::new(&mut thread_rng());
         let (enr, _, _, _) = Discv5::build_local_enr(&sk, &config);
