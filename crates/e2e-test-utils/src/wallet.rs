@@ -1,46 +1,54 @@
 use alloy_consensus::{BlobTransactionSidecar, SidecarBuilder, SimpleCoder, TxType};
 use alloy_network::{eip2718::Encodable2718, EthereumSigner, TransactionBuilder};
-use alloy_rpc_types::TransactionRequest;
+use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_signer_wallet::{coins_bip39::English, LocalWallet, MnemonicBuilder};
 use reth_primitives::{Address, Bytes, U256};
 /// One of the accounts of the genesis allocations.
 pub struct Wallet {
     inner: LocalWallet,
     nonce: u64,
+    chain_id: u64,
 }
 
 impl Wallet {
     /// Creates a new account from one of the secret/pubkeys of the genesis allocations (test.json)
     pub(crate) fn new(phrase: &str) -> Self {
         let inner = MnemonicBuilder::<English>::default().phrase(phrase).build().unwrap();
-        Self { inner, nonce: 0 }
+        Self { inner, chain_id: 1, nonce: 0 }
+    }
+
+    /// Sets chain id
+    pub fn with_chain_id(mut self, chain_id: u64) -> Self {
+        self.chain_id = chain_id;
+        self
     }
 
     /// Creates a static transfer and signs it
-    pub async fn transfer_tx(&mut self) -> Bytes {
-        let tx = self.tx();
-        self.nonce += 1;
+    pub async fn transfer_tx(&mut self, data: Option<Bytes>) -> Bytes {
+        let tx = self.tx(data);
         let signer = EthereumSigner::from(self.inner.clone());
         tx.build(&signer).await.unwrap().encoded_2718().into()
     }
 
-    /// Creates a static tx
-    fn tx(&self) -> TransactionRequest {
-        TransactionRequest {
+    /// Creates a transaction with data and signs it
+    fn tx(&mut self, data: Option<Bytes>) -> TransactionRequest {
+        let tx = TransactionRequest {
             nonce: Some(self.nonce),
             value: Some(U256::from(100)),
             to: Some(Address::random()),
-            gas: Some(21000),
-            chain_id: Some(1),
-            max_priority_fee_per_gas: Some(1500000000),
-            max_fee_per_gas: Some(1500000000),
+            gas_price: Some(20e9 as u128),
+            gas: Some(210000),
+            chain_id: Some(self.chain_id),
+            input: TransactionInput { input: None, data },
             ..Default::default()
-        }
+        };
+        self.nonce += 1;
+        tx
     }
 
     /// Creates a tx with blob sidecar and sign it
     pub async fn tx_with_blobs(&mut self) -> eyre::Result<Bytes> {
-        let mut tx = self.tx();
+        let mut tx = self.tx(None);
         self.nonce += 1;
         let mut builder = SidecarBuilder::<SimpleCoder>::new();
         builder.ingest(b"dummy blob");
