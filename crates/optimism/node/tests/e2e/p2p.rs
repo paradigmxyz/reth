@@ -1,7 +1,6 @@
+use crate::utils::{advance_chain, node, setup};
 use std::sync::Arc;
-
-use crate::utils::{node, optimism_payload_attributes, setup};
-use parking_lot::Mutex;
+use tokio::sync::Mutex;
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
@@ -21,27 +20,19 @@ async fn can_sync() -> eyre::Result<()> {
     first_node.network.expect_session().await;
     second_node.network.expect_session().await;
 
-    // Taken from optimism tests
     let tip: usize = 300;
-    let canonical_chain = first_node
-        .advance(
-            tip as u64,
-            || {
-                let wallet = wallet.clone();
-                Box::pin(async move { wallet.lock().optimism_l1_block_info_tx().await })
-            },
-            optimism_payload_attributes,
-        )
-        .await?;
+    let tip_index: usize = tip - 1;
 
-    // only send forkchoice update to second node
-    second_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip - 2]).await?;
-    second_node.wait_block(tip as u64 - 1, canonical_chain[tip - 2], true).await?;
+    // Create a chain up to block number 300.
+    let canonical_chain = advance_chain(tip, &mut first_node, wallet.clone()).await?;
+
+    second_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip_index - 1]).await?;
+    second_node.wait_block(tip as u64 - 1, canonical_chain[tip_index - 1], true).await?;
 
     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-    second_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip - 1]).await?;
-    second_node.wait_block(tip as u64, canonical_chain[tip - 1], false).await?;
+    second_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip_index]).await?;
+    second_node.wait_block(tip as u64, canonical_chain[tip_index], false).await?;
 
     Ok(())
 }
