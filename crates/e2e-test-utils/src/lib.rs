@@ -38,7 +38,8 @@ mod traits;
 /// Creates the initial setup with `num_nodes` started and interconnected.
 pub async fn setup<N>(
     num_nodes: usize,
-    chain_spec: ChainSpec,
+    chain_spec: Arc<ChainSpec>,
+    is_dev: bool
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
     N: Default + reth_node_builder::Node<TmpNodeAdapter<N>>,
@@ -58,11 +59,15 @@ where
     let mut nodes: Vec<NodeHelperType<N>> = Vec::with_capacity(num_nodes);
 
     for idx in 0..num_nodes {
-        let node_config = NodeConfig::test()
+        let mut node_config = NodeConfig::test()
             .with_chain(chain_spec.clone())
             .with_network(network_config.clone())
             .with_unused_ports()
             .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+
+        if is_dev {
+            node_config = node_config.dev();
+        }
 
         let span = span!(Level::INFO, "node", idx);
         let _enter = span.enter();

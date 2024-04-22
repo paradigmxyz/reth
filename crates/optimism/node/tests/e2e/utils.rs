@@ -6,15 +6,19 @@ use reth_primitives::{Address, ChainSpecBuilder, Genesis, B256, BASE_MAINNET};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// Optimism Node Helper type
+pub(crate) type OpNode = NodeHelperType<OptimismNode>;
+
 pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     reth_e2e_test_utils::setup(
         num_nodes,
-        ChainSpecBuilder::default()
+        Arc::new(ChainSpecBuilder::default()
             .chain(BASE_MAINNET.chain)
             .genesis(genesis)
             .ecotone_activated()
-            .build(),
+            .build()),
+            false
     )
     .await
 }
@@ -52,5 +56,3 @@ pub(crate) fn optimism_payload_attributes(timestamp: u64) -> OptimismPayloadBuil
         gas_limit: Some(30_000_000),
     }
 }
-
-type OpNode = NodeHelperType<OptimismNode>;
