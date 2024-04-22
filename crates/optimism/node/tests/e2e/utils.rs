@@ -42,7 +42,13 @@ pub(crate) fn setup() -> (NodeConfig, TaskManager, TaskExecutor, Wallet) {
     )
 }
 
-pub(crate) async fn node(node_config: NodeConfig, exec: TaskExecutor) -> eyre::Result<OpNode> {
+pub(crate) async fn node(
+    node_config: NodeConfig,
+    exec: TaskExecutor,
+    id: usize,
+) -> eyre::Result<OpNode> {
+    let span = span!(Level::INFO, "node", id);
+    let _enter = span.enter();
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
         .testing_node(exec.clone())
         .node(OptimismNode::default())
