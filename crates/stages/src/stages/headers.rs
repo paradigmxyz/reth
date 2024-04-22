@@ -22,7 +22,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
+    BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    HeaderSyncMode,
 };
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
@@ -337,6 +338,17 @@ where
             .get_highest_static_file_block(StaticFileSegment::Headers)
             .unwrap_or_default();
         let static_file_headers_to_unwind = highest_block - input.unwind_to;
+        for block_number in (input.unwind_to + 1)..=highest_block {
+            let hash = static_file_provider.block_hash(block_number)?;
+            // we have to delete from HeaderNumbers here as well as in the above unwind, since that
+            // mapping contains entries for both headers in the db and headers in static files
+            //
+            // so if we are unwinding past the lowest block in the db, we have to iterate through
+            // the HeaderNumbers entries that we'll delete in static files below
+            if let Some(header_hash) = hash {
+                provider.tx_ref().delete::<tables::HeaderNumbers>(header_hash, None)?;
+            }
+        }
 
         // Now unwind the static files until the unwind_to block number
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
