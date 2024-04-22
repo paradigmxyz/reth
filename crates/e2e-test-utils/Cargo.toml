@@ -18,6 +18,7 @@ reth-db.workspace = true
 reth-rpc.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-provider.workspace = true
+reth-node-builder.workspace = true
 
 jsonrpsee.workspace = true
 
@@ -33,3 +34,4 @@ alloy-signer-wallet = { workspace = true, features = ["mnemonic"] }
 alloy-rpc-types.workspace = true
 alloy-network.workspace = true
 alloy-consensus.workspace = true
+tracing.workspace = true

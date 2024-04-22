@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, _tasks, _, wallet) = setup(2).await?;
+    let (mut nodes, _tasks, wallet) = setup(2).await?;
     let wallet = Arc::new(Mutex::new(wallet));
 
     let second_node = nodes.pop().unwrap();
