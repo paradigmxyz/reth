@@ -223,11 +223,6 @@ where
                 block: Box::new(block.header.clone().seal_slow()),
                 error: BlockErrorKind::Execution(error.into()),
             })?;
-
-            // executor.execute_and_verify_receipt(&block, td).map_err(|error| StageError::Block {
-            //     block: Box::new(block.header.clone().seal_slow()),
-            //     error: BlockErrorKind::Execution(error),
-            // })?;
             execution_duration += execute_start.elapsed();
 
             // Gas metrics
