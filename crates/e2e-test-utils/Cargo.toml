@@ -17,6 +17,7 @@ reth-tracing.workspace = true
 reth-db.workspace = true
 reth-rpc.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-provider.workspace = true
 
 jsonrpsee.workspace = true
 
