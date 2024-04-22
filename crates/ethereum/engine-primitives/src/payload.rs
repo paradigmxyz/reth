@@ -245,7 +245,8 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
             })
             .map(BlobExcessGasAndPrice::new);
 
-        let mut basefee = parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp()));
+        let mut basefee =
+            parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp()));
 
         let mut gas_limit = U256::from(parent.gas_limit);
 

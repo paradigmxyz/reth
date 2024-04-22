@@ -142,7 +142,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             // calculate basefee based on parent block's gas usage
             basefee: U256::from(
                 parent
-                    .next_block_base_fee(chain_spec.base_fee_params(self.timestamp()))
+                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp()))
                     .unwrap_or_default(),
             ),
             // calculate excess gas based on parent block's blob gas usage
