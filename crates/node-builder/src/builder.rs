@@ -13,9 +13,10 @@ use crate::{
 use eyre::Context;
 use futures::{future, future::Either, stream, stream_select, Future, StreamExt};
 use rayon::ThreadPoolBuilder;
+use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensusEngine,
+    BeaconConsensus, BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
@@ -28,7 +29,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
-use reth_interfaces::p2p::either::EitherDownloader;
+use reth_interfaces::{consensus::Consensus, p2p::either::EitherDownloader};
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_api::{
     FullNodeComponents, FullNodeComponentsAdapter, FullNodeTypes, FullNodeTypesAdapter, NodeTypes,
@@ -524,7 +525,12 @@ where
 
         info!(target: "reth::cli", "\n{}", config.chain.display_hardforks());
 
-        let consensus = config.consensus();
+        // setup the consensus instance
+        let consensus: Arc<dyn Consensus> = if config.dev.dev {
+            Arc::new(AutoSealConsensus::new(Arc::clone(&config.chain)))
+        } else {
+            Arc::new(BeaconConsensus::new(Arc::clone(&config.chain)))
+        };
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
         let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
@@ -721,7 +727,17 @@ where
                 info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
             }
 
-            let mining_mode = config.mining_mode(transaction_pool.pending_transactions_listener());
+            // install auto-seal
+            let pending_transactions_listener = transaction_pool.pending_transactions_listener();
+
+            let mining_mode = if let Some(interval) = config.dev.block_time {
+                MiningMode::interval(interval)
+            } else if let Some(max_transactions) = config.dev.block_max_transactions {
+                MiningMode::instant(max_transactions, pending_transactions_listener)
+            } else {
+                info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
+                MiningMode::instant(1, pending_transactions_listener)
+            };
 
             let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
                 Arc::clone(&config.chain),
