@@ -42,7 +42,7 @@ use reth_node_core::{
     exit::NodeExitFuture,
     init::init_genesis,
     node_config::NodeConfig,
-    primitives::{kzg::KzgSettings, Head, TxHash},
+    primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
@@ -58,10 +58,7 @@ use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use std::{cmp::max, str::FromStr, sync::Arc, thread::available_parallelism};
-use tokio::sync::{
-    mpsc::{unbounded_channel, Receiver},
-    oneshot,
-};
+use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -741,8 +738,6 @@ where
                 info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
                 MiningMode::instant(1, pending_transactions_listener)
             };
-
-            let mining_mode = config.mining_mode(transaction_pool.pending_transactions_listener());
 
             let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
                 Arc::clone(&config.chain),
