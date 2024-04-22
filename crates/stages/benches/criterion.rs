@@ -70,20 +70,17 @@ fn senders(c: &mut Criterion, runtime: &Runtime) {
 
     let db = setup::txs_testdata(DEFAULT_NUM_BLOCKS);
 
-    for batch in [1000usize, 10_000, 100_000, 250_000] {
-        let stage = SenderRecoveryStage { commit_threshold: DEFAULT_NUM_BLOCKS };
-        let label = format!("SendersRecovery-batch-{batch}");
+    let stage = SenderRecoveryStage { commit_threshold: DEFAULT_NUM_BLOCKS };
 
-        measure_stage(
-            runtime,
-            &mut group,
-            &db,
-            setup::stage_unwind,
-            stage,
-            0..=DEFAULT_NUM_BLOCKS,
-            label,
-        );
-    }
+    measure_stage(
+        runtime,
+        &mut group,
+        &db,
+        setup::stage_unwind,
+        stage,
+        0..=DEFAULT_NUM_BLOCKS,
+        "SendersRecovery".to_string(),
+    );
 }
 
 fn transaction_lookup(c: &mut Criterion, runtime: &Runtime) {
