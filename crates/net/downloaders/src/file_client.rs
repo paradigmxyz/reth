@@ -72,7 +72,7 @@ impl FileClient {
         let file_len = metadata.len();
 
         let mut reader = vec![];
-        file.read_to_end(&mut reader).await.unwrap();
+        file.read_to_end(&mut reader).await?;
 
         Ok(Self::from_reader(&reader[..], file_len).await?.0)
     }
@@ -380,7 +380,7 @@ impl ChunkedFileReader {
         // read new bytes from file
         let mut reader = BytesMut::zeroed(new_read_bytes_target_len as usize);
         // actual bytes that have been read
-        let new_read_bytes_len = self.file.read_exact(&mut reader).await.unwrap() as u64;
+        let new_read_bytes_len = self.file.read_exact(&mut reader).await? as u64;
 
         // update remaining file length
         self.file_byte_len -= new_read_bytes_len;
