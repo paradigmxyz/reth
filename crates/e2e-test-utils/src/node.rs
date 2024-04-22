@@ -1,24 +1,17 @@
 use crate::{
     engine_api::EngineApiTestContext, network::NetworkTestContext, payload::PayloadTestContext,
-    traits::PayloadEnvelopeExt,
+    rpc::RpcTestContext, traits::PayloadEnvelopeExt,
 };
 use alloy_consensus::{TxEip4844Variant, TxEnvelope};
-use alloy_network::eip2718::Decodable2718;
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use reth::{
-    api::{
-        payload, BuiltPayload, EngineTypes, FullNodeComponents, NodeTypes, PayloadBuilderAttributes,
-    },
+    api::{BuiltPayload, EngineTypes, FullNodeComponents, NodeTypes, PayloadBuilderAttributes},
     builder::FullNode,
     providers::{BlockReaderIdExt, CanonStateSubscriptions},
-    rpc::{
-        api::DebugApiServer,
-        eth::{error::EthResult, EthTransactions},
-    },
 };
 
-use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, BlockNumber, Bytes, B256};
+use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, BlockNumber, B256};
 use std::marker::PhantomData;
 use tokio_stream::StreamExt;
 
@@ -31,6 +24,7 @@ where
     payload: PayloadTestContext<Node::Engine>,
     pub network: NetworkTestContext,
     pub engine_api: EngineApiTestContext<Node::Engine>,
+    pub rpc: RpcTestContext<Node>,
 }
 
 impl<Node> NodeTestContext<Node>
@@ -50,8 +44,13 @@ where
                 canonical_stream: node.provider.canonical_state_stream(),
                 _marker: PhantomData::<Node::Engine>,
             },
+            rpc: RpcTestContext { inner: node.rpc_registry.clone() },
         })
     }
+    /// Creates a new payload from given attributes generator
+    /// expects a payload attribute event and waits until the payload is built.
+    ///
+    /// It triggers the resolve payload via engine api and expects the built payload event.
     pub async fn new_payload(
         &mut self,
         attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
@@ -75,7 +74,8 @@ where
         Ok((self.payload.expect_built_payload().await?, eth_attr))
     }
 
-    /// Advances the node forward
+    /// Advances the node forward by creating a new payload, submitting it via engine api
+    /// and triggering a forkchoice update via engine api.
     pub async fn advance(
         &mut self,
         versioned_hashes: Vec<B256>,
@@ -98,18 +98,7 @@ where
         Ok((block_hash, block_number))
     }
 
-    /// Injects a raw transaction into the node tx pool via RPC server
-    pub async fn inject_tx(&mut self, raw_tx: Bytes) -> EthResult<B256> {
-        let eth_api = self.inner.rpc_registry.eth_api();
-        eth_api.send_raw_transaction(raw_tx).await
-    }
-
-    pub async fn envelope_by_hash(&mut self, hash: B256) -> eyre::Result<TxEnvelope> {
-        let tx = self.inner.rpc_registry.debug_api().raw_transaction(hash).await?.unwrap();
-        let tx = tx.to_vec();
-        Ok(TxEnvelope::decode_2718(&mut tx.as_ref()).unwrap())
-    }
-
+    /// Validates the sidecar of a given tx envelope and returns the versioned hashes
     pub fn validate_sidecar(&self, tx: TxEnvelope) -> Vec<B256> {
         let proof_setting = MAINNET_KZG_TRUSTED_SETUP.clone();
 

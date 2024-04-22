@@ -66,7 +66,7 @@ async fn can_sync() -> eyre::Result<()> {
     first_node.network.expect_session().await;
     second_node.network.expect_session().await;
 
-    let tx_hash = first_node.inject_tx(raw_tx).await?;
+    let tx_hash = first_node.rpc.inject_tx(raw_tx).await?;
 
     // Make the first node advance
     let (block_hash, block_number) = first_node.advance(vec![], eth_payload_attributes).await?;

@@ -45,7 +45,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let mut wallet = Wallet::default();
     let raw_tx = wallet.transfer_tx(None).await;
 
-    let tx_hash = node.inject_tx(raw_tx).await?;
+    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
     // make the node advance
     let (block_hash, block_number) = node.advance(vec![], eth_payload_attributes).await?;
@@ -90,7 +90,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     let mut wallet = Wallet::default();
     let raw_tx = wallet.transfer_tx(None).await;
 
-    let tx_hash = node.inject_tx(raw_tx).await?;
+    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
     // make the node advance
     let (block_hash, block_number) = node.advance(vec![], eth_payload_attributes).await?;

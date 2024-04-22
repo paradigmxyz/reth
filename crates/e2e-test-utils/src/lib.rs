@@ -13,5 +13,8 @@ mod network;
 /// Helper for engine api operations
 mod engine_api;
 
+/// Helper for rpc operations
+mod rpc;
+
 /// Helper traits
 mod traits;

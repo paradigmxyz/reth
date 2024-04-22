@@ -67,7 +67,7 @@ async fn can_sync() -> eyre::Result<()> {
 
     // Make the first node advance
     let raw_tx = wallet.transfer_tx(Some(l1_block_info)).await;
-    let tx_hash = first_node.inject_tx(raw_tx).await?;
+    let tx_hash = first_node.rpc.inject_tx(raw_tx).await?;
     let (block_hash, block_number) =
         first_node.advance(vec![], optimism_payload_attributes).await?;
 

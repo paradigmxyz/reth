@@ -1,4 +1,4 @@
-use alloy_consensus::{BlobTransactionSidecar, SidecarBuilder, SimpleCoder, TxType};
+use alloy_consensus::{BlobTransactionSidecar, SidecarBuilder, SimpleCoder};
 use alloy_network::{eip2718::Encodable2718, EthereumSigner, TransactionBuilder};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_signer_wallet::{coins_bip39::English, LocalWallet, MnemonicBuilder};
@@ -6,7 +6,6 @@ use reth_primitives::{Address, Bytes, U256};
 /// One of the accounts of the genesis allocations.
 pub struct Wallet {
     inner: LocalWallet,
-    nonce: u64,
     chain_id: u64,
 }
 
@@ -14,7 +13,7 @@ impl Wallet {
     /// Creates a new account from one of the secret/pubkeys of the genesis allocations (test.json)
     pub(crate) fn new(phrase: &str) -> Self {
         let inner = MnemonicBuilder::<English>::default().phrase(phrase).build().unwrap();
-        Self { inner, chain_id: 1, nonce: 0 }
+        Self { inner, chain_id: 1 }
     }
 
     /// Sets chain id
@@ -32,18 +31,17 @@ impl Wallet {
 
     /// Creates a transaction with data and signs it
     fn tx(&mut self, data: Option<Bytes>) -> TransactionRequest {
-        let tx = TransactionRequest {
-            nonce: Some(self.nonce),
+        TransactionRequest {
+            nonce: Some(0),
             value: Some(U256::from(100)),
             to: Some(Address::random()),
-            gas_price: Some(20e9 as u128),
-            gas: Some(210000),
+            gas: Some(21000),
+            max_fee_per_gas: Some(20e9 as u128),
+            max_priority_fee_per_gas: Some(20e9 as u128),
             chain_id: Some(self.chain_id),
             input: TransactionInput { input: None, data },
             ..Default::default()
-        };
-        self.nonce += 1;
-        tx
+        }
     }
 
     /// Creates a tx with blob sidecar and sign it
@@ -56,9 +54,6 @@ impl Wallet {
 
         tx.set_blob_sidecar(sidecar);
         tx.set_max_fee_per_blob_gas(15e9 as u128);
-        tx.set_max_fee_per_gas(20e9 as u128);
-        tx.set_max_priority_fee_per_gas(20e9 as u128);
-        tx.clone().transaction_type(TxType::Eip4844 as u8);
 
         let signer = EthereumSigner::from(self.inner.clone());
         let signed = tx.clone().build(&signer).await.unwrap();
