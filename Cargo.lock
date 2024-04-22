@@ -7426,6 +7426,7 @@ dependencies = [
  "reth-db",
  "reth-downloaders",
  "reth-etl",
+ "reth-evm",
  "reth-evm-ethereum",
  "reth-exex",
  "reth-interfaces",

@@ -28,6 +28,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::*;
+use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_revm::database::StateProviderDatabase;
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -60,10 +62,10 @@ use tracing::*;
 /// to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
-pub struct ExecutionStage<EF> {
+pub struct ExecutionStage<E> {
     metrics_tx: Option<MetricEventsSender>,
-    /// The stage's internal executor
-    executor_factory: EF,
+    /// The stage's internal block executor
+    executor_factory: E,
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -77,10 +79,10 @@ pub struct ExecutionStage<EF> {
     exex_manager_handle: ExExManagerHandle,
 }
 
-impl<EF> ExecutionStage<EF> {
+impl<E> ExecutionStage<E> {
     /// Create new execution stage with specified config.
     pub fn new(
-        executor_factory: EF,
+        executor_factory: E,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         prune_modes: PruneModes,
@@ -96,10 +98,10 @@ impl<EF> ExecutionStage<EF> {
         }
     }
 
-    /// Create an execution stage with the provided  executor factory.
+    /// Create an execution stage with the provided executor factory.
     ///
     /// The commit threshold will be set to 10_000.
-    pub fn new_with_factory(executor_factory: EF) -> Self {
+    pub fn new_with_executor(executor_factory: E) -> Self {
         Self::new(
             executor_factory,
             ExecutionStageThresholds::default(),
@@ -145,7 +147,9 @@ impl<EF> ExecutionStage<EF> {
     }
 }
 
-impl<EF: ExecutorFactory> ExecutionStage<EF> {
+impl<E> ExecutionStage<E>
+    where E: BlockExecutorProvider
+{
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
         &mut self,
@@ -170,13 +174,14 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             None
         };
 
-        // Build executor
-        let mut executor = self.executor_factory.with_state(LatestStateProviderRef::new(
+        let db = StateProviderDatabase(LatestStateProviderRef::new(
             provider.tx_ref(),
             provider.static_file_provider().clone(),
         ));
-        executor.set_prune_modes(prune_modes);
-        executor.set_tip(max_block);
+        let mut executor = self.executor_factory.batch_executor(db);
+
+        // executor.set_prune_modes(prune_modes);
+        // executor.set_tip(max_block);
 
         // Progress tracking
         let mut stage_progress = start_block;
@@ -214,10 +219,18 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             // Execute the block
             let execute_start = Instant::now();
-            executor.execute_and_verify_receipt(&block, td).map_err(|error| StageError::Block {
+
+            let out = executor.execute_one(
+                (&block, td).into()
+            ).map_err(|error| StageError::Block {
                 block: Box::new(block.header.clone().seal_slow()),
-                error: BlockErrorKind::Execution(error),
+                error: BlockErrorKind::Execution(error.into()),
             })?;
+
+            // executor.execute_and_verify_receipt(&block, td).map_err(|error| StageError::Block {
+            //     block: Box::new(block.header.clone().seal_slow()),
+            //     error: BlockErrorKind::Execution(error),
+            // })?;
             execution_duration += execute_start.elapsed();
 
             // Gas metrics
@@ -235,7 +248,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             }
 
             // Check if we should commit now
-            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
+            let bundle_size_hint = out.size_hint.unwrap_or_default() as u64;
             if self.thresholds.is_end_of_batch(
                 block_number - start_block,
                 bundle_size_hint,
@@ -246,7 +259,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             }
         }
         let time = Instant::now();
-        let state = executor.take_output_state();
+        let state = executor.finalize();
         let write_preparation_duration = time.elapsed();
 
         // Check if we should send a [`CanonStateNotification`] to execution extensions.

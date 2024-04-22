@@ -131,7 +131,7 @@ async fn unwind_and_copy<DB: Database>(
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.provider_rw()?;
 
-    let mut exec_stage = ExecutionStage::new_with_factory(EvmProcessorFactory::new(
+    let mut exec_stage = ExecutionStage::new_with_executor(EvmProcessorFactory::new(
         db_tool.chain.clone(),
         EthEvmConfig::default(),
     ));
@@ -163,7 +163,7 @@ async fn dry_run<DB: Database>(
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
-    let mut exec_stage = ExecutionStage::new_with_factory(EvmProcessorFactory::new(
+    let mut exec_stage = ExecutionStage::new_with_executor(EvmProcessorFactory::new(
         output_provider_factory.chain_spec(),
         EthEvmConfig::default(),
     ));

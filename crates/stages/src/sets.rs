@@ -296,7 +296,7 @@ impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for ExecutionStages<EF> {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(SenderRecoveryStage::default())
-            .add_stage(ExecutionStage::new_with_factory(self.executor_factory))
+            .add_stage(ExecutionStage::new_with_executor(self.executor_factory))
     }
 }
 
