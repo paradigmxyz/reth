@@ -49,12 +49,15 @@ impl Wallet {
     /// Creates a tx with blob sidecar and sign it
     pub async fn tx_with_blobs(&mut self) -> eyre::Result<Bytes> {
         let mut tx = self.tx(None);
-        self.nonce += 1;
+
         let mut builder = SidecarBuilder::<SimpleCoder>::new();
         builder.ingest(b"dummy blob");
         let sidecar: BlobTransactionSidecar = builder.build()?;
+
         tx.set_blob_sidecar(sidecar);
-        tx.set_max_fee_per_blob_gas(1500000000);
+        tx.set_max_fee_per_blob_gas(15e9 as u128);
+        tx.set_max_fee_per_gas(20e9 as u128);
+        tx.set_max_priority_fee_per_gas(20e9 as u128);
         tx.clone().transaction_type(TxType::Eip4844 as u8);
 
         let signer = EthereumSigner::from(self.inner.clone());

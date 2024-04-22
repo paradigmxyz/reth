@@ -42,7 +42,7 @@ impl<E: EngineTypes + 'static> EngineApiTestContext<E> {
         let submission = EngineApiClient::<E>::new_payload_v3(
             &self.engine_api_client,
             envelope_v3.execution_payload(),
-          versioned_hashes,
+            versioned_hashes,
             payload_builder_attributes.parent_beacon_block_root().unwrap(),
         )
         .await?;

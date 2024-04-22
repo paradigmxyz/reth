@@ -7,7 +7,9 @@ use alloy_network::eip2718::Decodable2718;
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use reth::{
-    api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
+    api::{
+        payload, BuiltPayload, EngineTypes, FullNodeComponents, NodeTypes, PayloadBuilderAttributes,
+    },
     builder::FullNode,
     providers::{BlockReaderIdExt, CanonStateSubscriptions},
     rpc::{
@@ -50,13 +52,13 @@ where
             },
         })
     }
-
-    /// Advances the node forward
-    pub async fn advance(
+    pub async fn new_payload(
         &mut self,
-        versioned_hashes: Vec<B256>,
         attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
-    ) -> eyre::Result<(B256, u64)>
+    ) -> eyre::Result<(
+        <<Node as NodeTypes>::Engine as EngineTypes>::BuiltPayload,
+        <<Node as NodeTypes>::Engine as EngineTypes>::PayloadBuilderAttributes,
+    )>
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
             From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
@@ -70,7 +72,20 @@ where
         // trigger resolve payload via engine api
         self.engine_api.get_payload_v3(eth_attr.payload_id()).await?;
         // ensure we're also receiving the built payload as event
-        let payload = self.payload.expect_built_payload().await?;
+        Ok((self.payload.expect_built_payload().await?, eth_attr))
+    }
+
+    /// Advances the node forward
+    pub async fn advance(
+        &mut self,
+        versioned_hashes: Vec<B256>,
+        attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
+    ) -> eyre::Result<(B256, u64)>
+    where
+        <Node::Engine as EngineTypes>::ExecutionPayloadV3:
+            From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
+    {
+        let (payload, eth_attr) = self.new_payload(attributes_generator).await?;
 
         // submit payload via engine api
         let block_number = payload.block().number;

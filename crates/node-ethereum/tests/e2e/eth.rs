@@ -64,7 +64,6 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     let exec = exec.executor();
 
     // Chain spec with test allocs
-
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
 
     let chain_spec = Arc::new(
