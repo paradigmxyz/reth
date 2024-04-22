@@ -1,6 +1,6 @@
 //! OP transaction pool types
 use parking_lot::RwLock;
-use reth_primitives::{Block, Chain, ChainSpec, GotExpected, InvalidTransactionError, SealedBlock};
+use reth_primitives::{Block, ChainSpec, GotExpected, InvalidTransactionError, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_revm::{optimism::RethL1BlockInfo, L1BlockInfo};
 use reth_transaction_pool::{
@@ -52,16 +52,10 @@ where
         if let Ok(Some(block)) =
             this.inner.client().block_by_number_or_tag(reth_primitives::BlockNumberOrTag::Latest)
         {
-            // update L1 block info to:
-            //   * empty on two cases:
-            //     * any chain on genesis block, it has no txs, so we can't extract L1 info, by
-            //       setting L1 block info to empty we still accept tx in the pool before the first
-            //       block.
-            //     * dev chain on all blocks, it does not rely on a L1 chain.
-            //   * data coming from L1
-            if block.number == 0 || this.inner.chain_spec().chain == Chain::dev() {
+            // genesis block has no txs, so we can't extract L1 info, we set the block info to empty
+            // so that we will accept txs into the pool before the first block
+            if block.number == 0 {
                 this.block_info.timestamp.store(block.timestamp, Ordering::Relaxed);
-                *this.block_info.l1_block_info.write() = Some(Default::default())
             } else {
                 this.update_l1_block_info(&block);
             }
@@ -82,7 +76,7 @@ where
     fn update_l1_block_info(&self, block: &Block) {
         self.block_info.timestamp.store(block.timestamp, Ordering::Relaxed);
         if let Ok(cost_addition) = reth_revm::optimism::extract_l1_info(block) {
-            *self.block_info.l1_block_info.write() = Some(cost_addition);
+            *self.block_info.l1_block_info.write() = cost_addition;
         }
     }
 
@@ -114,12 +108,7 @@ where
             propagate,
         } = outcome
         {
-            let Some(l1_block_info) = self.block_info.l1_block_info.read().clone() else {
-                return TransactionValidationOutcome::Error(
-                    *valid_tx.hash(),
-                    "L1BlockInfoError".into(),
-                )
-            };
+            let l1_block_info = self.block_info.l1_block_info.read().clone();
 
             let mut encoded = Vec::new();
             valid_tx.transaction().to_recovered_transaction().encode_enveloped(&mut encoded);
@@ -204,7 +193,7 @@ where
 #[derive(Debug, Default)]
 pub struct OpL1BlockInfo {
     /// The current L1 block info.
-    l1_block_info: RwLock<Option<L1BlockInfo>>,
+    l1_block_info: RwLock<L1BlockInfo>,
     /// Current block timestamp.
     timestamp: AtomicU64,
 }
