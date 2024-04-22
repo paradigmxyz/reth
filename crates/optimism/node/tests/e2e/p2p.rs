@@ -6,17 +6,12 @@ use tokio::sync::Mutex;
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (node_config, _tasks, exec, wallet) = setup();
+    let (mut nodes, _tasks, exec, wallet) = setup(3).await?;
     let wallet = Arc::new(Mutex::new(wallet));
 
-    let mut first_node = node(node_config.clone(), exec.clone(), 1).await?;
-    let mut second_node = node(node_config.clone(), exec.clone(), 2).await?;
-    let mut third_node = node(node_config.clone(), exec.clone(), 3).await?;
-
-    // Make them peer
-    first_node.connect(&mut second_node).await;
-    second_node.connect(&mut third_node).await;
-    third_node.connect(&mut first_node).await;
+    let mut third_node = nodes.pop().unwrap();
+    let mut second_node = nodes.pop().unwrap();
+    let mut first_node = nodes.pop().unwrap();
 
     let tip: usize = 300;
     let tip_index: usize = tip - 1;
