@@ -35,8 +35,8 @@ revm-primitives.workspace = true
 # async
 async-trait.workspace = true
 hyper.workspace = true
-http = "0.2.8"
-http-body = "0.4.5"
+http.workspace = true
+http-body.workspace = true
 reqwest = { version = "0.11", default-features = false, features = [
     "rustls-tls",
 ]}
