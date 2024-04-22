@@ -13,17 +13,16 @@ workspace = true
 [dependencies]
 reth-codecs-derive = { path = "./derive", default-features = false }
 
-alloy-eips = { workspace = true, features = ["arbitrary", "serde"] }
+alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 
 bytes.workspace = true
-modular-bitfield = "0.11.2"
+modular-bitfield.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 alloy-eips = { workspace = true, default-features = false, features = ["arbitrary", "serde"] }
 alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
-serde.workspace = true
-modular-bitfield.workspace = true
 test-fuzz.workspace = true
 serde_json.workspace = true
 
