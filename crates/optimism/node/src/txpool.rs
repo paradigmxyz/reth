@@ -1,6 +1,6 @@
 //! OP transaction pool types
 use parking_lot::RwLock;
-use reth_primitives::{Block, ChainSpec, GotExpected, InvalidTransactionError, SealedBlock};
+use reth_primitives::{Block, Chain, ChainSpec, GotExpected, InvalidTransactionError, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_revm::{optimism::RethL1BlockInfo, L1BlockInfo};
 use reth_transaction_pool::{
@@ -52,9 +52,14 @@ where
         if let Ok(Some(block)) =
             this.inner.client().block_by_number_or_tag(reth_primitives::BlockNumberOrTag::Latest)
         {
-            // genesis block has no txs, so we can't extract L1 info, we set the block info to empty
-            // so that we will accept txs into the pool before the first block
-            if block.number == 0 {
+            // update L1 block info to:
+            //   * empty on two cases:
+            //     * any chain on genesis block, it has no txs, so we can't extract L1 info, by
+            //       setting L1 block info to empty we still accept tx in the pool before the first
+            //       block.
+            //     * dev chain on all blocks, it does not rely on a L1 chain.
+            //   * data coming from L1
+            if block.number == 0 || this.inner.chain_spec().chain == Chain::dev() {
                 this.block_info.timestamp.store(block.timestamp, Ordering::Relaxed);
                 *this.block_info.l1_block_info.write() = Some(Default::default())
             } else {
