@@ -8,7 +8,7 @@ use jsonrpsee::{
         tracing::server::{rx_log_from_json, tx_log_from_str},
         JsonRawValue,
     },
-    server::IdProvider,
+    server::{middleware::rpc::RpcServiceT, IdProvider},
     types::{
         error::{reject_too_many_subscriptions, ErrorCode},
         ErrorObject, Id, InvalidRequest, Notification, Params, Request,
@@ -24,11 +24,14 @@ use tracing::instrument;
 type Notif<'a> = Notification<'a, Option<&'a JsonRawValue>>;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Batch<'a> {
+pub(crate) struct Batch<'a, S> {
     data: Vec<u8>,
     call: CallData<'a>,
+    rpc_service: S,
 }
 
+// todo(abner) remove it
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct CallData<'a> {
     conn_id: usize,
@@ -45,8 +48,11 @@ pub(crate) struct CallData<'a> {
 // request in the batch and read the results off of a new channel, `rx_batch`, and then send the
 // complete batch response back to the client over `tx`.
 #[instrument(name = "batch", skip(b), level = "TRACE")]
-pub(crate) async fn process_batch_request(b: Batch<'_>) -> Option<String> {
-    let Batch { data, call } = b;
+pub(crate) async fn process_batch_request<S>(b: Batch<'_, S>) -> Option<String>
+where
+    for<'a> S: RpcServiceT<'a> + Send,
+{
+    let Batch { data, call, rpc_service } = b;
 
     if let Ok(batch) = serde_json::from_slice::<Vec<&JsonRawValue>>(&data) {
         let mut got_notif = false;
@@ -57,9 +63,7 @@ pub(crate) async fn process_batch_request(b: Batch<'_>) -> Option<String> {
             .into_iter()
             .filter_map(|v| {
                 if let Ok(req) = serde_json::from_str::<Request<'_>>(v.get()) {
-                    Some(Either::Right(async {
-                        execute_call(req, call.clone()).await.into_response()
-                    }))
+                    Some(Either::Right(rpc_service.call(req)))
                 } else if let Ok(_notif) = serde_json::from_str::<Notif<'_>>(v.get()) {
                     // notifications should not be answered.
                     got_notif = true;
@@ -95,29 +99,43 @@ pub(crate) async fn process_batch_request(b: Batch<'_>) -> Option<String> {
     }
 }
 
-pub(crate) async fn process_single_request(
+pub(crate) async fn process_single_request<S>(
     data: Vec<u8>,
+    rpc_service: &S,
     call: CallData<'_>,
-) -> Option<CallOrSubscription> {
+) -> Option<MethodResponse>
+where
+    for<'a> S: RpcServiceT<'a> + Send,
+{
     if let Ok(req) = serde_json::from_slice::<Request<'_>>(&data) {
-        Some(execute_call_with_tracing(req, call).await)
+        Some(execute_call_with_tracing(req, rpc_service, call).await)
     } else if serde_json::from_slice::<Notif<'_>>(&data).is_ok() {
         None
     } else {
         let (id, code) = prepare_error(&data);
-        Some(CallOrSubscription::Call(MethodResponse::error(id, ErrorObject::from(code))))
+        Some(MethodResponse::error(id, ErrorObject::from(code)))
     }
 }
 
-#[instrument(name = "method_call", fields(method = req.method.as_ref()), skip(call, req), level = "TRACE")]
-pub(crate) async fn execute_call_with_tracing<'a>(
+// #[instrument(name = "method_call", fields(method = req.method.as_ref()), skip(call, req), level =
+// "TRACE")]
+pub(crate) async fn execute_call_with_tracing<'a, S>(
     req: Request<'a>,
-    call: CallData<'_>,
-) -> CallOrSubscription {
-    execute_call(req, call).await
+    rpc_service: &S,
+    _call: CallData<'_>,
+) -> MethodResponse
+where
+    for<'b> S: RpcServiceT<'b> + Send,
+{
+    rpc_service.call(req).await
 }
 
-pub(crate) async fn execute_call(req: Request<'_>, call: CallData<'_>) -> CallOrSubscription {
+// todo(abner) remove it
+#[allow(dead_code)]
+pub(crate) async fn execute_call<S>(req: Request<'_>, call: CallData<'_>) -> CallOrSubscription
+where
+    for<'a> S: RpcServiceT<'a> + Send,
+{
     let CallData {
         methods,
         max_response_body_size,
@@ -205,7 +223,14 @@ pub(crate) struct HandleRequest {
     pub(crate) id_provider: Arc<dyn IdProvider>,
 }
 
-pub(crate) async fn handle_request(request: String, input: HandleRequest) -> Option<String> {
+pub(crate) async fn call_with_service<S>(
+    request: String,
+    rpc_service: S,
+    input: HandleRequest,
+) -> Option<String>
+where
+    for<'a> S: RpcServiceT<'a> + Send,
+{
     let HandleRequest {
         methods,
         max_response_body_size,
@@ -244,18 +269,17 @@ pub(crate) async fn handle_request(request: String, input: HandleRequest) -> Opt
 
     // Single request or notification
     let res = if matches!(request_kind, Kind::Single) {
-        let response = process_single_request(request.into_bytes(), call).await;
+        let response = process_single_request(request.into_bytes(), &rpc_service, call).await;
         match response {
-            Some(CallOrSubscription::Call(response)) => Some(response.to_result()),
-            Some(CallOrSubscription::Subscription(_)) => {
+            Some(response) if response.is_method_call() => Some(response.to_result()),
+            _ => {
                 // subscription responses are sent directly over the sink, return a response here
                 // would lead to duplicate responses for the subscription response
                 None
             }
-            None => None,
         }
     } else {
-        process_batch_request(Batch { data: request.into_bytes(), call }).await
+        process_batch_request(Batch { data: request.into_bytes(), rpc_service, call }).await
     };
 
     drop(conn);

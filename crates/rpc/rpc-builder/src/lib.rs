@@ -1472,7 +1472,7 @@ pub struct RpcServerConfig {
     /// Address where to bind the ws server to
     ws_addr: Option<SocketAddr>,
     /// Configs for JSON-RPC IPC server
-    ipc_server_config: Option<IpcServerBuilder>,
+    ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     /// The Endpoint where to launch the ipc server
     ipc_endpoint: Option<Endpoint>,
     /// JWT secret for authentication
@@ -1508,7 +1508,7 @@ impl RpcServerConfig {
     }
 
     /// Creates a new config with only ipc set
-    pub fn ipc(config: IpcServerBuilder) -> Self {
+    pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
         Self::default().with_ipc(config)
     }
 
@@ -1568,7 +1568,7 @@ impl RpcServerConfig {
     ///
     /// Note: this always configures an [EthSubscriptionIdProvider] [IdProvider] for convenience.
     /// To set a custom [IdProvider], please use [Self::with_id_provider].
-    pub fn with_ipc(mut self, config: IpcServerBuilder) -> Self {
+    pub fn with_ipc(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }

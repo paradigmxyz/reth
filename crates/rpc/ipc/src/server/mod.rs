@@ -7,7 +7,10 @@ use crate::server::{
 use futures::{FutureExt, Stream, StreamExt};
 use jsonrpsee::{
     core::TEN_MB_SIZE_BYTES,
-    server::{AlreadyStoppedError, IdProvider, RandomIntegerIdProvider},
+    server::{
+        middleware::rpc::{either::Either, RpcLoggerLayer, RpcServiceT},
+        AlreadyStoppedError, IdProvider, RandomIntegerIdProvider,
+    },
     BoundedSubscriptions, MethodSink, Methods,
 };
 use std::{
@@ -21,31 +24,50 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::{oneshot, watch, OwnedSemaphorePermit},
 };
-use tower::{layer::util::Identity, Service};
+use tower::{layer::util::Identity, Layer, Service};
 use tracing::{debug, trace, warn};
 
 // re-export so can be used during builder setup
-use crate::server::connection::IpcConnDriver;
+use crate::server::{
+    connection::IpcConnDriver,
+    rpc_service::{RpcService, RpcServiceCfg},
+};
 pub use parity_tokio_ipc::Endpoint;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tower::layer::{util::Stack, LayerFn};
 
 mod connection;
 mod future;
 mod ipc;
+mod rpc_service;
 
 /// Ipc Server implementation
 
 // This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
-pub struct IpcServer<B = Identity> {
+pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     /// The endpoint we listen for incoming transactions
     endpoint: Endpoint,
     id_provider: Arc<dyn IdProvider>,
     cfg: Settings,
-    service_builder: tower::ServiceBuilder<B>,
+    rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
+    http_middleware: tower::ServiceBuilder<HttpMiddleware>,
 }
 
-impl IpcServer<Identity> {
+impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware>
+where
+    RpcMiddleware: Layer<RpcService> + Clone + Send + 'static,
+    for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<'a>,
+    HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
+    <HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service: Send
+        + Service<
+            String,
+            Response = Option<String>,
+            Error = Box<dyn std::error::Error + Send + Sync + 'static>,
+        >,
+    <<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service as Service<String>>::Future:
+    Send + Unpin,
+{
     /// Returns the configured [Endpoint]
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
@@ -154,7 +176,7 @@ impl IpcServer<Identity> {
 
                     let (tx, rx) = mpsc::channel::<String>(message_buffer_capacity as usize);
                     let method_sink = MethodSink::new_with_limit(tx, max_response_body_size);
-                    let tower_service = TowerService {
+                    let tower_service = TowerServiceNoHttp {
                         inner: ServiceData {
                             methods: methods.clone(),
                             max_request_body_size,
@@ -170,9 +192,10 @@ impl IpcServer<Identity> {
                             ),
                             method_sink,
                         },
+                        rpc_middleware: self.rpc_middleware.clone(),
                     };
 
-                    let service = self.service_builder.service(tower_service);
+                    let service = self.http_middleware.service(tower_service);
                     connections.add(Box::pin(spawn_connection(
                         ipc,
                         service,
@@ -203,7 +226,8 @@ impl std::fmt::Debug for IpcServer {
     }
 }
 
-/// Error thrown when server couldn't be started.
+// todo(abner) remove it
+#[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 #[error("failed to listen on ipc endpoint `{endpoint}`: {source}")]
 pub struct IpcServerStartError {
@@ -244,16 +268,87 @@ pub(crate) struct ServiceData {
     pub(crate) method_sink: MethodSink,
 }
 
+/// Similar to [`tower::ServiceBuilder`] but doesn't
+/// support any tower middleware implementations.
+#[derive(Debug, Clone)]
+pub struct RpcServiceBuilder<L>(tower::ServiceBuilder<L>);
+
+impl Default for RpcServiceBuilder<Identity> {
+    fn default() -> Self {
+        RpcServiceBuilder(tower::ServiceBuilder::new())
+    }
+}
+
+impl RpcServiceBuilder<Identity> {
+    /// Create a new [`RpcServiceBuilder`].
+    pub fn new() -> Self {
+        Self(tower::ServiceBuilder::new())
+    }
+}
+
+impl<L> RpcServiceBuilder<L> {
+    /// Optionally add a new layer `T` to the [`RpcServiceBuilder`].
+    ///
+    /// See the documentation for [`tower::ServiceBuilder::option_layer`] for more details.
+    pub fn option_layer<T>(
+        self,
+        layer: Option<T>,
+    ) -> RpcServiceBuilder<Stack<Either<T, Identity>, L>> {
+        let layer = if let Some(layer) = layer {
+            Either::Left(layer)
+        } else {
+            Either::Right(Identity::new())
+        };
+        self.layer(layer)
+    }
+
+    /// Add a new layer `T` to the [`RpcServiceBuilder`].
+    ///
+    /// See the documentation for [`tower::ServiceBuilder::layer`] for more details.
+    pub fn layer<T>(self, layer: T) -> RpcServiceBuilder<Stack<T, L>> {
+        RpcServiceBuilder(self.0.layer(layer))
+    }
+
+    /// Add a [`tower::Layer`] built from a function that accepts a service and returns another
+    /// service.
+    ///
+    /// See the documentation for [`tower::ServiceBuilder::layer_fn`] for more details.
+    pub fn layer_fn<F>(self, f: F) -> RpcServiceBuilder<Stack<LayerFn<F>, L>> {
+        RpcServiceBuilder(self.0.layer_fn(f))
+    }
+
+    /// Add a logging layer to [`RpcServiceBuilder`]
+    ///
+    /// This logs each request and response for every call.
+    pub fn rpc_logger(self, max_log_len: u32) -> RpcServiceBuilder<Stack<RpcLoggerLayer, L>> {
+        RpcServiceBuilder(self.0.layer(RpcLoggerLayer::new(max_log_len)))
+    }
+
+    /// Wrap the service `S` with the middleware.
+    pub(crate) fn service<S>(&self, service: S) -> L::Service
+    where
+        L: tower::Layer<S>,
+    {
+        self.0.service(service)
+    }
+}
+
 /// JsonRPSee service compatible with `tower`.
 ///
 /// # Note
 /// This is similar to [`hyper::service::service_fn`](https://docs.rs/hyper/latest/hyper/service/fn.service_fn.html).
-#[derive(Debug)]
-pub struct TowerService {
+#[derive(Debug, Clone)]
+pub struct TowerServiceNoHttp<L> {
     inner: ServiceData,
+    rpc_middleware: RpcServiceBuilder<L>,
 }
 
-impl Service<String> for TowerService {
+impl<RpcMiddleware> Service<String> for TowerServiceNoHttp<RpcMiddleware>
+where
+    RpcMiddleware: for<'a> Layer<RpcService>,
+    <RpcMiddleware as Layer<RpcService>>::Service: Send + Sync + 'static,
+    for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<'a>,
+{
     /// The response of a handled RPC call
     ///
     /// This is an `Option` because subscriptions and call responses are handled differently.
@@ -286,13 +381,40 @@ impl Service<String> for TowerService {
             id_provider: self.inner.id_provider.clone(),
         };
 
+        // todo(abner) how to use _pending_calls_completed?
+
+        // On each method call the `pending_calls` is cloned
+        // then when all pending_calls are dropped
+        // a graceful shutdown can occur.
+        let (pending_calls, _pending_calls_completed) = mpsc::channel::<()>(1);
+
+        let cfg = RpcServiceCfg::CallsAndSubscriptions {
+            bounded_subscriptions: BoundedSubscriptions::new(
+                self.inner.max_subscriptions_per_connection,
+            ),
+            id_provider: self.inner.id_provider.clone(),
+            sink: self.inner.method_sink.clone(),
+            _pending_calls: pending_calls,
+        };
+
+        let rpc_service = self.rpc_middleware.service(RpcService::new(
+            self.inner.methods.clone(),
+            self.inner.max_response_body_size as usize,
+            self.inner.conn_id as usize,
+            cfg,
+        ));
         // an ipc connection needs to handle read+write concurrently
         // even if the underlying rpc handler spawns the actual work or is does a lot of async any
         // additional overhead performed by `handle_request` can result in I/O latencies, for
         // example tracing calls are relatively CPU expensive on serde::serialize alone, moving this
         // work to a separate task takes the pressure off the connection so all concurrent responses
         // are also serialized concurrently and the connection can focus on read+write
-        let f = tokio::task::spawn(async move { ipc::handle_request(request, data).await });
+
+        let f =
+            tokio::task::spawn(
+                async move { ipc::call_with_service(request, rpc_service, data).await },
+            );
+
         Box::pin(async move { f.await.map_err(|err| err.into()) })
     }
 }
@@ -413,24 +535,26 @@ impl Default for Settings {
 
 /// Builder to configure and create a JSON-RPC server
 #[derive(Debug)]
-pub struct Builder<B = Identity> {
+pub struct Builder<HttpMiddleware, RpcMiddleware> {
     settings: Settings,
     /// Subscription ID provider.
     id_provider: Arc<dyn IdProvider>,
-    service_builder: tower::ServiceBuilder<B>,
+    rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
+    http_middleware: tower::ServiceBuilder<HttpMiddleware>,
 }
 
-impl Default for Builder {
+impl Default for Builder<Identity, Identity> {
     fn default() -> Self {
         Builder {
             settings: Settings::default(),
             id_provider: Arc::new(RandomIntegerIdProvider),
-            service_builder: tower::ServiceBuilder::new(),
+            rpc_middleware: RpcServiceBuilder::new(),
+            http_middleware: tower::ServiceBuilder::new(),
         }
     }
 }
 
-impl<B> Builder<B> {
+impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     /// Set the maximum size of a request body in bytes. Default is 10 MiB.
     pub fn max_request_body_size(mut self, size: u32) -> Self {
         self.settings.max_request_body_size = size;
@@ -529,26 +653,52 @@ impl<B> Builder<B> {
     ///     let builder = tower::ServiceBuilder::new();
     ///
     ///     let server =
-    ///         reth_ipc::server::Builder::default().set_middleware(builder).build("/tmp/my-uds");
+    ///         reth_ipc::server::Builder::default().set_http_middleware(builder).build("/tmp/my-uds");
     /// }
     /// ```
-    pub fn set_middleware<T>(self, service_builder: tower::ServiceBuilder<T>) -> Builder<T> {
-        Builder { settings: self.settings, id_provider: self.id_provider, service_builder }
+    pub fn set_http_middleware<T>(
+        self,
+        service_builder: tower::ServiceBuilder<T>,
+    ) -> Builder<T, RpcMiddleware> {
+        Builder {
+            settings: self.settings,
+            id_provider: self.id_provider,
+            http_middleware: service_builder,
+            rpc_middleware: self.rpc_middleware,
+        }
+    }
+
+    // todo(abner) fix it
+    #[allow(missing_docs)]
+    pub fn set_rpc_middleware<T>(
+        self,
+        rpc_middleware: RpcServiceBuilder<T>,
+    ) -> Builder<HttpMiddleware, T> {
+        Builder {
+            settings: self.settings,
+            id_provider: self.id_provider,
+            rpc_middleware,
+            http_middleware: self.http_middleware,
+        }
     }
 
     /// Finalize the configuration of the server. Consumes the [`Builder`].
-    pub fn build(self, endpoint: impl AsRef<str>) -> IpcServer<B> {
+    pub fn build(self, endpoint: impl AsRef<str>) -> IpcServer<HttpMiddleware, RpcMiddleware> {
         let endpoint = Endpoint::new(endpoint.as_ref().to_string());
         self.build_with_endpoint(endpoint)
     }
 
     /// Finalize the configuration of the server. Consumes the [`Builder`].
-    pub fn build_with_endpoint(self, endpoint: Endpoint) -> IpcServer<B> {
+    pub fn build_with_endpoint(
+        self,
+        endpoint: Endpoint,
+    ) -> IpcServer<HttpMiddleware, RpcMiddleware> {
         IpcServer {
             endpoint,
             cfg: self.settings,
             id_provider: self.id_provider,
-            service_builder: self.service_builder,
+            http_middleware: self.http_middleware,
+            rpc_middleware: self.rpc_middleware,
         }
     }
 }
@@ -657,6 +807,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ipc_modules() {
+        reth_tracing::init_test_tracing();
         let endpoint = dummy_endpoint();
         let server = Builder::default().build(&endpoint);
         let mut module = RpcModule::new(());

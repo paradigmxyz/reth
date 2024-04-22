@@ -437,7 +437,7 @@ impl RethRpcConfig for RpcServerArgs {
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
     }
 
-    fn ipc_server_builder(&self) -> IpcServerBuilder {
+    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity> {
         IpcServerBuilder::default()
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())
