@@ -887,8 +887,8 @@ mod tests {
         let server = Builder::default().set_rpc_middleware(rpc_middleware).build(&endpoint);
 
         let mut module = RpcModule::new(());
-        let goodbye_msg = r#"{"jsonrpc":"2.0","id":83,"result":"goodbye"}"#;
-        let hello_msg = r#"{"jsonrpc":"2.0","id":83,"result":"hello"}"#;
+        let goodbye_msg = r#"{"jsonrpc":"2.0","id":1,"result":"goodbye"}"#;
+        let hello_msg = r#"{"jsonrpc":"2.0","id":2,"result":"hello"}"#;
         module.register_method("say_hello", move |_, _| hello_msg).unwrap();
         module.register_method("say_goodbye", move |_, _| goodbye_msg).unwrap();
         let handle = server.start(module).await.unwrap();
