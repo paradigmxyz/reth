@@ -16,24 +16,24 @@ async fn exex_init<Node: FullNodeComponents>(
 
 /// An ExEx is just a future, which means you can implement all of it in an async function!
 ///
-/// This ExEx just prints out whenever either a new chain of blocks being added, or a chain of
-/// blocks being re-orged. After processing the chain, emits an [ExExEvent::FinishedHeight] event.
+/// This ExEx just prints out whenever either a new chain of blocks being added, re-orged, or
+/// reverted. After processing the chain, emits an [ExExEvent::FinishedHeight] event.
 async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.recv().await {
         match &notification {
             CanonStateNotification::Commit { new } => {
                 println!("Received commit: {:?}", new.range());
+                ctx.events.send(ExExEvent::FinishedHeight(new.tip().number))?;
             }
             CanonStateNotification::Reorg { old, new } => {
-                println!(
-                    "Received reorg: {:?} -> {:?}",
-                    old.range(),
-                    (!new.is_empty()).then(|| new.range())
-                );
+                println!("Received reorg: {:?} -> {:?}", old.range(), new.range());
+                ctx.events.send(ExExEvent::FinishedHeight(new.tip().number))?;
+            }
+            CanonStateNotification::Revert { old } => {
+                println!("Received revert: {:?}", old.range());
+                ctx.events.send(ExExEvent::FinishedHeight(old.first().number.saturating_sub(1)))?;
             }
         };
-
-        ctx.events.send(ExExEvent::FinishedHeight(notification.tip().number))?;
     }
     Ok(())
 }

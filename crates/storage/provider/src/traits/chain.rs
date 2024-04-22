@@ -70,12 +70,16 @@ pub enum CanonStateNotification {
         new: Arc<Chain>,
     },
     /// Chain reorgs and both old and new chain are returned.
-    /// Revert is just a subset of reorg where the new chain is empty.
     Reorg {
         /// The old chain before reorganization.
         old: Arc<Chain>,
         /// The new chain after reorganization.
         new: Arc<Chain>,
+    },
+    /// Chain reverts and only old chain is returned.
+    Revert {
+        /// The old chain before revert.
+        old: Arc<Chain>,
     },
 }
 
@@ -98,29 +102,49 @@ impl CanonStateNotification {
     pub fn reverted(&self) -> Option<Arc<Chain>> {
         match self {
             Self::Commit { .. } => None,
-            Self::Reorg { old, .. } => Some(old.clone()),
+            Self::Reorg { old, .. } | Self::Revert { old } => Some(old.clone()),
         }
     }
 
-    /// Get the new chain if any.
+    /// Returns the committed chain, if any.
     ///
-    /// Returns the new committed [Chain] for [Self::Reorg] and [Self::Commit] variants.
-    pub fn committed(&self) -> Arc<Chain> {
+    /// Returns [Some] with the new [Chain] for [Self::Reorg] and [Self::Commit] variants.
+    ///
+    /// Returns [None] for [Self::Revert] variant.
+    pub fn try_committed(&self) -> Option<Arc<Chain>> {
         match self {
-            Self::Commit { new } => new.clone(),
-            Self::Reorg { new, .. } => new.clone(),
+            Self::Commit { new } => Some(new.clone()),
+            Self::Reorg { new, .. } => Some(new.clone()),
+            Self::Revert { .. } => None,
+        }
+    }
+
+    /// Returns the committed chain, if any.
+    ///
+    /// Panics if the chain is reverted.
+    pub fn committed(&self) -> Arc<Chain> {
+        self.try_committed().expect("expected a committed chain, but got None")
+    }
+
+    /// Returns the new tip of the chain.
+    ///
+    /// Returns [Some] with the new tip for [Self::Reorg] and [Self::Commit] variants which commit
+    /// at least 1 new block.
+    ///
+    /// Returns [None] for [Self::Revert] variant.
+    pub fn try_tip(&self) -> Option<&SealedBlockWithSenders> {
+        match self {
+            Self::Commit { new } => Some(new.tip()),
+            Self::Reorg { new, .. } => Some(new.tip()),
+            Self::Revert { .. } => None,
         }
     }
 
     /// Returns the new tip of the chain.
     ///
-    /// Returns the new tip for [Self::Reorg] and [Self::Commit] variants which commit at least 1
-    /// new block.
+    /// Panics if the chain is reverted.
     pub fn tip(&self) -> &SealedBlockWithSenders {
-        match self {
-            Self::Commit { new } => new.tip(),
-            Self::Reorg { new, .. } => new.tip(),
-        }
+        self.try_tip().expect("expected a tip, but got None")
     }
 
     /// Return receipt with its block number and transaction hash.
@@ -138,6 +162,7 @@ impl CanonStateNotification {
         receipts.extend(
             self.committed().receipts_with_attachment().into_iter().map(|receipt| (receipt, false)),
         );
+
         receipts
     }
 }

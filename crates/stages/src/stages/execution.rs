@@ -436,10 +436,9 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
             // NOTE: We can ignore the error here, since an error means that the channel is closed,
             // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self.exex_manager_handle.send(CanonStateNotification::Reorg {
-                old: Arc::new(chain),
-                new: Arc::new(Chain::default()),
-            });
+            let _ = self
+                .exex_manager_handle
+                .send(CanonStateNotification::Revert { old: Arc::new(chain) });
         }
 
         // Unwind all receipts for transactions in the block range
