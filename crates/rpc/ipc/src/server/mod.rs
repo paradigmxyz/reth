@@ -226,8 +226,7 @@ impl std::fmt::Debug for IpcServer {
     }
 }
 
-// todo(abner) remove it
-#[allow(missing_docs)]
+/// Error thrown when server couldn't be started.
 #[derive(Debug, thiserror::Error)]
 #[error("failed to listen on ipc endpoint `{endpoint}`: {source}")]
 pub struct IpcServerStartError {
@@ -381,20 +380,12 @@ where
             id_provider: self.inner.id_provider.clone(),
         };
 
-        // todo(abner) how to use _pending_calls_completed?
-
-        // On each method call the `pending_calls` is cloned
-        // then when all pending_calls are dropped
-        // a graceful shutdown can occur.
-        let (pending_calls, _pending_calls_completed) = mpsc::channel::<()>(1);
-
         let cfg = RpcServiceCfg::CallsAndSubscriptions {
             bounded_subscriptions: BoundedSubscriptions::new(
                 self.inner.max_subscriptions_per_connection,
             ),
             id_provider: self.inner.id_provider.clone(),
             sink: self.inner.method_sink.clone(),
-            _pending_calls: pending_calls,
         };
 
         let rpc_service = self.rpc_middleware.service(RpcService::new(
@@ -668,8 +659,70 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
         }
     }
 
-    // todo(abner) fix it
-    #[allow(missing_docs)]
+    /// Enable middleware that is invoked on every JSON-RPC call.
+    ///
+    /// The middleware itself is very similar to the `tower middleware` but
+    /// it has a different service trait which takes &self instead &mut self
+    /// which means that you can't use built-in middleware from tower.
+    ///
+    /// Another consequence of `&self` is that you must wrap any of the middleware state in
+    /// a type which is Send and provides interior mutability such `Arc<Mutex>`.
+    ///
+    /// The builder itself exposes a similar API as the [`tower::ServiceBuilder`]
+    /// where it is possible to compose layers to the middleware.
+    ///
+    /// ```
+    /// use std::{
+    ///     net::SocketAddr,
+    ///     sync::{
+    ///         atomic::{AtomicUsize, Ordering},
+    ///         Arc,
+    ///     },
+    ///     time::Instant,
+    /// };
+    ///
+    /// use futures_util::future::BoxFuture;
+    /// use jsonrpsee::{
+    ///     server::{middleware::rpc::RpcServiceT, ServerBuilder},
+    ///     types::Request,
+    ///     MethodResponse,
+    /// };
+    /// use reth_ipc::server::{Builder, RpcServiceBuilder};
+    ///
+    /// #[derive(Clone)]
+    /// struct MyMiddleware<S> {
+    ///     service: S,
+    ///     count: Arc<AtomicUsize>,
+    /// }
+    ///
+    /// impl<'a, S> RpcServiceT<'a> for MyMiddleware<S>
+    /// where
+    ///     S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
+    /// {
+    ///     type Future = BoxFuture<'a, MethodResponse>;
+    ///
+    ///     fn call(&self, req: Request<'a>) -> Self::Future {
+    ///         tracing::info!("MyMiddleware processed call {}", req.method);
+    ///         let count = self.count.clone();
+    ///         let service = self.service.clone();
+    ///
+    ///         Box::pin(async move {
+    ///             let rp = service.call(req).await;
+    ///             // Modify the state.
+    ///             count.fetch_add(1, Ordering::Relaxed);
+    ///             rp
+    ///         })
+    ///     }
+    /// }
+    ///
+    /// // Create a state per connection
+    /// // NOTE: The service type can be omitted once `start` is called on the server.
+    /// let m = RpcServiceBuilder::new().layer_fn(move |service: ()| MyMiddleware {
+    ///     service,
+    ///     count: Arc::new(AtomicUsize::new(0)),
+    /// });
+    /// let builder = Builder::default().set_rpc_middleware(m);
+    /// ```
     pub fn set_rpc_middleware<T>(
         self,
         rpc_middleware: RpcServiceBuilder<T>,

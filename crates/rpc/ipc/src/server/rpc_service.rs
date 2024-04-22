@@ -21,7 +21,6 @@ pub struct RpcService {
 }
 
 /// Configuration of the RpcService.
-/// todo(abner) check it
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) enum RpcServiceCfg {
@@ -32,7 +31,6 @@ pub(crate) enum RpcServiceCfg {
         bounded_subscriptions: BoundedSubscriptions,
         sink: MethodSink,
         id_provider: Arc<dyn IdProvider>,
-        _pending_calls: tokio::sync::mpsc::Sender<()>,
     },
 }
 
@@ -97,7 +95,6 @@ impl<'a> RpcServiceT<'a> for RpcService {
                         bounded_subscriptions,
                         sink,
                         id_provider,
-                        _pending_calls,
                     } = self.cfg.clone()
                     else {
                         tracing::warn!("Subscriptions not supported");

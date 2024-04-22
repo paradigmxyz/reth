@@ -545,7 +545,6 @@ mod tests {
     use revm::L1_BLOCK_CONTRACT;
     use std::{collections::HashMap, str::FromStr};
 
-    use crate::OptimismEvmConfig;
     use reth_revm::test_utils::StateProviderTest;
 
     fn create_op_state_provider() -> StateProviderTest {
