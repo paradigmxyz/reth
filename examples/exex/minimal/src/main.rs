@@ -22,13 +22,13 @@ async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Res
     while let Some(notification) = ctx.notifications.recv().await {
         match &notification {
             CanonStateNotification::Commit { new } => {
-                println!("Received commit: {:?}", new.first().number..=new.tip().number);
+                println!("Received commit: {:?}", new.range());
             }
             CanonStateNotification::Reorg { old, new } => {
                 println!(
                     "Received reorg: {:?} -> {:?}",
-                    old.first().number..=old.tip().number,
-                    new.first().number..=new.tip().number
+                    old.range(),
+                    (!new.is_empty()).then(|| new.range())
                 );
             }
         };
