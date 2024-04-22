@@ -6439,6 +6439,7 @@ dependencies = [
  "reth-node-ethereum",
  "reth-payload-builder",
  "reth-primitives",
+ "reth-provider",
  "reth-rpc",
  "reth-tracing",
  "secp256k1 0.27.0",

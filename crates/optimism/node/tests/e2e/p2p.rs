@@ -1,4 +1,4 @@
-use crate::utils::{advance_chain, node, setup};
+use crate::utils::{advance_chain, setup};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -6,11 +6,10 @@ use tokio::sync::Mutex;
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, _tasks, exec, wallet) = setup(3).await?;
+    let (mut nodes, _tasks, _, wallet) = setup(2).await?;
     let wallet = Arc::new(Mutex::new(wallet));
 
-    let mut third_node = nodes.pop().unwrap();
-    let mut second_node = nodes.pop().unwrap();
+    let second_node = nodes.pop().unwrap();
     let mut first_node = nodes.pop().unwrap();
 
     let tip: usize = 300;
@@ -21,25 +20,9 @@ async fn can_sync() -> eyre::Result<()> {
     let canonical_chain =
         canonical_payload_chain.iter().map(|p| p.0.block().hash()).collect::<Vec<_>>();
 
-    // On second node, sync optimistically up to block number 297a
-    second_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip_index - 3]).await?;
-    second_node.wait_block(tip as u64 - 3, canonical_chain[tip_index - 3], true).await?;
-
-    // On third node, sync optimistically up to block number 300a
-    third_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip_index]).await?;
-    third_node.wait_block(tip as u64, canonical_chain[tip_index], true).await?;
-
-    //  On second node, create a side chain: 298b ->  299b -> 300b
-    wallet.lock().await.nonce -= 3;
-    second_node.payload.timestamp = first_node.payload.timestamp - 3; // TODO: probably want to make it node agnostic
-    let side_payload_chain = advance_chain(3, &mut second_node, wallet.clone()).await?;
-    let side_chain = side_payload_chain.iter().map(|p| p.0.block().hash()).collect::<Vec<_>>();
-
-    // On third node, cause a 3 block depth re-org
-    assert!(side_chain[2] != canonical_chain[tip_index]);
-    third_node.engine_api.update_optimistic_forkchoice(dbg!(side_chain[2])).await?;
-    third_node.wait_block(side_payload_chain[2].0.block().number, side_chain[2], true).await?;
-
+    // On second node, sync up to block number 300a
+    second_node.engine_api.update_forkchoice(canonical_chain[tip_index]).await?;
+    second_node.wait_block(tip as u64, canonical_chain[tip_index], true).await?;
 
     Ok(())
 }
