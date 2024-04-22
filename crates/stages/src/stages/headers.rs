@@ -324,12 +324,12 @@ where
         // First unwind the db tables, until the unwind_to block number. use the walker to unwind
         // HeaderNumbers based on the index in CanonicalHeaders
         provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
-            input.unwind_to,
+            input.unwind_to + 1,
         )?;
-        provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        provider.unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
+        provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to + 1)?;
+        provider.unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to + 1)?;
         let unfinalized_headers_unwound =
-            provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+            provider.unwind_table_by_num::<tables::Headers>(input.unwind_to + 1)?;
 
         // determine how many headers to unwind from the static files based on the highest block and
         // the unwind_to block
@@ -617,8 +617,6 @@ mod tests {
         // let's insert some blocks using append_blocks_with_state
         let sealed_headers =
             random_header_range(&mut generators::rng(), tip.number..tip.number + 10, tip.hash());
-        println!("sealed_headers: {:?}", sealed_headers);
-        println!("tip num: {:?}", tip.number);
 
         // make them sealed blocks with senders by converting them to empty blocks
         let sealed_blocks = sealed_headers
