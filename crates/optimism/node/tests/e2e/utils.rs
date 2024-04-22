@@ -5,11 +5,12 @@ use reth::{
 };
 use reth_e2e_test_utils::{node::NodeHelper, wallet::Wallet};
 use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
-use reth_node_optimism::{OptimismNode, OptimismPayloadBuilderAttributes};
+use reth_node_optimism::{OptimismBuiltPayload, OptimismNode, OptimismPayloadBuilderAttributes};
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_primitives::{Address, BlockHash, ChainSpecBuilder, Genesis, B256, BASE_MAINNET};
+use reth_primitives::{Address, ChainSpecBuilder, Genesis, B256, BASE_MAINNET};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{span, Level};
 
 pub(crate) fn setup() -> (NodeConfig, TaskManager, TaskExecutor, Wallet) {
     let tasks = TaskManager::current();
@@ -62,7 +63,7 @@ pub(crate) async fn advance_chain(
     length: usize,
     node: &mut OpNode,
     wallet: Arc<Mutex<Wallet>>,
-) -> eyre::Result<Vec<BlockHash>> {
+) -> eyre::Result<Vec<(OptimismBuiltPayload, OptimismPayloadBuilderAttributes)>> {
     node.advance(
         length as u64,
         || {
