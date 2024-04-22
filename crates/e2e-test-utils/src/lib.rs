@@ -35,6 +35,7 @@ mod engine_api;
 /// Helper traits
 mod traits;
 
+/// Creates the initial setup with `num_nodes` started and interconnected.
 pub async fn setup<N>(
     num_nodes: usize,
     chain_spec: ChainSpec,
