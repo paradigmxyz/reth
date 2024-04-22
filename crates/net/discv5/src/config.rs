@@ -192,7 +192,7 @@ pub struct Config {
     pub(super) fork: (&'static [u8], ForkId),
     /// RLPx TCP port to advertise.
     pub(super) tcp_port: u16,
-    /// Additional kv-pairs (asides tcp port, udp port and fork) that should be advertised to
+    /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to
     /// peers by including in local node record.
     pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query with to populate kbuckets.
