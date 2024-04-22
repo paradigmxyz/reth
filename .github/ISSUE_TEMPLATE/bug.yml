@@ -36,7 +36,10 @@ body:
     id: logs
     attributes:
       label: Node logs
-      description: If applicable, please provide the node logs leading up to the bug.
+      description: 
+        If applicable, please provide the node logs leading up to the bug.
+
+        **Please also provide debug logs.** By default, these can be found in `~/.cache/reth/logs`.
       render: text
     validations:
       required: false
