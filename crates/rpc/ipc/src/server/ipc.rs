@@ -100,8 +100,7 @@ where
     }
 }
 
-// #[instrument(name = "method_call", fields(method = req.method.as_ref()), skip(call, req), level =
-// "TRACE")]
+#[instrument(name = "method_call", fields(method = req.method.as_ref()), skip(req, rpc_service), level = "TRACE")]
 pub(crate) async fn execute_call_with_tracing<'a, S>(
     req: Request<'a>,
     rpc_service: &S,
