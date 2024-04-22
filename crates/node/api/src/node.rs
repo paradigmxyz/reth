@@ -2,6 +2,7 @@
 
 use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
 use reth_db::database::Database;
+use reth_evm::execute::ExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
@@ -20,9 +21,24 @@ pub trait NodeTypes: Send + Sync + 'static {
     type Engine: EngineTypes;
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
     type Evm: ConfigureEvm;
+    /// Provides instances of executors to execute blocks, for individual blocks and batches of
+    /// blocks (historical sync).
+    type Executor: ExecutorProvider;
 
     /// Returns the node's evm config.
     fn evm_config(&self) -> Self::Evm;
+
+    /// Returns the node's executor.
+    ///
+    /// NOTE:
+    ///
+    /// This function is temporary and will be moved in the future.
+    /// It is currently part of this crate because it is required by the provider implementation.
+    ///
+    /// Blocked by <https://github.com/paradigmxyz/reth/issues/7154>
+    ///
+    /// TODO add prune modes etc as arguments
+    fn executor(&self) -> Self::Executor;
 }
 
 /// A helper type that is downstream of the [NodeTypes] trait and adds stateful components to the
@@ -61,9 +77,14 @@ where
     type Primitives = Types::Primitives;
     type Engine = Types::Engine;
     type Evm = Types::Evm;
+    type Executor = Types::Executor;
 
     fn evm_config(&self) -> Self::Evm {
         self.types.evm_config()
+    }
+
+    fn executor(&self) -> Self::Executor {
+        self.types.executor()
     }
 }
 
@@ -109,6 +130,9 @@ pub struct FullNodeComponentsAdapter<Node: FullNodeTypes, Pool> {
     pub network: NetworkHandle,
     /// The provider of the node.
     pub provider: Node::Provider,
+    /// Provides instances of executors to execute blocks, for individual blocks and batches of
+    /// blocks (historical sync).
+    pub executor_provider: Node::Executor,
     /// The payload builder service handle of the node.
     pub payload_builder: PayloadBuilderHandle<Node::Engine>,
     /// The task executor of the node.
@@ -132,9 +156,14 @@ where
     type Primitives = Node::Primitives;
     type Engine = Node::Engine;
     type Evm = Node::Evm;
+    type Executor = Node::Executor;
 
     fn evm_config(&self) -> Self::Evm {
         self.evm_config.clone()
+    }
+
+    fn executor(&self) -> Self::Executor {
+        self.executor_provider.clone()
     }
 }
 
@@ -176,6 +205,7 @@ where
             pool: self.pool.clone(),
             network: self.network.clone(),
             provider: self.provider.clone(),
+            executor_provider: self.executor_provider.clone(),
             payload_builder: self.payload_builder.clone(),
             executor: self.executor.clone(),
         }
