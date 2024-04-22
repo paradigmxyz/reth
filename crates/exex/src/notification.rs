@@ -25,11 +25,12 @@ pub enum ExExNotification {
 }
 
 impl ExExNotification {
-    /// Returns the committed chain from the [Self::ChainCommitted] variant, if any.
+    /// Returns the committed chain from the [Self::ChainCommitted] and [Self::ChainReorged]
+    /// variants, if any.
     pub fn committed_chain(&self) -> Option<Arc<Chain>> {
         match self {
-            Self::ChainCommitted { new } => Some(new.clone()),
-            _ => None,
+            Self::ChainCommitted { new } | Self::ChainReorged { old: _, new } => Some(new.clone()),
+            Self::ChainReverted { .. } => None,
         }
     }
 
@@ -38,7 +39,7 @@ impl ExExNotification {
     pub fn reverted_chain(&self) -> Option<Arc<Chain>> {
         match self {
             Self::ChainReorged { old, new: _ } | Self::ChainReverted { old } => Some(old.clone()),
-            _ => None,
+            Self::ChainCommitted { .. } => None,
         }
     }
 }
