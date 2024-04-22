@@ -80,7 +80,7 @@ body:
     id: network
     attributes:
       label: Which chain / network are you on?
-      description: This is the argument you pass to `reth --chain`, if you are not running with `--chain`, then it is mainnet.
+      description: This is the argument you pass to `reth --chain`. If you are using `--dev`, type in 'dev' here. If you are not running with `--chain` or `--dev` then it is mainnet.
     validations:
       required: true
   - type: dropdown
