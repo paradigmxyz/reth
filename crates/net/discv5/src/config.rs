@@ -35,7 +35,7 @@ pub struct ConfigBuilder {
     /// [`NodeRecord`] doesn't supply an extra field for and alternative TCP address.
     tcp_port: u16,
     /// List of `(key, rlp-encoded-value)` tuples that should be advertised in local node record
-    /// (additional to tcp port, udp port and fork).
+    /// (in addition to tcp port, udp port and fork).
     other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query to populate kbuckets.
     lookup_interval: Option<u64>,
