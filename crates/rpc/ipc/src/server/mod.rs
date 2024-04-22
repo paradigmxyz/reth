@@ -367,19 +367,6 @@ where
     fn call(&mut self, request: String) -> Self::Future {
         trace!("{:?}", request);
 
-        // handle the request
-        let data = ipc::HandleRequest {
-            methods: self.inner.methods.clone(),
-            max_request_body_size: self.inner.max_request_body_size,
-            max_response_body_size: self.inner.max_response_body_size,
-            max_log_length: self.inner.max_log_length,
-            batch_requests_supported: true,
-            conn: self.inner.conn.clone(),
-            bounded_subscriptions: self.inner.bounded_subscriptions.clone(),
-            method_sink: self.inner.method_sink.clone(),
-            id_provider: self.inner.id_provider.clone(),
-        };
-
         let cfg = RpcServiceCfg::CallsAndSubscriptions {
             bounded_subscriptions: BoundedSubscriptions::new(
                 self.inner.max_subscriptions_per_connection,
@@ -388,23 +375,23 @@ where
             sink: self.inner.method_sink.clone(),
         };
 
+        let max_response_body_size = self.inner.max_response_body_size as usize;
         let rpc_service = self.rpc_middleware.service(RpcService::new(
             self.inner.methods.clone(),
-            self.inner.max_response_body_size as usize,
+            max_response_body_size,
             self.inner.conn_id as usize,
             cfg,
         ));
+        let conn = self.inner.conn.clone();
         // an ipc connection needs to handle read+write concurrently
         // even if the underlying rpc handler spawns the actual work or is does a lot of async any
         // additional overhead performed by `handle_request` can result in I/O latencies, for
         // example tracing calls are relatively CPU expensive on serde::serialize alone, moving this
         // work to a separate task takes the pressure off the connection so all concurrent responses
         // are also serialized concurrently and the connection can focus on read+write
-
-        let f =
-            tokio::task::spawn(
-                async move { ipc::call_with_service(request, rpc_service, data).await },
-            );
+        let f = tokio::task::spawn(async move {
+            ipc::call_with_service(request, rpc_service, max_response_body_size, conn).await
+        });
 
         Box::pin(async move { f.await.map_err(|err| err.into()) })
     }

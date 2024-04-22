@@ -10,10 +10,9 @@ use jsonrpsee::{
         tracing::server::{rx_log_from_json, tx_log_from_str},
         JsonRawValue,
     },
-    server::{middleware::rpc::RpcServiceT, IdProvider},
+    server::middleware::rpc::RpcServiceT,
     types::{error::ErrorCode, ErrorObject, Id, InvalidRequest, Notification, Request},
-    BatchResponseBuilder, BoundedSubscriptions, MethodResponse, MethodSink, Methods,
-    ResponsePayload,
+    BatchResponseBuilder, MethodResponse, ResponsePayload,
 };
 use tokio::sync::OwnedSemaphorePermit;
 use tokio_util::either::Either;
@@ -122,29 +121,15 @@ fn execute_notification(notif: &Notif<'_>, max_log_length: u32) -> MethodRespons
     response
 }
 
-#[allow(dead_code)]
-pub(crate) struct HandleRequest {
-    pub(crate) methods: Methods,
-    pub(crate) max_request_body_size: u32,
-    pub(crate) max_response_body_size: u32,
-    pub(crate) max_log_length: u32,
-    pub(crate) batch_requests_supported: bool,
-    pub(crate) conn: Arc<OwnedSemaphorePermit>,
-    pub(crate) bounded_subscriptions: BoundedSubscriptions,
-    pub(crate) method_sink: MethodSink,
-    pub(crate) id_provider: Arc<dyn IdProvider>,
-}
-
 pub(crate) async fn call_with_service<S>(
     request: String,
     rpc_service: S,
-    input: HandleRequest,
+    max_response_body_size: usize,
+    conn: Arc<OwnedSemaphorePermit>,
 ) -> Option<String>
 where
     for<'a> S: RpcServiceT<'a> + Send,
 {
-    let HandleRequest { max_response_body_size, conn, .. } = input;
-
     enum Kind {
         Single,
         Batch,
@@ -173,7 +158,7 @@ where
     } else {
         process_batch_request(
             Batch { data: request.into_bytes(), rpc_service },
-            max_response_body_size as usize,
+            max_response_body_size,
         )
         .await
     };
