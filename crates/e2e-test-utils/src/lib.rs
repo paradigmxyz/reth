@@ -39,7 +39,7 @@ mod traits;
 pub async fn setup<N>(
     num_nodes: usize,
     chain_spec: Arc<ChainSpec>,
-    is_dev: bool
+    is_dev: bool,
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
     N: Default + reth_node_builder::Node<TmpNodeAdapter<N>>,

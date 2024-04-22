@@ -6435,6 +6435,7 @@ dependencies = [
  "rand 0.8.5",
  "reth",
  "reth-db",
+ "reth-node-builder",
  "reth-node-core",
  "reth-node-ethereum",
  "reth-payload-builder",
@@ -6446,6 +6447,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]

@@ -13,12 +13,14 @@ pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskMa
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     reth_e2e_test_utils::setup(
         num_nodes,
-        Arc::new(ChainSpecBuilder::default()
-            .chain(BASE_MAINNET.chain)
-            .genesis(genesis)
-            .ecotone_activated()
-            .build()),
-            false
+        Arc::new(
+            ChainSpecBuilder::default()
+                .chain(BASE_MAINNET.chain)
+                .genesis(genesis)
+                .ecotone_activated()
+                .build(),
+        ),
+        false,
     )
     .await
 }
