@@ -1591,17 +1591,6 @@ where
             return Ok(())
         }
 
-        // update the canon chain if continuous is enabled
-        if self.sync.run_pipeline_continuously() {
-            let max_block = ctrl.block_number().unwrap_or_default();
-            let max_header = self.blockchain.sealed_header(max_block)
-            .inspect_err(|error| {
-                error!(target: "consensus::engine", %error, "Error getting canonical header for continuous sync");
-            })?
-            .ok_or_else(|| ProviderError::HeaderNotFound(max_block.into()))?;
-            self.blockchain.set_canonical_head(max_header);
-        }
-
         let sync_target_state = match self.forkchoice_state_tracker.sync_target_state() {
             Some(current_state) => current_state,
             None => {
@@ -1611,6 +1600,24 @@ where
                 return Ok(())
             }
         };
+
+        // update the canon chain if continuous is enabled
+        if self.sync.run_pipeline_continuously() || sync_target_state.finalized_block_hash.is_zero()
+        {
+            let max_block = ctrl.block_number().unwrap_or_default();
+            let max_header = self.blockchain.sealed_header(max_block)
+            .inspect_err(|error| {
+                error!(target: "consensus::engine", %error, "Error getting canonical header for continuous sync");
+            })?
+            .ok_or_else(|| ProviderError::HeaderNotFound(max_block.into()))?;
+            self.blockchain.set_canonical_head(max_header);
+            self.blockchain.connect_buffered_blocks_to_canonical_hashes_and_finalize(max_block)?;
+        }
+
+        if sync_target_state.finalized_block_hash.is_zero() {
+            // We are on a optimistic syncing process, better to wait for the next FCU to handle
+            return Ok(())
+        }
 
         // Next, we check if we need to schedule another pipeline run or transition
         // to live sync via tree.
@@ -1644,24 +1651,11 @@ where
             return Ok(())
         }
 
-        #[cfg(feature = "optimism")]
-        let target_block_hash = if sync_target_state.finalized_block_hash.is_zero() &&
-            self.blockchain.chain_spec().is_optimism()
-        {
-            // We are in an optimistic syncing scenario.
-            //
-            // Check fn can_pipeline_sync_to_finalized(..) for more context
-            sync_target_state.head_block_hash
-        } else {
-            sync_target_state.finalized_block_hash
-        };
-
-        #[cfg(not(feature = "optimism"))]
-        let target_block_hash = sync_target_state.finalized_block_hash;
-
         // get the block number of the finalized block, if we have it
-        let newest_finalized =
-            self.blockchain.buffered_header_by_hash(target_block_hash).map(|header| header.number);
+        let newest_finalized = self
+            .blockchain
+            .buffered_header_by_hash(sync_target_state.finalized_block_hash)
+            .map(|header| header.number);
 
         // The block number that the pipeline finished at - if the progress or newest
         // finalized is None then we can't check the distance anyways.
@@ -1681,7 +1675,9 @@ where
         if let Some(target) = pipeline_target {
             // run the pipeline to the target since the distance is sufficient
             self.sync.set_pipeline_sync_target(target);
-        } else if let Some(number) = self.blockchain.block_number(target_block_hash)? {
+        } else if let Some(number) =
+            self.blockchain.block_number(sync_target_state.finalized_block_hash)?
+        {
             // Finalized block is in the database, attempt to restore the tree with
             // the most recent canonical hashes.
             self.blockchain.connect_buffered_blocks_to_canonical_hashes_and_finalize(number).inspect_err(|error| {
@@ -1690,7 +1686,7 @@ where
         } else {
             // We don't have the finalized block in the database, so we need to
             // trigger another pipeline run.
-            self.sync.set_pipeline_sync_target(target_block_hash);
+            self.sync.set_pipeline_sync_target(sync_target_state.finalized_block_hash);
         }
 
         Ok(())
