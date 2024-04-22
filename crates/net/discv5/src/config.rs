@@ -26,7 +26,7 @@ pub struct ConfigBuilder {
     /// Nodes to boot from.
     bootstrap_nodes: HashSet<BootNode>,
     /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
-    /// belongs, e.g. (b"opstack", ChainId) or (b"eth", ForkId).
+    /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", ForkId)`.
     ///
     /// Defaults to L1 mainnet if not set.
     fork: Option<(&'static [u8], ForkId)>,
